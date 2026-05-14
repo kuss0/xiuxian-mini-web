@@ -34,3 +34,23 @@ Telegram 修仙 CHAT 群组辅助图形界面。
 - `backend/`：后端服务占位，后续接 Telethon、消息解析、API。
 - `web/`：前端占位，后续做频道流、消息卡片、操作台。
 
+## 本地启动
+
+当前基座不需要额外依赖：
+
+```bash
+python3 backend/app.py --host 127.0.0.1 --port 8787
+```
+
+打开：
+
+```text
+http://127.0.0.1:8787
+```
+
+可用 API：
+
+- `GET /api/health`
+- `GET /api/channels`
+- `GET /api/messages?channel=all`
+- `GET /api/outbox`

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Xiuxian Mini Web</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">修</span>
+          <div>
+            <h1>Mini 修仙</h1>
+            <p>Telegram 群組輔助介面</p>
+          </div>
+        </div>
+
+        <section class="panel">
+          <h2>角色</h2>
+          <button class="role-button active" type="button">
+            <span>當前角色</span>
+            <strong>未接入</strong>
+          </button>
+        </section>
+
+        <section class="panel">
+          <h2>邊界</h2>
+          <ul class="boundary-list">
+            <li>人工確認發送</li>
+            <li>官方定時消息</li>
+            <li>不自動補發</li>
+            <li>不自動鏈式操作</li>
+          </ul>
+        </section>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Xiuxian Mini Web</p>
+            <h2>修仙 CHAT 圖形輔助界面</h2>
+          </div>
+          <div class="topbar-actions">
+            <button id="refreshButton" type="button">刷新</button>
+            <button id="scheduleButton" type="button">官方定時</button>
+          </div>
+        </header>
+
+        <nav id="channelTabs" class="tabs" aria-label="消息場景"></nav>
+
+        <section class="content-grid">
+          <div class="stream">
+            <div class="section-head">
+              <h3>消息流</h3>
+              <span id="messageCount">0 條</span>
+            </div>
+            <div id="messageList" class="message-list"></div>
+          </div>
+
+          <aside class="detail">
+            <div class="section-head">
+              <h3>操作台</h3>
+              <span>人工出口</span>
+            </div>
+            <div id="detailPanel" class="detail-panel">
+              <p class="empty">選擇一條消息查看原文與可用操作。</p>
+            </div>
+          </aside>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
+
