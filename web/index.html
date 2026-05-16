@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Xiuxian Mini Web</title>
+    <title>修仙 Mini Web</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
@@ -12,67 +12,105 @@
         <div class="brand">
           <span class="brand-mark">修</span>
           <div>
-            <h1>Mini 修仙</h1>
-            <p>Telegram 群組輔助介面</p>
+            <h1>修仙 Mini Web</h1>
+            <p>Telegram 游戏聊天辅助界面</p>
           </div>
         </div>
 
         <section class="panel">
-          <h2>角色</h2>
-          <button class="role-button active" type="button">
-            <span>當前角色</span>
-            <strong>未接入</strong>
-          </button>
+          <div class="panel-head">
+            <h2>当前角色</h2>
+          </div>
+          <div id="identitySnapshot" class="identity-snapshot">
+            <p class="empty">等待消息箱投影。</p>
+          </div>
+        </section>
+
+        <section class="panel identity-panel">
+          <div class="panel-head">
+            <h2>身份列表</h2>
+            <button id="loginAccountButton" type="button">+ 登录账号</button>
+          </div>
+          <p id="currentAccountLine" class="muted-line">当前账号: 未登录</p>
+          <div id="identityList" class="identity-list sidebar-identity-list">
+            <p class="empty">还没有身份。先点上面「+ 登录账号」登一个 Telegram 账号,身份会自动建好。</p>
+          </div>
+          <div class="identity-panel-actions">
+            <button id="addIdentityButton" type="button" disabled title="先登录账号才能新增身份">+ 新增身份</button>
+            <button id="logoutAccountButton" type="button" disabled title="还没登录账号">登出账户</button>
+          </div>
+        </section>
+
+        <section class="panel channel-panel">
+          <div class="panel-head">
+            <h2>频道过滤</h2>
+            <button id="selectAllChannels" type="button">全选</button>
+          </div>
+          <div id="channelFilters" class="channel-filters"></div>
         </section>
 
         <section class="panel">
-          <h2>邊界</h2>
+          <div class="panel-head">
+            <h2>发送边界</h2>
+          </div>
           <ul class="boundary-list">
-            <li>人工確認發送</li>
-            <li>官方定時消息</li>
-            <li>不自動補發</li>
-            <li>不自動鏈式操作</li>
+            <li>只读消息流</li>
+            <li>动作先生成草稿</li>
+            <li>发送必须人工确认</li>
+            <li>官方定时单独管理</li>
           </ul>
         </section>
       </aside>
 
       <main class="main">
+        <div id="globalBanner" class="global-banner" hidden></div>
         <header class="topbar">
           <div>
-            <p class="eyebrow">Xiuxian Mini Web</p>
-            <h2>修仙 CHAT 圖形輔助界面</h2>
+            <p class="eyebrow">消息流</p>
+            <h2>修仙 CHAT 游戏界面</h2>
           </div>
           <div class="topbar-actions">
             <button id="refreshButton" type="button">刷新</button>
-            <button id="scheduleButton" type="button">官方定時</button>
+            <button id="logsButton" type="button" title="按日期 / 类型筛选浏览全部采集到的消息">日志</button>
+            <button id="outboxButton" type="button">草稿箱</button>
+            <button id="scheduleButton" type="button">官方定时</button>
+            <button id="gameBotsButton" type="button">游戏 Bot</button>
           </div>
         </header>
 
-        <nav id="channelTabs" class="tabs" aria-label="消息場景"></nav>
-
-        <section class="content-grid">
-          <div class="stream">
+        <section class="layout-grid">
+          <section class="stream">
             <div class="section-head">
-              <h3>消息流</h3>
-              <span id="messageCount">0 條</span>
+              <div>
+                <h3>修仙频道</h3>
+                <p id="activeChannelText">全部频道</p>
+              </div>
+              <div class="stream-head-actions">
+                <span id="messageCount">0 条</span>
+              </div>
             </div>
             <div id="messageList" class="message-list"></div>
-          </div>
+            <button id="jumpToLatest" class="jump-to-latest" type="button" hidden>↑ 回到最新</button>
+          </section>
 
           <aside class="detail">
             <div class="section-head">
-              <h3>操作台</h3>
-              <span>人工出口</span>
+              <div>
+                <h3>消息详情</h3>
+                <p>原文、增强信息和操作草稿</p>
+              </div>
+              <span id="detailState">未选择</span>
             </div>
             <div id="detailPanel" class="detail-panel">
-              <p class="empty">選擇一條消息查看原文與可用操作。</p>
+              <p class="empty">选择一条消息查看原文与可用操作。</p>
             </div>
           </aside>
         </section>
       </main>
     </div>
 
+    <div id="modalRoot" class="modal-backdrop" hidden></div>
+
     <script src="/static/app.js"></script>
   </body>
 </html>
-
