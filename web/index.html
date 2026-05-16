@@ -17,15 +17,6 @@
           </div>
         </div>
 
-        <section class="panel">
-          <div class="panel-head">
-            <h2>当前角色</h2>
-          </div>
-          <div id="identitySnapshot" class="identity-snapshot">
-            <p class="empty">等待消息箱投影。</p>
-          </div>
-        </section>
-
         <section class="panel identity-panel">
           <div class="panel-head">
             <h2>身份列表</h2>
@@ -41,14 +32,6 @@
           </div>
         </section>
 
-        <section class="panel channel-panel">
-          <div class="panel-head">
-            <h2>频道过滤</h2>
-            <button id="selectAllChannels" type="button">全选</button>
-          </div>
-          <div id="channelFilters" class="channel-filters"></div>
-        </section>
-
         <section class="panel">
           <div class="panel-head">
             <h2>发送边界</h2>
@@ -60,6 +43,11 @@
             <li>官方定时单独管理</li>
           </ul>
         </section>
+
+        <!-- 隐藏面板(功能未完成):当前角色、频道过滤 -->
+        <div id="identitySnapshot" hidden></div>
+        <div id="channelFilters" hidden></div>
+        <button id="selectAllChannels" type="button" hidden></button>
       </aside>
 
       <main class="main">
@@ -86,6 +74,7 @@
                 <p id="activeChannelText">全部频道</p>
               </div>
               <div class="stream-head-actions">
+                <div id="quickFilters" class="quick-filters"></div>
                 <span id="messageCount">0 条</span>
               </div>
             </div>

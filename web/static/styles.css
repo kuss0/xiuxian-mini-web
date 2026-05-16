@@ -3201,3 +3201,46 @@ pre {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ---------- 快速滤镜(修仙频道头部)---------- */
+.quick-filters {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.quick-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.quick-filter-chip:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.quick-filter-chip.active {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.25), rgba(168, 85, 247, 0.10));
+  border-color: rgba(168, 85, 247, 0.45);
+  color: #f3f4f6;
+}
+
+.quick-filter-chip.active.risk {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.30), rgba(234, 88, 12, 0.10));
+  border-color: rgba(239, 68, 68, 0.50);
+  color: #fecaca;
+}
+
+.quick-filter-chip.all {
+  font-weight: 600;
+}

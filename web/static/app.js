@@ -156,6 +156,7 @@ async function loadChannels() {
   state.channels = payload.channels;
   state.selectedChannels = new Set(state.channels.map((channel) => channel.key));
   renderChannelFilters();
+  renderQuickFilters();
 }
 
 async function loadMessages({ incremental = false } = {}) {
@@ -547,6 +548,7 @@ function jumpToMessage(target) {
   if (!channelInSelection) {
     channels.forEach((ch) => state.selectedChannels.add(ch));
     renderChannelFilters();
+    renderQuickFilters();
     needsRerender = true;
   }
   if (state.viewMode === "solo") {
@@ -650,6 +652,73 @@ function renderChannelFilters() {
   selectAllChannels.textContent =
     state.selectedChannels.size === state.channels.length ? "清空" : "全选";
   renderActiveChannelText();
+}
+
+// 快速滤镜:修仙频道标题旁的 3-4 个游戏化 chip。
+// 「全部」清回 all,其它 chip 排他切换到单一 channel。
+const QUICK_FILTER_PRESETS = [
+  { key: "__all", label: "全部", icon: "🌐", title: "显示全部频道" },
+  { key: "risk", label: "风险", icon: "🚨", title: "只看 风险提醒 / 自证类消息", className: "risk" },
+  { key: "training", label: "修炼", icon: "📿", title: "只看 闭关 / 元婴 / 第二元神" },
+  { key: "dungeon", label: "副本", icon: "🛡️", title: "只看 副本开启 / 加入" },
+  { key: "resource", label: "资源", icon: "💰", title: "只看 储物袋 / 资源" },
+];
+
+function quickFilterIsAll() {
+  return state.selectedChannels.size === state.channels.length;
+}
+
+function quickFilterActiveKey() {
+  if (quickFilterIsAll()) return "__all";
+  if (state.selectedChannels.size === 1) return [...state.selectedChannels][0];
+  return "";  // 自定义多选状态,啥都不亮
+}
+
+function renderQuickFilters() {
+  const container = document.querySelector("#quickFilters");
+  if (!container || !state.channels.length) return;
+  const activeKey = quickFilterActiveKey();
+  const knownKeys = new Set(state.channels.map((c) => c.key));
+  container.innerHTML = QUICK_FILTER_PRESETS
+    .filter((p) => p.key === "__all" || knownKeys.has(p.key))
+    .map((p) => {
+      const isActive = activeKey === p.key;
+      const cls = [
+        "quick-filter-chip",
+        p.key === "__all" ? "all" : "",
+        p.className || "",
+        isActive ? "active" : "",
+      ].filter(Boolean).join(" ");
+      return `
+        <button type="button" class="${cls}"
+                data-quick-filter="${escapeAttr(p.key)}"
+                title="${escapeAttr(p.title || p.label)}">
+          <span aria-hidden="true">${p.icon}</span>
+          <span>${escapeHtml(p.label)}</span>
+        </button>
+      `;
+    })
+    .join("");
+  container.querySelectorAll("[data-quick-filter]").forEach((btn) => {
+    btn.addEventListener("click", () => applyQuickFilter(btn.dataset.quickFilter));
+  });
+}
+
+function applyQuickFilter(key) {
+  if (key === "__all" || quickFilterActiveKey() === key) {
+    // 再点一次同一个 → 取消(恢复全部)
+    state.selectedChannels = new Set(state.channels.map((c) => c.key));
+  } else {
+    state.selectedChannels = new Set([key]);
+  }
+  if (!visibleMessages().some((message) => message.id === state.selectedMessageId)) {
+    state.selectedMessageId = visibleMessages()[0]?.id ?? null;
+  }
+  state.detailMode = "message";
+  renderQuickFilters();
+  renderChannelFilters();
+  renderMessages();
+  renderDetail();
 }
 
 function channelMessageCounts() {
@@ -4209,6 +4278,7 @@ selectAllChannels.addEventListener("click", () => {
   state.selectedMessageId = visibleMessages()[0]?.id ?? null;
   state.detailMode = "message";
   renderChannelFilters();
+  renderQuickFilters();
   renderMessages();
   renderDetail();
 });
