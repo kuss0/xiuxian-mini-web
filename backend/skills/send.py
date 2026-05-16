@@ -7,14 +7,20 @@
 
 skill_send_payload 只接受 reply_to_msg_id;不接受发送给非自己 send_as
 (self-identity 才发,其它 send_as 留 TODO)。
+
+发送成功后会立即把自己的 outgoing 消息 ingest 进 raw_messages(经由 event_sink 回调),
+不再等 telethon 自己的 NewMessage 回调 — 老脚本里 outgoing 事件不稳定,solo 模式靠
+parent-reply chain 串起来,缺了 outgoing 这条链就断了。
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable
 
+from backend.domain.models import RawMessageEvent
 from backend.skills import Skill, SkillRegistry
 
 
@@ -43,6 +49,9 @@ class SkillSendResult:
 class SkillSendService:
     """实际跑 send 的服务。需要 listener manager 注入,这样能复用已登录 client。
     没 listener 的情况下,所有 Telethon 调用都失败 — 这是预期的(未登录就不能发)。
+
+    event_sink:发送成功后,把 outgoing message 也 ingest 进消息箱(等价于 listener
+    的 NewMessage 回调,但更可靠 — outgoing 事件 telethon 行为不一致)。
     """
 
     def __init__(
@@ -50,10 +59,12 @@ class SkillSendService:
         registry: SkillRegistry,
         *,
         listener_lookup: Callable[[str], Any] | None = None,
+        event_sink: Callable[[RawMessageEvent], None] | None = None,
         time_fn: Callable[[], float] = time.time,
     ):
         self._registry = registry
         self._listener_lookup = listener_lookup or (lambda _id: None)
+        self._event_sink = event_sink
         self._time_fn = time_fn
 
     def registry(self) -> SkillRegistry:
@@ -65,6 +76,9 @@ class SkillSendService:
         skill_key: str,
         chat_id: int,
         account_local_id: str,
+        sender_id: int = 0,
+        sender_display: str = "",
+        account_key: str = "",
         reply_to_msg_id: int | None = None,
         topic_id: int | None = None,
         command_override: str = "",
@@ -123,10 +137,30 @@ class SkillSendService:
                 reply_to_msg_id=reply_id,
             )
 
+        sent_msg_id = int(sent_msg_id or 0)
+        sent_at = self._time_fn()
+        # outgoing 也 ingest 进消息箱,solo 模式才能把 bot 回复跟我的命令串起来
+        if sent_msg_id > 0 and self._event_sink is not None and int(sender_id or 0) != 0:
+            try:
+                event = _outgoing_event(
+                    chat_id=chat_id_int,
+                    msg_id=sent_msg_id,
+                    sender_id=int(sender_id),
+                    sender_display=sender_display or str(sender_id),
+                    text=command,
+                    reply_to_msg_id=reply_id or None,
+                    topic_id=topic or 0,
+                    sent_at=sent_at,
+                    account_key=account_key or str(sender_id),
+                )
+                self._event_sink(event)
+            except Exception as exc:  # ingest 失败不阻塞发送结果
+                print(f"[skill-send] outgoing ingest failed: {exc}")
+
         return SkillSendResult(
             ok=True,
-            sent_msg_id=int(sent_msg_id or 0),
-            sent_at=self._time_fn(),
+            sent_msg_id=sent_msg_id,
+            sent_at=sent_at,
             command=command,
             skill_key=skill_key,
             reply_to_msg_id=reply_id,
@@ -177,6 +211,39 @@ class SkillSendService:
             kwargs["reply_to"] = topic_id
         sent = await client.send_message(chat_id, command, **kwargs)
         return int(getattr(sent, "id", 0) or 0)
+
+
+def _outgoing_event(
+    *,
+    chat_id: int,
+    msg_id: int,
+    sender_id: int,
+    sender_display: str,
+    text: str,
+    reply_to_msg_id: int | None,
+    topic_id: int,
+    sent_at: float,
+    account_key: str,
+) -> RawMessageEvent:
+    date_text = datetime.fromtimestamp(sent_at, tz=timezone.utc).isoformat()
+    event_id = f"tg:{chat_id}:{msg_id}:{account_key}"
+    return RawMessageEvent(
+        id=event_id,
+        chat_id=chat_id,
+        msg_id=msg_id,
+        text=text,
+        source=sender_display,
+        date=date_text,
+        sender_id=sender_id,
+        reply_to_msg_id=int(reply_to_msg_id) if reply_to_msg_id else None,
+        top_msg_id=int(topic_id) if topic_id else None,
+        mentions=(),
+        sender_is_bot=False,
+        edited_at=None,
+        deleted_at=None,
+        media_kind=None,
+        media_meta=None,
+    )
 
 
 __all__ = ["SkillSendService", "SkillSendResult"]

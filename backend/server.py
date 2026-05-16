@@ -122,6 +122,7 @@ class MiniWebServer:
         self._skill_send = SkillSendService(
             self._skill_registry,
             listener_lookup=lambda local_id: self._listeners.get_listener(local_id),
+            event_sink=lambda event: self._store.ingest_event(event),
         )
 
     def health_payload(self) -> dict:
@@ -918,6 +919,9 @@ class MiniWebServer:
             skill_key=skill_key,
             chat_id=chat_id,
             account_local_id=account_local_id,
+            sender_id=account_id,
+            sender_display=str(account.get("label") or identity.get("label") or "我"),
+            account_key=account_local_id,
             reply_to_msg_id=reply_to,
             topic_id=topic_id,
             command_override=command_override,

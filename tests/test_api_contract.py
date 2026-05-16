@@ -2135,3 +2135,50 @@ def test_skill_routes_registered():
     assert "/api/skills" in GET_ROUTES
     assert "/api/skills/send" in POST_ROUTES
 
+
+def test_skill_send_ingests_outgoing_into_raw_messages(tmp_path, monkeypatch):
+    """发送成功后,自己的 outgoing 消息必须也写进 raw_messages — 否则 solo 模式
+    bot 回复(reply_to=msg_id)找不到 parent,会从 chat 流里消失。"""
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "1", "api_hash": "h",
+         "account_id": "8574677796", "target_chat": "-1001680975844",
+         "target_topic_id": "7310786", "label": "+447851861646"}
+    )
+    server.save_identity_payload(
+        {"send_as_id": "8574677796", "account_local_id": "main", "label": "self"}
+    )
+
+    class FakeClient:
+        async def send_message(self, chat_id, command, **kwargs):
+            class _Sent:
+                id = 555000
+            return _Sent()
+
+    class FakeListener:
+        def submit(self, coro_factory, *, timeout=30.0):
+            import asyncio
+            return asyncio.new_event_loop().run_until_complete(coro_factory(FakeClient()))
+    monkeypatch.setattr(server._listeners, "get_listener", lambda _id: FakeListener())
+
+    result = server.skill_send_payload(
+        {"skill_key": "wild_training", "identity_id": 8574677796}
+    )
+    assert result["ok"] is True
+    assert result["sent_msg_id"] == 555000
+
+    # 这条 outgoing message 已 ingest;list_mine_and_bot_reply_to_mine
+    # 在 solo 模式下应该能看到它
+    rows = list(server._store.list_cards("all"))
+    # raw_messages 直接查更直观
+    import sqlite3
+    con = sqlite3.connect(tmp_path / "m.db")
+    row = con.execute(
+        "SELECT chat_id, msg_id, sender_id, text, top_msg_id FROM raw_messages WHERE msg_id=555000"
+    ).fetchone()
+    assert row is not None, "outgoing message should have been ingested into raw_messages"
+    assert row[0] == -1001680975844
+    assert row[2] == 8574677796
+    assert row[3] == ".野外历练"
+    assert row[4] == 7310786  # forum topic 也被记录
+

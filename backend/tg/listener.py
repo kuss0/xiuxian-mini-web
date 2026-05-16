@@ -145,7 +145,7 @@ class TelegramReadOnlyListener:
                     self._set_status("error", "Telegram session 未登录,请先完成验证码登录")
                     return  # 不重试,session 没登录就是无效
 
-                @client.on(telethon.events.NewMessage(chats=target_chat))
+                @client.on(telethon.events.NewMessage(chats=target_chat, incoming=True, outgoing=True))
                 async def _on_new_message(event):
                     if topic_id and _event_topic_id(event) != topic_id:
                         return
