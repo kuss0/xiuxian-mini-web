@@ -25,6 +25,8 @@ class Skill:
     cd_module: str = ""
     icon: str = ""
     note: str = ""
+    sect: str = ""        # 限定宗门(空=所有宗门可用),对应老脚本 get_available_module_names
+    realm_min: str = ""   # 最低境界(空=无要求),命名对齐老脚本 REALM_SORT_ORDER
 
     def to_api(self) -> dict:
         return {
@@ -36,7 +38,28 @@ class Skill:
             "cd_module": self.cd_module,
             "icon": self.icon,
             "note": self.note,
+            "sect": self.sect,
+            "realm_min": self.realm_min,
         }
+
+
+# 老脚本 model/state.py:124-163 的 REALM_SORT_ORDER + sect/realm 闸:
+# - 灵树   → 落云宗 only
+# - 观星台/观星 → 星宫 only
+# - 登天阶 → 凌霄宫 only
+# - 太一   → 太一门 only
+# - 放养   → 万灵宗 only
+# - 元婴   → 境界 ≥ 元婴初期
+# - 小世界 → 境界 ≥ 化神初期
+REALM_SORT_ORDER: tuple[str, ...] = (
+    "炼气一层", "炼气二层", "炼气三层", "炼气四层", "炼气五层",
+    "炼气六层", "炼气七层", "炼气八层", "炼气九层", "炼气十层",
+    "炼气十一层", "炼气十二层", "炼气十三层",
+    "筑基初期", "筑基中期", "筑基后期",
+    "结丹初期", "结丹中期", "结丹后期",
+    "元婴初期", "元婴中期", "元婴后期",
+    "化神初期", "化神中期", "化神后期", "化神后期大圆满",
+)
 
 
 # 默认布局 — 6 个分组,参照老脚本 model/web/static/js/app.js 的「日常/法宝/侍妾/奇遇」
@@ -50,7 +73,7 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
     Skill("tower", "日常", "闯塔", ".闯塔", icon="🗼"),
     Skill("deep_retreat", "日常", "深度闭关", ".深度闭关", cd_module="deep_retreat", icon="📿"),
     Skill("retreat_shallow", "日常", "闭关修炼", ".闭关修炼", icon="🧘"),
-    Skill("yuanying", "日常", "元婴出窍", ".元婴出窍", icon="👻"),
+    Skill("yuanying", "日常", "元婴出窍", ".元婴出窍", icon="👻", realm_min="元婴初期"),
 
     # ---------- 法宝 ----------
     Skill("pet_touch", "法宝", "抚摸法宝", ".抚摸法宝", cd_module="pet_touch", icon="🖐️"),
@@ -93,25 +116,34 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
           reply_mode="required",
           note="南陇侯出现时,回复 bot 提示"),
 
-    # ---------- 玩法(灵树/观星/天阶/小世界/元神 — 多数是宗门玩法,不同宗门可用范围不同)----------
-    Skill("tree_water", "玩法", "灵树灌溉", ".灵树灌溉", icon="💧"),
-    Skill("tree_guard", "玩法", "协同守山", ".协同守山", icon="⛰️"),
-    Skill("tree_harvest", "玩法", "采摘灵果", ".采摘灵果", icon="🍎"),
-    Skill("stargazer_panel", "玩法", "观星台", ".观星台", icon="🔭"),
-    Skill("stargazer_guide", "玩法", "牵引星辰", ".牵引星辰", icon="🌟"),
-    Skill("stargazer_soothe", "玩法", "安抚星辰", ".安抚星辰", icon="✨"),
-    Skill("stargazer_collect", "玩法", "收集精华", ".收集精华", icon="💎"),
-    Skill("guanxing", "玩法", "观星", ".观星", icon="🔮"),
-    Skill("guanxing_shift", "玩法", "改换星移", ".改换星移", icon="🌌"),
-    Skill("tianti_climb", "玩法", "登天阶", ".登天阶", icon="🪜"),
-    Skill("tianti_wenxin", "玩法", "问心台", ".问心台", icon="🧠"),
-    Skill("tianti_gangfeng", "玩法", "引九天罡风", ".引九天罡风", icon="🌬️"),
-    Skill("small_world", "玩法", "小世界", ".小世界", icon="🌐",
+    # ---------- 玩法 — 宗门 / 境界限定(参考老脚本 state.py:1200 get_available_module_names)----------
+    # 灵树 = 落云宗
+    Skill("tree_water", "玩法", "灵树灌溉", ".灵树灌溉", icon="💧", sect="落云宗"),
+    Skill("tree_guard", "玩法", "协同守山", ".协同守山", icon="⛰️", sect="落云宗"),
+    Skill("tree_harvest", "玩法", "采摘灵果", ".采摘灵果", icon="🍎", sect="落云宗"),
+    # 观星台 / 观星 = 星宫
+    Skill("stargazer_panel", "玩法", "观星台", ".观星台", icon="🔭", sect="星宫"),
+    Skill("stargazer_guide", "玩法", "牵引星辰", ".牵引星辰", icon="🌟", sect="星宫"),
+    Skill("stargazer_soothe", "玩法", "安抚星辰", ".安抚星辰", icon="✨", sect="星宫"),
+    Skill("stargazer_collect", "玩法", "收集精华", ".收集精华", icon="💎", sect="星宫"),
+    Skill("guanxing", "玩法", "观星", ".观星", icon="🔮", sect="星宫"),
+    Skill("guanxing_shift", "玩法", "改换星移", ".改换星移", icon="🌌", sect="星宫"),
+    # 登天阶 = 凌霄宫
+    Skill("tianti_climb", "玩法", "登天阶", ".登天阶", icon="🪜", sect="凌霄宫"),
+    Skill("tianti_wenxin", "玩法", "问心台", ".问心台", icon="🧠", sect="凌霄宫"),
+    Skill("tianti_gangfeng", "玩法", "引九天罡风", ".引九天罡风", icon="🌬️", sect="凌霄宫"),
+    # 太一 = 太一门
+    Skill("taiyi", "玩法", "太一", ".太一", icon="☯️", sect="太一门"),
+    # 放养 = 万灵宗
+    Skill("ranch", "玩法", "一键放养", ".一键放养", icon="🌾", sect="万灵宗"),
+    # 小世界 = realm ≥ 化神初期
+    Skill("small_world", "玩法", "小世界", ".小世界", icon="🌐", realm_min="化神初期",
           note="进入小世界面板,查询不消耗"),
-    Skill("sw_manifest", "玩法", "显灵", ".显灵", icon="✨"),
-    Skill("sw_harvest", "玩法", "收割香火", ".收割香火", icon="🔥"),
-    Skill("sw_refine", "玩法", "神识淬炼", ".神识淬炼", icon="🧠"),
-    Skill("sw_preach", "玩法", "神迹 布道", ".神迹 布道", icon="📜"),
+    Skill("sw_manifest", "玩法", "显灵", ".显灵", icon="✨", realm_min="化神初期"),
+    Skill("sw_harvest", "玩法", "收割香火", ".收割香火", icon="🔥", realm_min="化神初期"),
+    Skill("sw_refine", "玩法", "神识淬炼", ".神识淬炼", icon="🧠", realm_min="化神初期"),
+    Skill("sw_preach", "玩法", "神迹 布道", ".神迹 布道", icon="📜", realm_min="化神初期"),
+    # 第二元神 / 元神修炼 — 无 sect 限制,通用
     Skill("second_soul_train", "玩法", "元神修炼", ".元神修炼", icon="🪞"),
     Skill("second_soul_choice_break", "玩法", "抉择 强行突破", ".抉择 强行突破",
           reply_mode="required",
@@ -119,8 +151,8 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
     Skill("second_soul_choice_stable", "玩法", "抉择 稳固道心", ".抉择 稳固道心",
           reply_mode="required",
           note="第二元神 prompt 出现时,回复 bot 提示"),
+    # 引道 — 全角色都能用(节点/星移辅助)
     Skill("yindao", "玩法", "引道", ".引道", icon="🌠"),
-    Skill("ranch", "玩法", "一键放养", ".一键放养", icon="🌾"),
 
     # ---------- 查询(只读,不消耗,不触发冷却)----------
     Skill("storage_bag", "查询", "储物袋", ".储物袋", icon="📦",
@@ -131,9 +163,9 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
           note="查询天命玉牒(称号/灵根/宗门/修为)"),
     Skill("deep_retreat_query", "查询", "查看闭关", ".查看闭关", icon="🔍",
           note="查询当前闭关状态"),
-    Skill("yuanying_status", "查询", "元婴状态", ".元婴状态", icon="👻"),
-    Skill("tianti_status", "查询", "天阶状态", ".天阶状态", icon="🪜"),
-    Skill("tree_status", "查询", "灵树状态", ".灵树状态", icon="🌳"),
+    Skill("yuanying_status", "查询", "元婴状态", ".元婴状态", icon="👻", realm_min="元婴初期"),
+    Skill("tianti_status", "查询", "天阶状态", ".天阶状态", icon="🪜", sect="凌霄宫"),
+    Skill("tree_status", "查询", "灵树状态", ".灵树状态", icon="🌳", sect="落云宗"),
     Skill("concubine_status", "查询", "我的侍妾", ".我的侍妾", icon="👩"),
     Skill("second_soul_status", "查询", "第二元神", ".第二元神", icon="🔮"),
     Skill("sect_list", "查询", "宗门列表", ".宗门列表", icon="🏔️"),
@@ -167,6 +199,7 @@ class SkillRegistry:
             "ok": True,
             "groups": self.list_groups(),
             "skills": [skill.to_api() for skill in self.list()],
+            "realm_order": list(REALM_SORT_ORDER),
         }
 
 

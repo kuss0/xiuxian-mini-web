@@ -268,6 +268,7 @@ async function loadIdentityPatches() {
   state.identityPatches = payload.state || [];
   renderIdentitySnapshot();
   renderCharacterHud();
+  renderSkillBar();
   return state.identityPatches;
 }
 
@@ -4742,6 +4743,7 @@ async function loadSkills() {
     const data = await fetchJson("/api/skills");
     state.skills = data.skills || [];
     state.skillGroups = data.groups || [];
+    state.realmOrder = data.realm_order || [];
     if (state.skillGroups.length && !state.skillGroups.includes(state.skillBarTab)) {
       state.skillBarTab = state.skillGroups[0];
     }
@@ -4749,6 +4751,43 @@ async function loadSkills() {
     console.warn("[skills] load failed", err);
   }
   renderSkillBar();
+}
+
+// 当前激活身份的宗门 / 境界 — 从 identity_profile state_patches 拿。
+// 拿不到就返空(那时 sect/realm 都视为「未知」,不过滤)。
+function currentIdentitySect() {
+  const patches = state.identityPatches || [];
+  const raw = (patches.find((p) => p.key === "宗门") || {}).value || "";
+  return String(raw || "").replace(/^【|】$/g, "").trim();
+}
+
+function currentIdentityRealm() {
+  const patches = state.identityPatches || [];
+  return String((patches.find((p) => p.key === "境界") || {}).value || "").trim();
+}
+
+function realmIndex(realmName) {
+  if (!realmName) return -1;
+  const order = state.realmOrder || [];
+  return order.indexOf(realmName);
+}
+
+function skillIsUnlocked(skill) {
+  // sect 限定:有标且当前 sect 已知则必须匹配;未知就放行
+  if (skill.sect) {
+    const cur = currentIdentitySect();
+    if (cur && cur !== skill.sect) return false;
+  }
+  // realm 限定:有标且当前 realm 已知则必须 >=;未知就放行
+  if (skill.realm_min) {
+    const cur = currentIdentityRealm();
+    if (cur) {
+      const need = realmIndex(skill.realm_min);
+      const have = realmIndex(cur);
+      if (need >= 0 && have >= 0 && have < need) return false;
+    }
+  }
+  return true;
 }
 
 function renderSkillBar() {
@@ -4781,9 +4820,15 @@ function renderSkillBar() {
     }
   }
   // chips
-  const tabSkills = (state.skills || []).filter((s) => s.group === state.skillBarTab);
+  const tabSkills = (state.skills || [])
+    .filter((s) => s.group === state.skillBarTab)
+    .filter((s) => skillIsUnlocked(s));
   if (!tabSkills.length) {
-    skillBarChips.innerHTML = '<span class="muted">这一组没有技能</span>';
+    const sect = currentIdentitySect();
+    const hint = sect
+      ? `「${state.skillBarTab}」组里没有跟你宗门(${sect})/境界匹配的技能`
+      : `「${state.skillBarTab}」组里没有技能`;
+    skillBarChips.innerHTML = `<span class="muted">${escapeHtml(hint)}</span>`;
     return;
   }
   const modulesByKey = activeId
