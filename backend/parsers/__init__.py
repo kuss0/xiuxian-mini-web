@@ -11,6 +11,7 @@ from .dungeon import DungeonParser
 from .inventory import InventoryParser
 from .naming import NamingParser
 from .profile import ProfileParser
+from .realm_breakthrough import RealmBreakthroughParser
 from .retreat_success import RetreatSuccessParser
 from .risk import RiskParser
 from .second_soul import SecondSoulParser
@@ -23,6 +24,7 @@ def build_parser_registry() -> ParserRegistry:
     registry.register(SecondSoulParser())
     registry.register(DungeonParser())
     registry.register(NamingParser())
+    registry.register(RealmBreakthroughParser())
     registry.register(ProfileParser())
     registry.register(BattlePowerParser())
     registry.register(InventoryParser())

@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from backend.domain.realm import REALM_SORT_ORDER
+
 
 @dataclass(frozen=True)
 class Skill:
@@ -51,15 +53,7 @@ class Skill:
 # - 放养   → 万灵宗 only
 # - 元婴   → 境界 ≥ 元婴初期
 # - 小世界 → 境界 ≥ 化神初期
-REALM_SORT_ORDER: tuple[str, ...] = (
-    "炼气一层", "炼气二层", "炼气三层", "炼气四层", "炼气五层",
-    "炼气六层", "炼气七层", "炼气八层", "炼气九层", "炼气十层",
-    "炼气十一层", "炼气十二层", "炼气十三层",
-    "筑基初期", "筑基中期", "筑基后期",
-    "结丹初期", "结丹中期", "结丹后期",
-    "元婴初期", "元婴中期", "元婴后期",
-    "化神初期", "化神中期", "化神后期", "化神后期大圆满",
-)
+# REALM_SORT_ORDER 现在统一从 backend.domain.realm 导入,跟 parser 用同一份。
 
 
 # 默认布局 — 6 个分组,参照老脚本 model/web/static/js/app.js 的「日常/法宝/侍妾/奇遇」
@@ -153,6 +147,10 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
           note="第二元神 prompt 出现时,回复 bot 提示"),
     # 引道 — 全角色都能用(节点/星移辅助)
     Skill("yindao", "玩法", "引道", ".引道", icon="🌠"),
+    Skill("node_search", "玩法", "搜寻节点", ".搜寻节点", icon="🔎",
+          note="搜寻可定星节点(老脚本 CMD_NODE_SEARCH)"),
+    Skill("node_define", "玩法", "定星", ".定星", icon="⭐",
+          note="把节点钉成星(老脚本 CMD_NODE_DEFINE)"),
 
     # ---------- 查询(只读,不消耗,不触发冷却)----------
     Skill("storage_bag", "查询", "储物袋", ".储物袋", icon="📦",
