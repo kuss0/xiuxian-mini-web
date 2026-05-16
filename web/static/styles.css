@@ -2749,6 +2749,37 @@ pre {
   background: linear-gradient(135deg, rgba(245, 158, 11, 0.10), rgba(220, 38, 38, 0.04));
 }
 
+.card-rich-loot {
+  background: linear-gradient(135deg, rgba(234, 179, 8, 0.12), rgba(120, 53, 15, 0.04));
+  border-color: rgba(234, 179, 8, 0.20);
+}
+
+.card-rich-soul {
+  background: linear-gradient(135deg, rgba(192, 132, 252, 0.12), rgba(56, 189, 248, 0.04));
+  border-color: rgba(192, 132, 252, 0.20);
+}
+
+.card-rich-dungeon {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.12), rgba(20, 184, 166, 0.04));
+  border-color: rgba(34, 197, 94, 0.20);
+}
+
+.card-rich-risk {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.16), rgba(234, 88, 12, 0.06));
+  border-color: rgba(239, 68, 68, 0.32);
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.12) inset;
+}
+
+.card-rich-risk .rich-hero-value {
+  color: #fca5a5;
+}
+
+.rich-hero-id {
+  font-family: var(--mono, ui-monospace, "SF Mono", monospace);
+  font-size: 26px;
+  letter-spacing: 0.5px;
+}
+
 .rich-hero {
   display: flex;
   align-items: center;

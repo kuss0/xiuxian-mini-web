@@ -1052,6 +1052,10 @@ const cardRenderers = {
   "深度闭关总结": renderDeepRetreatSummaryCard,
   "闭关成功": renderRetreatSuccessCard,
   "试炼古塔战报": renderTowerTrialCard,
+  "储物袋快照": renderInventoryCard,
+  "第二元神归位": renderSecondSoulCard,
+  "虚天殿开启": renderDungeonCard,
+  "风险提醒": renderRiskCard,
 };
 
 function renderEnhancedBlock(message) {
@@ -1232,6 +1236,58 @@ function renderTowerTrialCard(message) {
       ${f["遭遇词缀"] ? `<div class="rich-chips"><span class="rich-chip"><span class="rich-chip-k">词缀</span>${escapeHtml(String(f["遭遇词缀"]))}</span></div>` : ""}
       ${richCollapsibleList("收获", f["收获列表"] || [], 4)}
       ${floorRows ? `<div class="rich-progress"><div class="rich-progress-head"><span>逐层概要</span></div><ul class="tower-floor-list">${floorRows}</ul></div>` : ""}
+    </div>
+  `;
+}
+
+function renderInventoryCard(message) {
+  const summary = String(message.summary || "已识别背包/资源类消息").trim();
+  return `
+    <div class="card-rich card-rich-loot">
+      ${richHero("📦", "储物袋", "已识别")}
+      <p class="muted" style="margin:0;font-size:12px;">${escapeHtml(summary)}</p>
+      ${richChips([["类型", "资源快照"]])}
+    </div>
+  `;
+}
+
+function renderSecondSoulCard(message) {
+  const summary = String(message.summary || "第二元神已结束修炼。").trim();
+  return `
+    <div class="card-rich card-rich-soul">
+      ${richHero("🔮", "第二元神", "归位")}
+      <p class="muted" style="margin:0;font-size:12px;">${escapeHtml(summary)}</p>
+      ${richChips([["阶段", "回归窍中温养"], ["建议", "去 actions 区抉择 / 修炼"]])}
+    </div>
+  `;
+}
+
+function renderDungeonCard(message) {
+  const f = message.fields || {};
+  const dungeonId = f["副本ID"] ? String(f["副本ID"]).trim() : "—";
+  return `
+    <div class="card-rich card-rich-dungeon">
+      <div class="rich-hero">
+        <span class="rich-hero-icon">🛡️</span>
+        <div class="rich-hero-text">
+          <span class="rich-hero-label">虚天殿 · 副本 ID</span>
+          <span class="rich-hero-value rich-hero-id">#${escapeHtml(dungeonId)}</span>
+        </div>
+      </div>
+      ${richChips([["状态", "可加入"], ["操作", "actions 区一键加入"]])}
+    </div>
+  `;
+}
+
+function renderRiskCard(message) {
+  const summary = String(message.summary || "检测到高危消息,需要玩家手动处理。").trim();
+  const f = message.fields || {};
+  const handling = f["处理方式"] ? formatFieldValue(f["处理方式"]) : "人工查看原文";
+  return `
+    <div class="card-rich card-rich-risk">
+      ${richHero("⚠️", "风险提醒", "需人工介入")}
+      <p style="margin:0;font-size:12.5px;color:#fecaca;">${escapeHtml(summary)}</p>
+      ${richChips([["处理方式", handling]])}
     </div>
   `;
 }
