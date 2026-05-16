@@ -155,6 +155,29 @@ class TelegramReadOnlyListener:
                         raw_event = replace(raw_event, source=display_name)
                     self._sink.ingest_event(raw_event)
 
+                @client.on(telethon.events.MessageEdited(chats=target_chat, incoming=True, outgoing=True))
+                async def _on_message_edited(event):
+                    # bot 经常 send 占位 + edit 成最终结果(.战力 / .推演 等慢操作),
+                    # 不监听 edited 就只能看到「正在推演...」,拿不到结果。
+                    # 走和 NewMessage 完全相同的 ingest 路径(ON CONFLICT(id) DO UPDATE
+                    # 在 raw_messages 上是幂等的,会用最新 text 覆盖旧 text)。
+                    if topic_id and _event_topic_id(event) != topic_id:
+                        return
+                    raw_event = _raw_event_from_telethon(event, account_key=self._account_key)
+                    display_name = await _resolve_sender_display_name(event)
+                    if display_name:
+                        raw_event = replace(raw_event, source=display_name)
+                    # 标个 edited_at(用 message.edit_date 或 当前 UTC)
+                    edit_date = getattr(event.message, "edit_date", None)
+                    if edit_date is not None:
+                        if getattr(edit_date, "tzinfo", None) is None:
+                            edit_date = edit_date.replace(tzinfo=timezone.utc)
+                        raw_event = replace(
+                            raw_event,
+                            edited_at=edit_date.astimezone(timezone.utc).isoformat(),
+                        )
+                    self._sink.ingest_event(raw_event)
+
                 self._set_status("running", "只读监听运行中")
                 connected_at = asyncio.get_event_loop().time()
                 await client.run_until_disconnected()
