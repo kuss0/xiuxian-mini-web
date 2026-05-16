@@ -159,6 +159,7 @@ class StatePatch:
     value: Any
     source_message_id: str
     updated_at: str = ""
+    send_as_id: int = 0  # 哪个身份的状态(0 = 未知 / 全局)
 
     def to_api(self) -> dict[str, Any]:
         return {
@@ -167,6 +168,7 @@ class StatePatch:
             "value": self.value,
             "source_message_id": self.source_message_id,
             "updated_at": self.updated_at,
+            "send_as_id": self.send_as_id,
         }
 
     @classmethod

@@ -264,7 +264,10 @@ async function loadIdentityModuleStates() {
 }
 
 async function loadIdentityPatches() {
-  const payload = await fetchJson("/api/state-patches?scope=identity_profile");
+  const url = state.activeIdentityId
+    ? `/api/state-patches?scope=identity_profile&send_as_id=${encodeURIComponent(state.activeIdentityId)}`
+    : `/api/state-patches?scope=identity_profile`;
+  const payload = await fetchJson(url);
   state.identityPatches = payload.state || [];
   renderIdentitySnapshot();
   renderCharacterHud();
@@ -2411,6 +2414,8 @@ function renderSidebarIdentityList() {
       renderSidebarIdentityList();
       renderSkillBar();
       renderCharacterHud();
+      // 切换身份 → 重新拉这个身份的 state patches
+      loadIdentityPatches().catch((err) => console.warn("[mini-web] reload patches failed:", err));
     });
   });
 }

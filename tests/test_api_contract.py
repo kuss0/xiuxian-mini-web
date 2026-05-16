@@ -2287,3 +2287,87 @@ def test_skill_send_preserves_user_renamed_label(tmp_path, monkeypatch):
     assert server._store.get_account("main")["label"] == "我的主号"
     assert server._store.get_identity(8574677796)["label"] == "本尊"
 
+
+def test_state_patches_scoped_by_send_as_id(tmp_path):
+    """两个不同身份对同一 scope+key 各发一条命令,store 应该按 send_as_id 隔离,
+    互相不覆盖;查询时传 send_as_id 只返回该身份的版本。"""
+    from backend.repo.sqlite_store import SQLiteStore
+    from backend.domain.models import RawMessageEvent
+    store = SQLiteStore(tmp_path / "m.db")
+
+    # 用户 A 发 .我的灵根,bot 回复 — bot 回复时 sender_id=bot,但 parent.sender_id=A
+    A = 8574677796
+    B = 8668975549
+    BOT = 7900199668
+    chat = -1001680975844
+
+    # A 的 .我的灵根
+    a_cmd = RawMessageEvent(
+        id=f"tg:{chat}:1001:main",
+        chat_id=chat,
+        msg_id=1001,
+        text=".我的灵根",
+        source="A",
+        date="2026-05-17T00:00:00+00:00",
+        sender_id=A,
+        sender_is_bot=False,
+    )
+    store.ingest_event(a_cmd)
+
+    # bot 回复 A 的 玉牒
+    a_reply = RawMessageEvent(
+        id=f"tg:{chat}:1002:main",
+        chat_id=chat,
+        msg_id=1002,
+        text="@aaa 的天命玉牒\n────\n宗门: 【凌霄宫】\n灵根: 天灵根(火)\n修为: 100 / 1000\n",
+        source="bot",
+        date="2026-05-17T00:00:01+00:00",
+        sender_id=BOT,
+        sender_is_bot=True,
+        reply_to_msg_id=1001,
+    )
+    store.ingest_event(a_reply)
+
+    # B 发 .我的灵根 + bot 回复 B
+    b_cmd = RawMessageEvent(
+        id=f"tg:{chat}:1003:main",
+        chat_id=chat,
+        msg_id=1003,
+        text=".我的灵根",
+        source="B",
+        date="2026-05-17T00:00:02+00:00",
+        sender_id=B,
+        sender_is_bot=False,
+    )
+    store.ingest_event(b_cmd)
+    b_reply = RawMessageEvent(
+        id=f"tg:{chat}:1004:main",
+        chat_id=chat,
+        msg_id=1004,
+        text="@bbb 的天命玉牒\n────\n宗门: 【落云宗】\n灵根: 木灵根\n修为: 500 / 5000\n",
+        source="bot",
+        date="2026-05-17T00:00:03+00:00",
+        sender_id=BOT,
+        sender_is_bot=True,
+        reply_to_msg_id=1003,
+    )
+    store.ingest_event(b_reply)
+
+    # A 应该看到凌霄宫 / 天灵根(火) / 100
+    a_patches = {p["key"]: p["value"] for p in store.list_state_patches("identity_profile", send_as_id=A)}
+    assert a_patches.get("宗门") == "【凌霄宫】"
+    assert a_patches.get("灵根") == "天灵根(火)"
+    assert a_patches.get("修为") == "100 / 1000"
+
+    # B 应该看到落云宗 / 木灵根 / 500
+    b_patches = {p["key"]: p["value"] for p in store.list_state_patches("identity_profile", send_as_id=B)}
+    assert b_patches.get("宗门") == "【落云宗】"
+    assert b_patches.get("灵根") == "木灵根"
+    assert b_patches.get("修为") == "500 / 5000"
+
+    # 不传 send_as_id → 全部返(A + B 各自的)
+    all_patches = store.list_state_patches("identity_profile")
+    keys_by_sender = {(p["send_as_id"], p["key"]) for p in all_patches}
+    assert (A, "宗门") in keys_by_sender
+    assert (B, "宗门") in keys_by_sender
+

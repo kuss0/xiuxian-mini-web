@@ -36,7 +36,7 @@ class CardStore(Protocol):
     def get_settings(self) -> dict:
         ...
 
-    def list_state_patches(self, scope: str = "") -> list[dict]:
+    def list_state_patches(self, scope: str = "", send_as_id: int = 0) -> list[dict]:
         ...
 
     def save_settings(self, payload: dict) -> dict:
@@ -358,10 +358,10 @@ class MiniWebServer:
     def settings_payload(self) -> dict:
         return {"settings": public_settings(self._store.get_settings())}
 
-    def state_patches_payload(self, scope: str = "") -> dict:
+    def state_patches_payload(self, scope: str = "", *, send_as_id: int = 0) -> dict:
         return {
             "ok": True,
-            "state": self._store.list_state_patches(scope),
+            "state": self._store.list_state_patches(scope, send_as_id=send_as_id),
         }
 
     def discovered_bots_payload(self) -> dict:

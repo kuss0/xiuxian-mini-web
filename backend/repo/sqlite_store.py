@@ -379,26 +379,50 @@ class SQLiteStore:
                     ),
                 )
             for patch in output.state_patches:
+                # 解析 send_as_id:patch 自己有就用;没有就回退到本条 event sender,
+                # 如果本条是「游戏 bot 回复」(根据 settings.game_bot_ids 判断,不是
+                # telethon sender_is_bot —— 韩天尊在 TG 里是普通用户) → 用
+                # parent.sender_id(才是命令发起人)。
+                send_as_id = int(getattr(patch, "send_as_id", 0) or 0)
+                if send_as_id == 0:
+                    candidate = event.sender_id
+                    game_bot_ids = set()
+                    try:
+                        game_bot_ids = {int(x) for x in (self.get_settings().get("game_bot_ids") or [])}
+                    except Exception:
+                        game_bot_ids = set()
+                    is_bot_like = (
+                        bool(event.sender_is_bot)
+                        or (candidate is not None and candidate < 0)
+                        or (candidate is not None and int(candidate) in game_bot_ids)
+                    )
+                    if is_bot_like and event.reply_to_msg_id:
+                        parent = self._lookup_parent_event(int(event.chat_id), int(event.reply_to_msg_id))
+                        if parent and parent.sender_id:
+                            candidate = parent.sender_id
+                    send_as_id = int(candidate or 0)
                 updated_patch = StatePatch(
                     scope=patch.scope,
                     key=patch.key,
                     value=patch.value,
                     source_message_id=patch.source_message_id,
                     updated_at=patch.updated_at or event.date or utc_now_iso(),
+                    send_as_id=send_as_id,
                 )
                 conn.execute(
                     """
                     INSERT INTO state_patches(
-                        scope, key, value_json, source_message_id, updated_at
+                        scope, send_as_id, key, value_json, source_message_id, updated_at
                     )
-                    VALUES(?, ?, ?, ?, ?)
-                    ON CONFLICT(scope, key) DO UPDATE SET
+                    VALUES(?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(scope, send_as_id, key) DO UPDATE SET
                         value_json=excluded.value_json,
                         source_message_id=excluded.source_message_id,
                         updated_at=excluded.updated_at
                     """,
                     (
                         updated_patch.scope,
+                        updated_patch.send_as_id,
                         updated_patch.key,
                         json.dumps(updated_patch.value, ensure_ascii=False),
                         updated_patch.source_message_id,
@@ -607,37 +631,53 @@ class SQLiteStore:
             self.save_settings(patch)
         return self.get_settings()
 
-    def list_state_patches(self, scope: str = "") -> list[dict]:
+    def list_state_patches(self, scope: str = "", send_as_id: int = 0) -> list[dict]:
+        """列出 state patches。
+        - scope:可选,空字符串返回全部 scope
+        - send_as_id:0 = 不过滤(返回所有身份);>0 = 只返回该身份的 patch,
+          补上 send_as_id=0 的全局 patch(作为兜底),并按 send_as_id desc 排序
+          → 同 key 多版本时,身份特定的覆盖全局兜底。
+        """
         scope = str(scope or "").strip()
+        send_as_id = int(send_as_id or 0)
         with self._connect() as conn:
+            params: list = []
+            where: list[str] = []
             if scope:
-                rows = conn.execute(
-                    """
-                    SELECT scope, key, value_json, source_message_id, updated_at
-                    FROM state_patches
-                    WHERE scope=?
-                    ORDER BY updated_at DESC, key ASC
-                    """,
-                    (scope,),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT scope, key, value_json, source_message_id, updated_at
-                    FROM state_patches
-                    ORDER BY updated_at DESC, scope ASC, key ASC
-                    """
-                ).fetchall()
-        return [
-            StatePatch(
-                scope=row[0],
-                key=row[1],
-                value=json.loads(row[2]),
-                source_message_id=row[3],
-                updated_at=row[4],
-            ).to_api()
-            for row in rows
-        ]
+                where.append("scope=?")
+                params.append(scope)
+            if send_as_id > 0:
+                where.append("(send_as_id=? OR send_as_id=0)")
+                params.append(send_as_id)
+            where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+            rows = conn.execute(
+                f"""
+                SELECT scope, send_as_id, key, value_json, source_message_id, updated_at
+                FROM state_patches
+                {where_sql}
+                ORDER BY send_as_id DESC, updated_at DESC, scope ASC, key ASC
+                """,
+                params,
+            ).fetchall()
+        # 按 (scope, key) 去重,优先取 send_as_id>0 的(因为 ORDER BY send_as_id DESC)
+        seen: set[tuple[str, str]] = set()
+        out: list[dict] = []
+        for row in rows:
+            key_tuple = (row[0], row[2])
+            if send_as_id > 0 and key_tuple in seen:
+                continue
+            seen.add(key_tuple)
+            out.append(
+                StatePatch(
+                    scope=row[0],
+                    send_as_id=int(row[1] or 0),
+                    key=row[2],
+                    value=json.loads(row[3]),
+                    source_message_id=row[4],
+                    updated_at=row[5],
+                ).to_api()
+            )
+        return out
 
     def list_discovered_bots(self) -> list[dict]:
         """从消息箱抓「真的发过游戏 bot 风格消息」的 sender,给 UI 让用户勾选哪些是游戏 bot
@@ -1140,11 +1180,12 @@ class SQLiteStore:
 
                 CREATE TABLE IF NOT EXISTS state_patches (
                     scope TEXT NOT NULL,
+                    send_as_id INTEGER NOT NULL DEFAULT 0,
                     key TEXT NOT NULL,
                     value_json TEXT NOT NULL,
                     source_message_id TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
-                    PRIMARY KEY(scope, key),
+                    PRIMARY KEY(scope, send_as_id, key),
                     FOREIGN KEY(source_message_id) REFERENCES raw_messages(id)
                 );
 
@@ -1230,6 +1271,47 @@ class SQLiteStore:
                 """
             )
             self._migrate_raw_messages_columns(conn)
+            self._migrate_state_patches_columns(conn)
+            # idx_state_patches_sender 引用 send_as_id 列,迁移完成后再建,避免老库 cold start 失败
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_state_patches_sender "
+                "ON state_patches(scope, send_as_id)"
+            )
+
+    def _migrate_state_patches_columns(self, conn) -> None:
+        """幂等 schema 升级:给老 state_patches 加 send_as_id 列。
+        老库的 PK 是 (scope, key) 全局,导致多身份共用一行覆盖,角色 HUD 串号。
+        新库 PK 是 (scope, send_as_id, key),每个身份独立一行。
+        老行 send_as_id 填 0(全局),不丢历史数据。"""
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(state_patches)").fetchall()}
+        if "send_as_id" in existing:
+            return
+        # 旧表存在但缺 send_as_id 列:rebuild 表(SQLite 不支持 ALTER 改 PK)
+        legacy_count = conn.execute("SELECT COUNT(*) FROM state_patches").fetchone()[0]
+        conn.executescript(
+            """
+            ALTER TABLE state_patches RENAME TO state_patches_legacy;
+            CREATE TABLE state_patches (
+                scope TEXT NOT NULL,
+                send_as_id INTEGER NOT NULL DEFAULT 0,
+                key TEXT NOT NULL,
+                value_json TEXT NOT NULL,
+                source_message_id TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(scope, send_as_id, key),
+                FOREIGN KEY(source_message_id) REFERENCES raw_messages(id)
+            );
+            INSERT INTO state_patches(scope, send_as_id, key, value_json, source_message_id, updated_at)
+              SELECT scope, 0, key, value_json, source_message_id, updated_at FROM state_patches_legacy;
+            DROP TABLE state_patches_legacy;
+            CREATE INDEX IF NOT EXISTS idx_state_patches_scope
+                ON state_patches(scope, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_state_patches_sender
+                ON state_patches(scope, send_as_id);
+            """
+        )
+        if legacy_count:
+            print(f"[mini-web] state_patches 升级:迁移 {legacy_count} 条全局行(send_as_id=0)")
 
     def _migrate_raw_messages_columns(self, conn) -> None:
         """幂等 schema 升级:给 raw_messages 加 4 个新列(老库没有就 ALTER 加上)。

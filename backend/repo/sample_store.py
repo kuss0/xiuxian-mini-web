@@ -157,11 +157,17 @@ class SampleStore:
             "listener_message": "",
         }
 
-    def list_state_patches(self, scope: str = "") -> list[dict]:
+    def list_state_patches(self, scope: str = "", send_as_id: int = 0) -> list[dict]:
         scope = str(scope or "").strip()
+        send_as_id = int(send_as_id or 0)
         patches = self._state_patches
         if scope:
             patches = tuple(patch for patch in patches if patch.scope == scope)
+        if send_as_id > 0:
+            patches = tuple(
+                patch for patch in patches
+                if getattr(patch, "send_as_id", 0) in (0, send_as_id)
+            )
         return [patch.to_api() for patch in patches]
 
     def save_settings(self, payload: dict) -> dict:

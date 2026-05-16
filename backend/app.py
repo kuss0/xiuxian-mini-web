@@ -247,7 +247,11 @@ def _get_settings(request: MiniWebHandler, query: dict) -> dict:
 
 def _get_state_patches(request: MiniWebHandler, query: dict) -> dict:
     scope = (query.get("scope") or [""])[0]
-    return _app(request).state_patches_payload(scope)
+    try:
+        send_as_id = int((query.get("send_as_id") or ["0"])[0])
+    except (TypeError, ValueError):
+        send_as_id = 0
+    return _app(request).state_patches_payload(scope, send_as_id=send_as_id)
 
 
 def _get_discovered_bots(request: MiniWebHandler, query: dict) -> dict:
