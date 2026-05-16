@@ -709,9 +709,9 @@ textarea:focus-visible {
 .topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 14px;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-bottom: 10px;
 }
 
 .eyebrow {
@@ -727,15 +727,16 @@ textarea:focus-visible {
 
 .topbar-actions {
   display: flex;
-  gap: 10px;
+  gap: 6px;
 }
 
 .topbar-actions button {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--surface);
   color: var(--text);
-  padding: 9px 13px;
+  padding: 5px 10px;
+  font-size: 12px;
 }
 
 .topbar-actions button:hover {
@@ -745,8 +746,8 @@ textarea:focus-visible {
 
 .layout-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 460px);
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: 12px;
   align-items: start;
 }
 
