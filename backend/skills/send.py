@@ -66,9 +66,15 @@ class SkillSendService:
         self._listener_lookup = listener_lookup or (lambda _id: None)
         self._event_sink = event_sink
         self._time_fn = time_fn
+        self._last_display = ""
 
     def registry(self) -> SkillRegistry:
         return self._registry
+
+    def last_display(self) -> str:
+        """最近一次成功 send 时 client.get_me() 拿到的显示名;给 server 用于
+        hydrate account.label。空字符串表示还没成功过 / get_me 失败。"""
+        return self._last_display
 
     def send(
         self,
@@ -119,7 +125,7 @@ class SkillSendService:
             )
 
         try:
-            sent_msg_id = listener.submit(
+            sent = listener.submit(
                 lambda client: self._send_on_client(
                     client,
                     chat_id=chat_id_int,
@@ -137,7 +143,11 @@ class SkillSendService:
                 reply_to_msg_id=reply_id,
             )
 
-        sent_msg_id = int(sent_msg_id or 0)
+        sent_msg_id = int((sent or {}).get("msg_id") or 0)
+        # 优先用 client.get_me() 返回的真名,fallback 才用 server 传过来的 sender_display
+        resolved_display = str((sent or {}).get("display") or "").strip()
+        if resolved_display:
+            self._last_display = resolved_display
         sent_at = self._time_fn()
         # outgoing 也 ingest 进消息箱,solo 模式才能把 bot 回复跟我的命令串起来
         if sent_msg_id > 0 and self._event_sink is not None and int(sender_id or 0) != 0:
@@ -146,7 +156,7 @@ class SkillSendService:
                     chat_id=chat_id_int,
                     msg_id=sent_msg_id,
                     sender_id=int(sender_id),
-                    sender_display=sender_display or str(sender_id),
+                    sender_display=resolved_display or sender_display or str(sender_id),
                     text=command,
                     reply_to_msg_id=reply_id or None,
                     topic_id=topic or 0,
@@ -174,14 +184,12 @@ class SkillSendService:
         command: str,
         reply_to_msg_id: int,
         topic_id: int = 0,
-    ) -> int:
-        """在已连接 client 上发一条。返回 Telegram 给的 msg_id(>0 表示成功)。
+    ) -> dict:
+        """在已连接 client 上发一条。返回 {msg_id, display}。
 
-        forum 话题群发送规则:
-        - 没 topic 没 reply → 普通发
-        - 没 topic 有 reply → reply_to=msg_id 即可
-        - 有 topic 没 reply → reply_to=topic_id(把 topic_id 当 reply_to 即「post 到该话题」)
-        - 有 topic 有 reply → 必须用 SendMessageRequest + InputReplyToMessage(top_msg_id)
+        display 来自 client.get_me() 的 first_name/last_name/username,这样
+        chat 里显示的发送者名跟 listener 解析其它消息时用的同一个口径
+        (而不是 account.label 写死的手机号)。
         """
         if topic_id > 0 and reply_to_msg_id > 0:
             from telethon import functions, types
@@ -197,20 +205,42 @@ class SkillSendService:
                     reply_to=reply_to_spec,
                 )
             )
+            msg_id = 0
             for update in (getattr(result, "updates", None) or []):
                 mid = getattr(update, "id", 0)
                 if mid:
-                    return int(mid)
-            return 0
+                    msg_id = int(mid)
+                    break
+        else:
+            kwargs: dict[str, Any] = {}
+            if reply_to_msg_id > 0:
+                kwargs["reply_to"] = reply_to_msg_id
+            elif topic_id > 0:
+                kwargs["reply_to"] = topic_id
+            sent = await client.send_message(chat_id, command, **kwargs)
+            msg_id = int(getattr(sent, "id", 0) or 0)
 
-        kwargs: dict[str, Any] = {}
-        if reply_to_msg_id > 0:
-            kwargs["reply_to"] = reply_to_msg_id
-        elif topic_id > 0:
-            # post 到 forum topic:简单写法就是把 topic_id 当 reply_to
-            kwargs["reply_to"] = topic_id
-        sent = await client.send_message(chat_id, command, **kwargs)
-        return int(getattr(sent, "id", 0) or 0)
+        display = ""
+        try:
+            me = await client.get_me()
+            display = _format_user_display(me)
+        except Exception:
+            display = ""
+        return {"msg_id": msg_id, "display": display}
+
+
+def _format_user_display(user) -> str:
+    if user is None:
+        return ""
+    parts = [str(getattr(user, "first_name", "") or "").strip(),
+             str(getattr(user, "last_name", "") or "").strip()]
+    name = " ".join(p for p in parts if p).strip()
+    if name:
+        return name
+    username = getattr(user, "username", None)
+    if username:
+        return f"@{str(username).lstrip('@').strip()}"
+    return ""
 
 
 def _outgoing_event(

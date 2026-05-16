@@ -926,7 +926,40 @@ class MiniWebServer:
             topic_id=topic_id,
             command_override=command_override,
         )
-        return result.to_api()
+        api = result.to_api()
+        # 顺手把 client.get_me() 抓到的真名 hydrate 回 account.label / identity.label
+        # —— 之前两者都是手机号,UI 显示 +44... 很丑
+        display = self._skill_send.last_display()
+        if result.ok and display:
+            self._maybe_hydrate_account_display(account, identity, display)
+        return api
+
+    def _maybe_hydrate_account_display(
+        self,
+        account: dict,
+        identity: dict,
+        display: str,
+    ) -> None:
+        """如果 account.label 还是手机号(+xxx)就替换成 TG 真名;
+        identity.label 同理。一旦用户手动改过(label 不是手机号)就保留,不覆盖。"""
+        display = (display or "").strip()
+        if not display:
+            return
+
+        def _looks_like_phone(s: object) -> bool:
+            text = str(s or "").strip()
+            return text.startswith("+") and text[1:].replace(" ", "").isdigit()
+
+        if account is not None and _looks_like_phone(account.get("label")):
+            try:
+                self._store.save_account({**account, "label": display})
+            except Exception as exc:
+                print(f"[skill-send] hydrate account label failed: {exc}")
+        if identity is not None and _looks_like_phone(identity.get("label")):
+            try:
+                self._store.save_identity({**identity, "label": display})
+            except Exception as exc:
+                print(f"[skill-send] hydrate identity label failed: {exc}")
 
     def schedule_preview_payload(self, payload: dict) -> dict:
         try:
