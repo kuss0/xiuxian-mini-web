@@ -25,11 +25,11 @@ python3 backend/app.py --host 127.0.0.1 --port 8787
 - `parsers/` 一个玩法一个文件,只解析,不做 I/O,不发消息。
 - `processors/message_pipeline.py` 集中调 parser、生成卡片和动作建议。
 - `outbox/planner.py` 算发送计划,标记 `manual_confirm_required: True`。
-- `accounts / identities` 在 SQLite 里独立持久化,身份(send_as)和 Telegram 账号是多对一关系;identity_id == send_as peer ID(对照 Py 主线 `model/state.py:439-505`,登录后会自动 upsert 一条 identity_id == account_id 的 self-identity)。
+- `accounts / identities` 在 SQLite 里独立持久化,身份(send_as)和 Telegram 账号是多对一关系;identity_id == send_as peer ID,登录后会自动 upsert 一条 identity_id == account_id 的 self-identity。
 
 ## 不做
 
 - 不接入自动挂机调度。
 - 不做自动连发链路、自动重试、自动补发。
 - 不在游戏群输出工具日志。
-- 不复用 `/opt/xiuxian-main` 的 runtime 状态。
+- 不复用外部老脚本的 runtime 状态。

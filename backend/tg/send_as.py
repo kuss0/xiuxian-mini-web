@@ -1,9 +1,5 @@
-"""对照 Py 主线 model/ui.py:1932-1959 (ui_get_send_as_peers) 的最小复刻。
-
-mini-web 不挂机,所以只复用「按账号 session 调 channels.GetSendAs 拉可用 send_as 列表」
-+「按账号 session 调 get_entity 解析单个 send_as peer 信息」两段读路径。
-不做 send-as 缓存(对照 Rust 主线 send_as_cache 的 4h TTL 优化是为高频自动发包准备的),
-mini-web 是一次性 UI 操作,直接现拉现用即可。
+"""按账号 session 调 channels.GetSendAs 拉可用 send_as 列表,以及按账号 session
+调 get_entity 解析单个 send_as peer 信息。一次性 UI 操作,现拉现用,不做缓存。
 """
 
 from __future__ import annotations
@@ -122,9 +118,8 @@ def _parse_entity_ref(value: str) -> int | str:
 
 
 async def _send_as_peer_to_item(client, telethon, raw_peer) -> SendAsPeer | None:
-    """对照 Py 主线 model/ui.py 的 send-as 解析:
-    raw_peer 是 SendAsPeer (Telethon raw type),含一个 peer 子对象;
-    我们 await get_entity(peer) 拿到完整 entity 才能渲染 title/username。
+    """raw_peer 是 Telethon 的 SendAsPeer raw type,含一个 peer 子对象;
+    需要 await get_entity(peer) 拿到完整 entity 才能渲染 title/username。
     """
     peer = getattr(raw_peer, "peer", None)
     if peer is None:

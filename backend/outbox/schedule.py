@@ -1,11 +1,11 @@
 """官方定时(Telegram scheduled message)骨架。
 
-参考 /opt/xiuxian-main/model/official_schedule.py 的 preset + plan + batch 三层:
+preset + plan + batch 三层:
 - preset:几个预设玩法(深度闭关 / 抚摸法宝 / 温养器灵 / 器灵试炼) + 自定义
 - plan:把 preset 展开成多条带时间戳的命令(plan items)
 - batch:一次「准备」记一条批次,带 N 条 scheduled_messages 子记录
 
-mini-web 当前骨架只做:
+骨架只做:
 1. preset 注册表 + plan builder(纯计算,无 IO)
 2. 通过 listener 复用已登录 client,调 channels SendMessage(schedule_date=...) / GetScheduledHistory / DeleteScheduledMessages
 3. 提供 dry_run 模式 — 只算 plan,不真发到 TG,方便 UI 开发和试错
@@ -19,17 +19,16 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 # 默认锚点:现在
-# 默认 horizon:3 天(对照 xiuxian-main DEFAULT_HORIZON_DAYS=3)
+# 默认 horizon:3 天
 DEFAULT_HORIZON_DAYS = 3
 SOURCE_TAG = "official_schedule"
 
-# 命令对照 xiuxian-main config:
 CMD_DEEP_RETREAT = ".深度闭关"
 CMD_VIEW_RETREAT = "查看闭关"
 CMD_PET_TOUCH = ".抚摸法宝"
 CMD_PET_WARM = ".温养器灵"
 CMD_PET_TRIAL = ".器灵试炼"
-DEEP_RETREAT_CD = 8 * 3600  # 默认 8h,对应老脚本
+DEEP_RETREAT_CD = 8 * 3600  # 默认 8h
 
 PRESET_DEEP_RETREAT = "deep_retreat"
 PRESET_PET_TOUCH = "pet_touch"
@@ -424,7 +423,7 @@ def build_plan(payload: dict, *, anchor_resolver: Callable[[int, str], float | N
     }
 
 
-# ---------- Telethon-side service(对照 xiuxian-main create/list/delete_official_*) ----------
+# ---------- Telethon-side service ----------
 
 class OfficialScheduleService:
     """实际跟 Telegram 交互的部分。需要 listener manager 注入,这样能复用已登录 client。

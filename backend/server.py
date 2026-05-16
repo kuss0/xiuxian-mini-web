@@ -101,6 +101,9 @@ class MiniWebServer:
             migrated = sqlite_store.rebuild_parsed_cards_if_legacy()
             if migrated:
                 print(f"[mini-web] 迁移了 {migrated} 条历史卡片 (hall → world/system)")
+            backfilled = sqlite_store.backfill_module_states_if_empty()
+            if backfilled:
+                print(f"[mini-web] 状态机历史 backfill: 重放 {backfilled} 条 raw_messages")
             store = sqlite_store
         self._store = store
         self._outbox = OutboxPlanner(self._store)
@@ -353,8 +356,7 @@ class MiniWebServer:
         }
 
     def discovered_bots_payload(self) -> dict:
-        """对照 xiuxian-main 的 game_bot_ids 思路:
-        从消息箱「自动发现」可能是游戏 bot 的 sender(必须真的产出过游戏关键词消息,
+        """从消息箱「自动发现」可能是游戏 bot 的 sender(必须真的产出过游戏关键词消息,
         参考 backend/repo/bot_hints.py),每条带「是否已被标记为 game bot」标志。
         前端勾选 → POST /api/settings 写 game_bot_ids 列表。chat UI 用此区分
         韩天尊 vs 普通玩家。
@@ -501,8 +503,7 @@ class MiniWebServer:
         return {"ok": deleted, "deleted": deleted}
 
     def logout_account_payload(self, payload: dict) -> dict:
-        """对照 xiuxian-main model/ui.py:1535 (ui_logout_account):
-        登出 = 停 listener + 删 session 文件 + 重置 login_status,
+        """登出 = 停 listener + 删 session 文件 + 重置 login_status,
         但保留 account 配置和绑定的 identity 记录,以便重新登录后继续用。
         """
         local_id = str(payload.get("local_id") or "").strip()
@@ -564,9 +565,8 @@ class MiniWebServer:
         return {"ok": True, "identity": public_identity(identity)}
 
     def batch_save_identities_payload(self, payload: dict) -> dict:
-        """对照 Py 主线 web_new/pages/index.html:297-336 的「新增身份」模态框:
-        用户在 send_as 列表勾选多条,前端一次性提交 → 后端逐条 save_identity,
-        每条独立返回 ok / error,某一条失败不阻塞其他条。"""
+        """「新增身份」模态框:用户在 send_as 列表勾选多条,前端一次性提交
+        → 后端逐条 save_identity,每条独立返回 ok / error,某一条失败不阻塞其他条。"""
         raw_items = payload.get("identities")
         if not isinstance(raw_items, list) or not raw_items:
             return {"ok": False, "error": "请提供 identities 列表", "results": []}
@@ -619,7 +619,7 @@ class MiniWebServer:
             return {"ok": False, "error": str(exc), "topics": []}
 
     def account_dialogs_payload(self, local_id: str) -> dict:
-        """对照 Py 主线的「读取群 / 频道」按钮:用账号的 session 拉它能看到的所有
+        """「读取群 / 频道」按钮:用账号的 session 拉它能看到的所有
         群/频道,供「监听目标」picker 使用。
         如果该账号 listener 已经在跑,直接复用其 client,避免新开 client 抢
         Telethon session SQLite → "database is locked"。"""
@@ -652,9 +652,8 @@ class MiniWebServer:
     def account_send_as_peers_payload(
         self, local_id: str, target_chat: str = ""
     ) -> dict:
-        """对照 Py 主线 model/ui.py:1932-1959 (ui_get_send_as_peers):
-        按 account_local_id 拿登录态,调 channels.GetSendAs(target_chat) 拉可用 send_as 列表。
-        listener 在跑就复用 listener client,避免 session 锁。"""
+        """按 account_local_id 拿登录态,调 channels.GetSendAs(target_chat) 拉可用
+        send_as 列表。listener 在跑就复用 listener client,避免 session 锁。"""
         try:
             account = self._require_account(local_id)
             chat = str(target_chat or account.get("target_chat") or "").strip()
@@ -671,8 +670,7 @@ class MiniWebServer:
             return {"ok": False, "error": str(exc), "peers": []}
 
     def account_resolve_entity_payload(self, payload: dict) -> dict:
-        """对照 Py 主线 model/control.py:1152-1159 (hydrate_identity_profile):
-        给定一个 send_as_id,用账号 session 调 get_entity 拉 username/title。
+        """给定一个 send_as_id,用账号 session 调 get_entity 拉 username/title。
         listener 在跑就复用,避免 session 锁。"""
         try:
             account = self._require_account(payload.get("local_id"))
@@ -1388,8 +1386,7 @@ class MiniWebServer:
         return account
 
     def _ensure_self_identity(self, account: dict) -> dict | None:
-        """对照 Py 主线 model/ui.py:1566-1568 (_finalize_account_login):
-        登录成功后,如果 account_id 已知,就 upsert 一条 send_as_id == account_id 的
+        """登录成功后,如果 account_id 已知,就 upsert 一条 send_as_id == account_id 的
         self-identity,跳过手动建身份这一步。"""
         try:
             account_id = int(str(account.get("account_id") or "").strip())
@@ -1547,13 +1544,10 @@ def public_identity(identity: dict | None) -> dict | None:
 
 
 def classify_identity_kind(identity: dict, accounts_by_account_id: dict[int, dict]) -> str:
-    """对照 Py 主线 model/state.py:1158-1177 的 identity_account_map 思路:
-    一个身份(send_as_id)总是归属某个 account。如果 send_as_id 等于某个已登录账号的
+    """一个身份(send_as_id)归属某个 account。如果 send_as_id 等于某个已登录账号的
     TG account_id,即「以自己身份发」(self);负数 -100… 即频道 / 超级群身份;
     正数但匹配不上任何账号,意味着账号还没登录拿到 account_id,或这是预登记。
-
-    Py 主线本身不暴露这个分类,所有 send_as 平等对待;mini-web 这里只把它作为
-    UI 侧的友好提示标签,不改变底层数据。"""
+    仅作为 UI 侧的友好提示标签,不改变底层数据。"""
     try:
         send_as_id = int(identity.get("send_as_id") or 0)
     except (TypeError, ValueError):
@@ -1571,10 +1565,8 @@ def synth_self_identity(account: dict) -> dict | None:
     """合成 self-identity:identity_id == account_id 时,哪怕 identities 表里没这条,
     也能让 plan 解析过。不写库,只用于内存解析。
 
-    对照 Py 主线 model/ui.py:1566-1568 (_finalize_account_login → register_identity(account_id)):
-    Py 主线在登录成功后会把 account_id 自身作为一条默认 identity 落库;
-    mini-web 既走「登录后 _ensure_self_identity 落库」(等价于 Py 主线),
-    也允许 planner 在内存兜底合成,即使没落库也能解析。"""
+    登录后 _ensure_self_identity 会把 account_id 自身作为一条默认 identity 落库;
+    这里只是 planner 的内存兜底,即使没落库也能解析。"""
     try:
         account_id = int(str(account.get("account_id") or "").strip())
     except (TypeError, ValueError):

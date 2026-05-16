@@ -1,66 +1,348 @@
 # Architecture
 
-## 技术方向
+## 结论
 
-采用轻量前后端分离，但先保持一个服务可部署：
+Mini Web 不应该做成“旧挂机脚本加一个 UI”。最佳结构应当是一个 Telegram 消息客户端：
 
-- Backend：Python + Telethon + HTTP API。
-- Web：静态前端，后续可升级为 Vite/React/Vue。
-- Storage：SQLite 起步，保存消息索引、解析结果、用户配置、定时任务映射。
+```text
+Telegram updates
+  -> inbox 原始消息箱
+  -> classifier 频道/场景分类
+  -> parser 注册表
+  -> card/state/action suggestion
+  -> SQLite store
+  -> HTTP API
+  -> Web 多频道游戏界面
+```
 
-## 为什么不是 Java
+发送链路反过来只允许：
 
-当前生态里 Telethon/Python 更适合快速接入 Telegram 用户会话、读取群消息、发送官方定时消息，也方便复用现有脚本中的解析经验。Java 可以做得更工程化，但第一阶段会增加接入成本，不利于快速验证核心交互。
+```text
+Web action
+  -> outbox 草稿
+  -> 用户确认
+  -> 普通发送 或 Telegram 官方定时
+  -> send log
+```
+
+任何玩法解析器都不能直接发送消息。
+
+## 从 Rust 主线吸收的设计
+
+Rust 主线的核心优点不是语言本身，而是边界清楚：
+
+- `tg`：只处理 Telegram client、session、send-as、更新流。
+- `inbox`：全局唯一消息缓存，落 JSONL/索引，业务通过快照读取。
+- `xiuxian/behaviors`：玩法行为注册表，每个行为独立文件，统一上下文、统一参数校验。
+- `decide`：集中调度行为输出，不让行为自己操作发送器。
+- `sender`：统一发送出口，批次、reply、删除策略、发送日志都在这里收口。
+- `repo`：状态持久化独立，不散落在业务逻辑里。
+- `global_processors`：全局消息学习器和 per-identity 行为分离。
+
+Mini Web 要学习这些结构，但目标不同：
+
+- Rust 主线的 `Behavior -> PendingSend` 在 miniweb 中改成 `Parser -> ActionSuggestion`。
+- Rust 主线的自动调度在 miniweb 中只保留为“官方定时排班管理”。
+- Rust 主线的 inbox 思路应当保留，而且要成为整个产品的核心。
 
 ## 进程边界
 
-建议先做一个独立服务：
+第一阶段保持一个独立服务，和现有挂机脚本隔离：
 
-- 不依赖现有挂机脚本运行。
-- 不导入现有自动发送调度。
-- 可以与现有脚本共用 Telegram API 配置，但运行时状态隔离。
-- 可以读取同一个 Telegram 群，但不争抢自动化控制权。
+- 不导入旧脚本的 runtime。
+- 不共享旧脚本的自动发送状态。
+- 可以读取同一个 Telegram 群。
+- 可以使用同一组 Telegram API 凭据登录，但 session 独立存放。
+- 数据库独立，避免 miniweb 的 UI 状态污染挂机脚本。
 
-## 模块草图
+## Backend 分层
 
-Backend：
+目标目录：
 
-- `telegram_client`：登录、会话、读取群消息、官方定时消息。
-- `message_store`：消息落库、分页、检索。
-- `classifier`：消息分类和标签。
-- `parser`：玩法解析，例如副本、储物袋、战力、灵根、风险。
-- `command_outbox`：人工确认发送和官方定时发送。
-- `api`：给 Web 提供 JSON 接口。
+```text
+backend/
+  app.py
+  config.py
+  api/
+    routes.py
+    schemas.py
+  tg/
+    client.py
+    session.py
+    updates.py
+    scheduled.py
+  inbox/
+    events.py
+    store.py
+    index.py
+    replay.py
+  domain/
+    models.py
+    channels.py
+    registry.py
+  parsers/
+    second_soul.py
+    dungeon.py
+    profile.py
+    inventory.py
+    risk.py
+  processors/
+    message_pipeline.py
+    state_projection.py
+  outbox/
+    drafts.py
+    sender.py
+    schedules.py
+  repo/
+    db.py
+    migrations.py
+    messages.py
+    cards.py
+    schedules.py
+    identities.py
+```
 
-Web：
+### `tg`
 
-- `channel_stream`：频道化消息流。
-- `scene_tabs`：我的修仙、游戏大厅、事件中心、操作台。
-- `message_card`：摘要卡、原文展开、结构化字段。
-- `action_panel`：复制命令、确认发送、创建定时。
-- `settings`：账号、群、频道、语言和发送边界设置。
+职责是接入 Telegram：
 
-## 发送规则
+- 登录和 session。
+- 读取群消息、编辑、删除。
+- 抽取 sender、reply_to、topic、mention。
+- 普通发送。
+- 创建、查看、删除 Telegram 官方定时消息。
 
-所有发送都必须经过统一出口：
+这一层不理解修仙玩法，不生成命令。
 
-1. 用户点击动作。
-2. Web 展示将要发送的账号、群、命令、时间。
-3. 用户确认。
-4. Backend 发送普通消息或创建官方定时消息。
-5. 记录 outbox 日志。
+### `inbox`
 
-禁止模块绕过该出口直接发送。
+这是核心层，功能等价于 Rust 主线的 `inbox`：
 
-## 定时消息
+- 保存原始消息事件。
+- 保留消息原文、sender、reply_to、topic、mention、时间。
+- 支持按 msg_id 增量扫描。
+- 支持按时间窗查询。
+- 支持按频道/标签查询。
+- 支持重启 replay。
 
-官方定时消息用于替代部分低风险、固定 CD 的脚本发送逻辑。
+所有 parser 都读取 inbox 事件，不直接读 Telegram client。
 
-设计要求：
+### `domain`
 
-- 可查看已创建的定时消息。
-- 可删除未来定时消息。
-- 支持预设模板，例如深度闭关、抚摸法宝。
-- 支持自定义排班，例如每 8 小时加偏移、一次排 3 天。
-- 定时内容仍以普通玩家消息形式发出，避免脚本式补发风暴。
+定义稳定 DTO：
 
+- `RawMessageEvent`：Telegram 原始消息事件。
+- `MessageEnvelope`：带身份、频道、来源可信度的消息。
+- `ParsedCard`：展示给 UI 的卡片。
+- `StatePatch`：可选的状态投影，例如灵根、战力、储物袋库存。
+- `ActionSuggestion`：候选动作，例如复制、确认发送、创建定时。
+- `SchedulePlan`：官方定时排班计划。
+- `IdentityRef`：账号/角色/发言身份引用。
+
+这一层不能依赖具体 HTTP 框架或 Telegram SDK。
+
+### `parsers`
+
+玩法解析器只做纯解析：
+
+```text
+RawMessageEvent -> ParsedCard + StatePatch + ActionSuggestion[]
+```
+
+要求：
+
+- 一个玩法一个文件。
+- 每个 parser 在注册表登记。
+- parser 不做 I/O。
+- parser 不发消息。
+- parser 不修改运行时状态，只返回结构化结果。
+- 所有文案规则必须有 fixture 或日志出处。
+
+适合首批 parser：
+
+- 副本公告：生成 `.加入副本 <id>` 候选动作。
+- 第二元神：识别归位、修炼中、心魔抉择。
+- 身份面板：解析灵根、修为、宗门、法宝。
+- 战力面板：解析战力构成。
+- 储物袋：解析库存。
+- 风险：举报、自证、虚弱、封禁、禁言。
+
+### `processors`
+
+处理 parser 输出：
+
+- 消息分类。
+- 卡片生成。
+- 状态投影。
+- 动作去重。
+- 与账号/角色关联。
+
+这里可以有类似 Rust 主线 `global_processors` 的全局处理器，例如题库学习、公告学习、公共事件归档。但 miniweb 第一阶段只做展示和建议，不做自动答题。
+
+### `outbox`
+
+统一出口：
+
+- 保存动作草稿。
+- 用户确认后普通发送。
+- 用户确认后创建官方定时。
+- 删除未来官方定时。
+- 保存 send log。
+
+禁止 parser、processor、API route 直接绕过 outbox 调 Telegram send。
+
+### `repo`
+
+SQLite 表建议：
+
+- `raw_messages`：原始 Telegram 消息。
+- `parsed_cards`：结构化卡片。
+- `message_tags`：标签索引。
+- `identity_profiles`：角色基础信息投影。
+- `inventory_snapshots`：储物袋快照。
+- `action_suggestions`：候选动作。
+- `outbox_drafts`：待确认动作。
+- `send_logs`：实际发送记录。
+- `schedule_plans`：miniweb 管理的官方定时计划。
+- `settings`：频道、语言、账号配置。
+
+## Frontend 分层
+
+Web 第一屏应当是游戏聊天辅助界面，不是控制台或营销页。
+
+目标布局：
+
+```text
+左侧：账号/角色/频道
+中间：消息流
+右侧：消息详情 + 操作抽屉
+底部或弹层：官方定时排班
+```
+
+### 频道模型
+
+频道不是单选 Tab，而是可合并过滤：
+
+- 世界聊天
+- 系统公告
+- 我的相关
+- 修炼
+- 副本
+- 资源/交易
+- 洞府/家园
+- 风险
+- 工具日志
+
+用户可以单独查看，也可以勾选合并展示。
+
+### 卡片模型
+
+每条消息保留：
+
+- 摘要标题。
+- 原始文本。
+- 标签。
+- 可信来源。
+- 关联角色。
+- 结构化字段。
+- 候选动作。
+
+UI 面向玩家语言，底层字段保持机器可读。
+
+### 操作模型
+
+动作分三类：
+
+- `copy`：复制命令，零风险。
+- `confirm_send`：用户确认后立即发送。
+- `schedule`：创建官方定时消息。
+
+没有 `auto_send`。
+
+## 官方定时设计
+
+官方定时是 miniweb 的重点能力，不是旧脚本 scheduler。
+
+预设模块：
+
+- 深度闭关：例如 `查看闭关`、数分钟后 `.深度闭关`，按 8h+偏移排多天。
+- 抚摸法宝：固定 CD，可排多天。
+- 温养器灵：固定 CD，可排多天。
+- 自定义排班：用户输入命令、间隔、次数、偏移。
+
+原则：
+
+- 一次排未来 1-3 天。
+- 支持查看和删除已排定时。
+- 不做自动补发。
+- 不在游戏群输出工具日志。
+- 排班命令像玩家提前设好的定时消息，而不是后台实时脚本。
+
+## 与旧脚本的关系
+
+旧脚本可提供经验，但不能直接搬运行时：
+
+- 可以复用文案规则。
+- 可以复用消息盒子的解析思路。
+- 可以复用储物袋、战力、灵根等 parser 规则。
+- 不能复用自动补发、全局锁、模块状态机。
+- 不能让 miniweb 读取旧脚本状态后直接修改旧脚本状态。
+
+## 施工顺序
+
+### Phase 0：结构定型
+
+- 建立上述目录骨架。
+- 定义 domain models。
+- 建立 parser registry。
+- 建立 sample/in-memory store，让 UI 从新结构取数据。
+- 写 API contract tests。
+
+### Phase 1：消息客户端 MVP
+
+- 接 Telegram updates。
+- 原始消息入 SQLite。
+- inbox 增量扫描。
+- Web 多频道展示。
+- 原文/结构化卡片/标签展示。
+
+### Phase 2：核心 parser
+
+- 副本公告。
+- 第二元神。
+- 身份面板。
+- 战力面板。
+- 储物袋。
+- 风险消息。
+
+每个 parser 必须带 fixture 测试。
+
+### Phase 3：动作与官方定时
+
+- 动作草稿。
+- 复制命令。
+- 用户确认发送。
+- 创建/查看/删除官方定时。
+- 深度闭关、抚摸、温养器灵预设排班。
+
+### Phase 4：体验完善
+
+- 多账号/多角色视图。
+- 繁简显示映射。
+- 自定义频道规则。
+- 自定义 parser/动作模板。
+- 状态面板和库存投影。
+
+## 不做什么
+
+第一阶段明确不做：
+
+- 自动挂机。
+- 自动补发。
+- 自动链式指令。
+- 自动刷状态。
+- 自动答题。
+- AI 防举报。
+- 游戏群工具日志。
+
+这些边界是防止 miniweb 变成第二套高风险脚本的核心。

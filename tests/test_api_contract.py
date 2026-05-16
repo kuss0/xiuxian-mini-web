@@ -472,8 +472,8 @@ def test_identity_binding_requires_existing_account(tmp_path):
 
 
 def test_identity_payload_drops_legacy_profile_fields(tmp_path):
-    """对照 Py 主线 model/persistence.py:469-497 的 identities 表:profile 类字段
-    (道号 / 境界 / 宗门 / 灵根 / 战力)由消息箱解析自动写入,不应该出现在用户手填表单上。
+    """identities 表的 profile 类字段(道号 / 境界 / 宗门 / 灵根 / 战力)
+    由消息箱解析自动写入,不应该出现在用户手填表单上。
     mini-web 不挂机不解析这些字段,因此直接从身份模型移除,角色面板走 state_patches。"""
     store = SQLiteStore(tmp_path / "miniweb.db")
     server = MiniWebServer(store=store)
@@ -497,7 +497,7 @@ def test_identity_payload_drops_legacy_profile_fields(tmp_path):
 
 
 def test_identities_payload_classifies_self_and_channel_kinds(tmp_path):
-    """mini-web 加的 UI 友好分类(Py 主线本身没有此分类,所有 send_as 平等):
+    """UI 友好分类:
     send_as_id == 已登录账号 account_id => self;负数 => channel;
     其它正数 => self_unbound(预登记或 account_id 未拿到)。"""
     store = SQLiteStore(tmp_path / "miniweb.db")
@@ -523,8 +523,7 @@ def test_identities_payload_classifies_self_and_channel_kinds(tmp_path):
 
 
 def test_account_login_done_upserts_self_identity(tmp_path):
-    """对照 Py 主线 model/ui.py:1566-1568 (_finalize_account_login):
-    account 一登录成功(account_id 已知),系统就把 identity_id == account_id 的
+    """account 一登录成功(account_id 已知),系统就把 identity_id == account_id 的
     self-identity upsert 进库,跳过手动建身份这一步。"""
     store = SQLiteStore(tmp_path / "miniweb.db")
     server = MiniWebServer(store=store)
@@ -558,9 +557,8 @@ def test_account_login_self_identity_is_idempotent(tmp_path):
 
 
 def test_planner_synthesizes_self_identity_when_action_matches_account_id(tmp_path):
-    """对照 Py 主线 model/runtime.py:868-925 的 _send_game_command_impl:
-    action.identity_id == account.account_id 即「以自己身份发」,即使 identities 表里
-    没这条,plan 也应该 resolved=True,自动按 self-identity 处理。"""
+    """action.identity_id == account.account_id 即「以自己身份发」,即使 identities
+    表里没这条,plan 也应该 resolved=True,自动按 self-identity 处理。"""
     store = SQLiteStore(tmp_path / "miniweb.db")
     server = MiniWebServer(store=store)
     server.save_account_payload(
@@ -669,8 +667,8 @@ def test_messages_payload_initial_caps_with_default_limit(tmp_path):
 
 
 
-    """对照 Py 主线 model/ui.py:2733-2782 的 send-as endpoint 暴露:
-    mini-web 也必须把 GetSendAs / resolve-entity 路由挂上,前端身份表单才有得用。"""
+    """GetSendAs / resolve-entity / batch identities / accounts delete 路由必须挂上,
+    前端身份表单才有得用。"""
     from backend.app import GET_ROUTES, POST_ROUTES
 
     assert "/api/accounts/send-as-peers" in GET_ROUTES
@@ -698,8 +696,8 @@ def test_delete_account_payload_rejects_missing_local_id(tmp_path):
 
 
 def test_batch_save_identities_returns_per_item_results(tmp_path):
-    """对照 Py 主线 web_new 「新增身份」模态框:用户勾选多个 send_as,
-    一次性提交,后端逐条 save_identity,每条独立返回 ok / error。"""
+    """「新增身份」模态框:用户勾选多个 send_as,一次性提交,
+    后端逐条 save_identity,每条独立返回 ok / error。"""
     server = MiniWebServer(store=SQLiteStore(tmp_path / "miniweb.db"))
     server.save_account_payload({"local_id": "main", "api_id": "123", "api_hash": "hash"})
 
@@ -1002,7 +1000,7 @@ def test_proxy_host_validation():
 
 
 def test_discovered_bots_filters_by_game_keyword_hits(tmp_path):
-    """对照 xiuxian-main:discovered bots 只列「真发过游戏 bot 风格消息」的 sender。
+    """discovered bots 只列「真发过游戏 bot 风格消息」的 sender。
     频道号闲聊(没游戏关键词)不该被丢进来。"""
     from backend.domain.models import RawMessageEvent
     store = SQLiteStore(tmp_path / "miniweb.db")
@@ -1060,7 +1058,7 @@ def test_discovered_bots_keeps_manual_marked_even_without_messages(tmp_path):
 
 
 def test_schedule_presets_payload_lists_known_presets():
-    """对照 xiuxian-main:5 个预设(深度闭关 / 抚摸 / 温养 / 试炼 + 自定义)。"""
+    """5 个预设(深度闭关 / 抚摸 / 温养 / 试炼 + 自定义)。"""
     import tempfile, pathlib
     with tempfile.TemporaryDirectory() as tmp:
         server = MiniWebServer(store=SQLiteStore(pathlib.Path(tmp) / "x.db"))

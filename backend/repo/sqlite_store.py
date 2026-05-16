@@ -641,11 +641,11 @@ class SQLiteStore:
 
     def list_discovered_bots(self) -> list[dict]:
         """从消息箱抓「真的发过游戏 bot 风格消息」的 sender,给 UI 让用户勾选哪些是游戏 bot
-        (写到 settings.game_bot_ids)。识别条件抄自 xiuxian-main:
+        (写到 settings.game_bot_ids)。识别条件:
         - candidate:sender_is_bot=1 或 sender_id<0(bot 用户 / 频道身份)
         - 在 candidate 的消息里查关键词命中(`bot_hints.matched_families`)
         - 命中次数 ≥ 1 的才列出,纯闲聊频道号不会被丢进来
-        - 不自动加进 game_bot_ids — mini-web 要人工确认
+        - 不自动加进 game_bot_ids — 需要人工确认
 
         返回字段:
         - sender_id / last_source / last_seen / message_count / kind
@@ -865,7 +865,7 @@ class SQLiteStore:
             cursor = conn.execute("DELETE FROM outbox_drafts WHERE id=?", (draft_id,))
             return cursor.rowcount > 0
 
-    # ---------- official schedule(对照 xiuxian-main official_schedule.py) ----------
+    # ---------- official schedule ----------
 
     def create_schedule_batch(self, payload: dict, items: list[dict]) -> int:
         """payload: {send_as_id, account_local_id, preset_key, label, anchor_at, horizon_days, options}

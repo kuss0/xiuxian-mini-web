@@ -88,8 +88,8 @@ class TelegramDialogService:
         return {"ok": True, "topics": [topic.to_api() for topic in topics]}
 
     async def list_chat_bots(self, settings: dict, chat: str | None = None) -> dict:
-        """对照 xiuxian-main 的「游戏 bot 识别」需求:
-        把目标群里所有 bot 类型用户拉出来,前端勾选哪些是游戏机器人 → 写 game_bot_ids。
+        """游戏 bot 识别:把目标群里所有 bot 类型用户拉出来,前端勾选哪些是游戏
+        机器人 → 写 game_bot_ids。
         """
         target_chat = str(chat or settings.get("target_chat") or "").strip()
         if not target_chat:

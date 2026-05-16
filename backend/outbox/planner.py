@@ -75,10 +75,9 @@ class OutboxPlanner:
         account_local_id = action.account_local_id or (identity or {}).get("account_local_id") or ""
         account = self._resolve_account(account_local_id, missing)
 
-        # 对照 Py 主线 model/runtime.py:868-925 (_send_game_command_impl):
-        # action.identity_id 就是 Telegram 的 send_as peer ID;一旦 == account.account_id,
-        # 即「以自己身份发」(对应 Py 主线 _finalize_account_login 后自动注册的那条 identity)。
-        # 即使用户没在 identities 表里手建这条,也按 self-identity 处理,不阻塞 plan。
+        # action.identity_id 就是 Telegram 的 send_as peer ID;若 == account.account_id,
+        # 视作「以自己身份发」(登录后默认注册的 self-identity),即使 identities 表里没建,
+        # 也按 self-identity 处理,不阻塞 plan。
         if identity is None and account is not None and action.identity_id is not None:
             try:
                 account_id = int(str(account.get("account_id") or "").strip())
@@ -93,9 +92,8 @@ class OutboxPlanner:
         if action.chat_id is None and not target_chat:
             missing.append("target_chat")
 
-        # TODO(send_as): 真要发送时,对照 Py 主线 model/runtime.py:897-904
-        # 的 await client.get_input_entity(send_as_id) + SendMessageRequest(send_as=…)
-        # 路径,在这里把 identity_id 解析成 InputPeer 再交给发送出口。
+        # TODO(send_as): 真要发送时,把 identity_id 解析成 InputPeer
+        # (client.get_input_entity(send_as_id))再交给 SendMessageRequest(send_as=…)。
         # mini-web 当前不真发送,先不接。
 
         return OutboxPlan(

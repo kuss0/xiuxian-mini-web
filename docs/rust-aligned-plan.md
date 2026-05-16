@@ -321,7 +321,7 @@ ActionSuggestion
 
 - miniweb 可与旧脚本共存。
 - session 独立。
-- 不触碰 `/opt/xiuxian-main` runtime。
+- 不触碰外部老脚本 runtime。
 - 真实消息进入 UI。
 
 ## Phase 7：状态投影

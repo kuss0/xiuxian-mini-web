@@ -1,11 +1,10 @@
 """游戏 bot 「发言指纹」识别。
 
-抄 xiuxian-main `/opt/xiuxian-main/model/app.py:164-209` 的 `BOT_REPLY_FAMILY_HINTS`:
-每个 family(玩法分支)对应几个关键词 tuple,bot 回复某条命令时通常包含这些词。
-mini-web 用它过滤「discovered_bots」候选 —— 只把真在群里发过游戏 bot 风格消息的
-sender 列给用户勾选,不把闲聊玩家的频道号也扔上去。
+`BOT_REPLY_FAMILY_HINTS` 每个 family(玩法分支)对应几个关键词 tuple,bot 回复
+某条命令时通常包含这些词。用它过滤「discovered_bots」候选 —— 只把真在群里
+发过游戏 bot 风格消息的 sender 列给用户勾选,不把闲聊玩家的频道号也扔上去。
 
-不做「自动加进 game_bot_ids」这一步(老脚本满 3 次自动加),mini-web 让用户手动确认。
+不做「自动加进 game_bot_ids」这一步,让用户手动确认。
 """
 
 from __future__ import annotations

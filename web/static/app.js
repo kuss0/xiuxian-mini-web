@@ -2419,7 +2419,7 @@ function bindAddIdentityModal(dialog) {
   }
 }
 
-// ---------- 官方定时(对照 xiuxian-main official_schedule_ui.js) ----------
+// ---------- 官方定时 ----------
 
 async function openScheduleModal() {
   const [presetsPayload, batchesPayload] = await Promise.all([
@@ -2442,7 +2442,7 @@ async function openScheduleModal() {
     body: `
       <section class="modal-section">
         <h4>新建排班</h4>
-        <p class="muted">参考 xiuxian-main:预设排「深度闭关 / 抚摸法宝 / 温养器灵 / 器灵试炼」常用 CD;自定义可填任意命令 + 间隔。所有定时走 Telegram 官方 scheduled message,**不**会自动补发。多选身份会一次为每个身份各起一批,按「错峰偏移 + 阶梯」自动错开。</p>
+        <p class="muted">预设排「深度闭关 / 抚摸法宝 / 温养器灵 / 器灵试炼」常用 CD;自定义可填任意命令 + 间隔。所有定时走 Telegram 官方 scheduled message,**不**会自动补发。多选身份会一次为每个身份各起一批,按「错峰偏移 + 阶梯」自动错开。</p>
         <form id="scheduleForm" class="settings-form">
           <div class="form-grid">
             <label class="span-2">
@@ -2991,7 +2991,7 @@ function renderIdentityForm() {
   return `
     <div class="send-as-section">
       <fieldset class="send-as-picker">
-        <legend>从 Telegram 拉取并批量添加身份(对照 Py 主线 GetSendAs)</legend>
+        <legend>从 Telegram 拉取并批量添加身份(channels.GetSendAs)</legend>
         <div class="send-as-controls">
           <label class="send-as-control">
             <span>账号</span>
