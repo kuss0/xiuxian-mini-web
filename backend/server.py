@@ -20,6 +20,8 @@ from backend.outbox.schedule import (
     list_presets as list_schedule_presets,
 )
 from backend.repo import SQLiteStore
+from backend.skills import SkillRegistry
+from backend.skills.send import SkillSendService
 from backend.tg.client import safe_session_name
 from backend.tg.dialogs import TelegramDialogService
 from backend.tg.login import TelegramLoginService
@@ -114,6 +116,12 @@ class MiniWebServer:
         # 官方定时:复用 listener 的 client 排 Telegram scheduled message
         self._schedule = OfficialScheduleService(
             listener_lookup=self._listeners.get_listener
+        )
+        # 技能盘:登记好的常用命令 + 一键 send_message(reply_to 可选)
+        self._skill_registry = SkillRegistry()
+        self._skill_send = SkillSendService(
+            self._skill_registry,
+            listener_lookup=lambda local_id: self._listeners.get_listener(local_id),
         )
 
     def health_payload(self) -> dict:
@@ -851,6 +859,64 @@ class MiniWebServer:
 
     def schedule_presets_payload(self) -> dict:
         return {"ok": True, "presets": list_schedule_presets()}
+
+    def skills_payload(self) -> dict:
+        return self._skill_registry.to_api()
+
+    def skill_send_payload(self, payload: dict) -> dict:
+        payload = payload or {}
+        skill_key = str(payload.get("skill_key") or "").strip()
+        if not skill_key:
+            return {"ok": False, "error": "缺少 skill_key"}
+        if self._skill_registry.get(skill_key) is None:
+            return {"ok": False, "error": f"未知技能 key: {skill_key}"}
+
+        try:
+            identity_id = int(str(payload.get("identity_id") or 0).strip())
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "identity_id 必须是数字"}
+
+        identity = self._store.get_identity(identity_id) if identity_id else None
+        if identity is None:
+            return {"ok": False, "error": f"找不到 identity {identity_id},请先在身份列表里注册"}
+
+        account_local_id = str(identity.get("account_local_id") or "").strip()
+        if not account_local_id:
+            return {"ok": False, "error": "identity 没绑定 account_local_id,无法定位 listener"}
+
+        account = self._store.get_account(account_local_id)
+        if account is None:
+            return {"ok": False, "error": f"找不到 account {account_local_id}"}
+
+        # 暂时只允许 self-identity 发送(identity.send_as_id == account.account_id);
+        # 别的 send_as 走 SendMessageRequest(send_as=...) 路径还没实现。
+        try:
+            account_id = int(str(account.get("account_id") or 0).strip())
+        except (TypeError, ValueError):
+            account_id = 0
+        if account_id == 0 or identity_id != account_id:
+            return {
+                "ok": False,
+                "error": "目前只支持以「自己身份」发送 (send_as_id == account_id),其它 send_as 待接入",
+            }
+
+        chat_id_raw = payload.get("chat_id") or account.get("target_chat") or ""
+        try:
+            chat_id = int(str(chat_id_raw).strip())
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "缺少 chat_id 或 account.target_chat"}
+
+        reply_to = payload.get("reply_to_msg_id")
+        command_override = str(payload.get("command_override") or "").strip()
+
+        result = self._skill_send.send(
+            skill_key=skill_key,
+            chat_id=chat_id,
+            account_local_id=account_local_id,
+            reply_to_msg_id=reply_to,
+            command_override=command_override,
+        )
+        return result.to_api()
 
     def schedule_preview_payload(self, payload: dict) -> dict:
         try:

@@ -454,6 +454,19 @@ def _post_schedule_cancel(request: MiniWebHandler, payload: dict) -> dict:
     return _app(request).schedule_cancel_payload(payload)
 
 
+# ---------- 技能盘(直接 / 回复发送)----------
+
+def _get_skills(request: MiniWebHandler, query: dict) -> dict:
+    return _app(request).skills_payload()
+
+
+def _post_skill_send(request: MiniWebHandler, payload: dict) -> dict:
+    try:
+        return _app(request).skill_send_payload(payload)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 GET_ROUTES = {
     "/api/health": _get_health,
     "/api/channels": _get_channels,
@@ -476,6 +489,7 @@ GET_ROUTES = {
     "/api/schedule/presets": _get_schedule_presets,
     "/api/schedule": _get_schedule,
     "/api/schedule/sync": _get_schedule_sync,
+    "/api/skills": _get_skills,
 }
 
 
@@ -505,6 +519,7 @@ POST_ROUTES = {
     "/api/schedule/create": PostRoute(_post_schedule_create, needs_payload=True),
     "/api/schedule/delete": PostRoute(_post_schedule_delete, needs_payload=True),
     "/api/schedule/cancel": PostRoute(_post_schedule_cancel, needs_payload=True),
+    "/api/skills/send": PostRoute(_post_skill_send, needs_payload=True),
 }
 
 

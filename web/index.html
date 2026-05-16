@@ -55,8 +55,8 @@
           </div>
           <ul class="boundary-list">
             <li>只读消息流</li>
-            <li>动作先生成草稿</li>
-            <li>发送必须人工确认</li>
+            <li>技能盘一键发(直发 / 回复)</li>
+            <li>不自动连发、不自动补发</li>
             <li>官方定时单独管理</li>
           </ul>
         </section>
@@ -106,8 +106,20 @@
             </div>
           </aside>
         </section>
+
+        <footer id="skillBar" class="skill-bar" data-active-tab="日常">
+          <div class="skill-bar-head">
+            <div class="skill-bar-tabs" id="skillBarTabs"></div>
+            <div class="skill-bar-meta">
+              <span id="skillBarIdentity" class="skill-bar-identity">未选身份</span>
+            </div>
+          </div>
+          <div id="skillBarChips" class="skill-bar-chips"></div>
+        </footer>
       </main>
     </div>
+
+    <div id="skillToast" class="skill-toast" hidden></div>
 
     <div id="modalRoot" class="modal-backdrop" hidden></div>
 

@@ -33,6 +33,11 @@ const state = {
   },
   // 玩法状态机:Map<send_as_id(number), Array<{module_key,label,summary,state}>>
   identityModuleStates: new Map(),
+  // 技能盘
+  skills: [],            // Skill[] from /api/skills
+  skillGroups: [],       // 分组顺序
+  skillBarTab: "日常",   // 当前激活 tab
+  skillBarBusyKeys: new Set(),  // 正在发送中的 key,临时禁用
 };
 
 const MESSAGE_PREVIEW_CHAR_LIMIT = 480;
@@ -54,6 +59,11 @@ const logsButton = document.querySelector("#logsButton");
 const loginAccountButton = document.querySelector("#loginAccountButton");
 const addIdentityButton = document.querySelector("#addIdentityButton");
 const logoutAccountButton = document.querySelector("#logoutAccountButton");
+const skillBar = document.querySelector("#skillBar");
+const skillBarTabs = document.querySelector("#skillBarTabs");
+const skillBarChips = document.querySelector("#skillBarChips");
+const skillBarIdentity = document.querySelector("#skillBarIdentity");
+const skillToast = document.querySelector("#skillToast");
 const sidebarIdentityList = document.querySelector("#identityList");
 const currentAccountLine = document.querySelector("#currentAccountLine");
 const gameBotsButton = document.querySelector("#gameBotsButton");
@@ -230,6 +240,7 @@ async function loadIdentities() {
   state.identities = payload.identities || [];
   state.identityLimit = payload.max_identities || 0;
   renderSidebarIdentityList();
+  renderSkillBar();
   // 身份状态机摘要(深度闭关 / 抚摸 / 温养)— 失败不阻塞
   loadIdentityModuleStates().catch((err) => console.warn("[mini-web] identity state fetch failed:", err));
   return payload;
@@ -1348,6 +1359,11 @@ function renderDetailActions(message) {
     .map((action, index) => {
       const context = renderActionContextLine(action);
       const notice = state.draftNoticeByMessageId.get(`${message.id}:${index}`);
+      const skillKey = findSkillKeyForCommand(action.command);
+      const sendLabel = action.reply_to_msg_id ? "🚀 回复发送" : "🚀 直接发送";
+      const sendTitle = skillKey
+        ? `通过 /api/skills/send 真的发到 Telegram (skill=${skillKey})`
+        : "找不到对应技能注册项 — 请到 backend/skills/__init__.py 添加";
       return `
         <div class="action-draft" data-action-index="${index}">
           <div class="action-draft-head">
@@ -1356,8 +1372,11 @@ function renderDetailActions(message) {
           </div>
           <code class="action-draft-command">${escapeHtml(action.command)}</code>
           <div class="action-draft-buttons">
-            <button type="button" class="action-primary" data-action-button="copy" data-action-index="${index}">复制命令</button>
-            <button type="button" class="action-secondary" data-action-button="enqueue" data-action-index="${index}">确认入队</button>
+            <button type="button" class="action-primary" data-action-button="send"
+                    data-action-index="${index}" data-skill-key="${escapeAttr(skillKey || "")}"
+                    ${skillKey ? "" : "disabled"} title="${escapeAttr(sendTitle)}">${sendLabel}</button>
+            <button type="button" class="action-secondary" data-action-button="copy" data-action-index="${index}">复制命令</button>
+            <button type="button" class="action-tertiary" data-action-button="enqueue" data-action-index="${index}">入草稿箱</button>
             <button type="button" class="action-tertiary" data-action-button="plan" data-action-index="${index}">查看发送计划</button>
           </div>
           ${notice ? `<p class="action-draft-notice ${notice.kind}">${escapeHtml(notice.text)}</p>` : ""}
@@ -1366,6 +1385,16 @@ function renderDetailActions(message) {
     })
     .join("");
   return `<div class="action-list">${cards}</div>`;
+}
+
+function findSkillKeyForCommand(command) {
+  const text = String(command || "").trim();
+  if (!text) return null;
+  for (const skill of state.skills || []) {
+    if (text === skill.command) return skill.key;
+    if (text.startsWith(skill.command + " ")) return skill.key;
+  }
+  return null;
 }
 
 function renderActionContextLine(action) {
@@ -1414,6 +1443,21 @@ function bindDetailActions(message) {
       try {
         if (kind === "copy") {
           await copyCommandToClipboard(action.command, button);
+          return;
+        }
+        if (kind === "send") {
+          const skillKey = button.dataset.skillKey;
+          if (!skillKey) {
+            showSkillToast("没找到对应技能 — 请到 backend/skills/__init__.py 添加这条命令", "err");
+            return;
+          }
+          button.disabled = true;
+          await sendSkill(skillKey, {
+            command_override: action.command,
+            reply_to_msg_id: action.reply_to_msg_id || undefined,
+            chat_id: action.chat_id || undefined,
+          });
+          button.disabled = false;
           return;
         }
         if (kind === "plan") {
@@ -2169,6 +2213,7 @@ function renderSidebarIdentityList() {
       const id = Number(row.dataset.identityRow);
       state.activeIdentityId = state.activeIdentityId === id ? null : id;
       renderSidebarIdentityList();
+      renderSkillBar();
     });
   });
 }
@@ -2247,6 +2292,43 @@ function tickIdentityModuleChips() {
     if (timeEl) timeEl.textContent = `剩 ${fmtCountdown(remaining)}`;
     if (fillEl) fillEl.style.width = `${pct.toFixed(1)}%`;
   });
+  // 顺手 tick 底栏技能盘的冷却显示
+  tickSkillBarChips();
+}
+
+function tickSkillBarChips() {
+  if (!skillBarChips) return;
+  const chips = skillBarChips.querySelectorAll(".skill-chip");
+  if (!chips.length) return;
+  const activeId = state.activeIdentityId;
+  if (!activeId) return;
+  const modulesByKey = new Map(
+    (state.identityModuleStates.get(Number(activeId)) || []).map((it) => [it.module_key, it])
+  );
+  const now = Date.now() / 1000;
+  let anyExpired = false;
+  chips.forEach((chip) => {
+    const key = chip.dataset.skillKey;
+    const skill = (state.skills || []).find((s) => s.key === key);
+    if (!skill || !skill.cd_module) return;
+    const ms = modulesByKey.get(skill.cd_module);
+    const cdUntil = ms
+      ? Number((ms.summary && ms.summary.next_at) || (ms.state && ms.state.cooldown_until) || 0)
+      : 0;
+    const remaining = cdUntil - now;
+    const cdEl = chip.querySelector(".skill-chip-cd");
+    if (remaining > 0) {
+      if (cdEl) cdEl.textContent = `剩 ${fmtCountdown(remaining)}`;
+      else {
+        // 之前没冷却,现在出现了 — 标记重渲
+        anyExpired = true;
+      }
+    } else if (chip.classList.contains("cooling")) {
+      // 冷却到 0:重新渲染整条以解除 disabled
+      anyExpired = true;
+    }
+  });
+  if (anyExpired) renderSkillBar();
 }
 
 function identityRowStatusText(identity, account) {
@@ -4452,8 +4534,141 @@ loadChannels()
   .then(loadIdentities)
   .then(loadIdentityPatches)
   .then(loadDiscoveredBots)
+  .then(loadSkills)
   .then(loadMessages)
   .catch(showError);
+
+// ---------- 技能盘(底栏)----------
+
+async function loadSkills() {
+  try {
+    const data = await fetchJson("/api/skills");
+    state.skills = data.skills || [];
+    state.skillGroups = data.groups || [];
+    if (state.skillGroups.length && !state.skillGroups.includes(state.skillBarTab)) {
+      state.skillBarTab = state.skillGroups[0];
+    }
+  } catch (err) {
+    console.warn("[skills] load failed", err);
+  }
+  renderSkillBar();
+}
+
+function renderSkillBar() {
+  if (!skillBarTabs || !skillBarChips) return;
+  // 自动选 active identity 如果只有一个
+  if (state.activeIdentityId == null && state.identities && state.identities.length === 1) {
+    state.activeIdentityId = state.identities[0].send_as_id;
+  }
+  // tabs
+  skillBarTabs.innerHTML = state.skillGroups.map((g) => {
+    const cls = g === state.skillBarTab ? "skill-bar-tab active" : "skill-bar-tab";
+    return `<button type="button" class="${cls}" data-skill-tab="${escapeAttr(g)}">${escapeHtml(g)}</button>`;
+  }).join("");
+  skillBarTabs.querySelectorAll("[data-skill-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.skillBarTab = btn.dataset.skillTab;
+      renderSkillBar();
+    });
+  });
+  // identity meta
+  const activeId = state.activeIdentityId;
+  const identity = activeId ? (state.identities || []).find((i) => i.send_as_id === activeId) : null;
+  if (skillBarIdentity) {
+    if (identity) {
+      skillBarIdentity.textContent = `身份: ${identity.label || identity.username || activeId}`;
+      skillBarIdentity.classList.remove("empty");
+    } else {
+      skillBarIdentity.textContent = "未选身份(点左边身份列表)";
+      skillBarIdentity.classList.add("empty");
+    }
+  }
+  // chips
+  const tabSkills = (state.skills || []).filter((s) => s.group === state.skillBarTab);
+  if (!tabSkills.length) {
+    skillBarChips.innerHTML = '<span class="muted">这一组没有技能</span>';
+    return;
+  }
+  const modulesByKey = activeId
+    ? new Map((state.identityModuleStates.get(Number(activeId)) || []).map((it) => [it.module_key, it]))
+    : new Map();
+  const now = Date.now() / 1000;
+  skillBarChips.innerHTML = tabSkills.map((skill) => {
+    const isReply = skill.reply_mode === "required";
+    const moduleState = skill.cd_module ? modulesByKey.get(skill.cd_module) : null;
+    const cdUntil = moduleState
+      ? Number((moduleState.summary && moduleState.summary.next_at) || (moduleState.state && moduleState.state.cooldown_until) || 0)
+      : 0;
+    const cooling = cdUntil > now;
+    const busy = state.skillBarBusyKeys.has(skill.key);
+    // reply 类不能从底栏发(没 reply 上下文),只能从消息卡的 action 走 — 这里显示但禁用
+    const disabled = !activeId || isReply || busy || cooling;
+    const cls = [
+      "skill-chip",
+      isReply ? "reply" : "",
+      cooling ? "cooling" : "",
+      busy ? "busy" : "",
+    ].filter(Boolean).join(" ");
+    const cdText = cooling ? `剩 ${fmtCountdown(cdUntil - now)}` : "";
+    const title = isReply
+      ? (skill.note || "需要回复指定消息发送 — 在消息卡的 actions 区点对应按钮")
+      : (skill.note || skill.command);
+    return `
+      <button type="button" class="${cls}" ${disabled ? "disabled" : ""}
+              data-skill-key="${escapeAttr(skill.key)}" title="${escapeAttr(title)}">
+        ${skill.icon ? `<span class="skill-chip-icon">${skill.icon}</span>` : ""}
+        <span class="skill-chip-label">${escapeHtml(skill.label)}</span>
+        ${cdText ? `<span class="skill-chip-cd">${escapeHtml(cdText)}</span>` : ""}
+        ${isReply ? '<span class="skill-chip-cd" style="color:#fbbf24;">回复</span>' : ""}
+      </button>
+    `;
+  }).join("");
+  skillBarChips.querySelectorAll("[data-skill-key]").forEach((btn) => {
+    btn.addEventListener("click", () => sendSkill(btn.dataset.skillKey));
+  });
+}
+
+async function sendSkill(skillKey, opts) {
+  opts = opts || {};
+  const activeId = state.activeIdentityId;
+  if (!activeId) {
+    showSkillToast("请先在左边身份列表里选一个身份", "err");
+    return;
+  }
+  if (state.skillBarBusyKeys.has(skillKey)) return;
+  state.skillBarBusyKeys.add(skillKey);
+  renderSkillBar();
+  try {
+    const payload = { skill_key: skillKey, identity_id: activeId };
+    if (opts.reply_to_msg_id) payload.reply_to_msg_id = opts.reply_to_msg_id;
+    if (opts.command_override) payload.command_override = opts.command_override;
+    if (opts.chat_id) payload.chat_id = opts.chat_id;
+    const result = await postJson("/api/skills/send", payload);
+    if (result.ok) {
+      const replyText = result.reply_to_msg_id ? ` (回复 #${result.reply_to_msg_id})` : "";
+      showSkillToast(`✅ 已发: ${result.command}${replyText}`, "ok");
+    } else {
+      showSkillToast(`❌ ${result.error || "发送失败"}`, "err");
+    }
+  } catch (err) {
+    showSkillToast(`❌ ${(err && err.message) || "发送出错"}`, "err");
+  } finally {
+    state.skillBarBusyKeys.delete(skillKey);
+    renderSkillBar();
+  }
+}
+
+let _skillToastTimer = null;
+function showSkillToast(text, kind) {
+  if (!skillToast) return;
+  skillToast.textContent = text;
+  skillToast.className = `skill-toast ${kind || ""}`.trim();
+  skillToast.hidden = false;
+  if (_skillToastTimer) clearTimeout(_skillToastTimer);
+  _skillToastTimer = window.setTimeout(() => {
+    skillToast.hidden = true;
+  }, 3200);
+}
 
 // 自动轮询消息流(只在 chat 视图 + 页面可见时拉,避免 tab 切走还在打)。
 // listener 持续 ingest 新消息进 SQLite,这里负责把它们端到 UI。

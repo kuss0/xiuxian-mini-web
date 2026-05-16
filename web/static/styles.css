@@ -3024,3 +3024,180 @@ pre {
 .tower-floor-outcome.out-fail {
   color: #f87171;
 }
+
+/* ---------- 技能盘(底栏)---------- */
+.skill-bar {
+  margin-top: 14px;
+  padding: 10px 12px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.85), rgba(2, 6, 23, 0.92));
+  backdrop-filter: blur(8px);
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.35);
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+}
+
+.skill-bar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.skill-bar-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.skill-bar-tab {
+  padding: 4px 12px;
+  font-size: 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted, #94a3b8);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.skill-bar-tab:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.skill-bar-tab.active {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.20), rgba(37, 99, 235, 0.10));
+  border-color: rgba(168, 85, 247, 0.40);
+  color: #f3f4f6;
+}
+
+.skill-bar-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.skill-bar-identity {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.10);
+  border: 1px solid rgba(34, 197, 94, 0.20);
+  color: #a7f3d0;
+}
+
+.skill-bar-identity.empty {
+  background: rgba(239, 68, 68, 0.10);
+  border-color: rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+}
+
+.skill-bar-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.skill-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(15, 23, 42, 0.60);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.05s;
+  overflow: hidden;
+}
+
+.skill-chip:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.15);
+  border-color: rgba(37, 99, 235, 0.40);
+}
+
+.skill-chip:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.skill-chip:disabled,
+.skill-chip[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.skill-chip.reply {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(120, 53, 15, 0.18);
+}
+
+.skill-chip.reply:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.18);
+}
+
+.skill-chip.cooling {
+  border-color: rgba(94, 234, 212, 0.30);
+}
+
+.skill-chip-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.skill-chip-label {
+  font-weight: 600;
+}
+
+.skill-chip-cd {
+  font-size: 11px;
+  color: #5eead4;
+  font-variant-numeric: tabular-nums;
+}
+
+.skill-chip-fill {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(94, 234, 212, 0.10), rgba(94, 234, 212, 0.02));
+  pointer-events: none;
+  transform-origin: left center;
+  transform: scaleX(0);
+}
+
+.skill-toast {
+  position: fixed;
+  bottom: 26px;
+  right: 26px;
+  z-index: 9999;
+  max-width: 380px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text);
+  font-size: 13px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  animation: skill-toast-in 0.16s ease-out;
+}
+
+.skill-toast.ok {
+  border-color: rgba(34, 197, 94, 0.40);
+}
+
+.skill-toast.err {
+  border-color: rgba(239, 68, 68, 0.55);
+  color: #fecaca;
+}
+
+@keyframes skill-toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

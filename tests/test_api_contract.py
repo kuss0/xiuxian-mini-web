@@ -1938,3 +1938,200 @@ def test_schedule_create_empty_ids_returns_error():
     result = server.schedule_create_payload({"preset_key": "custom", "command": ".x"})
     assert result["ok"] is False
     assert "identity" in result["error"]
+
+
+# ---------- 技能盘 ----------
+
+def test_skills_payload_exposes_default_layout():
+    """技能盘必须把 5 组(日常/法宝/侍妾/奇遇/独立)和所有 skill 暴露出去。"""
+    from backend.repo.sqlite_store import SQLiteStore
+    import tempfile, pathlib
+    tmp = pathlib.Path(tempfile.mkdtemp()) / "m.db"
+    server = MiniWebServer(store=SQLiteStore(tmp))
+    payload = server.skills_payload()
+    assert payload["ok"] is True
+    assert payload["groups"] == ["日常", "法宝", "侍妾", "奇遇", "独立"]
+    by_key = {s["key"]: s for s in payload["skills"]}
+    assert "deep_retreat" in by_key
+    assert by_key["deep_retreat"]["reply_mode"] == "none"
+    assert by_key["deep_retreat"]["cd_module"] == "deep_retreat"
+    # 回复类必须显式标记
+    assert by_key["quiz_answer"]["reply_mode"] == "required"
+    assert by_key["dungeon_join"]["reply_mode"] == "required"
+
+
+def test_skill_send_rejects_unknown_skill(tmp_path):
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
+    result = server.skill_send_payload({"skill_key": "totally_made_up", "identity_id": 1})
+    assert result["ok"] is False
+    assert "未知技能" in result["error"] or "totally_made_up" in result["error"]
+
+
+def test_skill_send_rejects_missing_identity(tmp_path):
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
+    result = server.skill_send_payload({"skill_key": "wild_training", "identity_id": 999999})
+    assert result["ok"] is False
+    assert "identity" in result["error"]
+
+
+def test_skill_send_rejects_non_self_identity(tmp_path):
+    """禁止以「非 self」send_as 发送(暂未接 send_as= 路径)。"""
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "1", "api_hash": "h",
+         "account_id": "8574677796", "target_chat": "-1001680975844"}
+    )
+    server.save_identity_payload(
+        {"send_as_id": "8668975549", "account_local_id": "main", "label": "OtherSendAs"}
+    )
+    result = server.skill_send_payload(
+        {"skill_key": "wild_training", "identity_id": 8668975549}
+    )
+    assert result["ok"] is False
+    assert "自己身份" in result["error"]
+
+
+def test_skill_send_required_reply_mode_blocks_without_reply_to(tmp_path, monkeypatch):
+    """reply_mode=required 的 skill,没传 reply_to_msg_id → 直接拒绝,不该走到 listener。"""
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "1", "api_hash": "h",
+         "account_id": "8574677796", "target_chat": "-1001680975844"}
+    )
+    server.save_identity_payload(
+        {"send_as_id": "8574677796", "account_local_id": "main", "label": "self"}
+    )
+    listener_called = {"n": 0}
+
+    class FakeListener:
+        def submit(self, coro_factory, *, timeout=30.0):
+            listener_called["n"] += 1
+            return 1
+    monkeypatch.setattr(server._listeners, "get_listener", lambda _id: FakeListener())
+
+    result = server.skill_send_payload(
+        {"skill_key": "quiz_answer", "identity_id": 8574677796}
+    )
+    assert result["ok"] is False
+    assert "回复发送" in result["error"]
+    assert listener_called["n"] == 0
+
+
+def test_skill_send_happy_path_with_fake_listener(tmp_path, monkeypatch):
+    """端到端 happy path:自己身份 + 直发 skill → listener.submit 被调用一次,
+    送回 sent_msg_id;无需真 Telegram 客户端。"""
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "1", "api_hash": "h",
+         "account_id": "8574677796", "target_chat": "-1001680975844"}
+    )
+    server.save_identity_payload(
+        {"send_as_id": "8574677796", "account_local_id": "main", "label": "self"}
+    )
+    captured: dict = {}
+
+    class FakeClient:
+        async def send_message(self, chat_id, command, **kwargs):
+            captured["chat_id"] = chat_id
+            captured["command"] = command
+            captured["kwargs"] = kwargs
+
+            class _Sent:
+                id = 42000
+            return _Sent()
+
+    class FakeListener:
+        def submit(self, coro_factory, *, timeout=30.0):
+            import asyncio
+            return asyncio.new_event_loop().run_until_complete(coro_factory(FakeClient()))
+    monkeypatch.setattr(server._listeners, "get_listener", lambda _id: FakeListener())
+
+    result = server.skill_send_payload(
+        {"skill_key": "wild_training", "identity_id": 8574677796}
+    )
+    assert result["ok"] is True
+    assert result["sent_msg_id"] == 42000
+    assert result["command"] == ".野外历练"
+    assert captured["chat_id"] == -1001680975844
+    assert captured["command"] == ".野外历练"
+    assert "reply_to" not in captured["kwargs"]  # 直发不带 reply_to
+
+
+def test_skill_send_reply_mode_passes_reply_to_to_client(tmp_path, monkeypatch):
+    """reply 类 skill 带 reply_to_msg_id → 传给 client.send_message(reply_to=...)。"""
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "1", "api_hash": "h",
+         "account_id": "8574677796", "target_chat": "-1001680975844"}
+    )
+    server.save_identity_payload(
+        {"send_as_id": "8574677796", "account_local_id": "main", "label": "self"}
+    )
+    captured: dict = {}
+
+    class FakeClient:
+        async def send_message(self, chat_id, command, **kwargs):
+            captured["kwargs"] = kwargs
+            class _Sent:
+                id = 99001
+            return _Sent()
+
+    class FakeListener:
+        def submit(self, coro_factory, *, timeout=30.0):
+            import asyncio
+            return asyncio.new_event_loop().run_until_complete(coro_factory(FakeClient()))
+    monkeypatch.setattr(server._listeners, "get_listener", lambda _id: FakeListener())
+
+    result = server.skill_send_payload(
+        {"skill_key": "quiz_answer", "identity_id": 8574677796, "reply_to_msg_id": 8962000}
+    )
+    assert result["ok"] is True
+    assert result["reply_to_msg_id"] == 8962000
+    assert captured["kwargs"].get("reply_to") == 8962000
+
+
+def test_skill_send_dungeon_join_uses_command_override(tmp_path, monkeypatch):
+    """.加入副本 N 需要把 N 追加进 command — 用 command_override 覆盖。"""
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "1", "api_hash": "h",
+         "account_id": "8574677796", "target_chat": "-1001680975844"}
+    )
+    server.save_identity_payload(
+        {"send_as_id": "8574677796", "account_local_id": "main", "label": "self"}
+    )
+    captured: dict = {}
+
+    class FakeClient:
+        async def send_message(self, chat_id, command, **kwargs):
+            captured["command"] = command
+            captured["kwargs"] = kwargs
+            class _Sent:
+                id = 1
+            return _Sent()
+
+    class FakeListener:
+        def submit(self, coro_factory, *, timeout=30.0):
+            import asyncio
+            return asyncio.new_event_loop().run_until_complete(coro_factory(FakeClient()))
+    monkeypatch.setattr(server._listeners, "get_listener", lambda _id: FakeListener())
+
+    result = server.skill_send_payload(
+        {
+            "skill_key": "dungeon_join",
+            "identity_id": 8574677796,
+            "reply_to_msg_id": 7000,
+            "command_override": ".加入副本 123",
+        }
+    )
+    assert result["ok"] is True
+    assert captured["command"] == ".加入副本 123"
+    assert captured["kwargs"].get("reply_to") == 7000
+
+
+def test_skill_routes_registered():
+    """前端能找到 /api/skills + /api/skills/send。"""
+    from backend.app import GET_ROUTES, POST_ROUTES
+    assert "/api/skills" in GET_ROUTES
+    assert "/api/skills/send" in POST_ROUTES
+
