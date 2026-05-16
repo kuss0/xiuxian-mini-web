@@ -906,6 +906,11 @@ class MiniWebServer:
         except (TypeError, ValueError):
             return {"ok": False, "error": "缺少 chat_id 或 account.target_chat"}
 
+        try:
+            topic_id = int(str(payload.get("top_msg_id") or account.get("target_topic_id") or 0).strip())
+        except (TypeError, ValueError):
+            topic_id = 0
+
         reply_to = payload.get("reply_to_msg_id")
         command_override = str(payload.get("command_override") or "").strip()
 
@@ -914,6 +919,7 @@ class MiniWebServer:
             chat_id=chat_id,
             account_local_id=account_local_id,
             reply_to_msg_id=reply_to,
+            topic_id=topic_id,
             command_override=command_override,
         )
         return result.to_api()

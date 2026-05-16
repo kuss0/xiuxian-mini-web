@@ -66,6 +66,7 @@ class SkillSendService:
         chat_id: int,
         account_local_id: str,
         reply_to_msg_id: int | None = None,
+        topic_id: int | None = None,
         command_override: str = "",
     ) -> SkillSendResult:
         """同步入口,内部用 listener.submit 跑到 listener loop 里。"""
@@ -85,6 +86,7 @@ class SkillSendService:
             return SkillSendResult(ok=False, error="chat_id 不能为 0", skill_key=skill_key, command=command)
 
         reply_id = int(reply_to_msg_id or 0)
+        topic = int(topic_id or 0)
         if skill.reply_mode == "required" and reply_id <= 0:
             return SkillSendResult(
                 ok=False,
@@ -109,6 +111,7 @@ class SkillSendService:
                     chat_id=chat_id_int,
                     command=command,
                     reply_to_msg_id=reply_id,
+                    topic_id=topic,
                 )
             )
         except Exception as exc:
@@ -136,11 +139,42 @@ class SkillSendService:
         chat_id: int,
         command: str,
         reply_to_msg_id: int,
+        topic_id: int = 0,
     ) -> int:
-        """在已连接 client 上发一条。返回 Telegram 给的 msg_id(>0 表示成功)。"""
+        """在已连接 client 上发一条。返回 Telegram 给的 msg_id(>0 表示成功)。
+
+        forum 话题群发送规则:
+        - 没 topic 没 reply → 普通发
+        - 没 topic 有 reply → reply_to=msg_id 即可
+        - 有 topic 没 reply → reply_to=topic_id(把 topic_id 当 reply_to 即「post 到该话题」)
+        - 有 topic 有 reply → 必须用 SendMessageRequest + InputReplyToMessage(top_msg_id)
+        """
+        if topic_id > 0 and reply_to_msg_id > 0:
+            from telethon import functions, types
+            peer = await client.get_input_entity(chat_id)
+            reply_to_spec = types.InputReplyToMessage(
+                reply_to_msg_id=int(reply_to_msg_id),
+                top_msg_id=int(topic_id),
+            )
+            result = await client(
+                functions.messages.SendMessageRequest(
+                    peer=peer,
+                    message=command,
+                    reply_to=reply_to_spec,
+                )
+            )
+            for update in (getattr(result, "updates", None) or []):
+                mid = getattr(update, "id", 0)
+                if mid:
+                    return int(mid)
+            return 0
+
         kwargs: dict[str, Any] = {}
         if reply_to_msg_id > 0:
             kwargs["reply_to"] = reply_to_msg_id
+        elif topic_id > 0:
+            # post 到 forum topic:简单写法就是把 topic_id 当 reply_to
+            kwargs["reply_to"] = topic_id
         sent = await client.send_message(chat_id, command, **kwargs)
         return int(getattr(sent, "id", 0) or 0)
 
