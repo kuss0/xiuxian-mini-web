@@ -64,6 +64,7 @@ const skillBarTabs = document.querySelector("#skillBarTabs");
 const skillBarChips = document.querySelector("#skillBarChips");
 const skillBarIdentity = document.querySelector("#skillBarIdentity");
 const skillToast = document.querySelector("#skillToast");
+const characterHud = document.querySelector("#characterHud");
 const sidebarIdentityList = document.querySelector("#identityList");
 const currentAccountLine = document.querySelector("#currentAccountLine");
 const gameBotsButton = document.querySelector("#gameBotsButton");
@@ -242,6 +243,7 @@ async function loadIdentities() {
   state.identityLimit = payload.max_identities || 0;
   renderSidebarIdentityList();
   renderSkillBar();
+  renderCharacterHud();
   // 身份状态机摘要(深度闭关 / 抚摸 / 温养)— 失败不阻塞
   loadIdentityModuleStates().catch((err) => console.warn("[mini-web] identity state fetch failed:", err));
   return payload;
@@ -265,6 +267,7 @@ async function loadIdentityPatches() {
   const payload = await fetchJson("/api/state-patches?scope=identity_profile");
   state.identityPatches = payload.state || [];
   renderIdentitySnapshot();
+  renderCharacterHud();
   return state.identityPatches;
 }
 
@@ -768,6 +771,129 @@ function renderIdentitySnapshot() {
       ${rows || '<p class="empty inline">暂无角色状态。发送或监听“我的灵根 / 战力”后会更新。</p>'}
     </div>
   `;
+}
+
+// 角色 HUD —— 消息流顶部一行 chip,聚合 account + state_patches + identity_module_state。
+// 缺字段时 chip 显示「—」+ 提示发哪个命令补;有就高亮。
+function renderCharacterHud() {
+  if (!characterHud) return;
+  const patchMap = new Map((state.identityPatches || []).map((p) => [p.key, p.value]));
+  const activeId = state.activeIdentityId;
+  const identity = activeId ? (state.identities || []).find((i) => i.send_as_id === activeId) : null;
+  const account = identity ? (state.accounts || []).find((a) => a.local_id === identity.account_local_id) : null;
+
+  const accountId = account?.account_id || (identity ? identity.send_as_id : "");
+  const username = patchMap.get("username") || identity?.username || "";
+  const charName = patchMap.get("角色名") || account?.label || "";
+  const daohao = patchMap.get("道号") || "";
+  const realm = patchMap.get("境界") || "";
+  const root = patchMap.get("灵根") || "";
+  const sect = (patchMap.get("宗门") || "").replace(/^【|】$/g, "");
+  const power = patchMap.get("综合战力") || "";
+  const cultivation = patchMap.get("修为") || "";
+  const title = (patchMap.get("称号") || "").replace(/^【|】$/g, "");
+
+  const chips = [];
+  // 角色 chip:角色名 (道号) — 缺时显示 .我的灵根 hint
+  const charText = [charName, daohao ? `(${daohao})` : ""].filter(Boolean).join(" ").trim();
+  chips.push(_hudChip({
+    cls: "char",
+    k: "👤",
+    v: charText || "—",
+    title: charText ? "角色名 / 道号(来自 .战力 / .我的灵根)" : "发 .我的灵根 / .战力 抓取角色名 + 道号",
+    empty: !charText,
+  }));
+  if (username) {
+    chips.push(_hudChip({ cls: "user", k: "@", v: username, title: "Telegram username" }));
+  }
+  if (accountId) {
+    chips.push(_hudChip({ cls: "id", k: "#", v: String(accountId), title: "角色ID(== Telegram account_id)" }));
+  }
+  chips.push(_hudChip({
+    cls: "realm",
+    k: "📿",
+    v: realm || "—",
+    title: realm ? "当前境界" : "发 .战力 / .我的灵根 抓取境界",
+    empty: !realm,
+  }));
+  chips.push(_hudChip({
+    cls: "root",
+    k: "🌿",
+    v: root || "—",
+    title: root ? "灵根" : "发 .我的灵根 抓取灵根",
+    empty: !root,
+  }));
+  chips.push(_hudChip({
+    cls: "sect",
+    k: "🏔️",
+    v: sect || "—",
+    title: sect ? "宗门" : "发 .我的灵根 抓取宗门",
+    empty: !sect,
+  }));
+  chips.push(_hudChip({
+    cls: "power",
+    k: "⚔️",
+    v: power || "—",
+    title: power ? "综合战力" : "发 .战力 抓取战力",
+    empty: !power,
+  }));
+  if (title) {
+    chips.push(_hudChip({ cls: "title", k: "🏷️", v: title, title: "称号" }));
+  }
+  // 修为带进度条
+  chips.push(_hudCultivationChip(cultivation));
+
+  characterHud.innerHTML = chips.join("");
+  characterHud.hidden = chips.length === 0;
+
+  // 点击复制
+  characterHud.querySelectorAll(".hud-chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const txt = chip.dataset.copy || chip.textContent.trim();
+      copyToClipboardSilent(txt);
+    });
+  });
+}
+
+function _hudChip({ cls, k, v, title, empty }) {
+  const cn = ["hud-chip", cls || "", empty ? "empty" : ""].filter(Boolean).join(" ");
+  return `
+    <span class="${cn}" title="${escapeAttr(title || "")}" data-copy="${escapeAttr(v || "")}">
+      <span class="hud-chip-k">${k}</span>
+      <span class="hud-chip-v">${escapeHtml(v || "")}</span>
+    </span>
+  `;
+}
+
+function _hudCultivationChip(text) {
+  const m = String(text || "").match(/(\d+)\s*\/\s*(\d+)/);
+  if (!m) {
+    return _hudChip({
+      cls: "cultivation",
+      k: "📊",
+      v: "修为 —",
+      title: "发 .我的灵根 / .查看闭关 抓取修为",
+      empty: true,
+    });
+  }
+  const cur = parseInt(m[1], 10);
+  const mx = parseInt(m[2], 10);
+  const pct = mx > 0 ? Math.min(100, Math.max(0, (cur / mx) * 100)) : 0;
+  return `
+    <span class="hud-chip cultivation" title="修为 (当前 / 上限)" data-copy="${escapeAttr(`${cur} / ${mx}`)}">
+      <span class="hud-chip-k">📊</span>
+      <span class="hud-chip-v">${cur.toLocaleString()} / ${mx.toLocaleString()}</span>
+      <span class="hud-cultivation-bar"><span class="hud-cultivation-fill" style="width:${pct.toFixed(1)}%"></span></span>
+      <span class="hud-cultivation-pct">${pct.toFixed(0)}%</span>
+    </span>
+  `;
+}
+
+function copyToClipboardSilent(text) {
+  if (!text) return;
+  try {
+    navigator.clipboard.writeText(text);
+  } catch (_e) { /* noop */ }
 }
 
 function renderActiveChannelText() {
@@ -2283,6 +2409,7 @@ function renderSidebarIdentityList() {
       state.activeIdentityId = state.activeIdentityId === id ? null : id;
       renderSidebarIdentityList();
       renderSkillBar();
+      renderCharacterHud();
     });
   });
 }

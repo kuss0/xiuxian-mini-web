@@ -9,6 +9,7 @@ from .battle_power import BattlePowerParser
 from .deep_retreat_summary import DeepRetreatSummaryParser
 from .dungeon import DungeonParser
 from .inventory import InventoryParser
+from .naming import NamingParser
 from .profile import ProfileParser
 from .retreat_success import RetreatSuccessParser
 from .risk import RiskParser
@@ -21,6 +22,7 @@ def build_parser_registry() -> ParserRegistry:
     registry.register(RiskParser())  # 风险优先,优先级最高
     registry.register(SecondSoulParser())
     registry.register(DungeonParser())
+    registry.register(NamingParser())
     registry.register(ProfileParser())
     registry.register(BattlePowerParser())
     registry.register(InventoryParser())

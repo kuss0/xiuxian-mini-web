@@ -3255,3 +3255,94 @@ pre {
 .quick-filter-chip.all {
   font-weight: 600;
 }
+
+/* ---------- 角色 HUD(消息流顶部)---------- */
+.character-hud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(168, 85, 247, 0.06), rgba(15, 23, 42, 0));
+}
+
+.hud-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  font-size: 12px;
+  line-height: 1.5;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.hud-chip:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(168, 85, 247, 0.30);
+}
+
+.hud-chip-k {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.hud-chip-v {
+  font-weight: 600;
+}
+
+.hud-chip.empty {
+  opacity: 0.4;
+  cursor: help;
+}
+
+.hud-chip.empty .hud-chip-v {
+  font-weight: 400;
+  font-style: italic;
+}
+
+.hud-chip.power {
+  border-color: rgba(245, 158, 11, 0.30);
+}
+.hud-chip.realm {
+  border-color: rgba(168, 85, 247, 0.30);
+}
+.hud-chip.root {
+  border-color: rgba(34, 197, 94, 0.25);
+}
+.hud-chip.sect {
+  border-color: rgba(56, 189, 248, 0.25);
+}
+.hud-chip.cultivation {
+  flex: 1 1 220px;
+  max-width: 360px;
+  min-width: 180px;
+}
+
+.hud-cultivation-bar {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.hud-cultivation-fill {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #6366f1, #a855f7);
+  transform-origin: left center;
+}
+
+.hud-cultivation-pct {
+  font-size: 10.5px;
+  color: var(--muted);
+  min-width: 32px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

@@ -1,4 +1,4 @@
-"""战力评估 parser:识别「天机阁 · 战力评估」类消息,提取综合战力 + 境界,
+"""战力评估 parser:识别「天机阁 · 战力评估」类消息,提取综合战力 + 境界 + 角色名,
 投影到 identity_profile。"""
 
 from __future__ import annotations
@@ -10,6 +10,11 @@ from backend.domain.registry import ParserOutput
 
 POWER_RE = re.compile(r"综合战力[:：]\s*(?P<power>[^\n]+)")
 REALM_RE = re.compile(r"境界[:：]\s*(?P<realm>[^\n(]+)")
+# "修士: 墨隐 (@VanDu2233)"  ← 角色名 + username
+CULTIVATOR_RE = re.compile(
+    r"修士[:：]\s*(?P<name>[^\n(@（]+?)(?:\s*[\(（]\s*@?(?P<u>[^\)）\s]+)\s*[\)）])?\s*$",
+    re.MULTILINE,
+)
 
 
 class BattlePowerParser:
@@ -24,6 +29,10 @@ class BattlePowerParser:
             fields["综合战力"] = match.group("power").strip()
         if match := REALM_RE.search(text):
             fields["境界"] = match.group("realm").strip()
+        if match := CULTIVATOR_RE.search(text):
+            fields["角色名"] = match.group("name").strip()
+            if match.group("u"):
+                fields["username"] = match.group("u").strip()
         patches = tuple(
             StatePatch(
                 scope="identity_profile",

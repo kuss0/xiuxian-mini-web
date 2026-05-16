@@ -1943,14 +1943,14 @@ def test_schedule_create_empty_ids_returns_error():
 # ---------- 技能盘 ----------
 
 def test_skills_payload_exposes_default_layout():
-    """技能盘必须把 5 组(日常/法宝/侍妾/奇遇/独立)和所有 skill 暴露出去。"""
+    """技能盘必须把 6 组(日常/法宝/侍妾/奇遇/玩法/查询)和所有 skill 暴露出去。"""
     from backend.repo.sqlite_store import SQLiteStore
     import tempfile, pathlib
     tmp = pathlib.Path(tempfile.mkdtemp()) / "m.db"
     server = MiniWebServer(store=SQLiteStore(tmp))
     payload = server.skills_payload()
     assert payload["ok"] is True
-    assert payload["groups"] == ["日常", "法宝", "侍妾", "奇遇", "独立"]
+    assert payload["groups"] == ["日常", "法宝", "侍妾", "奇遇", "玩法", "查询"]
     by_key = {s["key"]: s for s in payload["skills"]}
     assert "deep_retreat" in by_key
     assert by_key["deep_retreat"]["reply_mode"] == "none"
@@ -1958,6 +1958,13 @@ def test_skills_payload_exposes_default_layout():
     # 回复类必须显式标记
     assert by_key["quiz_answer"]["reply_mode"] == "required"
     assert by_key["dungeon_join"]["reply_mode"] == "required"
+    # 新增的命令必须在
+    assert "storage_bag" in by_key  # .储物袋
+    assert "concubine_romance" in by_key  # .红尘寻缘
+    assert "concubine_sect_marry" in by_key  # .宗门赐婚
+    # 查询组里至少要有 储物袋 / 战力 / 我的灵根
+    query_skills = {s["key"] for s in payload["skills"] if s["group"] == "查询"}
+    assert {"storage_bag", "battle_power", "identity_info"} <= query_skills
 
 
 def test_skill_send_rejects_unknown_skill(tmp_path):

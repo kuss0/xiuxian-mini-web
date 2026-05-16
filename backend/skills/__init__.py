@@ -39,15 +39,17 @@ class Skill:
         }
 
 
-# 默认布局 — 参照老脚本 model/web/static/js/app.js 的分组(日常/法宝/侍妾/奇遇 + 独立)
+# 默认布局 — 6 个分组,参照老脚本 model/web/static/js/app.js 的「日常/法宝/侍妾/奇遇」
+# 4 大组 + 把那一堆「独立卡片」收成「玩法」(灵树/观星/天阶/小世界/元神 等宗门玩法),
+# 再加一个新「查询」组放纯只读不消耗的命令。
 DEFAULT_SKILLS: tuple[Skill, ...] = (
     # ---------- 日常 ----------
     Skill("wild_training", "日常", "野外历练", ".野外历练", icon="⚔️"),
     Skill("checkin", "日常", "宗门点卯", ".宗门点卯", icon="📋"),
+    Skill("sect_teach", "日常", "宗门传功", ".宗门传功", icon="📖"),
     Skill("tower", "日常", "闯塔", ".闯塔", icon="🗼"),
     Skill("deep_retreat", "日常", "深度闭关", ".深度闭关", cd_module="deep_retreat", icon="📿"),
-    Skill("deep_retreat_query", "日常", "查看闭关", ".查看闭关", icon="🔍",
-          note="查询当前闭关状态,不消耗"),
+    Skill("retreat_shallow", "日常", "闭关修炼", ".闭关修炼", icon="🧘"),
     Skill("yuanying", "日常", "元婴出窍", ".元婴出窍", icon="👻"),
 
     # ---------- 法宝 ----------
@@ -56,8 +58,12 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
     Skill("pet_trial", "法宝", "器灵试炼", ".器灵试炼", icon="🥊"),
 
     # ---------- 侍妾 ----------
-    Skill("concubine_status", "侍妾", "我的侍妾", ".我的侍妾", icon="👩",
-          note="查询侍妾面板,不消耗"),
+    Skill("concubine_dream", "侍妾", "入梦寻图", ".入梦寻图", icon="💭"),
+    Skill("concubine_fragment", "侍妾", "残图", ".残图", icon="🧩",
+          note="拼图前先看残图"),
+    Skill("concubine_puzzle", "侍妾", "拼图", ".拼图", icon="🖼️"),
+    Skill("concubine_sect_marry", "侍妾", "宗门赐婚", ".宗门赐婚", icon="💍"),
+    Skill("concubine_romance", "侍妾", "红尘寻缘", ".红尘寻缘", icon="🌹"),
     Skill("concubine_tianji", "侍妾", "天机代卜", ".天机代卜", icon="🔮"),
     Skill("concubine_heart", "侍妾", "共历心劫", ".共历心劫", icon="💔"),
     Skill("concubine_heart_steady", "侍妾", "稳", ".稳",
@@ -68,6 +74,9 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
     Skill("quiz_answer", "奇遇", "作答", ".作答",
           reply_mode="required",
           note="玄骨考校题目出现时,回复题目消息"),
+    Skill("tiandao_prove", "奇遇", "自证", ".自证",
+          reply_mode="required",
+          note="天道审判出现时,回复 bot 的提示"),
     Skill("jiyin_offer_soul", "奇遇", "献上魂魄", ".献上魂魄",
           reply_mode="required",
           note="极阴祖师提示出现时,回复 bot 提示"),
@@ -84,26 +93,55 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
           reply_mode="required",
           note="南陇侯出现时,回复 bot 提示"),
 
-    # ---------- 独立(暂收最常用 4 个 - 灵树/小世界/第二元神/查询)----------
-    Skill("tree_water", "独立", "灵树灌溉", ".灵树灌溉", icon="🌱"),
-    Skill("tree_status", "独立", "灵树状态", ".灵树状态", icon="🌳",
-          note="查询不消耗"),
-    Skill("small_world", "独立", "小世界", ".小世界", icon="🌐",
-          note="查询不消耗"),
-    Skill("second_soul_train", "独立", "元神修炼", ".元神修炼", icon="🔮"),
-    Skill("second_soul_choice_break", "独立", "抉择 强行突破", ".抉择 强行突破",
+    # ---------- 玩法(灵树/观星/天阶/小世界/元神 — 多数是宗门玩法,不同宗门可用范围不同)----------
+    Skill("tree_water", "玩法", "灵树灌溉", ".灵树灌溉", icon="💧"),
+    Skill("tree_guard", "玩法", "协同守山", ".协同守山", icon="⛰️"),
+    Skill("tree_harvest", "玩法", "采摘灵果", ".采摘灵果", icon="🍎"),
+    Skill("stargazer_panel", "玩法", "观星台", ".观星台", icon="🔭"),
+    Skill("stargazer_guide", "玩法", "牵引星辰", ".牵引星辰", icon="🌟"),
+    Skill("stargazer_soothe", "玩法", "安抚星辰", ".安抚星辰", icon="✨"),
+    Skill("stargazer_collect", "玩法", "收集精华", ".收集精华", icon="💎"),
+    Skill("guanxing", "玩法", "观星", ".观星", icon="🔮"),
+    Skill("guanxing_shift", "玩法", "改换星移", ".改换星移", icon="🌌"),
+    Skill("tianti_climb", "玩法", "登天阶", ".登天阶", icon="🪜"),
+    Skill("tianti_wenxin", "玩法", "问心台", ".问心台", icon="🧠"),
+    Skill("tianti_gangfeng", "玩法", "引九天罡风", ".引九天罡风", icon="🌬️"),
+    Skill("small_world", "玩法", "小世界", ".小世界", icon="🌐",
+          note="进入小世界面板,查询不消耗"),
+    Skill("sw_manifest", "玩法", "显灵", ".显灵", icon="✨"),
+    Skill("sw_harvest", "玩法", "收割香火", ".收割香火", icon="🔥"),
+    Skill("sw_refine", "玩法", "神识淬炼", ".神识淬炼", icon="🧠"),
+    Skill("sw_preach", "玩法", "神迹 布道", ".神迹 布道", icon="📜"),
+    Skill("second_soul_train", "玩法", "元神修炼", ".元神修炼", icon="🪞"),
+    Skill("second_soul_choice_break", "玩法", "抉择 强行突破", ".抉择 强行突破",
           reply_mode="required",
           note="第二元神 prompt 出现时,回复 bot 提示"),
-    Skill("second_soul_choice_stable", "独立", "抉择 稳固道心", ".抉择 稳固道心",
+    Skill("second_soul_choice_stable", "玩法", "抉择 稳固道心", ".抉择 稳固道心",
           reply_mode="required",
           note="第二元神 prompt 出现时,回复 bot 提示"),
-    Skill("battle_power", "独立", "战力", ".战力", icon="💪",
+    Skill("yindao", "玩法", "引道", ".引道", icon="🌠"),
+    Skill("ranch", "玩法", "一键放养", ".一键放养", icon="🌾"),
+
+    # ---------- 查询(只读,不消耗,不触发冷却)----------
+    Skill("storage_bag", "查询", "储物袋", ".储物袋", icon="📦",
+          note="查询当前储物袋"),
+    Skill("battle_power", "查询", "战力", ".战力", icon="💪",
           note="查询当前综合战力"),
-    Skill("identity_info", "独立", "我的灵根", ".我的灵根", icon="📜",
-          note="查询面板信息"),
-    Skill("dungeon_join", "独立", "加入副本", ".加入副本",
+    Skill("identity_info", "查询", "我的灵根", ".我的灵根", icon="📜",
+          note="查询天命玉牒(称号/灵根/宗门/修为)"),
+    Skill("deep_retreat_query", "查询", "查看闭关", ".查看闭关", icon="🔍",
+          note="查询当前闭关状态"),
+    Skill("yuanying_status", "查询", "元婴状态", ".元婴状态", icon="👻"),
+    Skill("tianti_status", "查询", "天阶状态", ".天阶状态", icon="🪜"),
+    Skill("tree_status", "查询", "灵树状态", ".灵树状态", icon="🌳"),
+    Skill("concubine_status", "查询", "我的侍妾", ".我的侍妾", icon="👩"),
+    Skill("second_soul_status", "查询", "第二元神", ".第二元神", icon="🔮"),
+    Skill("sect_list", "查询", "宗门列表", ".宗门列表", icon="🏔️"),
+    Skill("check_root", "查询", "检测灵根", ".检测灵根", icon="🪬",
+          note="新角色用,会赐道号 + 灵根"),
+    Skill("dungeon_join", "查询", "加入副本", ".加入副本",
           reply_mode="required",
-          note="副本公告出现时,回复并附副本ID;或在动作按钮里用预填命令"),
+          note="副本公告出现时,回复并附副本ID;或在卡片 actions 区点预填命令"),
 )
 
 

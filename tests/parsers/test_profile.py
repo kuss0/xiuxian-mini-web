@@ -10,9 +10,18 @@ def test_extracts_root_and_sect_and_emits_state_patches():
     assert card.title == "角色信息"
     assert card.fields.get("灵根") == "天灵根(火)"
     assert card.fields.get("宗门") == "【凌霄宫】"
+    assert card.fields.get("称号") == "【紫灵的轻吻】"
+    assert card.fields.get("修为") == "445955 / 1000000"
+    assert card.fields.get("修为进度") == {"current": 445955, "max": 1000000}
+    assert card.fields.get("username") == "example"
     patches = {patch.key: patch.value for patch in output.state_patches}
     assert patches.get("灵根") == "天灵根(火)"
     assert patches.get("宗门") == "【凌霄宫】"
+    assert patches.get("称号") == "【紫灵的轻吻】"
+    assert patches.get("修为") == "445955 / 1000000"
+    assert patches.get("username") == "example"
+    # 修为进度 dict 不进 patch(scope 不支持复杂类型)
+    assert "修为进度" not in patches
     assert all(patch.scope == "identity_profile" for patch in output.state_patches)
     assert all(patch.source_message_id == event.id for patch in output.state_patches)
 
