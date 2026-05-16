@@ -9,14 +9,6 @@
   <body>
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="brand">
-          <span class="brand-mark">修</span>
-          <div>
-            <h1>修仙 Mini Web</h1>
-            <p>Telegram 游戏聊天辅助界面</p>
-          </div>
-        </div>
-
         <section class="panel identity-panel">
           <div class="panel-head">
             <h2>身份列表</h2>
@@ -65,15 +57,10 @@
         <section class="layout-grid">
           <section class="stream">
             <div class="section-head">
-              <div>
-                <h3>修仙频道</h3>
-                <p id="activeChannelText">全部频道</p>
-              </div>
-              <div class="stream-head-actions">
-                <div id="quickFilters" class="quick-filters"></div>
-                <span id="messageCount">0 条</span>
-              </div>
+              <div id="quickFilters" class="quick-filters"></div>
+              <span id="messageCount" class="message-count-pill">0 条</span>
             </div>
+            <p id="activeChannelText" hidden></p>
             <div id="messageList" class="message-list"></div>
             <button id="jumpToLatest" class="jump-to-latest" type="button" hidden>↑ 回到最新</button>
           </section>
