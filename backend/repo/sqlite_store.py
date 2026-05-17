@@ -26,6 +26,8 @@ class SQLiteStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
+        # 通知调度器 — 服务层注入(set_notify_dispatcher),没注入就完全不推
+        self._notify_dispatcher = None
         # 玩法状态机注册表 — 默认 3 个模块(深度闭关 / 抚摸法宝 / 温养器灵)。
         # 后续可通过 set_module_registry() 替换(单测里换 fixture 用)。
         self._module_registry = build_default_registry()
@@ -65,6 +67,10 @@ class SQLiteStore:
                 sid, key, state, source_message_id=src
             ),
         )
+
+    def set_notify_dispatcher(self, dispatcher) -> None:
+        """注入通知调度器。MiniWebServer init 时挂上,单测里 set None 跳过推送。"""
+        self._notify_dispatcher = dispatcher
 
     def module_registry(self):
         return self._module_registry
@@ -429,6 +435,25 @@ class SQLiteStore:
                         updated_patch.updated_at,
                     ),
                 )
+        # 卡片落库完了再走 notification dispatch — 失败不影响 ingest
+        if self._notify_dispatcher is not None and cards:
+            from backend.notifications import NotificationEvent
+            for card in cards:
+                title = str(card.title or "")
+                if not self._notify_dispatcher.event_is_enabled(title):
+                    continue
+                try:
+                    self._notify_dispatcher.dispatch(
+                        NotificationEvent(
+                            kind="card",
+                            title=title,
+                            body=card.raw or card.summary or "",
+                            source_id=event.id,
+                            severity=str(card.severity or "normal"),
+                        )
+                    )
+                except Exception as exc:
+                    print(f"[notify] dispatch failed for {title}: {exc}")
         return cards
 
     def list_cards(self, channel: str = "all") -> tuple[ParsedCard, ...]:
@@ -605,6 +630,10 @@ class SQLiteStore:
             "listener_status": "stopped",
             "listener_message": "",
             "message_retention_days": 30,
+            "notify_enabled": False,
+            "notify_tg_bot_token": "",
+            "notify_tg_chat_id": "",
+            "notify_card_titles": [],
         }
         with self._connect() as conn:
             rows = conn.execute("SELECT key, value_json FROM settings").fetchall()
@@ -1370,6 +1399,14 @@ def _normalize_settings(payload: dict) -> dict:
         if retention < 0:
             retention = 0
 
+    # notify_card_titles: tuple/list of strings (UI 多选 checkbox)
+    raw_titles = payload.get("notify_card_titles") or []
+    if isinstance(raw_titles, str):
+        raw_titles = [raw_titles]
+    notify_card_titles = sorted(
+        {str(t).strip() for t in raw_titles if str(t or "").strip()}
+    )
+
     return {
         "api_id": text("api_id"),
         "api_hash": text("api_hash"),
@@ -1389,6 +1426,10 @@ def _normalize_settings(payload: dict) -> dict:
         "listener_status": text("listener_status") or "stopped",
         "listener_message": text("listener_message"),
         "message_retention_days": retention,
+        "notify_enabled": bool_value("notify_enabled"),
+        "notify_tg_bot_token": text("notify_tg_bot_token"),
+        "notify_tg_chat_id": text("notify_tg_chat_id"),
+        "notify_card_titles": notify_card_titles,
     }
 
 

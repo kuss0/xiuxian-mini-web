@@ -19,6 +19,8 @@ from backend.outbox.schedule import (
     fmt_ts as schedule_fmt_ts,
     list_presets as list_schedule_presets,
 )
+from backend.notifications.dispatcher import NotificationDispatcher
+from backend.notifications.tg_bot import TelegramBotNotifier
 from backend.repo import SQLiteStore
 from backend.skills import SkillRegistry
 from backend.skills.send import SkillSendService
@@ -73,7 +75,7 @@ class CardStore(Protocol):
         ...
 
 
-SECRET_SETTING_KEYS = {"api_hash", "proxy_password"}
+SECRET_SETTING_KEYS = {"api_hash", "proxy_password", "notify_tg_bot_token"}
 
 
 def _estimate_send_seconds(n: int) -> int:
@@ -124,6 +126,10 @@ class MiniWebServer:
             listener_lookup=lambda local_id: self._listeners.get_listener(local_id),
             event_sink=lambda event: self._store.ingest_event(event),
         )
+        # 通知调度器(MVP 只支持 TG bot,后续可加 Bark/钉钉/浏览器推送)
+        self._notify = NotificationDispatcher(get_settings=self._store.get_settings)
+        if hasattr(self._store, "set_notify_dispatcher"):
+            self._store.set_notify_dispatcher(self._notify)
 
     def health_payload(self) -> dict:
         return {"ok": True, "service": "xiuxian-mini-web", "time": utc_now_iso()}
@@ -863,6 +869,47 @@ class MiniWebServer:
 
     def skills_payload(self) -> dict:
         return self._skill_registry.to_api()
+
+    def notify_test_payload(self, payload: dict | None = None) -> dict:
+        """对当前 notify 配置发一条测试通知,返回每个 channel 的结果。"""
+        from backend.notifications import NotificationEvent
+
+        payload = payload or {}
+        title = str(payload.get("title") or "通知测试")
+        body = str(payload.get("body") or "若收到此条,说明你的通知通道已配通。\n\n— mini-web 修仙助手")
+        event = NotificationEvent(
+            kind="test",
+            title=title,
+            body=body,
+            source_id=f"test-{int(utc_now_iso().__hash__()) & 0xFFFFFFFF}",
+            severity=str(payload.get("severity") or "success"),
+        )
+        notifiers = self._notify.list_notifiers()
+        if not notifiers:
+            return {"ok": False, "error": "未启用通知或未配置 channel", "results": []}
+        results = []
+        for n in notifiers:
+            ok, err = n.notify(event)
+            results.append({"channel": n.name, "ok": ok, "error": err})
+        return {"ok": all(r["ok"] for r in results), "results": results}
+
+    def notify_card_titles_payload(self) -> dict:
+        """返回当前 registry 里所有 parser 会生成的卡片标题,给 UI 当 toggle 列表用。"""
+        # 静态列表;新加 parser 时同步加在这里(避免引入 parser 自省的复杂度)
+        titles = [
+            "风险提醒", "天道审判",
+            "玄骨考校", "天机考验",
+            "极阴祖师", "南陇侯", "共历心劫",
+            "境界突破", "赐予道号",
+            "深度闭关总结", "闭关成功",
+            "试炼古塔战报", "虚天殿开启", "加入副本成功", "副本房间解散",
+            "第二元神归位", "角色信息", "战力评估", "储物袋快照",
+            "登天阶面板", "观星台面板", "星盘显化", "天机阁快报",
+            "小世界面板", "侍妾面板", "灵树面板", "灵树采摘",
+            "抚摸法宝", "温养器灵", "器灵试炼",
+            "引动大道", "空间节点", "定星成功",
+        ]
+        return {"ok": True, "titles": titles}
 
     def skill_send_payload(self, payload: dict) -> dict:
         payload = payload or {}

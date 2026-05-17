@@ -2109,6 +2109,38 @@ function renderSettings(settings) {
         <button type="submit">保存配置</button>
       </div>
 
+      <div class="detail-block notify-section">
+        <h4>🔔 通知设置</h4>
+        <p class="muted" style="font-size:12px;">关键事件(风险/突破/奇遇 prompt 等)可推送到独立的 Telegram bot。
+        后续会加 Bark / 钉钉 / 浏览器 push。</p>
+        <label class="toggle-field">
+          <input type="checkbox" name="notify_enabled" ${settings.notify_enabled ? "checked" : ""} />
+          <span>启用通知</span>
+        </label>
+        <div class="form-grid">
+          <label>
+            <span>Telegram Bot Token</span>
+            <input
+              name="notify_tg_bot_token"
+              value=""
+              placeholder="${savedSecrets.notify_tg_bot_token ? "已保存,留空不变" : "BotFather 拿到的 token,形如 123:ABC..."}"
+              autocomplete="off"
+            />
+          </label>
+          <label>
+            <span>Telegram Chat ID</span>
+            <input name="notify_tg_chat_id" value="${escapeAttr(settings.notify_tg_chat_id || '')}" placeholder="接收方的 chat ID(私聊 = user_id;群 = -100xxx)" />
+          </label>
+        </div>
+        <div class="notify-event-grid" id="notifyEventGrid">
+          <p class="muted" style="font-size:11px;">加载中…</p>
+        </div>
+        <div class="form-actions">
+          <button type="button" data-notify-action="test">发测试通知</button>
+        </div>
+        <p id="notifyTestResult" class="muted" style="font-size:12px;"></p>
+      </div>
+
       <div class="login-verify">
         <label>
           <span>验证码</span>
@@ -2144,6 +2176,9 @@ function renderSettings(settings) {
       }
     })
     .catch(() => {});
+
+  // 加载通知事件列表 + 绑测试按钮
+  _hydrateNotifySection(settings);
 
   document.querySelector("#settingsForm").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -4470,6 +4505,10 @@ function telegramDialogKindLabel(kind) {
 
 async function saveCurrentSettingsFromForm(form) {
   const data = new FormData(form);
+  // 收集通知事件勾选(notify_card_titles 是 multi-checkbox)
+  const notifyTitles = Array.from(
+    form.querySelectorAll('input[name="notify_card_titles"]:checked')
+  ).map((el) => el.value);
   return saveSettings({
     api_id: data.get("api_id"),
     api_hash: data.get("api_hash"),
@@ -4485,6 +4524,75 @@ async function saveCurrentSettingsFromForm(form) {
     proxy_host: data.get("proxy_host"),
     proxy_username: data.get("proxy_username"),
     proxy_password: data.get("proxy_password"),
+    notify_enabled: !!form.querySelector('input[name="notify_enabled"]:checked'),
+    notify_tg_bot_token: data.get("notify_tg_bot_token"),
+    notify_tg_chat_id: data.get("notify_tg_chat_id"),
+    notify_card_titles: notifyTitles,
+  });
+}
+
+// 通知设置 — 拉所有可选卡片标题作 checkbox,绑「发测试通知」按钮
+async function _hydrateNotifySection(settings) {
+  const grid = document.querySelector("#notifyEventGrid");
+  if (!grid) return;
+  const enabled = new Set(settings.notify_card_titles || []);
+  try {
+    const data = await fetchJson("/api/notify/card-titles");
+    const titles = data.titles || [];
+    // 按几个语义组排列(顺序硬编码以便阅读;新增的 title 也会一并展示)
+    const groups = [
+      { name: "🚨 高危", keys: ["风险提醒", "天道审判"] },
+      { name: "🎯 prompt", keys: ["玄骨考校", "天机考验", "极阴祖师", "南陇侯", "共历心劫", "第二元神归位"] },
+      { name: "🎉 里程碑", keys: ["境界突破", "赐予道号", "试炼古塔战报", "深度闭关总结", "闭关成功"] },
+      { name: "📦 副本/物品", keys: ["虚天殿开启", "加入副本成功", "副本房间解散", "储物袋快照", "灵树采摘"] },
+    ];
+    const used = new Set();
+    let html = "";
+    for (const g of groups) {
+      const present = g.keys.filter((k) => titles.includes(k));
+      if (!present.length) continue;
+      present.forEach((k) => used.add(k));
+      html += `<div class="notify-group"><span class="notify-group-name">${escapeHtml(g.name)}</span>`;
+      for (const k of present) {
+        html += `<label class="notify-event"><input type="checkbox" name="notify_card_titles" value="${escapeAttr(k)}" ${enabled.has(k) ? "checked" : ""} /> <span>${escapeHtml(k)}</span></label>`;
+      }
+      html += "</div>";
+    }
+    const leftover = titles.filter((k) => !used.has(k));
+    if (leftover.length) {
+      html += `<div class="notify-group"><span class="notify-group-name">其它</span>`;
+      for (const k of leftover) {
+        html += `<label class="notify-event"><input type="checkbox" name="notify_card_titles" value="${escapeAttr(k)}" ${enabled.has(k) ? "checked" : ""} /> <span>${escapeHtml(k)}</span></label>`;
+      }
+      html += "</div>";
+    }
+    grid.innerHTML = html || '<p class="muted">没有可订阅事件</p>';
+  } catch (err) {
+    grid.innerHTML = `<p class="muted">事件列表加载失败:${escapeHtml(String(err))}</p>`;
+  }
+
+  document.querySelectorAll('[data-notify-action="test"]').forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const resultEl = document.querySelector("#notifyTestResult");
+      btn.disabled = true;
+      if (resultEl) resultEl.textContent = "正在发送测试...";
+      try {
+        // 先保存当前表单(token/chat 等可能未提交)
+        const form = btn.closest("form");
+        if (form) await saveCurrentSettingsFromForm(form);
+        const data = await postJson("/api/notify/test", {});
+        if (data.ok) {
+          if (resultEl) resultEl.textContent = `✅ 测试通知已发(${(data.results || []).map((r) => r.channel).join(",")})`;
+        } else {
+          const errs = (data.results || []).filter((r) => !r.ok).map((r) => `${r.channel}: ${r.error}`).join("; ") || data.error || "未知错误";
+          if (resultEl) resultEl.textContent = `❌ ${errs}`;
+        }
+      } catch (err) {
+        if (resultEl) resultEl.textContent = `❌ ${err.message || err}`;
+      } finally {
+        btn.disabled = false;
+      }
+    });
   });
 }
 

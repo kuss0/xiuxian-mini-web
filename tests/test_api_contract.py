@@ -143,10 +143,10 @@ def test_settings_payload_redacts_saved_secrets(tmp_path):
 
     assert payload["settings"]["api_hash"] == ""
     assert payload["settings"]["proxy_password"] == ""
-    assert payload["settings"]["saved_secrets"] == {
-        "api_hash": True,
-        "proxy_password": True,
-    }
+    # 所有标记为 secret 的 key 都必须出现在 saved_secrets 里(True 表示已保存)
+    assert payload["settings"]["saved_secrets"]["api_hash"] is True
+    assert payload["settings"]["saved_secrets"]["proxy_password"] is True
+    assert payload["settings"]["saved_secrets"]["notify_tg_bot_token"] is False
     assert "secret-hash" not in str(payload)
     assert "proxy-secret" not in str(payload)
 
@@ -189,10 +189,8 @@ def test_account_save_redacts_and_preserves_existing_secret(tmp_path):
     )
 
     assert created["account"]["api_hash"] == ""
-    assert updated["account"]["saved_secrets"] == {
-        "api_hash": True,
-        "proxy_password": True,
-    }
+    assert updated["account"]["saved_secrets"]["api_hash"] is True
+    assert updated["account"]["saved_secrets"]["proxy_password"] is True
     saved = store.get_account(local_id)
     assert saved["label"] == "主号"
     assert saved["api_hash"] == "secret-hash"
@@ -2373,4 +2371,76 @@ def test_state_patches_scoped_by_send_as_id(tmp_path):
     keys_by_sender = {(p["send_as_id"], p["key"]) for p in all_patches}
     assert (A, "宗门") in keys_by_sender
     assert (B, "宗门") in keys_by_sender
+
+
+# ---------- 通知 ----------
+
+def test_notify_card_titles_payload_returns_known_set():
+    """前端 settings UI 需要拿到全部可订阅卡片标题作 checkbox。"""
+    from backend.repo.sqlite_store import SQLiteStore
+    import tempfile, pathlib
+    server = MiniWebServer(store=SQLiteStore(pathlib.Path(tempfile.mkdtemp()) / "m.db"))
+    payload = server.notify_card_titles_payload()
+    assert payload["ok"] is True
+    titles = set(payload["titles"])
+    # 关键 prompt 类必须在(用户最关心)
+    assert "风险提醒" in titles
+    assert "玄骨考校" in titles
+    assert "境界突破" in titles
+    assert "登天阶面板" in titles
+
+
+def test_notify_test_payload_without_config_reports_error(tmp_path):
+    """没启用通知或没填 token 时,/api/notify/test 返回 ok=False。"""
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
+    result = server.notify_test_payload({})
+    assert result["ok"] is False
+    assert "未启用" in result["error"] or "未配置" in result["error"]
+
+
+def test_notify_dispatcher_fires_on_card_when_enabled(tmp_path, monkeypatch):
+    """ingest_event 产生卡片 + 配置勾选该卡片标题 → notifier.notify 被调用一次。
+    同一 source_id 二次 ingest(NewMessage + Edit) 不会重复推。"""
+    from backend.notifications.dispatcher import NotificationDispatcher
+    from backend.notifications import Notifier, NotificationEvent
+    from backend.domain.models import RawMessageEvent
+
+    captured: list[NotificationEvent] = []
+
+    class FakeNotifier(Notifier):
+        name = "fake"
+        def notify(self, event):
+            captured.append(event)
+            return True, ""
+
+    store = SQLiteStore(tmp_path / "m.db")
+    # 写 settings 配通知 + 订阅 "风险提醒"
+    store.save_settings({
+        "notify_enabled": True,
+        "notify_tg_bot_token": "irrelevant-for-fake",
+        "notify_tg_chat_id": "1",
+        "notify_card_titles": ["风险提醒"],
+    })
+    dispatcher = NotificationDispatcher(get_settings=store.get_settings)
+    # 用 fake notifier 替换 list_notifiers
+    monkeypatch.setattr(dispatcher, "list_notifiers", lambda: [FakeNotifier()])
+    store.set_notify_dispatcher(dispatcher)
+
+    risk_event = RawMessageEvent(
+        id="tg:-1001:90001",
+        chat_id=-1001,
+        msg_id=90001,
+        text="挂机嫌疑提醒:对象 @user,你必须自证清白。",
+        source="bot",
+        date="2026-05-17T00:00:00+00:00",
+        sender_id=7900199668,
+        sender_is_bot=True,
+    )
+    store.ingest_event(risk_event)
+    # dedup:同 id 再 ingest 一次,不应该再触发 notify
+    store.ingest_event(risk_event)
+
+    assert len(captured) == 1
+    assert captured[0].title in {"风险提醒", "天道审判"}
+    assert captured[0].severity == "risk"
 
