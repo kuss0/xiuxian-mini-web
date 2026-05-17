@@ -5,7 +5,7 @@ from typing import Callable, Iterable
 
 from backend.domain.models import ParsedCard, RawMessageEvent
 
-CURRENT_MESSAGE_FILTER_VERSION = 2
+CURRENT_MESSAGE_FILTER_VERSION = 3
 
 
 DEFAULT_FOCUS_KEYWORDS = (
