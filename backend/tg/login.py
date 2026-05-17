@@ -136,9 +136,15 @@ class TelegramLoginService:
 
         me = await client.get_me()
         account_id = str(getattr(me, "id", "") or "")
+        username = str(getattr(me, "username", "") or "").lstrip("@")
         await client.disconnect()
         self._pending.pop(key, None)
-        return {"status": "done", "message": "登录成功", "account_id": account_id}
+        return {
+            "status": "done",
+            "message": "登录成功",
+            "account_id": account_id,
+            "username": username,
+        }
 
     async def _cancel(self, key: str) -> dict:
         pending = self._pending.pop(key, None)

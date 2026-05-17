@@ -523,6 +523,8 @@ class MiniWebServer:
                 raise ValueError(f"账号数量已达上限 {MAX_ACCOUNTS} 个")
         patch = preserve_existing_secrets({**payload, "local_id": local_id}, current or {})
         account = self._store.save_account(patch)
+        if _username_changed(current, account):
+            self._reclassify_message_filters()
         return {"ok": True, "account": public_account(account)}
 
     def delete_account_payload(self, payload: dict) -> dict:
@@ -597,6 +599,8 @@ class MiniWebServer:
         if account_local_id and self._store.get_account(account_local_id) is None:
             raise ValueError("绑定账号不存在，请先保存 Telegram 账号")
         identity = self._store.save_identity({**payload, "send_as_id": send_as_id})
+        if _username_changed(current, identity):
+            self._reclassify_message_filters()
         return {"ok": True, "identity": public_identity(identity)}
 
     def batch_save_identities_payload(self, payload: dict) -> dict:
@@ -784,6 +788,7 @@ class MiniWebServer:
                 "login_status": result["status"],
                 "login_message": result["message"],
                 "account_id": result.get("account_id") or account.get("account_id") or "",
+                "username": result.get("username") or account.get("username") or "",
             }
             account = self._store.save_account(patch)
             if result["status"] == "done":
@@ -1572,6 +1577,9 @@ class MiniWebServer:
             return None
         existing = self._store.get_identity(account_id)
         if existing is not None:
+            username = str(account.get("username") or "").strip().lstrip("@")
+            if username and not str(existing.get("username") or "").strip():
+                return self._store.save_identity({**existing, "username": username})
             return existing
         if len(self._store.list_identities()) >= MAX_IDENTITIES:
             return None
@@ -1579,11 +1587,17 @@ class MiniWebServer:
             "send_as_id": account_id,
             "account_local_id": account.get("local_id") or "",
             "label": account.get("label") or "",
-            "username": "",
+            "username": account.get("username") or "",
             "enabled": True,
             "note": "登录后自动创建的 self-identity（identity_id == account_id）",
         }
         return self._store.save_identity(payload)
+
+    def _reclassify_message_filters(self) -> int:
+        reclassify = getattr(self._store, "reclassify_message_filters", None)
+        if callable(reclassify):
+            return int(reclassify() or 0)
+        return 0
 
     def _mark_account_login_error(self, local_id: object, message: str) -> None:
         account = self._store.get_account(str(local_id or ""))
@@ -1717,6 +1731,12 @@ def public_identity(identity: dict | None) -> dict | None:
     if identity is None:
         return None
     return dict(identity)
+
+
+def _username_changed(before: dict | None, after: dict | None) -> bool:
+    before_name = str((before or {}).get("username") or "").strip().lstrip("@")
+    after_name = str((after or {}).get("username") or "").strip().lstrip("@")
+    return before_name != after_name and bool(after_name)
 
 
 def classify_identity_kind(identity: dict, accounts_by_account_id: dict[int, dict]) -> str:

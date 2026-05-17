@@ -273,6 +273,28 @@ def test_sqlite_settings_roundtrip(tmp_path):
     assert SQLiteStore(tmp_path / "miniweb.db").get_settings()["listen_enabled"] is True
 
 
+def test_settings_auto_collects_own_usernames(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_account(
+        {
+            "local_id": "main",
+            "account_id": "12345",
+            "username": "@wa2000",
+        }
+    )
+    store.save_identity(
+        {
+            "send_as_id": "67890",
+            "account_local_id": "main",
+            "username": "alt_wa",
+        }
+    )
+
+    aliases = store.get_settings()["own_aliases"]
+    assert "wa2000" in aliases
+    assert "alt_wa" in aliases
+
+
 def test_settings_payload_redacts_saved_secrets(tmp_path):
     store = SQLiteStore(tmp_path / "miniweb.db")
     store.save_settings({"api_hash": "secret-hash", "proxy_password": "proxy-secret"})

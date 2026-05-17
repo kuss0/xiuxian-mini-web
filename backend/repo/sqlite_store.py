@@ -132,6 +132,20 @@ class SQLiteStore:
             pass
         return [item for item in sorted(ids) if item]
 
+    def _collect_my_aliases(self) -> list[str]:
+        """从账号/身份里自动收集自己的 @username,用于过滤 @我的消息。"""
+        aliases: list[str] = []
+        for collection in (self.list_accounts, self.list_identities):
+            try:
+                items = collection()
+            except Exception:
+                continue
+            for item in items:
+                username = str((item or {}).get("username") or "").strip().lstrip("@")
+                if username:
+                    aliases.append(username)
+        return _merge_str_defaults([], aliases)
+
     def _collect_game_bot_ids(self) -> list[int]:
         try:
             ids = self.get_settings().get("game_bot_ids") or []
@@ -841,6 +855,10 @@ class SQLiteStore:
             if key not in defaults:
                 continue
             defaults[key] = json.loads(raw_value)
+        defaults["own_aliases"] = _merge_str_defaults(
+            defaults.get("own_aliases"),
+            self._collect_my_aliases(),
+        )
         return defaults
 
     def ensure_default_settings(self) -> dict:
@@ -1713,6 +1731,7 @@ def _normalize_account(payload: dict) -> dict:
         "local_id": local_id,
         "account_id": text("account_id"),
         "label": text("label") or text("phone") or local_id,
+        "username": text("username").lstrip("@"),
         "phone": text("phone"),
         "session_name": session_name,
         "api_id": text("api_id"),
