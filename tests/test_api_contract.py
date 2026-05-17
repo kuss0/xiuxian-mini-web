@@ -68,11 +68,18 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
         {"own_aliases": ["wa2000"], "focus_keywords": []},
         is_game_bot_sender=lambda _sid: False,
     )
+    other_mention = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x4", chat_id=1, msg_id=4, text="@other 来看", source="玩家", date=""),
+        {"own_aliases": ["wa2000"], "focus_keywords": [], "focus_include_player_plain": False},
+        is_game_bot_sender=lambda _sid: False,
+    )
 
     assert "focus" in plain.channels
     assert "archive" in command.channels
     assert "focus" not in command.channels
     assert "focus" in mention.channels
+    assert "focus" not in other_mention.channels
 
 
 def test_server_payload_shape_stays_compatible():

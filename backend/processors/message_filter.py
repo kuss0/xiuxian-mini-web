@@ -124,7 +124,7 @@ def has_own_mention(text: str, *, mentions: tuple[str, ...], aliases: list[str])
             return True
         lowered = raw_text.lower()
         return any(f"@{alias.lower()}" in lowered for alias in normalized_aliases)
-    return "@" in raw_text or bool(normalized_mentions)
+    return False
 
 
 def is_leader_message(
