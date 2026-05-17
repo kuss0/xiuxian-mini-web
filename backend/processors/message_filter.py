@@ -6,7 +6,7 @@ from typing import Callable, Iterable
 
 from backend.domain.models import ParsedCard, RawMessageEvent
 
-CURRENT_MESSAGE_FILTER_VERSION = 4
+CURRENT_MESSAGE_FILTER_VERSION = 5
 
 
 DEFAULT_FOCUS_KEYWORDS = (
@@ -126,10 +126,9 @@ def enrich_filter_channels(
     if suppress_focus and "focus" in channels:
         channels = [channel for channel in channels if channel != "focus"]
 
-    archive_due_bot = archive_bot and bot_like and (
-        bot_reply_to_other or bot_mentions_other or not card_important
-    )
-    if (archive_dot and dot_command) or archive_due_bot:
+    archive_due_other = bot_like and (bot_reply_to_other or bot_mentions_other)
+    archive_due_bot = archive_bot and bot_like and not card_important
+    if (archive_dot and dot_command) or archive_due_other or archive_due_bot:
         _append_unique(channels, "archive")
         _append_unique(tags, "归档")
 

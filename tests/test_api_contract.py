@@ -101,7 +101,7 @@ def test_message_filter_promotes_bot_reply_to_me_and_archives_reply_to_others():
         tags=("未分类",),
         raw="",
     )
-    settings = {"archive_bot_replies": True, "focus_keywords": []}
+    settings = {"archive_bot_replies": False, "focus_keywords": []}
     bot_event = RawMessageEvent(
         id="r1", chat_id=1, msg_id=11, text="你已进入深度闭关状态。", source="韩天尊",
         date="", sender_id=-100, reply_to_msg_id=10,
@@ -142,7 +142,7 @@ def test_message_filter_archives_bot_mentions_to_others():
         raw="",
     )
     settings = {
-        "archive_bot_replies": True,
+        "archive_bot_replies": False,
         "focus_keywords": ["洞府"],
         "own_aliases": ["wa2000"],
     }
