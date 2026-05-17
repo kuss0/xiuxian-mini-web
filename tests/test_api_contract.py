@@ -149,10 +149,26 @@ def test_message_filter_promotes_bot_reply_to_me_and_archives_reply_to_others():
         parent_event=other,
         my_identity_ids=[12345],
     )
+    reply_to_me_with_other_mentions = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="r1b", chat_id=1, msg_id=12,
+            text="【宗门战况】\n战功榜: 1. @other 7444",
+            source="韩天尊", date="", sender_id=-100, reply_to_msg_id=10,
+        ),
+        settings,
+        is_game_bot_sender=lambda sid: sid == -100,
+        parent_event=mine,
+        my_identity_ids=[12345],
+    )
 
     assert "focus" in reply_to_me.channels
     assert "archive" not in reply_to_me.channels
     assert "回复我" in reply_to_me.tags
+    assert "focus" in reply_to_me_with_other_mentions.channels
+    assert "archive" not in reply_to_me_with_other_mentions.channels
+    assert "回复我" in reply_to_me_with_other_mentions.tags
+    assert "提到别人" in reply_to_me_with_other_mentions.tags
     assert "archive" in reply_to_other.channels
     assert "focus" not in reply_to_other.channels
     assert "回复别人" in reply_to_other.tags
@@ -1845,6 +1861,52 @@ def test_messages_solo_mode_filters_to_me_and_bot_replies(tmp_path):
     assert "bot-other" not in ids
     assert all(not m["id"].startswith("noise-") for m in payload["messages"])
     assert payload["mode"] == "solo"
+
+
+def test_parent_arriving_after_bot_reply_reclassifies_focus(tmp_path):
+    """miniweb 主动发送时可能先收到 bot reply,后写 outgoing 父消息。
+
+    父消息补齐后,直接回复它的 bot 卡片必须从普通 system/archive 重分流到
+    focus,否则首页重点流看不到刚刚自己触发的结果。
+    """
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_settings({
+        "game_bot_ids": [-100],
+        "archive_bot_replies": False,
+        "focus_keywords": [],
+    })
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+
+    reply = RawMessageEvent(
+        id="bot-reply",
+        chat_id=-1,
+        msg_id=11,
+        text="【宗门战况】\n战役 #9",
+        source="韩天尊",
+        date="",
+        sender_id=-100,
+        reply_to_msg_id=10,
+        sender_is_bot=True,
+    )
+    parent = RawMessageEvent(
+        id="mine",
+        chat_id=-1,
+        msg_id=10,
+        text=".宗门战况",
+        source="me",
+        date="",
+        sender_id=12345,
+    )
+
+    store.ingest_event(reply)
+    before = store.get_card("bot-reply")[1]
+    assert "focus" not in before.channels
+
+    store.ingest_event(parent)
+
+    after = store.get_card("bot-reply")[1]
+    assert "focus" in after.channels
+    assert "回复我" in after.tags
 
 
 def test_messages_before_seq_returns_older(tmp_path):

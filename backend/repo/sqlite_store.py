@@ -661,7 +661,107 @@ class SQLiteStore:
                     )
                 except Exception as exc:
                     print(f"[notify] dispatch failed for {title}: {exc}")
+        # 发送链路和 listener 可能并发写库:bot 回复有时先入库,父级 outgoing
+        # 消息稍后才由 event_sink 写入。父消息补齐后,要把直接回复它的卡片
+        # 重新分流,否则「bot 回复我」会停留在 archive,首页重点流看不到。
+        self._reclassify_direct_reply_children(event)
         return cards
+
+    def _reclassify_direct_reply_children(self, parent_event: RawMessageEvent) -> int:
+        """父消息落库后,重算直接回复它的卡片过滤频道。
+
+        只处理同 chat 且 reply_to_msg_id == parent.msg_id 的直接子消息,避免每次
+        ingest 都全量 reclassify。主要覆盖 miniweb 主动发送后,bot 秒回比
+        outgoing event_sink 更早入库的竞态。
+        """
+        if not parent_event.chat_id or not parent_event.msg_id:
+            return 0
+        settings = self.get_settings()
+        my_identity_ids = self._collect_my_identities()
+        topic_id = self._get_target_topic_id()
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT pc.rowid, pc.payload_json,
+                       rm.id, rm.chat_id, rm.msg_id, rm.text, rm.source, rm.date,
+                       rm.sender_id, rm.reply_to_msg_id, rm.top_msg_id,
+                       rm.mentions_json, rm.sender_is_bot,
+                       rm.edited_at, rm.deleted_at, rm.media_kind, rm.media_meta_json
+                FROM parsed_cards pc
+                JOIN raw_messages rm ON rm.id = pc.raw_message_id
+                WHERE rm.chat_id=? AND rm.reply_to_msg_id=?
+                """,
+                (int(parent_event.chat_id), int(parent_event.msg_id)),
+            ).fetchall()
+            updates = []
+            for row in rows:
+                rowid = int(row[0])
+                card = ParsedCard.from_api(json.loads(row[1]))
+                event = RawMessageEvent(
+                    id=row[2],
+                    chat_id=int(row[3]),
+                    msg_id=int(row[4]),
+                    text=row[5] or "",
+                    source=row[6] or "",
+                    date=row[7] or "",
+                    sender_id=row[8],
+                    reply_to_msg_id=row[9],
+                    top_msg_id=row[10],
+                    mentions=tuple(json.loads(row[11] or "[]")),
+                    sender_is_bot=bool(row[12]),
+                    edited_at=row[13],
+                    deleted_at=row[14],
+                    media_kind=row[15],
+                    media_meta=(json.loads(row[16]) if row[16] else None),
+                )
+                clean_reply = _clean_reply_to(event, topic_id)
+                parent = None
+                if clean_reply:
+                    parent = self._lookup_parent_event(int(event.chat_id), int(clean_reply))
+                base_card = replace(
+                    card,
+                    channels=tuple(
+                        channel for channel in card.channels
+                        if channel not in {"focus", "leader", "archive"}
+                    ),
+                    tags=tuple(
+                        tag for tag in card.tags
+                        if tag not in {"会长", "被@", "归档", "回复我", "回复别人", "提到别人", "我发出"}
+                        and not str(tag).startswith("关键词:")
+                        and not str(tag).startswith("重点排除:")
+                    ),
+                )
+                filtered = enrich_filter_channels(
+                    base_card,
+                    event,
+                    settings,
+                    is_game_bot_sender=self._is_game_bot_sender,
+                    parent_event=parent,
+                    my_identity_ids=my_identity_ids,
+                )
+                updated_card = replace(
+                    card,
+                    channels=filtered.channels,
+                    tags=filtered.tags,
+                    reply_to_msg_id=clean_reply if card.reply_to_msg_id is None else card.reply_to_msg_id,
+                )
+                if updated_card.channels != card.channels or updated_card.tags != card.tags:
+                    updates.append((
+                        updated_card.primary_channel,
+                        json.dumps(list(updated_card.channels), ensure_ascii=False),
+                        json.dumps(updated_card.to_api(), ensure_ascii=False),
+                        rowid,
+                    ))
+            if updates:
+                conn.executemany(
+                    """
+                    UPDATE parsed_cards
+                    SET primary_channel=?, channels_json=?, payload_json=?
+                    WHERE rowid=?
+                    """,
+                    updates,
+                )
+        return len(updates)
 
     def list_cards(self, channel: str = "all") -> tuple[ParsedCard, ...]:
         sql = "SELECT payload_json FROM parsed_cards ORDER BY rowid DESC"

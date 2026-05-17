@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: composer-secondary-menus 2026-05-18T02:10
-console.log("[mini-web] build: composer-secondary-menus 2026-05-18T02:10 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: composer-enter-send 2026-05-18T02:25
+console.log("[mini-web] build: composer-enter-send 2026-05-18T02:25 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -5450,7 +5450,7 @@ if (directSendIdentitySelect) {
 
 if (directSendInput) {
   directSendInput.addEventListener("keydown", (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+    if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       sendDirectComposerMessage();
     }
