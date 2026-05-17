@@ -634,9 +634,11 @@ class SQLiteStore:
     def list_state_patches(self, scope: str = "", send_as_id: int = 0) -> list[dict]:
         """列出 state patches。
         - scope:可选,空字符串返回全部 scope
-        - send_as_id:0 = 不过滤(返回所有身份);>0 = 只返回该身份的 patch,
-          补上 send_as_id=0 的全局 patch(作为兜底),并按 send_as_id desc 排序
-          → 同 key 多版本时,身份特定的覆盖全局兜底。
+        - send_as_id:0 = 不过滤(返回所有身份);>0 = **严格**只返回该身份的 patch。
+
+        老脚本对 identity_profile 是 per-identity 严格隔离的(model/state.py),
+        不要 fallback 到 send_as_id=0 — 否则字段会从别人/历史污染过来
+        (例如 称号 跟身份不匹配)。要兜底就让 UI 显示「—」。
         """
         scope = str(scope or "").strip()
         send_as_id = int(send_as_id or 0)
@@ -647,7 +649,7 @@ class SQLiteStore:
                 where.append("scope=?")
                 params.append(scope)
             if send_as_id > 0:
-                where.append("(send_as_id=? OR send_as_id=0)")
+                where.append("send_as_id=?")
                 params.append(send_as_id)
             where_sql = ("WHERE " + " AND ".join(where)) if where else ""
             rows = conn.execute(
@@ -655,18 +657,12 @@ class SQLiteStore:
                 SELECT scope, send_as_id, key, value_json, source_message_id, updated_at
                 FROM state_patches
                 {where_sql}
-                ORDER BY send_as_id DESC, updated_at DESC, scope ASC, key ASC
+                ORDER BY updated_at DESC, scope ASC, key ASC
                 """,
                 params,
             ).fetchall()
-        # 按 (scope, key) 去重,优先取 send_as_id>0 的(因为 ORDER BY send_as_id DESC)
-        seen: set[tuple[str, str]] = set()
         out: list[dict] = []
         for row in rows:
-            key_tuple = (row[0], row[2])
-            if send_as_id > 0 and key_tuple in seen:
-                continue
-            seen.add(key_tuple)
             out.append(
                 StatePatch(
                     scope=row[0],
