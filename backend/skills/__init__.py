@@ -175,19 +175,38 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
 )
 
 
+INTERNAL_SKILLS: tuple[Skill, ...] = (
+    Skill(
+        "manual_send",
+        "内部",
+        "手动发送",
+        "",
+        reply_mode="optional",
+        note="UI 主动发送/回复入口专用;不暴露到底部技能盘",
+    ),
+)
+
+
 class SkillRegistry:
     def __init__(self, skills: tuple[Skill, ...] = DEFAULT_SKILLS):
-        self._skills_by_key: dict[str, Skill] = {skill.key: skill for skill in skills}
+        self._public_skills = tuple(skills)
+        internal = tuple(
+            skill for skill in INTERNAL_SKILLS
+            if all(skill.key != public.key for public in self._public_skills)
+        )
+        self._skills_by_key: dict[str, Skill] = {
+            skill.key: skill for skill in (*self._public_skills, *internal)
+        }
 
     def list(self) -> tuple[Skill, ...]:
-        return tuple(self._skills_by_key.values())
+        return self._public_skills
 
     def get(self, key: str) -> Skill | None:
         return self._skills_by_key.get(str(key or "").strip())
 
     def list_groups(self) -> list[str]:
         seen: list[str] = []
-        for skill in self._skills_by_key.values():
+        for skill in self._public_skills:
             if skill.group not in seen:
                 seen.append(skill.group)
         return seen
@@ -201,4 +220,4 @@ class SkillRegistry:
         }
 
 
-__all__ = ["Skill", "SkillRegistry", "DEFAULT_SKILLS"]
+__all__ = ["Skill", "SkillRegistry", "DEFAULT_SKILLS", "INTERNAL_SKILLS"]

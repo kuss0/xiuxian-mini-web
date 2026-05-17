@@ -855,6 +855,8 @@ textarea:focus-visible {
 
 .topbar-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
 }
 
@@ -1178,12 +1180,19 @@ textarea:focus-visible {
   transition: box-shadow 0.12s ease, border-color 0.12s ease;
 }
 
+.chat-head-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 .chat-head {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: 8px 12px;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   border: 0;
   background: transparent;
   padding: 0;
@@ -1193,6 +1202,32 @@ textarea:focus-visible {
 
 .chat-head:focus-visible {
   outline: none;
+}
+
+.chat-message-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.chat-reply-button {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  padding: 3px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.chat-reply-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chat-reply-button:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .chat-source {
@@ -2162,6 +2197,31 @@ pre {
   gap: 10px;
 }
 
+.manual-send-modal {
+  gap: 12px;
+}
+
+.manual-send-context {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 9px 10px;
+}
+
+.manual-send-context span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.manual-send-context strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 .modal-section h4 {
   margin: 0;
   font-size: 13px;
@@ -2367,6 +2427,7 @@ pre {
 
 .form-grid input,
 .form-grid select,
+.form-grid textarea,
 .stacked-field textarea {
   width: 100%;
   border: 1px solid var(--line);
@@ -2374,6 +2435,11 @@ pre {
   background: var(--surface);
   color: var(--text);
   padding: 9px 10px;
+}
+
+.form-grid textarea {
+  min-height: 120px;
+  resize: vertical;
 }
 
 .picker-grid {

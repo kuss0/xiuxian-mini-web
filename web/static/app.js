@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: focus-filter-schedule 2026-05-17T00:00
-console.log("[mini-web] build: focus-filter-schedule 2026-05-17T00:00 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: manual-send 2026-05-18T00:00
+console.log("[mini-web] build: manual-send 2026-05-18T00:00 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -53,6 +53,7 @@ const detailPanel = document.querySelector("#detailPanel");
 const detailState = document.querySelector("#detailState");
 const identitySnapshot = document.querySelector("#identitySnapshot");
 const refreshButton = document.querySelector("#refreshButton");
+const manualSendButton = document.querySelector("#manualSendButton");
 const outboxButton = document.querySelector("#outboxButton");
 const scheduleButton = document.querySelector("#scheduleButton");
 const logsButton = document.querySelector("#logsButton");
@@ -1264,17 +1265,24 @@ function renderChatMessageNode(message) {
   const sourceClass = isNumericSource(message.source) ? "chat-source numeric" : "chat-source";
   const replyContext = renderReplyContext(message);
 
+  const canReply = Number(message.chat_id || 0) !== 0 && Number(message.msg_id || 0) > 0;
   row.innerHTML = `
     <button type="button" class="chat-avatar-btn" data-chat-action="select" aria-label="查看消息详情">
       <span class="chat-avatar" aria-hidden="true">${escapeHtml(sourceInitial(message.source, kind))}</span>
     </button>
     <div class="chat-body">
-      <button type="button" class="chat-head" data-chat-action="select">
-        <strong class="${sourceClass}">${escapeHtml(sourceText)}</strong>
-        <span class="chat-time">${escapeHtml(formatChatTime(message.time))}</span>
-        <span class="chat-channels">${channels}</span>
-        ${riskBadge}
-      </button>
+      <div class="chat-head-row">
+        <button type="button" class="chat-head" data-chat-action="select">
+          <strong class="${sourceClass}">${escapeHtml(sourceText)}</strong>
+          <span class="chat-time">${escapeHtml(formatChatTime(message.time))}</span>
+          <span class="chat-channels">${channels}</span>
+          ${riskBadge}
+        </button>
+        <div class="chat-message-actions">
+          <button type="button" class="chat-reply-button" data-chat-action="reply" ${canReply ? "" : "disabled"}
+                  title="${canReply ? "回复这条 Telegram 消息" : "这条卡片缺少 Telegram msg_id,不能回复"}">回复</button>
+        </div>
+      </div>
       ${replyContext}
       <div class="chat-text" data-chat-action="select">${textHtml}</div>
       ${truncated ? `<button type="button" class="chat-toggle" data-chat-action="toggle">${isExpanded ? "收起全文" : "展开全文"}</button>` : ""}
@@ -1283,6 +1291,14 @@ function renderChatMessageNode(message) {
   `;
 
   row.addEventListener("click", async (event) => {
+    const reply = event.target.closest('[data-chat-action="reply"]');
+    if (reply) {
+      event.stopPropagation();
+      if (!reply.disabled) {
+        openManualSendModal(message);
+      }
+      return;
+    }
     const toggle = event.target.closest('[data-chat-action="toggle"]');
     if (toggle) {
       event.stopPropagation();
@@ -4891,6 +4907,238 @@ async function postJson(url, payload) {
   return response.json();
 }
 
+function identityById(identityId) {
+  const id = Number(identityId || 0);
+  return (state.identities || []).find((identity) => Number(identity.send_as_id || 0) === id) || null;
+}
+
+function accountForIdentity(identity) {
+  if (!identity) return null;
+  return (state.accounts || []).find((account) => account.local_id === identity.account_local_id) || null;
+}
+
+function identityCanSend(identity) {
+  const account = accountForIdentity(identity);
+  const accountId = Number(account?.account_id || 0);
+  const identityId = Number(identity?.send_as_id || 0);
+  return Boolean(account && accountId && identityId && accountId === identityId);
+}
+
+function identityOptionLabel(identity) {
+  const account = accountForIdentity(identity);
+  const name = identity?.label || identity?.username || identity?.send_as_id || "未命名身份";
+  const accountLabel = account?.label || identity?.account_local_id || "未绑定账号";
+  const suffix = identityCanSend(identity) ? "" : "（暂不能发送）";
+  return `${name}｜账号 ${accountLabel}${suffix}`;
+}
+
+function defaultManualIdentityId() {
+  const active = identityById(state.activeIdentityId);
+  if (active && identityCanSend(active)) {
+    return Number(active.send_as_id);
+  }
+  const firstSelf = (state.identities || []).find((identity) => identityCanSend(identity));
+  if (firstSelf) {
+    return Number(firstSelf.send_as_id);
+  }
+  return Number((active || (state.identities || [])[0] || {}).send_as_id || 0);
+}
+
+function manualSendIdentityOptions(selectedId) {
+  const selected = Number(selectedId || 0);
+  return (state.identities || []).map((identity) => {
+    const id = Number(identity.send_as_id || 0);
+    const canSend = identityCanSend(identity);
+    return `
+      <option value="${escapeAttr(String(id))}" ${id === selected ? "selected" : ""} ${canSend ? "" : "disabled"}>
+        ${escapeHtml(identityOptionLabel(identity))}
+      </option>
+    `;
+  }).join("");
+}
+
+function manualMessagePreview(message) {
+  if (!message) return "";
+  const raw = String(message.raw || message.summary || message.title || "").trim();
+  const compact = raw.replace(/\s+/g, " ").slice(0, 120);
+  const source = displaySource(message.source);
+  const msgId = message.msg_id ? `#${message.msg_id}` : message.id || "";
+  return `${source} ${msgId}${compact ? `：${compact}` : ""}`;
+}
+
+function openManualSendModal(replyMessage = null) {
+  if (!state.identities.length) {
+    showSkillToast("请先登录账号并生成身份", "err");
+    return;
+  }
+  const selectedId = defaultManualIdentityId();
+  const identity = identityById(selectedId);
+  const account = accountForIdentity(identity);
+  const replyTo = Number(replyMessage?.msg_id || 0);
+  const replyChat = Number(replyMessage?.chat_id || 0);
+  const initialChat = replyChat || account?.target_chat || "";
+  const initialTopic = account?.target_topic_id || "";
+  const context = replyMessage
+    ? `
+      <div class="manual-send-context">
+        <span>回复对象</span>
+        <strong>${escapeHtml(manualMessagePreview(replyMessage))}</strong>
+      </div>
+    `
+    : `
+      <div class="manual-send-context">
+        <span>发送方式</span>
+        <strong>手动输入内容，确认后通过当前账号 Telegram client 发送</strong>
+      </div>
+    `;
+  const dialog = openModal({
+    title: replyMessage ? "回复消息" : "主动发送消息",
+    body: `
+      <section class="modal-section manual-send-modal">
+        ${context}
+        <form id="manualSendForm">
+          <div class="form-grid">
+            <label class="span-2">
+              <span>发送身份</span>
+              <select name="identity_id">${manualSendIdentityOptions(selectedId)}</select>
+            </label>
+            <label>
+              <span>目标群 / 频道</span>
+              <input name="chat_id" inputmode="numeric" value="${escapeAttr(String(initialChat || ""))}" placeholder="留空走账号默认 target_chat" />
+            </label>
+            <label>
+              <span>话题 ID</span>
+              <input name="top_msg_id" inputmode="numeric" value="${escapeAttr(String(initialTopic || ""))}" placeholder="留空走账号默认话题" />
+            </label>
+            <label>
+              <span>回复消息 ID</span>
+              <input name="reply_to_msg_id" inputmode="numeric" value="${replyTo ? escapeAttr(String(replyTo)) : ""}" placeholder="可选；回复时自动填入" />
+            </label>
+            <label class="span-2 stacked-field">
+              <span>发送内容</span>
+              <textarea name="command" rows="5" placeholder="例如 .查看闭关，或输入任意要发到 Telegram 的文本"></textarea>
+            </label>
+          </div>
+        </form>
+        <p id="manualSendStatus" class="modal-status-line info">只会在你点击「发送」后发出；不会根据消息内容自动触发。</p>
+      </section>
+    `,
+    footer: `
+      <button type="button" data-modal-close>关闭</button>
+      <button type="button" class="primary" id="manualSendConfirm">发送</button>
+    `,
+  });
+  if (!dialog) return;
+  bindManualSendModal(dialog, { replyMessage });
+}
+
+function bindManualSendModal(dialog, { replyMessage = null } = {}) {
+  const form = dialog.querySelector("#manualSendForm");
+  const identitySelect = form?.querySelector('[name="identity_id"]');
+  const chatInput = form?.querySelector('[name="chat_id"]');
+  const topicInput = form?.querySelector('[name="top_msg_id"]');
+  const commandInput = form?.querySelector('[name="command"]');
+  const status = dialog.querySelector("#manualSendStatus");
+  const confirm = dialog.querySelector("#manualSendConfirm");
+  if (!form || !identitySelect || !commandInput || !confirm) return;
+
+  const syncTargetDefaults = (force = false) => {
+    const identity = identityById(identitySelect.value);
+    const account = accountForIdentity(identity);
+    if (!replyMessage && chatInput && (force || !chatInput.value.trim())) {
+      chatInput.value = account?.target_chat || "";
+    }
+    if (topicInput && (force || !topicInput.value.trim())) {
+      topicInput.value = account?.target_topic_id || "";
+    }
+    const canSend = identity && identityCanSend(identity);
+    confirm.disabled = !canSend;
+    if (!canSend && status) {
+      status.className = "modal-status-line warn";
+      status.textContent = "当前身份不是账号本体，暂不能发送。请选择自己身份。";
+    } else if (status && status.classList.contains("warn")) {
+      status.className = "modal-status-line info";
+      status.textContent = "只会在你点击「发送」后发出；不会根据消息内容自动触发。";
+    }
+  };
+
+  identitySelect.addEventListener("change", () => syncTargetDefaults(true));
+  commandInput.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      confirm.click();
+    }
+  });
+
+  confirm.addEventListener("click", async () => {
+    const data = new FormData(form);
+    const command = String(data.get("command") || "").trim();
+    const identityId = Number(data.get("identity_id") || 0);
+    if (!identityId) {
+      if (status) {
+        status.className = "modal-status-line error";
+        status.textContent = "请选择发送身份。";
+      }
+      return;
+    }
+    if (!command) {
+      if (status) {
+        status.className = "modal-status-line error";
+        status.textContent = "发送内容不能为空。";
+      }
+      commandInput.focus();
+      return;
+    }
+    const payload = {
+      skill_key: "manual_send",
+      identity_id: identityId,
+      command_override: command,
+    };
+    const chatId = String(data.get("chat_id") || "").trim();
+    const topicId = String(data.get("top_msg_id") || "").trim();
+    const replyTo = String(data.get("reply_to_msg_id") || "").trim();
+    if (chatId) payload.chat_id = chatId;
+    if (topicId) payload.top_msg_id = topicId;
+    if (replyTo) payload.reply_to_msg_id = replyTo;
+
+    confirm.disabled = true;
+    if (status) {
+      status.className = "modal-status-line info";
+      status.textContent = "正在发送...";
+    }
+    try {
+      const result = await postJson("/api/skills/send", payload);
+      if (result.ok) {
+        const replyText = result.reply_to_msg_id ? `，回复 #${result.reply_to_msg_id}` : "";
+        if (status) {
+          status.className = "modal-status-line ok";
+          status.textContent = `已发送 #${result.sent_msg_id || "?"}${replyText}`;
+        }
+        showSkillToast(`✅ 已发: ${result.command}`, "ok");
+        commandInput.value = "";
+        await loadMessages().catch((err) => console.warn("[manual-send] refresh failed:", err));
+      } else {
+        if (status) {
+          status.className = "modal-status-line error";
+          status.textContent = result.error || "发送失败";
+        }
+        showSkillToast(`❌ ${result.error || "发送失败"}`, "err");
+      }
+    } catch (error) {
+      if (status) {
+        status.className = "modal-status-line error";
+        status.textContent = error.message || "发送出错";
+      }
+      showSkillToast(`❌ ${error.message || "发送出错"}`, "err");
+    } finally {
+      syncTargetDefaults(false);
+    }
+  });
+
+  syncTargetDefaults(false);
+  window.setTimeout(() => commandInput.focus(), 0);
+}
+
 selectAllChannels.addEventListener("click", () => {
   if (state.selectedChannels.size === state.channels.length) {
     state.selectedChannels.clear();
@@ -4954,6 +5202,17 @@ refreshButton.addEventListener("click", async () => {
     refreshButton.disabled = false;
   }
 });
+
+if (manualSendButton) {
+  manualSendButton.addEventListener("click", async () => {
+    try {
+      await Promise.all([loadAccounts(), loadIdentities()]);
+      openManualSendModal();
+    } catch (error) {
+      showError(error);
+    }
+  });
+}
 
 outboxButton.addEventListener("click", async () => {
   state.detailMode = "drafts";

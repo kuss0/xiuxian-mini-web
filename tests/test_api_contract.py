@@ -2127,6 +2127,15 @@ def test_skills_payload_exposes_default_layout():
     # 查询组里至少要有 储物袋 / 战力 / 我的灵根
     query_skills = {s["key"] for s in payload["skills"] if s["group"] == "查询"}
     assert {"storage_bag", "battle_power", "identity_info"} <= query_skills
+    # 手动发送是 UI 内部出口,不能污染底部技能盘分组
+    assert "manual_send" not in by_key
+
+
+def test_manual_send_skill_is_internal_but_registered():
+    from backend.skills import SkillRegistry
+    registry = SkillRegistry()
+    assert registry.get("manual_send") is not None
+    assert all(skill.key != "manual_send" for skill in registry.list())
 
 
 def test_skill_send_rejects_unknown_skill(tmp_path):
@@ -2295,6 +2304,53 @@ def test_skill_send_dungeon_join_uses_command_override(tmp_path, monkeypatch):
     )
     assert result["ok"] is True
     assert captured["command"] == ".加入副本 123"
+    assert captured["kwargs"].get("reply_to") == 7000
+
+
+def test_manual_send_uses_command_override_and_optional_reply(tmp_path, monkeypatch):
+    """顶部主动发送 / 消息卡回复共用 manual_send,但命令必须来自人工输入的 override。"""
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "1", "api_hash": "h",
+         "account_id": "8574677796", "target_chat": "-1001680975844",
+         "target_topic_id": "7310786"}
+    )
+    server.save_identity_payload(
+        {"send_as_id": "8574677796", "account_local_id": "main", "label": "self"}
+    )
+    captured: dict = {}
+
+    class FakeClient:
+        async def get_input_entity(self, chat_id):
+            return chat_id
+
+        async def send_message(self, chat_id, command, **kwargs):
+            captured["chat_id"] = chat_id
+            captured["command"] = command
+            captured["kwargs"] = kwargs
+            class _Sent:
+                id = 88001
+            return _Sent()
+
+    class FakeListener:
+        def submit(self, coro_factory, *, timeout=30.0):
+            import asyncio
+            return asyncio.new_event_loop().run_until_complete(coro_factory(FakeClient()))
+    monkeypatch.setattr(server._listeners, "get_listener", lambda _id: FakeListener())
+
+    result = server.skill_send_payload(
+        {
+            "skill_key": "manual_send",
+            "identity_id": 8574677796,
+            "command_override": "今晚手动看一下",
+            "reply_to_msg_id": 7000,
+            "top_msg_id": "0",
+        }
+    )
+    assert result["ok"] is True
+    assert result["command"] == "今晚手动看一下"
+    assert captured["chat_id"] == -1001680975844
+    assert captured["command"] == "今晚手动看一下"
     assert captured["kwargs"].get("reply_to") == 7000
 
 
