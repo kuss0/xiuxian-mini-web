@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: quick-actions-direct-send 2026-05-18T01:00
-console.log("[mini-web] build: quick-actions-direct-send 2026-05-18T01:00 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: composer-secondary-menus 2026-05-18T02:10
+console.log("[mini-web] build: composer-secondary-menus 2026-05-18T02:10 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -38,6 +38,8 @@ const state = {
   skillGroups: [],       // 分组顺序
   skillBarTab: "日常",   // 当前激活 tab
   skillBarBusyKeys: new Set(),  // 正在发送中的 key,临时禁用
+  directSendIdentityId: null,
+  directSendLastActiveId: null,
 };
 
 const MESSAGE_PREVIEW_CHAR_LIMIT = 480;
@@ -54,6 +56,14 @@ const detailState = document.querySelector("#detailState");
 const identitySnapshot = document.querySelector("#identitySnapshot");
 const refreshButton = document.querySelector("#refreshButton");
 const manualSendButton = document.querySelector("#manualSendButton");
+const directSendComposer = document.querySelector("#directSendComposer");
+const directSendIdentityLine = document.querySelector("#directSendIdentityLine");
+const directSendIdentitySelect = document.querySelector("#directSendIdentitySelect");
+const directSendInput = document.querySelector("#directSendInput");
+const directSendSubmit = document.querySelector("#directSendSubmit");
+const directSendStatus = document.querySelector("#directSendStatus");
+const openSkillMenuButton = document.querySelector("#openSkillMenuButton");
+const openCultivationButton = document.querySelector("#openCultivationButton");
 const outboxButton = document.querySelector("#outboxButton");
 const scheduleButton = document.querySelector("#scheduleButton");
 const logsButton = document.querySelector("#logsButton");
@@ -238,6 +248,7 @@ async function loadAccounts() {
   state.accountLimit = payload.max_accounts || 0;
   state.listenerSummary = payload.listener || null;
   renderSidebarIdentityList();
+  renderDirectSendComposer();
   updateCurrentAccountLine();
   updateAccountActionGuards();
   return payload;
@@ -248,7 +259,8 @@ async function loadIdentities() {
   state.identities = payload.identities || [];
   state.identityLimit = payload.max_identities || 0;
   renderSidebarIdentityList();
-  renderSkillBar();
+  renderSkillViews();
+  renderDirectSendComposer();
   renderCharacterHud();
   // 身份状态机摘要(深度闭关 / 抚摸 / 温养)— 失败不阻塞
   loadIdentityModuleStates().catch((err) => console.warn("[mini-web] identity state fetch failed:", err));
@@ -265,6 +277,7 @@ async function loadIdentityModuleStates() {
     state.identityModuleStates = map;
     renderSidebarIdentityList();
     renderCultivationModules();
+    renderDirectSendComposer();
   } catch (err) {
     console.warn("[mini-web] loadIdentityModuleStates:", err);
   }
@@ -278,7 +291,8 @@ async function loadIdentityPatches() {
   state.identityPatches = payload.state || [];
   renderIdentitySnapshot();
   renderCharacterHud();
-  renderSkillBar();
+  renderSkillViews();
+  renderDirectSendComposer();
   renderSidebarIdentityList();  // profile chips 也跟着重画
   return state.identityPatches;
 }
@@ -2802,7 +2816,8 @@ function renderSidebarIdentityList() {
       const id = Number(row.dataset.identityRow);
       state.activeIdentityId = state.activeIdentityId === id ? null : id;
       renderSidebarIdentityList();
-      renderSkillBar();
+      renderSkillViews();
+      renderDirectSendComposer();
       renderCharacterHud();
       renderCultivationModules();
       // 切换身份 → 重新拉这个身份的 state patches
@@ -2843,16 +2858,21 @@ const CULTIVATION_MODULE_SPECS = [
 ];
 
 function renderCultivationModules() {
-  if (!cultivationModules) return;
+  renderCultivationModulesInto(cultivationModules);
+  renderCultivationModal();
+}
+
+function renderCultivationModulesInto(container) {
+  if (!container) return;
   const activeId = state.activeIdentityId;
   if (!activeId) {
-    cultivationModules.innerHTML = '<p class="empty">选一个身份后,这里显示模块状态。</p>';
+    container.innerHTML = '<p class="empty">选一个身份后,这里显示模块状态。</p>';
     return;
   }
   const moduleStates = state.identityModuleStates.get(Number(activeId)) || [];
   const byKey = new Map(moduleStates.map((m) => [m.module_key, m]));
   const now = Date.now() / 1000;
-  cultivationModules.innerHTML = CULTIVATION_MODULE_SPECS.map((spec) => {
+  container.innerHTML = CULTIVATION_MODULE_SPECS.map((spec) => {
     const ms = byKey.get(spec.key);
     let timerText = "—";
     let timerCls = "muted";
@@ -2877,12 +2897,36 @@ function renderCultivationModules() {
     }
     return _cultivationCardHtml(spec, timerText, timerCls, 0, 0, 0);
   }).join("");
-  cultivationModules.querySelectorAll("[data-cult-fire]").forEach((btn) => {
+  container.querySelectorAll("[data-cult-fire]").forEach((btn) => {
     btn.addEventListener("click", () => sendSkill(btn.dataset.cultFire));
   });
-  cultivationModules.querySelectorAll("[data-cult-query]").forEach((btn) => {
+  container.querySelectorAll("[data-cult-query]").forEach((btn) => {
     btn.addEventListener("click", () => sendSkill(btn.dataset.cultQuery));
   });
+}
+
+function renderCultivationModal() {
+  const container = modalRoot?.querySelector("#cultivationModalModules");
+  if (!container) return;
+  renderCultivationModulesInto(container);
+}
+
+function openCultivationModal() {
+  const active = identityById(state.activeIdentityId);
+  const titleSuffix = active ? `｜${active.label || active.username || active.send_as_id}` : "";
+  const dialog = openModal({
+    title: `修炼状态${titleSuffix}`,
+    body: `
+      <section class="modal-section cultivation-menu-modal">
+        <div id="cultivationModalModules" class="cultivation-modules">
+          <p class="empty">正在载入...</p>
+        </div>
+      </section>
+    `,
+    footer: `<button type="button" data-modal-close>关闭</button>`,
+  });
+  if (!dialog) return;
+  renderCultivationModal();
 }
 
 function _cultivationCardHtml(spec, timerText, timerCls, pct, nextAt, startTs) {
@@ -2907,8 +2951,7 @@ function _cultivationCardHtml(spec, timerText, timerCls, pct, nextAt, startTs) {
 }
 
 function tickCultivationModules() {
-  if (!cultivationModules) return;
-  const timers = cultivationModules.querySelectorAll("[data-cult-timer]");
+  const timers = document.querySelectorAll("[data-cult-timer]");
   if (!timers.length) return;
   const now = Date.now() / 1000;
   let needRerender = false;
@@ -3046,7 +3089,7 @@ function tickSkillBarChips() {
       anyExpired = true;
     }
   });
-  if (anyExpired) renderSkillBar();
+  if (anyExpired) renderSkillViews();
 }
 
 function identityRowStatusText(identity, account) {
@@ -5041,6 +5084,103 @@ function manualSendIdentityOptions(selectedId) {
   }).join("");
 }
 
+function directSendSelectedIdentityId() {
+  const activeId = Number(state.activeIdentityId || 0);
+  if (activeId && state.directSendLastActiveId !== activeId) {
+    state.directSendLastActiveId = activeId;
+    state.directSendIdentityId = activeId;
+  }
+  if (state.directSendIdentityId && identityById(state.directSendIdentityId)) {
+    return Number(state.directSendIdentityId);
+  }
+  const fallback = activeId || defaultManualIdentityId();
+  state.directSendIdentityId = fallback || null;
+  return Number(fallback || 0);
+}
+
+function renderDirectSendComposer() {
+  if (!directSendComposer || !directSendIdentitySelect || !directSendSubmit) return;
+  if (!state.identities.length) {
+    directSendIdentitySelect.innerHTML = '<option value="">先登录账号</option>';
+    directSendIdentitySelect.disabled = true;
+    directSendSubmit.disabled = true;
+    if (directSendIdentityLine) directSendIdentityLine.textContent = "未登录";
+    return;
+  }
+
+  const selectedId = directSendSelectedIdentityId();
+  directSendIdentitySelect.innerHTML = manualSendIdentityOptions(selectedId);
+  directSendIdentitySelect.value = String(selectedId || "");
+  directSendIdentitySelect.disabled = false;
+
+  const identity = identityById(selectedId);
+  const canSend = identity && identityCanSend(identity);
+  directSendSubmit.disabled = !canSend;
+  if (directSendIdentityLine) {
+    if (!identity) {
+      directSendIdentityLine.textContent = "未选身份";
+    } else {
+      const name = identity.label || identity.username || identity.send_as_id;
+      directSendIdentityLine.textContent = canSend ? `当前: ${name}` : `当前身份暂不能发送: ${name}`;
+    }
+  }
+}
+
+function setDirectSendStatus(text, kind = "info") {
+  if (!directSendStatus) return;
+  directSendStatus.textContent = text;
+  directSendStatus.className = `direct-send-status ${kind}`;
+  directSendStatus.hidden = false;
+}
+
+async function sendDirectComposerMessage() {
+  if (!directSendInput || !directSendIdentitySelect || !directSendSubmit) return;
+  if (!state.identities.length || !state.accounts.length) {
+    await Promise.all([loadAccounts(), loadIdentities()]);
+  }
+  const command = directSendInput.value.trim();
+  const identityId = Number(directSendIdentitySelect.value || 0);
+  const identity = identityById(identityId);
+  if (!identityId || !identity) {
+    setDirectSendStatus("请选择发送身份。", "error");
+    return;
+  }
+  if (!identityCanSend(identity)) {
+    setDirectSendStatus("当前只支持账号本体身份发送，请切换到可发送身份。", "warn");
+    return;
+  }
+  if (!command) {
+    setDirectSendStatus("发送内容不能为空。", "error");
+    directSendInput.focus();
+    return;
+  }
+
+  directSendSubmit.disabled = true;
+  setDirectSendStatus("正在发送...", "info");
+  try {
+    const result = await postJson("/api/skills/send", {
+      skill_key: "manual_send",
+      identity_id: identityId,
+      command_override: command,
+    });
+    if (result.ok) {
+      setDirectSendStatus(`已发送 #${result.sent_msg_id || "?"}`, "ok");
+      showSkillToast(`✅ 已发: ${result.command}`, "ok");
+      directSendInput.value = "";
+      await loadMessages().catch((err) => console.warn("[direct-send] refresh failed:", err));
+    } else {
+      setDirectSendStatus(result.error || "发送失败", "error");
+      showSkillToast(`❌ ${result.error || "发送失败"}`, "err");
+    }
+  } catch (error) {
+    const message = error.message || "发送出错";
+    setDirectSendStatus(message, "error");
+    showSkillToast(`❌ ${message}`, "err");
+  } finally {
+    renderDirectSendComposer();
+  }
+}
+
 function manualMessagePreview(message) {
   if (!message) return "";
   const raw = String(message.raw || message.summary || message.title || "").trim();
@@ -5094,17 +5234,11 @@ function openManualSendModal(replyMessage = null, opts = {}) {
         ${context}
         <form id="manualSendForm">
           <div class="form-grid">
+            <input type="hidden" name="chat_id" value="${escapeAttr(String(initialChat || ""))}" />
+            <input type="hidden" name="top_msg_id" value="${escapeAttr(String(initialTopic || ""))}" />
             <label class="span-2">
               <span>发送身份</span>
               <select name="identity_id">${manualSendIdentityOptions(selectedId)}</select>
-            </label>
-            <label>
-              <span>目标群 / 频道</span>
-              <input name="chat_id" inputmode="numeric" value="${escapeAttr(String(initialChat || ""))}" placeholder="留空走账号默认 target_chat" />
-            </label>
-            <label>
-              <span>话题 ID</span>
-              <input name="top_msg_id" inputmode="numeric" value="${escapeAttr(String(initialTopic || ""))}" placeholder="留空走账号默认话题" />
             </label>
             ${replyField}
             <label class="span-2 stacked-field">
@@ -5301,6 +5435,51 @@ if (manualSendButton) {
     try {
       await Promise.all([loadAccounts(), loadIdentities()]);
       openManualSendModal();
+    } catch (error) {
+      showError(error);
+    }
+  });
+}
+
+if (directSendIdentitySelect) {
+  directSendIdentitySelect.addEventListener("change", () => {
+    state.directSendIdentityId = Number(directSendIdentitySelect.value || 0) || null;
+    renderDirectSendComposer();
+  });
+}
+
+if (directSendInput) {
+  directSendInput.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      sendDirectComposerMessage();
+    }
+  });
+}
+
+if (directSendSubmit) {
+  directSendSubmit.addEventListener("click", () => {
+    sendDirectComposerMessage();
+  });
+}
+
+if (openSkillMenuButton) {
+  openSkillMenuButton.addEventListener("click", async () => {
+    try {
+      await Promise.all([loadAccounts(), loadIdentities()]);
+      if (!state.skills.length) await loadSkills();
+      openSkillMenuModal();
+    } catch (error) {
+      showError(error);
+    }
+  });
+}
+
+if (openCultivationButton) {
+  openCultivationButton.addEventListener("click", async () => {
+    try {
+      await Promise.all([loadAccounts(), loadIdentities(), loadIdentityModuleStates()]);
+      openCultivationModal();
     } catch (error) {
       showError(error);
     }
@@ -5604,7 +5783,7 @@ async function loadSkills() {
   } catch (err) {
     console.warn("[skills] load failed", err);
   }
-  renderSkillBar();
+  renderSkillViews();
 }
 
 // 当前激活身份的宗门 / 境界 — 从 identity_profile state_patches 拿。
@@ -5645,32 +5824,68 @@ function skillIsUnlocked(skill) {
 }
 
 function renderSkillBar() {
-  if (!skillBarTabs || !skillBarChips) return;
+  renderSkillPanel(skillBarTabs, skillBarChips, skillBarIdentity, renderSkillBar);
+}
+
+function renderSkillMenuModal() {
+  const tabs = modalRoot?.querySelector("#skillMenuTabs");
+  const chips = modalRoot?.querySelector("#skillMenuChips");
+  const identity = modalRoot?.querySelector("#skillMenuIdentity");
+  renderSkillPanel(tabs, chips, identity, renderSkillMenuModal);
+}
+
+function renderSkillViews() {
+  renderSkillBar();
+  renderSkillMenuModal();
+}
+
+function openSkillMenuModal() {
+  const dialog = openModal({
+    title: "快捷指令",
+    body: `
+      <section class="modal-section skill-menu-modal">
+        <div class="skill-bar-head">
+          <div class="skill-bar-tabs" id="skillMenuTabs"></div>
+          <div class="skill-bar-meta">
+            <span id="skillMenuIdentity" class="skill-bar-identity">未选身份</span>
+          </div>
+        </div>
+        <div id="skillMenuChips" class="skill-bar-chips"></div>
+      </section>
+    `,
+    footer: `<button type="button" data-modal-close>关闭</button>`,
+  });
+  if (!dialog) return;
+  renderSkillMenuModal();
+}
+
+function renderSkillPanel(tabsEl, chipsEl, identityEl, rerender) {
+  if (!tabsEl || !chipsEl) return;
   // 自动选 active identity 如果只有一个
   if (state.activeIdentityId == null && state.identities && state.identities.length === 1) {
     state.activeIdentityId = state.identities[0].send_as_id;
   }
   // tabs
-  skillBarTabs.innerHTML = state.skillGroups.map((g) => {
+  tabsEl.innerHTML = state.skillGroups.map((g) => {
     const cls = g === state.skillBarTab ? "skill-bar-tab active" : "skill-bar-tab";
     return `<button type="button" class="${cls}" data-skill-tab="${escapeAttr(g)}">${escapeHtml(g)}</button>`;
   }).join("");
-  skillBarTabs.querySelectorAll("[data-skill-tab]").forEach((btn) => {
+  tabsEl.querySelectorAll("[data-skill-tab]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.skillBarTab = btn.dataset.skillTab;
-      renderSkillBar();
+      rerender();
     });
   });
   // identity meta
   const activeId = state.activeIdentityId;
   const identity = activeId ? (state.identities || []).find((i) => i.send_as_id === activeId) : null;
-  if (skillBarIdentity) {
+  if (identityEl) {
     if (identity) {
-      skillBarIdentity.textContent = `身份: ${identity.label || identity.username || activeId}`;
-      skillBarIdentity.classList.remove("empty");
+      identityEl.textContent = `身份: ${identity.label || identity.username || activeId}`;
+      identityEl.classList.remove("empty");
     } else {
-      skillBarIdentity.textContent = "未选身份(点左边身份列表)";
-      skillBarIdentity.classList.add("empty");
+      identityEl.textContent = "未选身份(点左边身份列表)";
+      identityEl.classList.add("empty");
     }
   }
   // chips
@@ -5682,14 +5897,14 @@ function renderSkillBar() {
     const hint = sect
       ? `「${state.skillBarTab}」组里没有跟你宗门(${sect})/境界匹配的技能`
       : `「${state.skillBarTab}」组里没有技能`;
-    skillBarChips.innerHTML = `<span class="muted">${escapeHtml(hint)}</span>`;
+    chipsEl.innerHTML = `<span class="muted">${escapeHtml(hint)}</span>`;
     return;
   }
   const modulesByKey = activeId
     ? new Map((state.identityModuleStates.get(Number(activeId)) || []).map((it) => [it.module_key, it]))
     : new Map();
   const now = Date.now() / 1000;
-  skillBarChips.innerHTML = tabSkills.map((skill) => {
+  chipsEl.innerHTML = tabSkills.map((skill) => {
     const isReply = skill.reply_mode === "required";
     const moduleState = skill.cd_module ? modulesByKey.get(skill.cd_module) : null;
     const cdUntil = moduleState
@@ -5719,7 +5934,7 @@ function renderSkillBar() {
       </button>
     `;
   }).join("");
-  skillBarChips.querySelectorAll("[data-skill-key]").forEach((btn) => {
+  chipsEl.querySelectorAll("[data-skill-key]").forEach((btn) => {
     btn.addEventListener("click", () => sendSkill(btn.dataset.skillKey));
   });
 }
@@ -5733,7 +5948,7 @@ async function sendSkill(skillKey, opts) {
   }
   if (state.skillBarBusyKeys.has(skillKey)) return;
   state.skillBarBusyKeys.add(skillKey);
-  renderSkillBar();
+  renderSkillViews();
   try {
     const payload = { skill_key: skillKey, identity_id: activeId };
     if (opts.reply_to_msg_id) payload.reply_to_msg_id = opts.reply_to_msg_id;
@@ -5750,7 +5965,7 @@ async function sendSkill(skillKey, opts) {
     showSkillToast(`❌ ${(err && err.message) || "发送出错"}`, "err");
   } finally {
     state.skillBarBusyKeys.delete(skillKey);
-    renderSkillBar();
+    renderSkillViews();
   }
 }
 

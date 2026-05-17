@@ -874,19 +874,6 @@ textarea:focus-visible {
   color: var(--accent);
 }
 
-#manualSendButton {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
-  font-weight: 600;
-}
-
-#manualSendButton:hover {
-  background: #1d4ed8;
-  border-color: #1d4ed8;
-  color: #fff;
-}
-
 .layout-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
@@ -2976,6 +2963,27 @@ pre {
   .action-draft-buttons button {
     width: 100%;
   }
+
+  .direct-send-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .direct-send-tools {
+    justify-content: stretch;
+  }
+
+  .direct-send-tools button {
+    flex: 1;
+  }
+
+  .direct-send-row {
+    grid-template-columns: 1fr;
+  }
+
+  #directSendSubmit {
+    width: 100%;
+  }
 }
 
 /* 页游化:卡片专用渲染器(richer card view in detail panel) */
@@ -3281,7 +3289,135 @@ pre {
   color: #f87171;
 }
 
-/* ---------- 技能盘(底栏)---------- */
+/* ---------- 主发送栏 ---------- */
+.direct-send-composer {
+  margin-top: 14px;
+  padding: 10px 12px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.90), rgba(2, 6, 23, 0.94));
+  backdrop-filter: blur(8px);
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.35);
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+}
+
+.direct-send-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.direct-send-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.direct-send-title strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.direct-send-title span {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.direct-send-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.direct-send-tools button {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.direct-send-tools button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.direct-send-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 210px) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.direct-send-row label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.direct-send-row label span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.direct-send-row select,
+.direct-send-row textarea {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.84);
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.direct-send-row textarea {
+  min-height: 42px;
+  max-height: 120px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+#directSendSubmit {
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  padding: 9px 18px;
+  font-weight: 600;
+}
+
+#directSendSubmit:hover:not(:disabled) {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+#directSendSubmit:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.direct-send-status {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+.direct-send-status.info { color: var(--muted); }
+.direct-send-status.ok { color: #86efac; }
+.direct-send-status.warn { color: #fbbf24; }
+.direct-send-status.error { color: #fecaca; }
+
+/* ---------- 技能盘(二级菜单)---------- */
 .skill-bar {
   margin-top: 14px;
   padding: 10px 12px 12px;
@@ -3293,6 +3429,11 @@ pre {
   position: sticky;
   bottom: 0;
   z-index: 5;
+}
+
+.skill-menu-modal {
+  display: grid;
+  gap: 10px;
 }
 
 .skill-bar-head {
