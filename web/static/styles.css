@@ -359,15 +359,143 @@ textarea:focus-visible {
 }
 
 .identity-row strong {
-  display: block;
+  display: inline-block;
   font-size: 13px;
   margin-bottom: 2px;
 }
 
+.identity-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.identity-row-sub {
+  font-size: 11px;
+  color: var(--sidebar-muted);
+  margin-bottom: 4px;
+}
+
+.identity-row-sub .muted {
+  opacity: 0.7;
+}
+
+.identity-row-profile {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.identity-row-profile .row-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--sidebar-text);
+}
+
+.row-chip.realm { border-color: rgba(168, 85, 247, 0.30); }
+.row-chip.root  { border-color: rgba(34, 197, 94, 0.25); }
+.row-chip.sect  { border-color: rgba(56, 189, 248, 0.25); }
+.row-chip.title { border-color: rgba(245, 158, 11, 0.30); }
+
 .identity-row-status {
-  display: block;
+  display: inline-block;
   color: var(--sidebar-muted);
   font-size: 11px;
+  white-space: nowrap;
+}
+
+/* ---------- 修炼面板(侧栏) ---------- */
+.cultivation-panel { margin-top: 10px; }
+
+.cultivation-modules {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cult-card {
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  background: #0f172a;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cult-card.cooling { border-color: rgba(94, 234, 212, 0.30); }
+.cult-card.ready   { border-color: rgba(34, 197, 94, 0.45); }
+
+.cult-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cult-icon { font-size: 16px; line-height: 1; }
+.cult-label { font-weight: 600; font-size: 13px; color: var(--sidebar-text); flex: 1; }
+.cult-timer {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cult-timer.cooling { color: #5eead4; }
+.cult-timer.ready   { color: #4ade80; }
+.cult-timer.muted   { color: var(--sidebar-muted); }
+
+.cult-card-bar {
+  position: relative;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.cult-card-bar-fill {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #6366f1, #a855f7);
+  transform-origin: left center;
+  width: 0%;
+}
+
+.cult-card-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.cult-card-actions button {
+  flex: 1;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--sidebar-text);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.cult-card-actions button:hover:not(:disabled) {
+  background: rgba(168, 85, 247, 0.18);
+  border-color: rgba(168, 85, 247, 0.40);
+}
+
+.cult-card-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cult-card-actions button.secondary {
+  background: rgba(94, 234, 212, 0.06);
 }
 
 .identity-row-modules {

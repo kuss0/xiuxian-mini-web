@@ -65,6 +65,7 @@ const skillBarChips = document.querySelector("#skillBarChips");
 const skillBarIdentity = document.querySelector("#skillBarIdentity");
 const skillToast = document.querySelector("#skillToast");
 const characterHud = document.querySelector("#characterHud");
+const cultivationModules = document.querySelector("#cultivationModules");
 const sidebarIdentityList = document.querySelector("#identityList");
 const currentAccountLine = document.querySelector("#currentAccountLine");
 const gameBotsButton = document.querySelector("#gameBotsButton");
@@ -258,6 +259,7 @@ async function loadIdentityModuleStates() {
     }
     state.identityModuleStates = map;
     renderSidebarIdentityList();
+    renderCultivationModules();
   } catch (err) {
     console.warn("[mini-web] loadIdentityModuleStates:", err);
   }
@@ -272,6 +274,7 @@ async function loadIdentityPatches() {
   renderIdentitySnapshot();
   renderCharacterHud();
   renderSkillBar();
+  renderSidebarIdentityList();  // profile chips 也跟着重画
   return state.identityPatches;
 }
 
@@ -777,8 +780,8 @@ function renderIdentitySnapshot() {
   `;
 }
 
-// 角色 HUD —— 消息流顶部一行 chip,聚合 account + state_patches + identity_module_state。
-// 缺字段时 chip 显示「—」+ 提示发哪个命令补;有就高亮。
+// 角色 HUD —— 消息流顶部一行,瘦身后只展示:@username | #角色ID | 战力 | 修为进度。
+// 角色名/道号/灵根/境界/宗门 已经放在侧栏的身份行(避免顶部太挤),称号没拿到就别造。
 function renderCharacterHud() {
   if (!characterHud) return;
   const patchMap = new Map((state.identityPatches || []).map((p) => [p.key, p.value]));
@@ -788,25 +791,10 @@ function renderCharacterHud() {
 
   const accountId = account?.account_id || (identity ? identity.send_as_id : "");
   const username = patchMap.get("username") || identity?.username || "";
-  const charName = patchMap.get("角色名") || account?.label || "";
-  const daohao = patchMap.get("道号") || "";
-  const realm = patchMap.get("境界") || "";
-  const root = patchMap.get("灵根") || "";
-  const sect = (patchMap.get("宗门") || "").replace(/^【|】$/g, "");
   const power = patchMap.get("综合战力") || "";
   const cultivation = patchMap.get("修为") || "";
-  const title = (patchMap.get("称号") || "").replace(/^【|】$/g, "");
 
   const chips = [];
-  // 角色 chip:角色名 (道号) — 缺时显示 .我的灵根 hint
-  const charText = [charName, daohao ? `(${daohao})` : ""].filter(Boolean).join(" ").trim();
-  chips.push(_hudChip({
-    cls: "char",
-    k: "👤",
-    v: charText || "—",
-    title: charText ? "角色名 / 道号(来自 .战力 / .我的灵根)" : "发 .我的灵根 / .战力 抓取角色名 + 道号",
-    empty: !charText,
-  }));
   if (username) {
     chips.push(_hudChip({ cls: "user", k: "@", v: username, title: "Telegram username" }));
   }
@@ -814,41 +802,17 @@ function renderCharacterHud() {
     chips.push(_hudChip({ cls: "id", k: "#", v: String(accountId), title: "角色ID(== Telegram account_id)" }));
   }
   chips.push(_hudChip({
-    cls: "realm",
-    k: "📿",
-    v: realm || "—",
-    title: realm ? "当前境界" : "发 .战力 / .我的灵根 抓取境界",
-    empty: !realm,
-  }));
-  chips.push(_hudChip({
-    cls: "root",
-    k: "🌿",
-    v: root || "—",
-    title: root ? "灵根" : "发 .我的灵根 抓取灵根",
-    empty: !root,
-  }));
-  chips.push(_hudChip({
-    cls: "sect",
-    k: "🏔️",
-    v: sect || "—",
-    title: sect ? "宗门" : "发 .我的灵根 抓取宗门",
-    empty: !sect,
-  }));
-  chips.push(_hudChip({
     cls: "power",
     k: "⚔️",
     v: power || "—",
     title: power ? "综合战力" : "发 .战力 抓取战力",
     empty: !power,
   }));
-  if (title) {
-    chips.push(_hudChip({ cls: "title", k: "🏷️", v: title, title: "称号" }));
-  }
   // 修为带进度条
   chips.push(_hudCultivationChip(cultivation));
 
   characterHud.innerHTML = chips.join("");
-  characterHud.hidden = chips.length === 0;
+  characterHud.hidden = chips.length === 0 || !activeId;
 
   // 点击复制
   characterHud.querySelectorAll(".hud-chip").forEach((chip) => {
@@ -2389,8 +2353,10 @@ function renderSidebarIdentityList() {
   if (!sidebarIdentityList) return;
   if (!state.identities.length) {
     sidebarIdentityList.innerHTML = '<p class="empty">还没有身份。登录账号后会自动建好。</p>';
+    renderCultivationModules();
     return;
   }
+  const patchMap = new Map((state.identityPatches || []).map((p) => [p.key, p.value]));
   sidebarIdentityList.innerHTML = state.identities.map((identity) => {
     const account = state.accounts.find((a) => a.local_id === identity.account_local_id);
     const status = identityRowStatusText(identity, account);
@@ -2398,12 +2364,18 @@ function renderSidebarIdentityList() {
     const active = identity.send_as_id === state.activeIdentityId;
     const klass = ["identity-row", offline ? "offline" : "", active ? "active" : ""].filter(Boolean).join(" ");
     const name = identity.label || identity.username || identity.send_as_id;
-    const modulesLine = renderIdentityModulesLine(identity.send_as_id);
+    // 当前激活身份才有 profile chips(identityPatches 是按身份 scoped 的)
+    const profileChips = active ? _buildProfileChips(patchMap) : "";
     return `
       <button type="button" class="${klass}" data-identity-row="${escapeAttr(String(identity.send_as_id))}">
-        <strong>${escapeHtml(String(name))}</strong>
-        <span class="identity-row-status">${escapeHtml(status)}</span>
-        ${modulesLine}
+        <div class="identity-row-head">
+          <strong>${escapeHtml(String(name))}</strong>
+          <span class="identity-row-status">${escapeHtml(status)}</span>
+        </div>
+        <div class="identity-row-sub">
+          ${identity.username ? `@${escapeHtml(identity.username)}` : ""} <span class="muted">#${escapeHtml(String(identity.send_as_id))}</span>
+        </div>
+        ${profileChips}
       </button>
     `;
   }).join("");
@@ -2414,10 +2386,134 @@ function renderSidebarIdentityList() {
       renderSidebarIdentityList();
       renderSkillBar();
       renderCharacterHud();
+      renderCultivationModules();
       // 切换身份 → 重新拉这个身份的 state patches
       loadIdentityPatches().catch((err) => console.warn("[mini-web] reload patches failed:", err));
     });
   });
+  renderCultivationModules();
+}
+
+function _buildProfileChips(patchMap) {
+  const charName = patchMap.get("角色名") || "";
+  const daohao = patchMap.get("道号") || "";
+  const root = patchMap.get("灵根") || "";
+  const realm = patchMap.get("境界") || "";
+  const sect = (patchMap.get("宗门") || "").replace(/^【|】$/g, "");
+  const title = (patchMap.get("称号") || "").replace(/^【|】$/g, "");
+  const chips = [];
+  if (charName || daohao) {
+    const txt = [charName, daohao ? `· ${daohao}` : ""].filter(Boolean).join(" ").trim();
+    chips.push(`<span class="row-chip">👤 ${escapeHtml(txt)}</span>`);
+  }
+  if (realm) chips.push(`<span class="row-chip realm">📿 ${escapeHtml(realm)}</span>`);
+  if (root) chips.push(`<span class="row-chip root">🌿 ${escapeHtml(root)}</span>`);
+  if (sect) chips.push(`<span class="row-chip sect">🏔️ ${escapeHtml(sect)}</span>`);
+  if (title) chips.push(`<span class="row-chip title">🏷️ ${escapeHtml(title)}</span>`);
+  if (!chips.length) return "";
+  return `<div class="identity-row-profile">${chips.join("")}</div>`;
+}
+
+// 修炼状态二级菜单 — 跟身份绑定:深度闭关/元婴/第二元神 倒计时 chip
+const CULTIVATION_MODULE_SPECS = [
+  { key: "deep_retreat", icon: "📿", label: "深度闭关", note: "8h CD",
+    fire_skill: "deep_retreat", query_skill: "deep_retreat_query" },
+  { key: "yuanying",     icon: "🔮", label: "元婴",     note: "元婴初期+",
+    fire_skill: "yuanying", query_skill: "yuanying_status" },
+  { key: "second_soul",  icon: "🪞", label: "第二元神", note: "训练 / 抉择",
+    fire_skill: "second_soul_train", query_skill: "second_soul_status" },
+];
+
+function renderCultivationModules() {
+  if (!cultivationModules) return;
+  const activeId = state.activeIdentityId;
+  if (!activeId) {
+    cultivationModules.innerHTML = '<p class="empty">选一个身份后,这里显示模块状态。</p>';
+    return;
+  }
+  const moduleStates = state.identityModuleStates.get(Number(activeId)) || [];
+  const byKey = new Map(moduleStates.map((m) => [m.module_key, m]));
+  const now = Date.now() / 1000;
+  cultivationModules.innerHTML = CULTIVATION_MODULE_SPECS.map((spec) => {
+    const ms = byKey.get(spec.key);
+    let timerText = "—";
+    let timerCls = "muted";
+    if (ms) {
+      const summary = ms.summary || {};
+      const st = ms.state || {};
+      const nextAt = Number(summary.next_at || st.cooldown_until || 0) || 0;
+      const ready = summary.ready === true || (nextAt > 0 && nextAt <= now) || nextAt === 0;
+      if (ready) {
+        timerText = "已就绪";
+        timerCls = "ready";
+      } else {
+        const remaining = nextAt - now;
+        timerText = `剩 ${fmtCountdown(remaining)}`;
+        timerCls = "cooling";
+        const startTs = moduleStartTs(st);
+        const total = Math.max(1, nextAt - startTs);
+        // 进度条占满,fill 占已经过的比例
+        const pct = Math.min(100, Math.max(0, ((total - remaining) / total) * 100));
+        return _cultivationCardHtml(spec, timerText, timerCls, pct, nextAt, startTs);
+      }
+    }
+    return _cultivationCardHtml(spec, timerText, timerCls, 0, 0, 0);
+  }).join("");
+  cultivationModules.querySelectorAll("[data-cult-fire]").forEach((btn) => {
+    btn.addEventListener("click", () => sendSkill(btn.dataset.cultFire));
+  });
+  cultivationModules.querySelectorAll("[data-cult-query]").forEach((btn) => {
+    btn.addEventListener("click", () => sendSkill(btn.dataset.cultQuery));
+  });
+}
+
+function _cultivationCardHtml(spec, timerText, timerCls, pct, nextAt, startTs) {
+  const fireDisabled = timerCls === "cooling" ? "disabled" : "";
+  return `
+    <div class="cult-card ${timerCls}" data-module="${spec.key}">
+      <div class="cult-card-head">
+        <span class="cult-icon">${spec.icon}</span>
+        <span class="cult-label">${escapeHtml(spec.label)}</span>
+        <span class="cult-timer ${timerCls}"
+              data-cult-timer="1"
+              data-next-at="${nextAt}"
+              data-start-at="${startTs}">${escapeHtml(timerText)}</span>
+      </div>
+      <div class="cult-card-bar"><div class="cult-card-bar-fill" style="width:${pct.toFixed(1)}%"></div></div>
+      <div class="cult-card-actions">
+        <button type="button" data-cult-fire="${escapeAttr(spec.fire_skill)}" ${fireDisabled}>${spec.icon} 出手</button>
+        <button type="button" class="secondary" data-cult-query="${escapeAttr(spec.query_skill)}">🔍 查询</button>
+      </div>
+    </div>
+  `;
+}
+
+function tickCultivationModules() {
+  if (!cultivationModules) return;
+  const timers = cultivationModules.querySelectorAll("[data-cult-timer]");
+  if (!timers.length) return;
+  const now = Date.now() / 1000;
+  let needRerender = false;
+  timers.forEach((el) => {
+    const nextAt = Number(el.dataset.nextAt || 0);
+    if (nextAt === 0) return;
+    const remaining = nextAt - now;
+    if (remaining <= 0) {
+      needRerender = true;
+      return;
+    }
+    el.textContent = `剩 ${fmtCountdown(remaining)}`;
+    // 也 tick 进度条
+    const card = el.closest(".cult-card");
+    if (card) {
+      const fill = card.querySelector(".cult-card-bar-fill");
+      const startTs = Number(el.dataset.startAt || 0);
+      const total = Math.max(1, nextAt - startTs);
+      const pct = Math.min(100, Math.max(0, ((total - remaining) / total) * 100));
+      if (fill) fill.style.width = `${pct.toFixed(1)}%`;
+    }
+  });
+  if (needRerender) renderCultivationModules();
 }
 
 const MODULE_ICONS = { deep_retreat: "📿", pet_touch: "🖐️", pet_warm: "🔥", pet_trial: "⚔️" };
@@ -2496,6 +2592,8 @@ function tickIdentityModuleChips() {
   });
   // 顺手 tick 底栏技能盘的冷却显示
   tickSkillBarChips();
+  // 也 tick 修炼面板里的卡片倒计时
+  tickCultivationModules();
 }
 
 function tickSkillBarChips() {
