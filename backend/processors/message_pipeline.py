@@ -200,12 +200,23 @@ class MessagePipeline:
                 settings = dict(self._get_settings_snapshot() or {})
             except Exception:
                 settings = {}
+        parent = None
+        if clean_reply and self._get_parent_event:
+            try:
+                parent = self._get_parent_event(int(event.chat_id), int(clean_reply))
+            except Exception:
+                parent = None
+        my_identity_ids = frozenset(
+            int(x) for x in (self._get_my_identities() if self._get_my_identities else ())
+        )
         enriched = tuple(
             self._enrich_one_card(
                 card,
                 event=event,
                 clean_reply=clean_reply,
                 settings=settings,
+                parent=parent,
+                my_identity_ids=my_identity_ids,
             )
             for card in output.cards
         )
@@ -218,12 +229,16 @@ class MessagePipeline:
         event: RawMessageEvent,
         clean_reply: int | None,
         settings: dict,
+        parent: RawMessageEvent | None,
+        my_identity_ids: Iterable[int],
     ) -> ParsedCard:
         filtered = enrich_filter_channels(
             card,
             event,
             settings,
             is_game_bot_sender=self._is_game_bot_sender,
+            parent_event=parent,
+            my_identity_ids=my_identity_ids,
         )
         return replace(
             card,

@@ -107,7 +107,7 @@ class MiniWebServer:
                 print(f"[mini-web] 迁移了 {migrated} 条历史卡片 (hall → world/system)")
             filter_migrated = sqlite_store.rebuild_parsed_cards_if_filter_outdated()
             if filter_migrated:
-                print(f"[mini-web] 消息过滤频道迁移: 重放 {filter_migrated} 条 raw_messages")
+                print(f"[mini-web] 消息过滤频道迁移: 重分流 {filter_migrated} 条历史卡片")
             backfilled = sqlite_store.backfill_module_states_if_empty()
             if backfilled:
                 print(f"[mini-web] 状态机历史 backfill: 重放 {backfilled} 条 raw_messages")
@@ -430,9 +430,9 @@ class MiniWebServer:
             "game_bot_ids",
         }
         if any(saved.get(key) != before.get(key) for key in filter_keys):
-            rebuild = getattr(self._store, "rebuild_all_parsed_cards", None)
-            if callable(rebuild):
-                rebuilt = int(rebuild() or 0)
+            reclassify = getattr(self._store, "reclassify_message_filters", None)
+            if callable(reclassify):
+                rebuilt = int(reclassify() or 0)
         return {"ok": True, "settings": public_settings(saved), "rebuilt_messages": rebuilt}
 
     def accounts_payload(self) -> dict:

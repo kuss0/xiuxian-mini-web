@@ -11,7 +11,11 @@ from backend.domain.models import OutboxDraft, ParsedCard, RawMessageEvent, Stat
 from backend.identity_state import build_default_registry
 from backend.parsers import build_parser_registry
 from backend.processors import MessagePipeline
-from backend.processors.message_filter import DEFAULT_FOCUS_KEYWORDS
+from backend.processors.message_filter import (
+    CURRENT_MESSAGE_FILTER_VERSION,
+    DEFAULT_FOCUS_KEYWORDS,
+    enrich_filter_channels,
+)
 from backend.repo.sample_store import SAMPLE_EVENTS
 from backend.tg.client import safe_session_name
 
@@ -115,10 +119,16 @@ class SQLiteStore:
 
     def _collect_my_identities(self) -> list[int]:
         """所有已登记身份的 send_as_id。"""
+        ids: set[int] = set()
         try:
-            return [int(item.get("send_as_id") or 0) for item in self.list_identities()]
+            ids.update(int(item.get("send_as_id") or 0) for item in self.list_identities())
         except Exception:
-            return []
+            pass
+        try:
+            ids.update(int(account.get("account_id") or 0) for account in self.list_accounts())
+        except Exception:
+            pass
+        return [item for item in sorted(ids) if item]
 
     def _collect_game_bot_ids(self) -> list[int]:
         try:
@@ -306,9 +316,17 @@ class SQLiteStore:
         避免服务启动被迁移拖住。
         """
         try:
-            own_aliases = self.get_settings().get("own_aliases") or []
+            settings = self.get_settings()
+        except Exception:
+            settings = {}
+        try:
+            own_aliases = settings.get("own_aliases") or []
         except Exception:
             own_aliases = []
+        try:
+            filter_version = int(settings.get("message_filter_version") or 0)
+        except (TypeError, ValueError):
+            filter_version = 0
         with self._connect() as conn:
             total = conn.execute("SELECT COUNT(*) FROM parsed_cards").fetchone()[0]
             if not total:
@@ -332,41 +350,101 @@ class SQLiteStore:
                     ).fetchone()[0]
             except Exception:
                 stale_mentions = 0
-            # 大库启动时不做全量重放,避免服务启动被历史迁移拖住。
-            # 用户保存「过滤设置」时会走 rebuild_all_parsed_cards 显式重分流。
-            if classified and (not stale_mentions or total > 5000):
+            if (
+                classified
+                and not stale_mentions
+                and filter_version >= CURRENT_MESSAGE_FILTER_VERSION
+            ):
                 return 0
+        return self.reclassify_message_filters()
+
+    def reclassify_message_filters(self) -> int:
+        """只重算 focus/leader/archive 频道和过滤标签,不重跑 parser/状态机。"""
+        settings = self.get_settings()
+        my_identity_ids = self._collect_my_identities()
+        topic_id = self._get_target_topic_id()
+        with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, chat_id, msg_id, text, source, date, sender_id,
-                       reply_to_msg_id, top_msg_id, mentions_json, sender_is_bot,
-                       edited_at, deleted_at, media_kind, media_meta_json
-                FROM raw_messages
-                ORDER BY rowid ASC
+                SELECT pc.rowid, pc.payload_json,
+                       rm.id, rm.chat_id, rm.msg_id, rm.text, rm.source, rm.date,
+                       rm.sender_id, rm.reply_to_msg_id, rm.top_msg_id,
+                       rm.mentions_json, rm.sender_is_bot,
+                       rm.edited_at, rm.deleted_at, rm.media_kind, rm.media_meta_json
+                FROM parsed_cards pc
+                JOIN raw_messages rm ON rm.id = pc.raw_message_id
+                ORDER BY pc.rowid ASC
                 """
             ).fetchall()
-        count = 0
-        for row in rows:
-            event = RawMessageEvent(
-                id=row[0],
-                chat_id=int(row[1]),
-                msg_id=int(row[2]),
-                text=row[3],
-                source=row[4],
-                date=row[5],
-                sender_id=row[6],
-                reply_to_msg_id=row[7],
-                top_msg_id=row[8],
-                mentions=tuple(json.loads(row[9] or "[]")),
-                sender_is_bot=bool(row[10]),
-                edited_at=row[11],
-                deleted_at=row[12],
-                media_kind=row[13],
-                media_meta=(json.loads(row[14]) if row[14] else None),
-            )
-            self.ingest_event(event)
-            count += 1
-        return count
+            updates = []
+            for row in rows:
+                rowid = int(row[0])
+                card = ParsedCard.from_api(json.loads(row[1]))
+                event = RawMessageEvent(
+                    id=row[2],
+                    chat_id=int(row[3]),
+                    msg_id=int(row[4]),
+                    text=row[5] or "",
+                    source=row[6] or "",
+                    date=row[7] or "",
+                    sender_id=row[8],
+                    reply_to_msg_id=row[9],
+                    top_msg_id=row[10],
+                    mentions=tuple(json.loads(row[11] or "[]")),
+                    sender_is_bot=bool(row[12]),
+                    edited_at=row[13],
+                    deleted_at=row[14],
+                    media_kind=row[15],
+                    media_meta=(json.loads(row[16]) if row[16] else None),
+                )
+                clean_reply = _clean_reply_to(event, topic_id)
+                parent = None
+                if clean_reply:
+                    parent = self._lookup_parent_event(int(event.chat_id), int(clean_reply))
+                base_card = replace(
+                    card,
+                    channels=tuple(
+                        channel for channel in card.channels
+                        if channel not in {"focus", "leader", "archive"}
+                    ),
+                    tags=tuple(
+                        tag for tag in card.tags
+                        if tag not in {"会长", "被@", "归档", "回复我", "回复别人"}
+                        and not str(tag).startswith("关键词:")
+                    ),
+                )
+                filtered = enrich_filter_channels(
+                    base_card,
+                    event,
+                    settings,
+                    is_game_bot_sender=self._is_game_bot_sender,
+                    parent_event=parent,
+                    my_identity_ids=my_identity_ids,
+                )
+                updated_card = replace(
+                    card,
+                    channels=filtered.channels,
+                    tags=filtered.tags,
+                    reply_to_msg_id=clean_reply if card.reply_to_msg_id is None else card.reply_to_msg_id,
+                )
+                if updated_card.channels != card.channels or updated_card.tags != card.tags:
+                    updates.append((
+                        updated_card.primary_channel,
+                        json.dumps(list(updated_card.channels), ensure_ascii=False),
+                        json.dumps(updated_card.to_api(), ensure_ascii=False),
+                        rowid,
+                    ))
+            if updates:
+                conn.executemany(
+                    """
+                    UPDATE parsed_cards
+                    SET primary_channel=?, channels_json=?, payload_json=?
+                    WHERE rowid=?
+                    """,
+                    updates,
+                )
+        self.save_settings({"message_filter_version": CURRENT_MESSAGE_FILTER_VERSION})
+        return len(updates)
 
     def rebuild_all_parsed_cards(self) -> int:
         """按当前 parser/settings 全量重建 parsed_cards/state_patches。
@@ -749,7 +827,7 @@ class SQLiteStore:
             "focus_include_player_plain": True,
             "archive_dot_commands": True,
             "archive_bot_replies": True,
-            "message_filter_version": 1,
+            "message_filter_version": CURRENT_MESSAGE_FILTER_VERSION,
             "notify_enabled": False,
             "notify_tg_bot_token": "",
             "notify_tg_chat_id": "",
@@ -1570,12 +1648,22 @@ def _normalize_settings(payload: dict) -> dict:
         "focus_include_player_plain": bool_value("focus_include_player_plain"),
         "archive_dot_commands": bool_value("archive_dot_commands"),
         "archive_bot_replies": bool_value("archive_bot_replies"),
-        "message_filter_version": 1,
+        "message_filter_version": CURRENT_MESSAGE_FILTER_VERSION,
         "notify_enabled": bool_value("notify_enabled"),
         "notify_tg_bot_token": text("notify_tg_bot_token"),
         "notify_tg_chat_id": text("notify_tg_chat_id"),
         "notify_card_titles": notify_card_titles,
     }
+
+
+def _clean_reply_to(event: RawMessageEvent, topic_id: int = 0) -> int | None:
+    raw_reply = event.reply_to_msg_id
+    if raw_reply and (
+        (event.top_msg_id and int(raw_reply) == int(event.top_msg_id))
+        or (topic_id and int(raw_reply) == int(topic_id))
+    ):
+        return None
+    return int(raw_reply) if raw_reply else None
 
 
 def _normalize_account(payload: dict) -> dict:

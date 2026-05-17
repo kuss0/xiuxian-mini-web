@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Iterable
 
 from backend.domain.models import ParsedCard, RawMessageEvent
+
+CURRENT_MESSAGE_FILTER_VERSION = 2
 
 
 DEFAULT_FOCUS_KEYWORDS = (
@@ -44,6 +46,8 @@ def enrich_filter_channels(
     settings: dict,
     *,
     is_game_bot_sender: Callable[[int | None], bool],
+    parent_event: RawMessageEvent | None = None,
+    my_identity_ids: Iterable[int] = (),
 ) -> FilterResult:
     """Add product-level message filtering channels.
 
@@ -57,6 +61,10 @@ def enrich_filter_channels(
     sender_id = event.sender_id
     bot_like = bool(event.sender_is_bot) or bool(is_game_bot_sender(sender_id))
     dot_command = is_dot_command(text)
+    my_ids = _int_set(my_identity_ids)
+    parent_sender = _safe_int(parent_event.sender_id if parent_event else None)
+    bot_reply_to_mine = bool(bot_like and parent_sender and parent_sender in my_ids)
+    bot_reply_to_other = bool(bot_like and parent_sender and my_ids and parent_sender not in my_ids)
 
     own_mention = has_own_mention(
         text,
@@ -81,6 +89,7 @@ def enrich_filter_channels(
         or own_mention
         or leader
         or bool(keyword_hits)
+        or bot_reply_to_mine
     )
     plain_player = (
         bool(settings.get("focus_include_player_plain", True))
@@ -93,15 +102,22 @@ def enrich_filter_channels(
         _append_unique(tags, "会长")
     if own_mention:
         _append_unique(tags, "被@")
+    if bot_reply_to_mine:
+        _append_unique(tags, "回复我")
+    if bot_reply_to_other:
+        _append_unique(tags, "回复别人")
     for hit in keyword_hits[:3]:
         _append_unique(tags, f"关键词:{hit}")
 
-    if card_important or plain_player:
+    if not bot_reply_to_other and (card_important or plain_player):
         _append_unique(channels, "focus")
+    if bot_reply_to_other and "focus" in channels:
+        channels = [channel for channel in channels if channel != "focus"]
 
     archive_dot = bool(settings.get("archive_dot_commands", True))
     archive_bot = bool(settings.get("archive_bot_replies", True))
-    if (archive_dot and dot_command) or (archive_bot and bot_like and not card_important):
+    archive_due_bot = archive_bot and bot_like and (bot_reply_to_other or not card_important)
+    if (archive_dot and dot_command) or archive_due_bot:
         _append_unique(channels, "archive")
         _append_unique(tags, "归档")
 
@@ -176,3 +192,19 @@ def _int_list_setting(settings: dict, key: str) -> list[int]:
         except (TypeError, ValueError):
             continue
     return out
+
+
+def _int_set(values: Iterable[int]) -> set[int]:
+    out = set()
+    for value in values or ():
+        parsed = _safe_int(value)
+        if parsed:
+            out.add(parsed)
+    return out
+
+
+def _safe_int(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0

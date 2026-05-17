@@ -82,6 +82,46 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
     assert "focus" not in other_mention.channels
 
 
+def test_message_filter_promotes_bot_reply_to_me_and_archives_reply_to_others():
+    base = ParsedCard(
+        id="reply",
+        channels=("system",),
+        title="系统消息",
+        summary="",
+        source="韩天尊",
+        time="",
+        tags=("未分类",),
+        raw="",
+    )
+    settings = {"archive_bot_replies": True, "focus_keywords": []}
+    bot_event = RawMessageEvent(
+        id="r1", chat_id=1, msg_id=11, text="你已进入深度闭关状态。", source="韩天尊",
+        date="", sender_id=-100, reply_to_msg_id=10,
+    )
+    mine = RawMessageEvent(id="p1", chat_id=1, msg_id=10, text=".深度闭关", source="me", date="", sender_id=12345)
+    other = RawMessageEvent(id="p2", chat_id=1, msg_id=10, text=".深度闭关", source="other", date="", sender_id=67890)
+
+    reply_to_me = enrich_filter_channels(
+        base, bot_event, settings,
+        is_game_bot_sender=lambda sid: sid == -100,
+        parent_event=mine,
+        my_identity_ids=[12345],
+    )
+    reply_to_other = enrich_filter_channels(
+        base, bot_event, settings,
+        is_game_bot_sender=lambda sid: sid == -100,
+        parent_event=other,
+        my_identity_ids=[12345],
+    )
+
+    assert "focus" in reply_to_me.channels
+    assert "archive" not in reply_to_me.channels
+    assert "回复我" in reply_to_me.tags
+    assert "archive" in reply_to_other.channels
+    assert "focus" not in reply_to_other.channels
+    assert "回复别人" in reply_to_other.tags
+
+
 def test_server_payload_shape_stays_compatible():
     server = MiniWebServer(store=SampleStore())
     payload = server.messages_payload("all")
