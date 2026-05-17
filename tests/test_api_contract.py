@@ -62,6 +62,12 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
         {"archive_dot_commands": True, "focus_include_player_plain": True},
         is_game_bot_sender=lambda _sid: False,
     )
+    keyword_command = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x2b", chat_id=1, msg_id=22, text=".洞府", source="玩家", date=""),
+        {"archive_dot_commands": True, "focus_keywords": ["洞府"], "focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+    )
     mention = enrich_filter_channels(
         base,
         RawMessageEvent(id="x3", chat_id=1, msg_id=3, text="@wa2000 来看玄骨", source="玩家", date=""),
@@ -78,6 +84,8 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
     assert "focus" in plain.channels
     assert "archive" in command.channels
     assert "focus" not in command.channels
+    assert "archive" in keyword_command.channels
+    assert "focus" not in keyword_command.channels
     assert "focus" in mention.channels
     assert "focus" not in other_mention.channels
 

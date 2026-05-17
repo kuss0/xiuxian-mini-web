@@ -109,13 +109,15 @@ def enrich_filter_channels(
     for hit in keyword_hits[:3]:
         _append_unique(tags, f"关键词:{hit}")
 
-    if not bot_reply_to_other and (card_important or plain_player):
-        _append_unique(channels, "focus")
-    if bot_reply_to_other and "focus" in channels:
-        channels = [channel for channel in channels if channel != "focus"]
-
     archive_dot = bool(settings.get("archive_dot_commands", True))
     archive_bot = bool(settings.get("archive_bot_replies", True))
+
+    suppress_focus = bot_reply_to_other or (archive_dot and dot_command)
+    if not suppress_focus and (card_important or plain_player):
+        _append_unique(channels, "focus")
+    if suppress_focus and "focus" in channels:
+        channels = [channel for channel in channels if channel != "focus"]
+
     archive_due_bot = archive_bot and bot_like and (bot_reply_to_other or not card_important)
     if (archive_dot and dot_command) or archive_due_bot:
         _append_unique(channels, "archive")
