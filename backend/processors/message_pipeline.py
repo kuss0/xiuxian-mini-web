@@ -6,6 +6,7 @@ from typing import Callable, Iterable
 
 from backend.domain.models import ParsedCard, RawMessageEvent
 from backend.domain.registry import ParserOutput, ParserRegistry
+from backend.processors.message_filter import enrich_filter_channels
 
 
 # 跨 NewMessage + MessageEdited 两条入口的幂等去重 — 同一 (chat_id, msg_id)
@@ -193,16 +194,45 @@ class MessagePipeline:
             clean_reply = None
         else:
             clean_reply = raw_reply
+        settings = {}
+        if self._get_settings_snapshot:
+            try:
+                settings = dict(self._get_settings_snapshot() or {})
+            except Exception:
+                settings = {}
         enriched = tuple(
-            replace(
+            self._enrich_one_card(
                 card,
-                chat_id=event.chat_id if card.chat_id is None else card.chat_id,
-                msg_id=event.msg_id if card.msg_id is None else card.msg_id,
-                sender_id=event.sender_id if card.sender_id is None else card.sender_id,
-                reply_to_msg_id=(
-                    clean_reply if card.reply_to_msg_id is None else card.reply_to_msg_id
-                ),
+                event=event,
+                clean_reply=clean_reply,
+                settings=settings,
             )
             for card in output.cards
         )
         return ParserOutput(cards=enriched, state_patches=output.state_patches)
+
+    def _enrich_one_card(
+        self,
+        card: ParsedCard,
+        *,
+        event: RawMessageEvent,
+        clean_reply: int | None,
+        settings: dict,
+    ) -> ParsedCard:
+        filtered = enrich_filter_channels(
+            card,
+            event,
+            settings,
+            is_game_bot_sender=self._is_game_bot_sender,
+        )
+        return replace(
+            card,
+            channels=filtered.channels,
+            tags=filtered.tags,
+            chat_id=event.chat_id if card.chat_id is None else card.chat_id,
+            msg_id=event.msg_id if card.msg_id is None else card.msg_id,
+            sender_id=event.sender_id if card.sender_id is None else card.sender_id,
+            reply_to_msg_id=(
+                clean_reply if card.reply_to_msg_id is None else card.reply_to_msg_id
+            ),
+        )

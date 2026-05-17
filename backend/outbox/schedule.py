@@ -247,11 +247,12 @@ def _build_custom(*, anchor: float, command: str, interval_sec: int, count: int,
     interval_sec = _positive_int(interval_sec, 3600)
     count = _positive_int(count, 1)
     items = []
-    # 自定义也加 jitter,避免精确等距
+    # 自定义把 anchor 当作第一条预计发送时间;后续按 interval 递推。
+    # 每条加少量 jitter,避免精确等距。
     for i in range(count):
         items.append({
             "command": command,
-            "schedule_at": anchor + (i + 1) * interval_sec + _jitter(0),
+            "schedule_at": anchor + i * interval_sec + _jitter(0),
         })
     return items
 
@@ -269,6 +270,13 @@ class PresetSpec:
 
 
 PRESETS: dict[str, PresetSpec] = {
+    PRESET_CUSTOM: PresetSpec(
+        key=PRESET_CUSTOM,
+        label="自定义",
+        description="任意命令 + 间隔 + 次数,用于一天一次设好官方定时",
+        fields=("command", "interval_sec", "count"),
+        builder=_build_custom,
+    ),
     PRESET_DEEP_RETREAT: PresetSpec(
         key=PRESET_DEEP_RETREAT,
         label="深度闭关",
@@ -308,13 +316,6 @@ PRESETS: dict[str, PresetSpec] = {
             interval_sec=8 * 3600,
             **{k: v for k, v in kw.items() if k not in {"interval_sec", "command_prefix"}},
         ),
-    ),
-    PRESET_CUSTOM: PresetSpec(
-        key=PRESET_CUSTOM,
-        label="自定义",
-        description="任意命令 + 间隔 + 次数,加 jitter 避免精确等距",
-        fields=("command", "interval_sec", "count"),
-        builder=_build_custom,
     ),
 }
 

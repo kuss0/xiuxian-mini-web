@@ -1,4 +1,5 @@
 from backend.domain import CHANNELS
+from backend.domain.models import ParsedCard, RawMessageEvent
 from backend.app import MiniWebHandler, create_handler, is_authorized_api_headers
 from backend.config import MAX_ACCOUNTS, MAX_IDENTITIES, MAX_LISTENERS
 import backend.server as server_module
@@ -11,6 +12,7 @@ from backend.tg.listener import (
     _raw_event_from_telethon,
 )
 from backend.outbox.planner import OutboxPlanner
+from backend.processors.message_filter import enrich_filter_channels
 
 
 def test_channels_have_unique_keys():
@@ -34,6 +36,43 @@ def test_sample_store_filters_by_secondary_channel():
     messages = [card.to_api() for card in SampleStore().list_cards("dungeon")]
     assert len(messages) == 1
     assert messages[0]["title"] == "虚天殿开启"
+
+
+def test_message_filter_promotes_plain_mentions_and_archives_commands():
+    base = ParsedCard(
+        id="x",
+        channels=("world",),
+        title="玩家消息",
+        summary="",
+        source="玩家",
+        time="",
+        tags=(),
+        raw="",
+    )
+
+    plain = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x1", chat_id=1, msg_id=1, text="今晚虚天殿有人吗", source="玩家", date=""),
+        {"focus_keywords": ["虚天殿"], "focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+    )
+    command = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x2", chat_id=1, msg_id=2, text=".加入副本 394", source="玩家", date=""),
+        {"archive_dot_commands": True, "focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+    )
+    mention = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x3", chat_id=1, msg_id=3, text="@wa2000 来看玄骨", source="玩家", date=""),
+        {"own_aliases": ["wa2000"], "focus_keywords": []},
+        is_game_bot_sender=lambda _sid: False,
+    )
+
+    assert "focus" in plain.channels
+    assert "archive" in command.channels
+    assert "focus" not in command.channels
+    assert "focus" in mention.channels
 
 
 def test_server_payload_shape_stays_compatible():
@@ -2443,4 +2482,3 @@ def test_notify_dispatcher_fires_on_card_when_enabled(tmp_path, monkeypatch):
     assert len(captured) == 1
     assert captured[0].title in {"风险提醒", "天道审判"}
     assert captured[0].severity == "risk"
-

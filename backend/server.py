@@ -105,6 +105,9 @@ class MiniWebServer:
             migrated = sqlite_store.rebuild_parsed_cards_if_legacy()
             if migrated:
                 print(f"[mini-web] 迁移了 {migrated} 条历史卡片 (hall → world/system)")
+            filter_migrated = sqlite_store.rebuild_parsed_cards_if_filter_outdated()
+            if filter_migrated:
+                print(f"[mini-web] 消息过滤频道迁移: 重放 {filter_migrated} 条 raw_messages")
             backfilled = sqlite_store.backfill_module_states_if_empty()
             if backfilled:
                 print(f"[mini-web] 状态机历史 backfill: 重放 {backfilled} 条 raw_messages")
@@ -412,8 +415,25 @@ class MiniWebServer:
         }
 
     def save_settings_payload(self, payload: dict) -> dict:
+        before = self._store.get_settings()
         patch = preserve_existing_secrets(payload, self._store.get_settings())
-        return {"ok": True, "settings": public_settings(self._store.save_settings(patch))}
+        saved = self._store.save_settings(patch)
+        rebuilt = 0
+        filter_keys = {
+            "own_aliases",
+            "leader_sender_ids",
+            "leader_source_names",
+            "focus_keywords",
+            "focus_include_player_plain",
+            "archive_dot_commands",
+            "archive_bot_replies",
+            "game_bot_ids",
+        }
+        if any(saved.get(key) != before.get(key) for key in filter_keys):
+            rebuild = getattr(self._store, "rebuild_all_parsed_cards", None)
+            if callable(rebuild):
+                rebuilt = int(rebuild() or 0)
+        return {"ok": True, "settings": public_settings(saved), "rebuilt_messages": rebuilt}
 
     def accounts_payload(self) -> dict:
         self._ensure_collector_running()

@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: dark-sidebar-identity 2026-05-16T02:00
-console.log("[mini-web] build: dark-sidebar-identity 2026-05-16T02:00 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: focus-filter-schedule 2026-05-17T00:00
+console.log("[mini-web] build: focus-filter-schedule 2026-05-17T00:00 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -25,7 +25,7 @@ const state = {
   activeIdentityId: null,
   discoveredBots: [],
   lastMessageSeq: 0,
-  viewMode: "solo",
+  viewMode: "focus",
   sendAs: {
     peers: [],
     accountLocalId: "",
@@ -70,6 +70,7 @@ const sidebarIdentityList = document.querySelector("#identityList");
 const currentAccountLine = document.querySelector("#currentAccountLine");
 const gameBotsButton = document.querySelector("#gameBotsButton");
 const notifySettingsButton = document.querySelector("#notifySettingsButton");
+const filterSettingsButton = document.querySelector("#filterSettingsButton");
 const globalBanner = document.querySelector("#globalBanner");
 const viewModeAllButton = null;
 const viewModeSoloButton = null;
@@ -157,7 +158,9 @@ function authHeaders(headers = {}) {
 async function loadChannels() {
   const payload = await fetchJson("/api/channels");
   state.channels = payload.channels;
-  state.selectedChannels = new Set(state.channels.map((channel) => channel.key));
+  state.selectedChannels = state.channels.some((channel) => channel.key === "focus")
+    ? new Set(["focus"])
+    : new Set(state.channels.map((channel) => channel.key));
   renderChannelFilters();
   renderQuickFilters();
 }
@@ -165,8 +168,8 @@ async function loadChannels() {
 async function loadMessages({ incremental = false } = {}) {
   // 增量:轮询用,只拉 rowid > lastSeq 的新卡片(可能 0 条)
   // 初始化:首次/手动刷新用,拉最近 200 条
-  // mode:默认 solo(只我和天尊),不依赖前端窗口;日志按钮单独走 modal
-  const params = new URLSearchParams({ channel: "all" });
+  // channel:默认 focus(重点流);日志按钮单独走全量 modal
+  const params = new URLSearchParams({ channel: serverChannelForCurrentView() });
   const mode = state.viewMode === "solo" ? "solo" : "";
   if (mode) params.set("mode", mode);
   if (incremental && state.lastMessageSeq > 0) {
@@ -203,7 +206,7 @@ async function loadMessages({ incremental = false } = {}) {
     // 初始化:直接替换
     state.messages = incoming;
   }
-  state.lastMessageSeq = Math.max(state.lastMessageSeq, serverMax);
+  state.lastMessageSeq = incremental ? Math.max(state.lastMessageSeq, serverMax) : serverMax;
 
   if (!visibleMessages().some((message) => message.id === state.selectedMessageId)) {
     state.selectedMessageId = visibleMessages()[0]?.id ?? null;
@@ -345,6 +348,96 @@ function openGameBotsModal() {
       renderGameBotsDiscoveredList(dialog);
     })
     .catch((error) => console.warn("[mini-web] discovered-bots fetch failed:", error));
+}
+
+function openFilterSettingsModal() {
+  const settings = state.settings || {};
+  const dialog = openModal({
+    title: "消息过滤设置",
+    body: `
+      <section class="modal-section">
+        <h4>重点流规则</h4>
+        <p class="muted">首页默认只看重点流。点命令和普通天尊回复会进入归档;被 @、会长、关键词、风险和副本动作会提到首页。</p>
+        <form id="filterSettingsForm" class="settings-form">
+          <label class="stacked-field">
+            <span>我的 @ 名称</span>
+            <textarea name="own_aliases" rows="2" placeholder="每行一个,例如 wa2000 或 @wa2000">${escapeHtml((settings.own_aliases || []).join("\n"))}</textarea>
+          </label>
+          <label class="stacked-field">
+            <span>会长 sender IDs</span>
+            <textarea name="leader_sender_ids" rows="2" placeholder="每行一个 sender_id">${escapeHtml((settings.leader_sender_ids || []).join("\n"))}</textarea>
+          </label>
+          <label class="stacked-field">
+            <span>会长昵称 / 情报源名称</span>
+            <textarea name="leader_source_names" rows="2" placeholder="每行一个昵称,用于 source 文本包含匹配">${escapeHtml((settings.leader_source_names || []).join("\n"))}</textarea>
+          </label>
+          <label class="stacked-field">
+            <span>关注关键词</span>
+            <textarea name="focus_keywords" rows="8" placeholder="每行一个关键词">${escapeHtml((settings.focus_keywords || []).join("\n"))}</textarea>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" name="focus_include_player_plain" ${settings.focus_include_player_plain === false ? "" : "checked"} />
+            <span>不带点的玩家消息进入重点流</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" name="archive_dot_commands" ${settings.archive_dot_commands === false ? "" : "checked"} />
+            <span>点命令进入归档</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" name="archive_bot_replies" ${settings.archive_bot_replies === false ? "" : "checked"} />
+            <span>普通天尊回复进入归档</span>
+          </label>
+          <p class="modal-status-line info" id="filterSettingsStatus" hidden></p>
+        </form>
+      </section>
+    `,
+    footer: `
+      <button type="button" data-modal-close>取消</button>
+      <button type="button" class="primary" id="filterSettingsSave">保存并刷新</button>
+    `,
+  });
+  if (!dialog) return;
+  const status = dialog.querySelector("#filterSettingsStatus");
+  const form = dialog.querySelector("#filterSettingsForm");
+  const setStatus = (kind, text) => {
+    if (!status) return;
+    status.hidden = !text;
+    status.className = `modal-status-line ${kind}`;
+    status.textContent = text || "";
+  };
+  dialog.querySelector("#filterSettingsSave")?.addEventListener("click", async () => {
+    const data = new FormData(form);
+    setStatus("info", "保存中…");
+    try {
+      const saved = await postJson("/api/settings", {
+        own_aliases: splitLines(data.get("own_aliases")),
+        leader_sender_ids: splitLines(data.get("leader_sender_ids")),
+        leader_source_names: splitLines(data.get("leader_source_names")),
+        focus_keywords: splitLines(data.get("focus_keywords")),
+        focus_include_player_plain: data.get("focus_include_player_plain") === "on",
+        archive_dot_commands: data.get("archive_dot_commands") === "on",
+        archive_bot_replies: data.get("archive_bot_replies") === "on",
+      });
+      state.settings = saved.settings || state.settings;
+      await loadSettings();
+      state.lastMessageSeq = 0;
+      state.messages = [];
+      await loadMessages({ incremental: false });
+      setStatus("ok", `已保存。${saved.rebuilt_messages ? `已重分流 ${saved.rebuilt_messages} 条历史消息。` : "历史消息无需重分流。"}`);
+      renderQuickFilters();
+      renderMessages();
+      renderDetail();
+    } catch (error) {
+      setStatus("error", error.message || "保存失败");
+    }
+  });
+}
+
+function splitLines(value) {
+  return String(value || "")
+    .split(/\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function renderGameBotsDiscoveredList(dialog) {
@@ -716,6 +809,13 @@ function botIdSet() {
   return new Set(ids.map((id) => Number(id)).filter(Boolean));
 }
 
+function serverChannelForCurrentView() {
+  if (state.selectedChannels.size === 1) {
+    return Array.from(state.selectedChannels)[0] || "all";
+  }
+  return "all";
+}
+
 function parentMessageOf(card) {
   if (!card.reply_to_msg_id || !card.chat_id) return null;
   const parentId = `tg:${card.chat_id}:${card.reply_to_msg_id}`;
@@ -844,11 +944,13 @@ function renderChannelFilters() {
 // 快速滤镜:修仙频道标题旁的 3-4 个游戏化 chip。
 // 「全部」清回 all,其它 chip 排他切换到单一 channel。
 const QUICK_FILTER_PRESETS = [
-  { key: "__all", label: "全部", icon: "🌐", title: "显示全部频道" },
-  { key: "risk", label: "风险", icon: "🚨", title: "只看 风险提醒 / 自证类消息", className: "risk" },
-  { key: "training", label: "修炼", icon: "📿", title: "只看 闭关 / 元婴 / 第二元神" },
-  { key: "dungeon", label: "副本", icon: "🛡️", title: "只看 副本开启 / 加入" },
-  { key: "resource", label: "资源", icon: "💰", title: "只看 储物袋 / 资源" },
+  { key: "focus", label: "重点", icon: "◎", title: "被 @、会长、关键词和需要处理的消息" },
+  { key: "leader", label: "会长", icon: "◇", title: "只看配置为会长/情报源的消息" },
+  { key: "risk", label: "风险", icon: "!", title: "只看风险提醒 / 自证类消息", className: "risk" },
+  { key: "dungeon", label: "副本", icon: "#", title: "只看副本开启 / 加入" },
+  { key: "resource", label: "资源", icon: "$", title: "只看储物袋 / 资源" },
+  { key: "archive", label: "归档", icon: "A", title: "查看点命令和普通 bot 回复" },
+  { key: "__all", label: "全部", icon: "*", title: "显示全部频道" },
 ];
 
 function quickFilterIsAll() {
@@ -891,21 +993,25 @@ function renderQuickFilters() {
   });
 }
 
-function applyQuickFilter(key) {
-  if (key === "__all" || quickFilterActiveKey() === key) {
-    // 再点一次同一个 → 取消(恢复全部)
+async function applyQuickFilter(key) {
+  if (key === "__all") {
     state.selectedChannels = new Set(state.channels.map((c) => c.key));
+  } else if (quickFilterActiveKey() === key) {
+    state.selectedChannels = new Set(["focus"]);
   } else {
     state.selectedChannels = new Set([key]);
   }
   if (!visibleMessages().some((message) => message.id === state.selectedMessageId)) {
     state.selectedMessageId = visibleMessages()[0]?.id ?? null;
   }
+  state.lastMessageSeq = 0;
+  state.messages = [];
   state.detailMode = "message";
   renderQuickFilters();
   renderChannelFilters();
   renderMessages();
   renderDetail();
+  await loadMessages({ incremental: false });
 }
 
 function channelMessageCounts() {
@@ -1700,7 +1806,7 @@ function renderDetailActions(message) {
       const context = renderActionContextLine(action);
       const notice = state.draftNoticeByMessageId.get(`${message.id}:${index}`);
       const skillKey = findSkillKeyForCommand(action.command);
-      const sendLabel = action.reply_to_msg_id ? "🚀 回复发送" : "🚀 直接发送";
+      const sendLabel = action.reply_to_msg_id ? "确认回复发送" : "确认发送";
       const sendTitle = skillKey
         ? `通过 /api/skills/send 真的发到 Telegram (skill=${skillKey})`
         : "找不到对应技能注册项 — 请到 backend/skills/__init__.py 添加";
@@ -3092,7 +3198,7 @@ async function openScheduleModal() {
     body: `
       <section class="modal-section">
         <h4>新建排班</h4>
-        <p class="muted">预设排「深度闭关 / 抚摸法宝 / 温养器灵 / 器灵试炼」常用 CD;自定义可填任意命令 + 间隔。所有定时走 Telegram 官方 scheduled message,**不**会自动补发。多选身份会一次为每个身份各起一批,按「错峰偏移 + 阶梯」自动错开。</p>
+        <p class="muted">核心用法是填命令、间隔和次数,一次排进 Telegram 官方定时;预设只是快速填常用玩法。这里不会根据回复自动补发或追链。多选身份会一次为每个身份各起一批,按「错峰偏移 + 阶梯」自动错开。</p>
         <form id="scheduleForm" class="settings-form">
           <div class="form-grid">
             <label class="span-2">
@@ -3125,7 +3231,7 @@ async function openScheduleModal() {
               <input name="command" placeholder="例如 .签到" />
             </label>
             <label data-show-when="interval_sec">
-              <span>间隔(秒)</span>
+              <span>间隔 / CD(秒)</span>
               <input name="interval_sec" inputmode="numeric" value="3600" />
             </label>
             <label data-show-when="count">
@@ -4799,10 +4905,10 @@ selectAllChannels.addEventListener("click", () => {
   renderDetail();
 });
 
-// viewMode 切换在主界面已下线 — 默认 solo,「全部」走顶部「日志」按钮的 modal。
+// viewMode 切换在主界面已下线 — 默认 focus,「全部」走顶部「日志」按钮的 modal。
 // setViewMode 留给跳转跨视图等内部调用,但不再绑按钮。
 function setViewMode(mode) {
-  if (mode !== "solo") return;  // 只支持 solo;全部走 logs modal
+  if (!["focus", "solo"].includes(mode)) return;
   if (state.viewMode === mode) return;
   state.viewMode = mode;
   state.detailMode = "message";
@@ -4916,6 +5022,10 @@ if (logoutAccountButton) {
 
 if (gameBotsButton) {
   gameBotsButton.addEventListener("click", () => openGameBotsModal());
+}
+
+if (filterSettingsButton) {
+  filterSettingsButton.addEventListener("click", () => openFilterSettingsModal());
 }
 
 if (notifySettingsButton) {

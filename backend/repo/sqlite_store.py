@@ -11,6 +11,7 @@ from backend.domain.models import OutboxDraft, ParsedCard, RawMessageEvent, Stat
 from backend.identity_state import build_default_registry
 from backend.parsers import build_parser_registry
 from backend.processors import MessagePipeline
+from backend.processors.message_filter import DEFAULT_FOCUS_KEYWORDS
 from backend.repo.sample_store import SAMPLE_EVENTS
 from backend.tg.client import safe_session_name
 
@@ -296,6 +297,97 @@ class SQLiteStore:
             count += 1
         return count
 
+    def rebuild_parsed_cards_if_filter_outdated(self) -> int:
+        """旧卡片没有 focus/archive/leader 过滤频道时,重放 raw_messages。
+
+        这是产品主线从「单机/控制台」切到「消息过滤」后的轻量迁移。只在
+        parsed_cards 中完全没有新过滤频道时触发,避免每次启动都重建。
+        """
+        with self._connect() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM parsed_cards").fetchone()[0]
+            if not total:
+                return 0
+            classified = conn.execute(
+                """
+                SELECT COUNT(*) FROM parsed_cards
+                WHERE channels_json LIKE '%"focus"%'
+                   OR channels_json LIKE '%"archive"%'
+                   OR channels_json LIKE '%"leader"%'
+                """
+            ).fetchone()[0]
+            if classified:
+                return 0
+            rows = conn.execute(
+                """
+                SELECT id, chat_id, msg_id, text, source, date, sender_id,
+                       reply_to_msg_id, top_msg_id, mentions_json, sender_is_bot,
+                       edited_at, deleted_at, media_kind, media_meta_json
+                FROM raw_messages
+                ORDER BY rowid ASC
+                """
+            ).fetchall()
+        count = 0
+        for row in rows:
+            event = RawMessageEvent(
+                id=row[0],
+                chat_id=int(row[1]),
+                msg_id=int(row[2]),
+                text=row[3],
+                source=row[4],
+                date=row[5],
+                sender_id=row[6],
+                reply_to_msg_id=row[7],
+                top_msg_id=row[8],
+                mentions=tuple(json.loads(row[9] or "[]")),
+                sender_is_bot=bool(row[10]),
+                edited_at=row[11],
+                deleted_at=row[12],
+                media_kind=row[13],
+                media_meta=(json.loads(row[14]) if row[14] else None),
+            )
+            self.ingest_event(event)
+            count += 1
+        return count
+
+    def rebuild_all_parsed_cards(self) -> int:
+        """按当前 parser/settings 全量重建 parsed_cards/state_patches。
+
+        用于过滤规则变更后立即让历史消息重新分流。raw_messages 是事实来源,
+        ingest_event 内部会先删旧 card 再写新 card。
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, chat_id, msg_id, text, source, date, sender_id,
+                       reply_to_msg_id, top_msg_id, mentions_json, sender_is_bot,
+                       edited_at, deleted_at, media_kind, media_meta_json
+                FROM raw_messages
+                ORDER BY rowid ASC
+                """
+            ).fetchall()
+        count = 0
+        for row in rows:
+            event = RawMessageEvent(
+                id=row[0],
+                chat_id=int(row[1]),
+                msg_id=int(row[2]),
+                text=row[3],
+                source=row[4],
+                date=row[5],
+                sender_id=row[6],
+                reply_to_msg_id=row[7],
+                top_msg_id=row[8],
+                mentions=tuple(json.loads(row[9] or "[]")),
+                sender_is_bot=bool(row[10]),
+                edited_at=row[11],
+                deleted_at=row[12],
+                media_kind=row[13],
+                media_meta=(json.loads(row[14]) if row[14] else None),
+            )
+            self.ingest_event(event)
+            count += 1
+        return count
+
     def ingest_many(self, events: Iterable[RawMessageEvent]) -> None:
         for event in events:
             self.ingest_event(event)
@@ -491,6 +583,9 @@ class SQLiteStore:
         if before_seq > 0:
             where.append("rowid < ?")
             params.append(int(before_seq))
+        if channel != "all":
+            where.append("channels_json LIKE ?")
+            params.append(f'%"{channel}"%')
         if where:
             sql_parts.append("WHERE " + " AND ".join(where))
         # since_seq 模式按 rowid ASC 给前端,前端按到来顺序 merge;
@@ -509,8 +604,6 @@ class SQLiteStore:
         result: list[tuple[int, ParsedCard]] = []
         for rowid, payload in rows:
             card = ParsedCard.from_api(json.loads(payload))
-            if channel != "all" and channel not in card.channels:
-                continue
             result.append((int(rowid), card))
         return result
 
@@ -630,6 +723,14 @@ class SQLiteStore:
             "listener_status": "stopped",
             "listener_message": "",
             "message_retention_days": 30,
+            "own_aliases": [],
+            "leader_sender_ids": [],
+            "leader_source_names": [],
+            "focus_keywords": list(DEFAULT_FOCUS_KEYWORDS),
+            "focus_include_player_plain": True,
+            "archive_dot_commands": True,
+            "archive_bot_replies": True,
+            "message_filter_version": 1,
             "notify_enabled": False,
             "notify_tg_bot_token": "",
             "notify_tg_chat_id": "",
@@ -1407,6 +1508,23 @@ def _normalize_settings(payload: dict) -> dict:
         {str(t).strip() for t in raw_titles if str(t or "").strip()}
     )
 
+    def str_list(key: str, default: list[str] | None = None) -> list[str]:
+        raw = payload.get(key)
+        if raw is None:
+            raw = default or []
+        if isinstance(raw, str):
+            raw = raw.replace("\n", ",").split(",")
+        return [str(item).strip() for item in raw if str(item or "").strip()]
+
+    def int_list(key: str) -> list[int]:
+        out = []
+        for item in str_list(key):
+            try:
+                out.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        return sorted(set(out))
+
     return {
         "api_id": text("api_id"),
         "api_hash": text("api_hash"),
@@ -1426,6 +1544,14 @@ def _normalize_settings(payload: dict) -> dict:
         "listener_status": text("listener_status") or "stopped",
         "listener_message": text("listener_message"),
         "message_retention_days": retention,
+        "own_aliases": sorted(set(str_list("own_aliases"))),
+        "leader_sender_ids": int_list("leader_sender_ids"),
+        "leader_source_names": sorted(set(str_list("leader_source_names"))),
+        "focus_keywords": sorted(set(str_list("focus_keywords", list(DEFAULT_FOCUS_KEYWORDS)))),
+        "focus_include_player_plain": bool_value("focus_include_player_plain"),
+        "archive_dot_commands": bool_value("archive_dot_commands"),
+        "archive_bot_replies": bool_value("archive_bot_replies"),
+        "message_filter_version": 1,
         "notify_enabled": bool_value("notify_enabled"),
         "notify_tg_bot_token": text("notify_tg_bot_token"),
         "notify_tg_chat_id": text("notify_tg_chat_id"),
