@@ -820,7 +820,15 @@ function serverChannelForCurrentView() {
 function parentMessageOf(card) {
   if (!card.reply_to_msg_id || !card.chat_id) return null;
   const parentId = `tg:${card.chat_id}:${card.reply_to_msg_id}`;
-  return state.messages.find((m) => m.id === parentId) || null;
+  return (
+    state.messages.find((m) => m.id === parentId) ||
+    state.messages.find(
+      (m) =>
+        Number(m.chat_id || 0) === Number(card.chat_id || 0) &&
+        Number(m.msg_id || 0) === Number(card.reply_to_msg_id || 0)
+    ) ||
+    null
+  );
 }
 
 function jumpToMessage(target) {

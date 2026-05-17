@@ -267,7 +267,9 @@ def _outgoing_event(
     account_key: str,
 ) -> RawMessageEvent:
     date_text = datetime.fromtimestamp(sent_at, tz=timezone.utc).isoformat()
-    event_id = f"tg:{chat_id}:{msg_id}:{account_key}"
+    # Telegram msg_id is unique inside a chat. Keep outgoing ids canonical so
+    # bot replies can resolve their parent by tg:{chat_id}:{msg_id}.
+    event_id = f"tg:{chat_id}:{msg_id}"
     return RawMessageEvent(
         id=event_id,
         chat_id=chat_id,

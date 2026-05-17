@@ -35,6 +35,9 @@ class CardStore(Protocol):
     def list_cards(self, channel: str = "all") -> tuple[ParsedCard, ...]:
         ...
 
+    def get_card_by_chat_msg(self, chat_id: int, msg_id: int) -> tuple[int, ParsedCard] | None:
+        ...
+
     def get_settings(self) -> dict:
         ...
 
@@ -76,6 +79,21 @@ class CardStore(Protocol):
 
 
 SECRET_SETTING_KEYS = {"api_hash", "proxy_password", "notify_tg_bot_token"}
+
+
+def _parse_tg_card_ref(value: str) -> tuple[int, int]:
+    """Parse canonical card refs like tg:-1001680975844:9023228.
+
+    Older outgoing cards may append an account key after msg_id; the first
+    three fields are still enough to locate the Telegram message.
+    """
+    parts = str(value or "").strip().split(":")
+    if len(parts) < 3 or parts[0] != "tg":
+        return 0, 0
+    try:
+        return int(parts[1]), int(parts[2])
+    except (TypeError, ValueError):
+        return 0, 0
 
 
 def _estimate_send_seconds(n: int) -> int:
@@ -151,6 +169,10 @@ class MiniWebServer:
         target_id = str(target_id or "").strip()
         if target_id and hasattr(self._store, "get_card"):
             result = self._store.get_card(target_id)
+            if result is None and hasattr(self._store, "get_card_by_chat_msg"):
+                chat_id, msg_id = _parse_tg_card_ref(target_id)
+                if chat_id and msg_id:
+                    result = self._store.get_card_by_chat_msg(chat_id, msg_id)
             if result is None:
                 return {"messages": [], "source": "sqlite", "max_seq": 0, "incremental": False}
             seq, card = result

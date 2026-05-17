@@ -828,6 +828,29 @@ def test_messages_payload_initial_caps_with_default_limit(tmp_path):
     assert payload["max_seq"] >= len(payload["messages"])
 
 
+def test_messages_payload_target_id_falls_back_to_chat_msg_for_outgoing_suffix(tmp_path):
+    """回复链按 tg:{chat}:{msg} 查父消息时,要能命中历史 outgoing 后缀 ID。"""
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1001680975844:9023228:447851861646",
+            chat_id=-1001680975844,
+            msg_id=9023228,
+            text=".闯塔",
+            source="Wise Mole",
+            date="2026-05-17T17:14:01+00:00",
+            sender_id=8574677796,
+        )
+    )
+    server = MiniWebServer(store=store)
+
+    payload = server.messages_payload("all", target_id="tg:-1001680975844:9023228")
+
+    assert len(payload["messages"]) == 1
+    assert payload["messages"][0]["id"] == "tg:-1001680975844:9023228:447851861646"
+    assert payload["messages"][0]["raw"] == ".闯塔"
+
+
 
     """GetSendAs / resolve-entity / batch identities / accounts delete 路由必须挂上,
     前端身份表单才有得用。"""
@@ -2406,7 +2429,7 @@ def test_skill_send_ingests_outgoing_into_raw_messages(tmp_path, monkeypatch):
     import sqlite3
     con = sqlite3.connect(tmp_path / "m.db")
     row = con.execute(
-        "SELECT chat_id, msg_id, sender_id, text, top_msg_id, source FROM raw_messages WHERE msg_id=555000"
+        "SELECT chat_id, msg_id, sender_id, text, top_msg_id, source, id FROM raw_messages WHERE msg_id=555000"
     ).fetchone()
     assert row is not None, "outgoing message should have been ingested into raw_messages"
     assert row[0] == -1001680975844
@@ -2414,6 +2437,7 @@ def test_skill_send_ingests_outgoing_into_raw_messages(tmp_path, monkeypatch):
     assert row[3] == ".野外历练"
     assert row[4] == 7310786
     assert row[5] == "Wise Mole🤓", f"source should be first+last name from get_me, got {row[5]!r}"
+    assert row[6] == "tg:-1001680975844:555000"
 
 
 def test_skill_send_hydrates_account_and_identity_label_from_get_me(tmp_path, monkeypatch):

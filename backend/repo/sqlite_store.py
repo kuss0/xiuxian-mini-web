@@ -816,6 +816,31 @@ class SQLiteStore:
             return None
         return int(row[0]), ParsedCard.from_api(json.loads(row[1]))
 
+    def get_card_by_chat_msg(self, chat_id: int, msg_id: int) -> tuple[int, ParsedCard] | None:
+        """按 Telegram (chat_id,msg_id) 取卡片。
+
+        UI 回复链只知道 Telegram msg_id,但 mini-web 自己发出的 outgoing
+        曾经会把 account_key 追加进 card.id,例如:
+        tg:-1001680975844:9023228:447851861646
+        这时按 canonical id tg:-1001680975844:9023228 查不到,必须回落到
+        raw_messages 的 chat_id/msg_id 索引。
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT parsed_cards.rowid, parsed_cards.payload_json
+                FROM parsed_cards
+                JOIN raw_messages ON raw_messages.id = parsed_cards.raw_message_id
+                WHERE raw_messages.chat_id=? AND raw_messages.msg_id=?
+                ORDER BY parsed_cards.rowid DESC
+                LIMIT 1
+                """,
+                (int(chat_id), int(msg_id)),
+            ).fetchone()
+        if not row:
+            return None
+        return int(row[0]), ParsedCard.from_api(json.loads(row[1]))
+
     def get_settings(self) -> dict:
         defaults = {
             "api_id": "",
