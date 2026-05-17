@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: manual-send 2026-05-18T00:00
-console.log("[mini-web] build: manual-send 2026-05-18T00:00 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: quick-actions-direct-send 2026-05-18T01:00
+console.log("[mini-web] build: quick-actions-direct-send 2026-05-18T01:00 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -1299,11 +1299,19 @@ function renderChatMessageNode(message) {
       ${replyContext}
       <div class="chat-text" data-chat-action="select">${textHtml}</div>
       ${truncated ? `<button type="button" class="chat-toggle" data-chat-action="toggle">${isExpanded ? "收起全文" : "展开全文"}</button>` : ""}
+      ${renderChatQuickActions(message)}
       ${enhanceItems ? `<div class="chat-enhance">${enhanceItems}</div>` : ""}
     </div>
   `;
 
   row.addEventListener("click", async (event) => {
+    const quickAction = event.target.closest('[data-chat-action="quick-action"]');
+    if (quickAction) {
+      event.stopPropagation();
+      const index = Number(quickAction.dataset.actionIndex || 0);
+      await handleChatQuickAction(message, index, quickAction);
+      return;
+    }
     const reply = event.target.closest('[data-chat-action="reply"]');
     if (reply) {
       event.stopPropagation();
@@ -1347,6 +1355,69 @@ function renderChatMessageNode(message) {
     renderDetail();
   });
   return row;
+}
+
+function renderChatQuickActions(message) {
+  const actions = (message.actions || []).filter((action) => String(action.command || "").trim());
+  if (!actions.length) return "";
+  const maxVisible = 4;
+  const buttons = actions.slice(0, maxVisible).map((action, index) => {
+    const label = quickActionLabel(action);
+    const command = String(action.command || "").trim();
+    const replyText = action.reply_to_msg_id ? `回复 #${action.reply_to_msg_id}` : "直接发送";
+    return `
+      <button type="button" class="chat-quick-action" data-chat-action="quick-action"
+              data-action-index="${index}" title="${escapeAttr(`${replyText}: ${command}`)}">
+        ${escapeHtml(label)}
+      </button>
+    `;
+  }).join("");
+  const more = actions.length > maxVisible
+    ? `<span class="chat-quick-more">+${actions.length - maxVisible}</span>`
+    : "";
+  return `<div class="chat-quick-actions">${buttons}${more}</div>`;
+}
+
+function quickActionLabel(action) {
+  const rawLabel = String(action.label || "").trim();
+  const command = String(action.command || "").trim();
+  const cleaned = rawLabel
+    .replace(/^复制\s*/, "")
+    .replace(/[（(]回复[）)]/g, "")
+    .trim();
+  if (cleaned && cleaned.length <= 12) return cleaned;
+  return command.replace(/^[.。]/, "").trim() || "回复";
+}
+
+function quickActionNeedsManualReview(action) {
+  const command = String(action.command || "").trim();
+  // 自证命令通常还需要口令 + 答案,不能裸发 ".自证"。
+  return command === ".自证" || command === "。自证";
+}
+
+async function handleChatQuickAction(message, index, button) {
+  const action = (message.actions || [])[index];
+  if (!action) return;
+  const skillKey = findSkillKeyForCommand(action.command);
+  if (!skillKey || quickActionNeedsManualReview(action)) {
+    openManualSendModal(message, {
+      initialCommand: action.command,
+      chatId: action.chat_id,
+      replyToMsgId: action.reply_to_msg_id,
+      title: "快捷回复",
+    });
+    return;
+  }
+  button.disabled = true;
+  try {
+    await sendSkill(skillKey, {
+      command_override: action.command,
+      reply_to_msg_id: action.reply_to_msg_id || undefined,
+      chat_id: action.chat_id || undefined,
+    });
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function displaySource(source) {
@@ -4979,7 +5050,8 @@ function manualMessagePreview(message) {
   return `${source} ${msgId}${compact ? `：${compact}` : ""}`;
 }
 
-function openManualSendModal(replyMessage = null) {
+function openManualSendModal(replyMessage = null, opts = {}) {
+  opts = opts || {};
   if (!state.identities.length) {
     showSkillToast("请先登录账号并生成身份", "err");
     return;
@@ -4987,11 +5059,14 @@ function openManualSendModal(replyMessage = null) {
   const selectedId = defaultManualIdentityId();
   const identity = identityById(selectedId);
   const account = accountForIdentity(identity);
-  const replyTo = Number(replyMessage?.msg_id || 0);
+  const replyTo = Number(opts.replyToMsgId || replyMessage?.msg_id || 0);
   const replyChat = Number(replyMessage?.chat_id || 0);
-  const initialChat = replyChat || account?.target_chat || "";
-  const initialTopic = account?.target_topic_id || "";
-  const context = replyMessage
+  const initialChat = opts.chatId || replyChat || account?.target_chat || "";
+  const initialTopic = opts.topMsgId || account?.target_topic_id || "";
+  const initialCommand = String(opts.initialCommand || "").trim();
+  const isReplyMode = Boolean(replyMessage || replyTo);
+  const modalTitle = opts.title || (isReplyMode ? "回复消息" : "直接发送消息");
+  const context = isReplyMode && replyMessage
     ? `
       <div class="manual-send-context">
         <span>回复对象</span>
@@ -5000,12 +5075,20 @@ function openManualSendModal(replyMessage = null) {
     `
     : `
       <div class="manual-send-context">
-        <span>发送方式</span>
-        <strong>手动输入内容，确认后通过当前账号 Telegram client 发送</strong>
+        <span>${isReplyMode ? "回复方式" : "发送方式"}</span>
+        <strong>${isReplyMode ? "确认后作为回复消息发送" : "不绑定具体消息，确认后直接发送到目标群 / 话题"}</strong>
       </div>
     `;
+  const replyField = isReplyMode
+    ? `
+      <label>
+        <span>回复消息 ID</span>
+        <input name="reply_to_msg_id" inputmode="numeric" value="${replyTo ? escapeAttr(String(replyTo)) : ""}" placeholder="回复时自动填入" />
+      </label>
+    `
+    : "";
   const dialog = openModal({
-    title: replyMessage ? "回复消息" : "主动发送消息",
+    title: modalTitle,
     body: `
       <section class="modal-section manual-send-modal">
         ${context}
@@ -5023,13 +5106,10 @@ function openManualSendModal(replyMessage = null) {
               <span>话题 ID</span>
               <input name="top_msg_id" inputmode="numeric" value="${escapeAttr(String(initialTopic || ""))}" placeholder="留空走账号默认话题" />
             </label>
-            <label>
-              <span>回复消息 ID</span>
-              <input name="reply_to_msg_id" inputmode="numeric" value="${replyTo ? escapeAttr(String(replyTo)) : ""}" placeholder="可选；回复时自动填入" />
-            </label>
+            ${replyField}
             <label class="span-2 stacked-field">
               <span>发送内容</span>
-              <textarea name="command" rows="5" placeholder="例如 .查看闭关，或输入任意要发到 Telegram 的文本"></textarea>
+              <textarea name="command" rows="5" placeholder="例如 .查看闭关，或输入任意要发到 Telegram 的文本">${escapeHtml(initialCommand)}</textarea>
             </label>
           </div>
         </form>

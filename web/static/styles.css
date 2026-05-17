@@ -874,6 +874,19 @@ textarea:focus-visible {
   color: var(--accent);
 }
 
+#manualSendButton {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+#manualSendButton:hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+
 .layout-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
@@ -1299,6 +1312,44 @@ textarea:focus-visible {
 
 .chat-toggle:hover {
   text-decoration: underline;
+}
+
+.chat-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.chat-quick-action {
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: rgba(37, 99, 235, 0.16);
+  color: #bfdbfe;
+  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.chat-quick-action:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.chat-quick-action:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.chat-quick-more {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  padding: 4px 8px;
+  font-size: 12px;
 }
 
 .chat-enhance {
