@@ -8,6 +8,13 @@ from backend.domain.models import ParsedCard, RawMessageEvent
 from backend.domain.registry import ParserOutput, ParserRegistry
 
 
+# 跨 NewMessage + MessageEdited 两条入口的幂等去重 — 同一 (chat_id, msg_id)
+# 内容没变化时跳过 _maybe_observe(state machine 不重复 tick)。
+# 老脚本对照:app.py:324 `_claim_runtime_event`。TTL 自己 GC。
+_OBSERVE_CACHE_TTL_SEC = 600.0
+_OBSERVE_CACHE_MAX = 4096
+
+
 class MessagePipeline:
     """单条消息的处理管线:parser → enrich → 状态机 observe。
 
@@ -46,6 +53,8 @@ class MessagePipeline:
         self._get_settings_snapshot = get_settings_snapshot
         self._get_module_state = get_module_state
         self._save_module_state = save_module_state
+        # observe 幂等缓存:{(chat_id, msg_id): (text_hash, expires_at)}
+        self._observe_cache: dict[tuple[int, int], tuple[int, float]] = {}
 
     def process(self, event: RawMessageEvent) -> ParserOutput:
         output = self._registry.parse(event)
@@ -86,6 +95,19 @@ class MessagePipeline:
         self._maybe_observe(event)
         return enriched
 
+    def _gc_observe_cache(self, now: float) -> None:
+        if len(self._observe_cache) < _OBSERVE_CACHE_MAX:
+            # 按 max 容量做被动 GC,够用且代价低
+            return
+        expired = [k for k, (_h, exp) in self._observe_cache.items() if exp <= now]
+        for k in expired:
+            self._observe_cache.pop(k, None)
+        # 仍超容 → 砍掉最老的一半
+        if len(self._observe_cache) >= _OBSERVE_CACHE_MAX:
+            items = sorted(self._observe_cache.items(), key=lambda kv: kv[1][1])
+            for k, _ in items[: _OBSERVE_CACHE_MAX // 2]:
+                self._observe_cache.pop(k, None)
+
     def _maybe_observe(self, event: RawMessageEvent) -> None:
         """跑玩法 module 的 observe;失败静默,不影响 parser 落库。"""
         if (
@@ -94,6 +116,17 @@ class MessagePipeline:
             or self._save_module_state is None
         ):
             return
+        # 幂等去重:同 (chat_id, msg_id) 内容未变就跳过(NewMessage + 多次 MessageEdited
+        # 会反复送同一条进来)。text_hash 是 hash(text or "") — 编辑了文字才重跑。
+        key = (int(event.chat_id or 0), int(event.msg_id or 0))
+        text_hash = hash(event.text or "")
+        if key[0] and key[1]:
+            now = time.time()
+            self._gc_observe_cache(now)
+            prev = self._observe_cache.get(key)
+            if prev and prev[0] == text_hash and prev[1] > now:
+                return
+            self._observe_cache[key] = (text_hash, now + _OBSERVE_CACHE_TTL_SEC)
         try:
             from backend.identity_state import ObserveContext, classify_sender
         except Exception:

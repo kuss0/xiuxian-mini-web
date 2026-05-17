@@ -135,9 +135,20 @@ class SkillSendService:
                 )
             )
         except Exception as exc:
+            # 老脚本 runtime.py:1536 在挂机模式下 catch FloodWaitError 暂停发送。
+            # mini-web 一次一发不会循环,但还是要给用户一个可读的错误。
+            exc_name = type(exc).__name__
+            if "FloodWait" in exc_name:
+                seconds = int(getattr(exc, "seconds", 0) or 0)
+                if seconds > 0:
+                    error = f"⏳ Telegram 限流:请等 {seconds}s 再发(FloodWait)"
+                else:
+                    error = f"⏳ Telegram 限流:{exc}"
+            else:
+                error = f"发送失败:{exc}"
             return SkillSendResult(
                 ok=False,
-                error=f"发送失败:{exc}",
+                error=error,
                 skill_key=skill_key,
                 command=command,
                 reply_to_msg_id=reply_id,

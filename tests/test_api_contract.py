@@ -71,7 +71,10 @@ def test_sqlite_store_persists_cards(tmp_path):
 
     assert len(first) == 1
     assert len(second) == 1
-    assert second[0].title == "风险提醒"
+    # 天道审判 + 自证 提示同时落到 risk 频道(severity=risk);
+    # 老 RiskParser 也会匹配但优先级在 prompt 后面,这里取 Tiandao prompt 卡。
+    assert second[0].title in {"风险提醒", "天道审判"}
+    assert second[0].severity == "risk"
 
 
 def test_sqlite_store_persists_state_patches(tmp_path):
