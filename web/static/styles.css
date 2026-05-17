@@ -3512,3 +3512,12 @@ pre {
   color: var(--text);
 }
 .notify-event input { margin: 0; }
+
+.notify-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.notify-toggle input { margin: 0; }

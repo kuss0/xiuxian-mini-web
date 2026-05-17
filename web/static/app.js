@@ -69,6 +69,7 @@ const cultivationModules = document.querySelector("#cultivationModules");
 const sidebarIdentityList = document.querySelector("#identityList");
 const currentAccountLine = document.querySelector("#currentAccountLine");
 const gameBotsButton = document.querySelector("#gameBotsButton");
+const notifySettingsButton = document.querySelector("#notifySettingsButton");
 const globalBanner = document.querySelector("#globalBanner");
 const viewModeAllButton = null;
 const viewModeSoloButton = null;
@@ -443,6 +444,182 @@ function bindGameBotsModal(dialog) {
         status.className = "modal-status-line error";
         status.textContent = error.message || "保存失败";
         saveBtn.disabled = false;
+      }
+    });
+  }
+}
+
+// ---------- 通知设置 modal ----------
+
+async function openNotifySettingsModal() {
+  // 先把最新 settings 拉过来,确保 saved_secrets 是新鲜的
+  const settings = await loadSettings();
+  const savedSecrets = settings.saved_secrets || {};
+  const enabled = !!settings.notify_enabled;
+  const subscribed = new Set(settings.notify_card_titles || []);
+
+  const dialog = openModal({
+    title: "🔔 通知设置",
+    body: `
+      <section class="modal-section">
+        <h4>通道:Telegram Bot</h4>
+        <p class="muted">用一个独立的 Telegram bot(BotFather 申请),把关键事件推到指定 chat。
+        Bot 需要先被你加进 chat 一次(私聊就 /start 一下,群里把 bot 拉进去)。
+        后续会接 Bark / 钉钉 / 浏览器 push,接口已留好。</p>
+
+        <label class="notify-toggle">
+          <input type="checkbox" id="notifyEnabled" ${enabled ? "checked" : ""} />
+          <span>启用通知</span>
+        </label>
+
+        <div class="form-grid" style="margin-top:8px;">
+          <label>
+            <span>Bot Token</span>
+            <input id="notifyTgBotToken" type="text" value=""
+              placeholder="${savedSecrets.notify_tg_bot_token ? "已保存,留空不变;重新填写则覆盖" : "BotFather 给的 token,形如 1234567:ABC..."}"
+              autocomplete="off" />
+          </label>
+          <label>
+            <span>Chat ID</span>
+            <input id="notifyTgChatId" type="text" value="${escapeAttr(settings.notify_tg_chat_id || "")}"
+              placeholder="私聊 = 你的 user_id;群 = -100xxx" />
+          </label>
+        </div>
+      </section>
+
+      <section class="modal-section">
+        <h4>订阅哪些事件</h4>
+        <p class="muted">命中订阅清单的卡片才会推。同一条消息 60s 内不会重复推(防 NewMessage+Edit 双触发)。</p>
+        <div id="notifyEventGrid" class="notify-event-grid">
+          <p class="muted">加载中…</p>
+        </div>
+      </section>
+
+      <p class="modal-status-line info" id="notifyStatus" hidden></p>
+    `,
+    footer: `
+      <button type="button" data-modal-close>关闭</button>
+      <button type="button" id="notifyTestBtn">发测试通知</button>
+      <button type="button" class="primary" id="notifySaveBtn">保存</button>
+    `,
+  });
+  if (!dialog) return;
+
+  // 加载可订阅事件清单
+  try {
+    const data = await fetchJson("/api/notify/card-titles");
+    const titles = data.titles || [];
+    const grid = dialog.querySelector("#notifyEventGrid");
+    const groups = [
+      { name: "🚨 高危", keys: ["风险提醒", "天道审判"] },
+      { name: "🎯 prompt", keys: ["玄骨考校", "天机考验", "极阴祖师", "南陇侯", "共历心劫", "第二元神归位"] },
+      { name: "🎉 里程碑", keys: ["境界突破", "赐予道号", "试炼古塔战报", "深度闭关总结", "闭关成功"] },
+      { name: "📦 副本/物品", keys: ["虚天殿开启", "加入副本成功", "副本房间解散", "储物袋快照", "灵树采摘"] },
+    ];
+    const used = new Set();
+    let html = "";
+    for (const g of groups) {
+      const present = g.keys.filter((k) => titles.includes(k));
+      if (!present.length) continue;
+      present.forEach((k) => used.add(k));
+      html += `<div class="notify-group"><span class="notify-group-name">${escapeHtml(g.name)}</span>`;
+      for (const k of present) {
+        html += `<label class="notify-event"><input type="checkbox" data-notify-event="${escapeAttr(k)}" ${subscribed.has(k) ? "checked" : ""} /> <span>${escapeHtml(k)}</span></label>`;
+      }
+      html += "</div>";
+    }
+    const leftover = titles.filter((k) => !used.has(k));
+    if (leftover.length) {
+      html += `<div class="notify-group"><span class="notify-group-name">其它</span>`;
+      for (const k of leftover) {
+        html += `<label class="notify-event"><input type="checkbox" data-notify-event="${escapeAttr(k)}" ${subscribed.has(k) ? "checked" : ""} /> <span>${escapeHtml(k)}</span></label>`;
+      }
+      html += "</div>";
+    }
+    grid.innerHTML = html || '<p class="muted">没有可订阅的事件</p>';
+  } catch (err) {
+    const grid = dialog.querySelector("#notifyEventGrid");
+    if (grid) grid.innerHTML = `<p class="muted">事件列表加载失败:${escapeHtml(String(err))}</p>`;
+  }
+
+  bindNotifySettingsModal(dialog);
+}
+
+function bindNotifySettingsModal(dialog) {
+  const status = dialog.querySelector("#notifyStatus");
+  const setStatus = (kind, text) => {
+    if (!status) return;
+    status.hidden = false;
+    status.className = `modal-status-line ${kind}`;
+    status.textContent = text;
+  };
+  const collectPayload = () => {
+    const enabledEl = dialog.querySelector("#notifyEnabled");
+    const tokenEl = dialog.querySelector("#notifyTgBotToken");
+    const chatEl = dialog.querySelector("#notifyTgChatId");
+    const titles = Array.from(
+      dialog.querySelectorAll('[data-notify-event]:checked')
+    ).map((el) => el.dataset.notifyEvent);
+    return {
+      notify_enabled: !!(enabledEl && enabledEl.checked),
+      notify_tg_bot_token: (tokenEl && tokenEl.value) || "",
+      notify_tg_chat_id: (chatEl && chatEl.value) || "",
+      notify_card_titles: titles,
+    };
+  };
+  const saveSettingsPatch = async () => {
+    const settings = state.settings || (await loadSettings());
+    // 注意:把当前 settings 整体回传时,要置空已保存的 secret 输入,
+    // 否则 preserve_existing_secrets 会误以为用户重新输入了 ""。
+    const patch = {
+      ...settings,
+      api_hash: "",        // 已保存,留空不变
+      proxy_password: "",  // 同上
+      ...collectPayload(),
+    };
+    // notify_tg_bot_token 同理:为空就别覆盖
+    if (!patch.notify_tg_bot_token) {
+      delete patch.notify_tg_bot_token;
+    }
+    await postJson("/api/settings", patch);
+    state.settings = await loadSettings();
+  };
+
+  const saveBtn = dialog.querySelector("#notifySaveBtn");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", async () => {
+      saveBtn.disabled = true;
+      setStatus("info", "保存中…");
+      try {
+        await saveSettingsPatch();
+        setStatus("ok", "已保存");
+        setTimeout(() => closeModal(), 600);
+      } catch (error) {
+        setStatus("error", error.message || "保存失败");
+        saveBtn.disabled = false;
+      }
+    });
+  }
+
+  const testBtn = dialog.querySelector("#notifyTestBtn");
+  if (testBtn) {
+    testBtn.addEventListener("click", async () => {
+      testBtn.disabled = true;
+      setStatus("info", "保存当前配置 + 发测试通知…");
+      try {
+        await saveSettingsPatch();
+        const data = await postJson("/api/notify/test", {});
+        if (data.ok) {
+          const channels = (data.results || []).map((r) => r.channel).join(", ");
+          setStatus("ok", `✅ 已发(${channels || "无 channel"}),去 chat 看一下`);
+        } else {
+          const errs = (data.results || []).filter((r) => !r.ok).map((r) => `${r.channel}: ${r.error}`).join("; ");
+          setStatus("error", `❌ ${errs || data.error || "未知错误"}`);
+        }
+      } catch (error) {
+        setStatus("error", `❌ ${error.message || error}`);
+      } finally {
+        testBtn.disabled = false;
       }
     });
   }
@@ -4739,6 +4916,10 @@ if (logoutAccountButton) {
 
 if (gameBotsButton) {
   gameBotsButton.addEventListener("click", () => openGameBotsModal());
+}
+
+if (notifySettingsButton) {
+  notifySettingsButton.addEventListener("click", () => openNotifySettingsModal());
 }
 
 if (logsButton) {
