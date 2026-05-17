@@ -301,8 +301,14 @@ class SQLiteStore:
         """旧卡片没有 focus/archive/leader 过滤频道时,重放 raw_messages。
 
         这是产品主线从「单机/控制台」切到「消息过滤」后的轻量迁移。只在
-        parsed_cards 中完全没有新过滤频道时触发,避免每次启动都重建。
+        parsed_cards 中完全没有新过滤频道,或小库里旧版把所有 @ 都标成
+        「被@」时触发。大库的历史重分流只在用户保存「过滤设置」时显式执行,
+        避免服务启动被迁移拖住。
         """
+        try:
+            own_aliases = self.get_settings().get("own_aliases") or []
+        except Exception:
+            own_aliases = []
         with self._connect() as conn:
             total = conn.execute("SELECT COUNT(*) FROM parsed_cards").fetchone()[0]
             if not total:
@@ -315,7 +321,20 @@ class SQLiteStore:
                    OR channels_json LIKE '%"leader"%'
                 """
             ).fetchone()[0]
-            if classified:
+            stale_mentions = 0
+            try:
+                if not own_aliases:
+                    stale_mentions = conn.execute(
+                        """
+                        SELECT COUNT(*) FROM parsed_cards
+                        WHERE payload_json LIKE '%"被@"%'
+                        """
+                    ).fetchone()[0]
+            except Exception:
+                stale_mentions = 0
+            # 大库启动时不做全量重放,避免服务启动被历史迁移拖住。
+            # 用户保存「过滤设置」时会走 rebuild_all_parsed_cards 显式重分流。
+            if classified and (not stale_mentions or total > 5000):
                 return 0
             rows = conn.execute(
                 """
