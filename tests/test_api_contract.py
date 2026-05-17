@@ -130,6 +130,47 @@ def test_message_filter_promotes_bot_reply_to_me_and_archives_reply_to_others():
     assert "回复别人" in reply_to_other.tags
 
 
+def test_message_filter_archives_bot_mentions_to_others():
+    base = ParsedCard(
+        id="mention-reply",
+        channels=("system",),
+        title="系统消息",
+        summary="",
+        source="韩天尊",
+        time="",
+        tags=("未分类",),
+        raw="",
+    )
+    settings = {
+        "archive_bot_replies": True,
+        "focus_keywords": ["洞府"],
+        "own_aliases": ["wa2000"],
+    }
+    other_mention = RawMessageEvent(
+        id="r2", chat_id=1, msg_id=12, text="@other 的洞府", source="韩天尊",
+        date="", sender_id=-100,
+    )
+    own_mention = RawMessageEvent(
+        id="r3", chat_id=1, msg_id=13, text="@wa2000 的洞府", source="韩天尊",
+        date="", sender_id=-100,
+    )
+
+    reply_to_other = enrich_filter_channels(
+        base, other_mention, settings,
+        is_game_bot_sender=lambda sid: sid == -100,
+    )
+    reply_to_me = enrich_filter_channels(
+        base, own_mention, settings,
+        is_game_bot_sender=lambda sid: sid == -100,
+    )
+
+    assert "archive" in reply_to_other.channels
+    assert "focus" not in reply_to_other.channels
+    assert "提到别人" in reply_to_other.tags
+    assert "focus" in reply_to_me.channels
+    assert "archive" not in reply_to_me.channels
+
+
 def test_server_payload_shape_stays_compatible():
     server = MiniWebServer(store=SampleStore())
     payload = server.messages_payload("all")
@@ -211,6 +252,8 @@ def test_state_patches_api_shape(tmp_path):
 def test_sqlite_settings_roundtrip(tmp_path):
     store = SQLiteStore(tmp_path / "miniweb.db")
     assert 7900199668 in store.get_settings()["game_bot_ids"]
+    assert -1002049298748 in store.get_settings()["leader_sender_ids"]
+    assert "@iosdo7" in store.get_settings()["leader_source_names"]
 
     saved = store.save_settings(
         {
@@ -225,6 +268,8 @@ def test_sqlite_settings_roundtrip(tmp_path):
     assert saved["api_id"] == "123"
     assert saved["target_chat"] == "-1001"
     assert saved["game_bot_ids"] == [7900199668, 8757550896]
+    assert -1002049298748 in saved["leader_sender_ids"]
+    assert "@iosdo7" in saved["leader_source_names"]
     assert SQLiteStore(tmp_path / "miniweb.db").get_settings()["listen_enabled"] is True
 
 

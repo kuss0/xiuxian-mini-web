@@ -21,6 +21,8 @@ from backend.tg.client import safe_session_name
 
 
 DEFAULT_GAME_BOT_IDS = [-1003983937918, 7900199668, 8388633812, 8547797815, 8757550896]
+DEFAULT_LEADER_SENDER_IDS = [-1002049298748]
+DEFAULT_LEADER_SOURCE_NAMES = ["@iosdo7"]
 DEFAULT_TARGET_CHAT = "-1001680975844"
 DEFAULT_TARGET_TOPIC_ID = "7310786"
 ACCOUNT_SECRET_KEYS = {"api_hash", "proxy_password"}
@@ -821,8 +823,8 @@ class SQLiteStore:
             "listener_message": "",
             "message_retention_days": 30,
             "own_aliases": [],
-            "leader_sender_ids": [],
-            "leader_source_names": [],
+            "leader_sender_ids": list(DEFAULT_LEADER_SENDER_IDS),
+            "leader_source_names": list(DEFAULT_LEADER_SOURCE_NAMES),
             "focus_keywords": list(DEFAULT_FOCUS_KEYWORDS),
             "focus_include_player_plain": True,
             "archive_dot_commands": True,
@@ -854,6 +856,12 @@ class SQLiteStore:
         bots = settings.get("game_bot_ids") or []
         if not list(bots):
             patch["game_bot_ids"] = list(DEFAULT_GAME_BOT_IDS)
+        leaders = _merge_int_defaults(settings.get("leader_sender_ids"), DEFAULT_LEADER_SENDER_IDS)
+        if leaders != list(settings.get("leader_sender_ids") or []):
+            patch["leader_sender_ids"] = leaders
+        leader_names = _merge_str_defaults(settings.get("leader_source_names"), DEFAULT_LEADER_SOURCE_NAMES)
+        if leader_names != list(settings.get("leader_source_names") or []):
+            patch["leader_source_names"] = leader_names
         if patch:
             self.save_settings(patch)
         return self.get_settings()
@@ -1664,6 +1672,33 @@ def _clean_reply_to(event: RawMessageEvent, topic_id: int = 0) -> int | None:
     ):
         return None
     return int(raw_reply) if raw_reply else None
+
+
+def _merge_int_defaults(raw_value, defaults: list[int]) -> list[int]:
+    items: list[int] = []
+    seen: set[int] = set()
+    for value in list(raw_value or []) + list(defaults or []):
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed and parsed not in seen:
+            seen.add(parsed)
+            items.append(parsed)
+    return items
+
+
+def _merge_str_defaults(raw_value, defaults: list[str]) -> list[str]:
+    items: list[str] = []
+    seen: set[str] = set()
+    for value in list(raw_value or []) + list(defaults or []):
+        text = str(value or "").strip()
+        if not text:
+            continue
+        if text not in seen:
+            seen.add(text)
+            items.append(text)
+    return items
 
 
 def _normalize_account(payload: dict) -> dict:

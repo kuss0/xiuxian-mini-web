@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
 from backend.domain.models import ParsedCard, RawMessageEvent
 
-CURRENT_MESSAGE_FILTER_VERSION = 3
+CURRENT_MESSAGE_FILTER_VERSION = 4
 
 
 DEFAULT_FOCUS_KEYWORDS = (
@@ -71,6 +72,9 @@ def enrich_filter_channels(
         mentions=event.mentions,
         aliases=_list_setting(settings, "own_aliases"),
     )
+    bot_mentions_other = bool(
+        bot_like and has_any_mention(text, mentions=event.mentions) and not own_mention
+    )
     leader = is_leader_message(
         event,
         leader_sender_ids=_int_list_setting(settings, "leader_sender_ids"),
@@ -106,19 +110,25 @@ def enrich_filter_channels(
         _append_unique(tags, "回复我")
     if bot_reply_to_other:
         _append_unique(tags, "回复别人")
+    if bot_mentions_other:
+        _append_unique(tags, "提到别人")
     for hit in keyword_hits[:3]:
         _append_unique(tags, f"关键词:{hit}")
 
     archive_dot = bool(settings.get("archive_dot_commands", True))
     archive_bot = bool(settings.get("archive_bot_replies", True))
 
-    suppress_focus = bot_reply_to_other or (archive_dot and dot_command)
+    suppress_focus = (
+        bot_reply_to_other or bot_mentions_other or (archive_dot and dot_command)
+    )
     if not suppress_focus and (card_important or plain_player):
         _append_unique(channels, "focus")
     if suppress_focus and "focus" in channels:
         channels = [channel for channel in channels if channel != "focus"]
 
-    archive_due_bot = archive_bot and bot_like and (bot_reply_to_other or not card_important)
+    archive_due_bot = archive_bot and bot_like and (
+        bot_reply_to_other or bot_mentions_other or not card_important
+    )
     if (archive_dot and dot_command) or archive_due_bot:
         _append_unique(channels, "archive")
         _append_unique(tags, "归档")
@@ -143,6 +153,12 @@ def has_own_mention(text: str, *, mentions: tuple[str, ...], aliases: list[str])
         lowered = raw_text.lower()
         return any(f"@{alias.lower()}" in lowered for alias in normalized_aliases)
     return False
+
+
+def has_any_mention(text: str, *, mentions: tuple[str, ...]) -> bool:
+    if any(_normalize_alias(item) for item in (mentions or ())):
+        return True
+    return bool(re.search(r"@[A-Za-z0-9_]{3,32}\b", str(text or "")))
 
 
 def is_leader_message(
