@@ -6,7 +6,7 @@ from typing import Callable, Iterable
 
 from backend.domain.models import ParsedCard, RawMessageEvent
 
-CURRENT_MESSAGE_FILTER_VERSION = 5
+CURRENT_MESSAGE_FILTER_VERSION = 6
 
 
 DEFAULT_FOCUS_KEYWORDS = (
@@ -32,6 +32,10 @@ DEFAULT_FOCUS_KEYWORDS = (
     "共历心劫",
     "心魔",
     "显灵",
+)
+
+DEFAULT_FOCUS_EXCLUDE_PATTERNS = (
+    r"^\d{1,2}$",
 )
 
 
@@ -63,6 +67,7 @@ def enrich_filter_channels(
     bot_like = bool(event.sender_is_bot) or bool(is_game_bot_sender(sender_id))
     dot_command = is_dot_command(text)
     my_ids = _int_set(my_identity_ids)
+    mine = bool(_safe_int(sender_id) and _safe_int(sender_id) in my_ids)
     parent_sender = _safe_int(parent_event.sender_id if parent_event else None)
     bot_reply_to_mine = bool(bot_like and parent_sender and parent_sender in my_ids)
     bot_reply_to_other = bool(bot_like and parent_sender and my_ids and parent_sender not in my_ids)
@@ -94,16 +99,30 @@ def enrich_filter_channels(
         or leader
         or bool(keyword_hits)
         or bot_reply_to_mine
+        or mine
+    )
+    exclude_patterns = _list_setting(settings, "focus_exclude_patterns")
+    if "focus_exclude_patterns" not in settings:
+        exclude_patterns = list(DEFAULT_FOCUS_EXCLUDE_PATTERNS)
+    exclude_hits = focus_exclude_hits(text, exclude_patterns)
+    excluded_plain_noise = bool(
+        exclude_hits
+        and not mine
+        and not card_important
+        and not bot_like
     )
     plain_player = (
         bool(settings.get("focus_include_player_plain", True))
         and not bot_like
         and not dot_command
+        and not excluded_plain_noise
     )
 
     if leader:
         _append_unique(channels, "leader")
         _append_unique(tags, "会长")
+    if mine:
+        _append_unique(tags, "我发出")
     if own_mention:
         _append_unique(tags, "被@")
     if bot_reply_to_mine:
@@ -114,12 +133,18 @@ def enrich_filter_channels(
         _append_unique(tags, "提到别人")
     for hit in keyword_hits[:3]:
         _append_unique(tags, f"关键词:{hit}")
+    for hit in exclude_hits[:1]:
+        if excluded_plain_noise:
+            _append_unique(tags, f"重点排除:{hit}")
 
     archive_dot = bool(settings.get("archive_dot_commands", True))
     archive_bot = bool(settings.get("archive_bot_replies", True))
 
     suppress_focus = (
-        bot_reply_to_other or bot_mentions_other or (archive_dot and dot_command)
+        bot_reply_to_other
+        or bot_mentions_other
+        or (archive_dot and dot_command and not mine)
+        or excluded_plain_noise
     )
     if not suppress_focus and (card_important or plain_player):
         _append_unique(channels, "focus")
@@ -128,7 +153,7 @@ def enrich_filter_channels(
 
     archive_due_other = bot_like and (bot_reply_to_other or bot_mentions_other)
     archive_due_bot = archive_bot and bot_like and not card_important
-    if (archive_dot and dot_command) or archive_due_other or archive_due_bot:
+    if (archive_dot and dot_command) or archive_due_other or archive_due_bot or excluded_plain_noise:
         _append_unique(channels, "archive")
         _append_unique(tags, "归档")
 
@@ -182,6 +207,25 @@ def focus_keyword_hits(text: str, keywords: list[str]) -> list[str]:
         key = str(keyword or "").strip()
         if key and key in raw and key not in hits:
             hits.append(key)
+    return hits
+
+
+def focus_exclude_hits(text: str, patterns: list[str]) -> list[str]:
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    hits = []
+    for pattern in patterns:
+        item = str(pattern or "").strip()
+        if not item:
+            continue
+        matched = False
+        try:
+            matched = bool(re.search(item, raw))
+        except re.error:
+            matched = item == raw
+        if matched and item not in hits:
+            hits.append(item)
     return hits
 
 

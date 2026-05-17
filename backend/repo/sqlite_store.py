@@ -13,6 +13,7 @@ from backend.parsers import build_parser_registry
 from backend.processors import MessagePipeline
 from backend.processors.message_filter import (
     CURRENT_MESSAGE_FILTER_VERSION,
+    DEFAULT_FOCUS_EXCLUDE_PATTERNS,
     DEFAULT_FOCUS_KEYWORDS,
     enrich_filter_channels,
 )
@@ -425,8 +426,9 @@ class SQLiteStore:
                     ),
                     tags=tuple(
                         tag for tag in card.tags
-                        if tag not in {"会长", "被@", "归档", "回复我", "回复别人"}
+                        if tag not in {"会长", "被@", "归档", "回复我", "回复别人", "提到别人", "我发出"}
                         and not str(tag).startswith("关键词:")
+                        and not str(tag).startswith("重点排除:")
                     ),
                 )
                 filtered = enrich_filter_channels(
@@ -865,6 +867,7 @@ class SQLiteStore:
             "leader_sender_ids": list(DEFAULT_LEADER_SENDER_IDS),
             "leader_source_names": list(DEFAULT_LEADER_SOURCE_NAMES),
             "focus_keywords": list(DEFAULT_FOCUS_KEYWORDS),
+            "focus_exclude_patterns": list(DEFAULT_FOCUS_EXCLUDE_PATTERNS),
             "focus_include_player_plain": True,
             "archive_dot_commands": True,
             "archive_bot_replies": True,
@@ -1696,6 +1699,7 @@ def _normalize_settings(payload: dict) -> dict:
         "leader_sender_ids": int_list("leader_sender_ids"),
         "leader_source_names": sorted(set(str_list("leader_source_names"))),
         "focus_keywords": sorted(set(str_list("focus_keywords", list(DEFAULT_FOCUS_KEYWORDS)))),
+        "focus_exclude_patterns": sorted(set(str_list("focus_exclude_patterns", list(DEFAULT_FOCUS_EXCLUDE_PATTERNS)))),
         "focus_include_player_plain": bool_value("focus_include_player_plain"),
         "archive_dot_commands": bool_value("archive_dot_commands"),
         "archive_bot_replies": bool_value("archive_bot_replies"),

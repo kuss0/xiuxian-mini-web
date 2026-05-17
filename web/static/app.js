@@ -358,7 +358,7 @@ function openFilterSettingsModal() {
     body: `
       <section class="modal-section">
         <h4>重点流规则</h4>
-        <p class="muted">首页默认只看重点流。点命令和普通天尊回复会进入归档;被 @、会长、关键词、风险和副本动作会提到首页。</p>
+        <p class="muted">首页默认只看重点流。自己的发送一定显示;点命令和普通天尊回复会进入归档;被 @、会长、关键词、风险和副本动作会提到首页。</p>
         <form id="filterSettingsForm" class="settings-form">
           <label class="stacked-field">
             <span>我的 @ 名称</span>
@@ -375,6 +375,10 @@ function openFilterSettingsModal() {
           <label class="stacked-field">
             <span>关注关键词</span>
             <textarea name="focus_keywords" rows="8" placeholder="每行一个关键词">${escapeHtml((settings.focus_keywords || []).join("\n"))}</textarea>
+          </label>
+          <label class="stacked-field">
+            <span>重点流排除规则（正则）</span>
+            <textarea name="focus_exclude_patterns" rows="3" placeholder="每行一条正则，例如 ^\\d{1,2}$">${escapeHtml((settings.focus_exclude_patterns || []).join("\n"))}</textarea>
           </label>
           <label class="toggle-row">
             <input type="checkbox" name="focus_include_player_plain" ${settings.focus_include_player_plain === false ? "" : "checked"} />
@@ -415,6 +419,7 @@ function openFilterSettingsModal() {
         leader_sender_ids: splitLines(data.get("leader_sender_ids")),
         leader_source_names: splitLines(data.get("leader_source_names")),
         focus_keywords: splitLines(data.get("focus_keywords")),
+        focus_exclude_patterns: splitLines(data.get("focus_exclude_patterns")),
         focus_include_player_plain: data.get("focus_include_player_plain") === "on",
         archive_dot_commands: data.get("archive_dot_commands") === "on",
         archive_bot_replies: data.get("archive_bot_replies") === "on",

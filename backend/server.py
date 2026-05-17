@@ -446,6 +446,7 @@ class MiniWebServer:
             "leader_sender_ids",
             "leader_source_names",
             "focus_keywords",
+            "focus_exclude_patterns",
             "focus_include_player_plain",
             "archive_dot_commands",
             "archive_bot_replies",

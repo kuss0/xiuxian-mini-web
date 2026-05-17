@@ -80,6 +80,27 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
         {"own_aliases": ["wa2000"], "focus_keywords": [], "focus_include_player_plain": False},
         is_game_bot_sender=lambda _sid: False,
     )
+    short_reply = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x5", chat_id=1, msg_id=5, text="1", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True, "focus_exclude_patterns": [r"^\d{1,2}$"]},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    own_command = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x6", chat_id=1, msg_id=6, text=".闯塔", source="我", date="", sender_id=123),
+        {"archive_dot_commands": True, "focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    short_reply_without_exclude = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x7", chat_id=1, msg_id=7, text="1", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True, "focus_exclude_patterns": []},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
 
     assert "focus" in plain.channels
     assert "archive" in command.channels
@@ -88,6 +109,13 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
     assert "focus" not in keyword_command.channels
     assert "focus" in mention.channels
     assert "focus" not in other_mention.channels
+    assert "focus" not in short_reply.channels
+    assert "archive" in short_reply.channels
+    assert any(str(tag).startswith("重点排除:") for tag in short_reply.tags)
+    assert "focus" in own_command.channels
+    assert "archive" in own_command.channels
+    assert "我发出" in own_command.tags
+    assert "focus" in short_reply_without_exclude.channels
 
 
 def test_message_filter_promotes_bot_reply_to_me_and_archives_reply_to_others():
