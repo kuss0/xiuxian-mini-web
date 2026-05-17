@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: composer-enter-send 2026-05-18T02:25
-console.log("[mini-web] build: composer-enter-send 2026-05-18T02:25 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: focus-noise-controls 2026-05-18T03:20
+console.log("[mini-web] build: focus-noise-controls 2026-05-18T03:20 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -387,6 +387,14 @@ function openFilterSettingsModal() {
             <textarea name="leader_source_names" rows="2" placeholder="每行一个昵称,用于 source 文本包含匹配">${escapeHtml((settings.leader_source_names || []).join("\n"))}</textarea>
           </label>
           <label class="stacked-field">
+            <span>重点流静音 sender IDs</span>
+            <textarea name="focus_muted_sender_ids" rows="2" placeholder="每行一个 sender_id,只压普通玩家噪音">${escapeHtml((settings.focus_muted_sender_ids || []).join("\n"))}</textarea>
+          </label>
+          <label class="stacked-field">
+            <span>重点流静音昵称</span>
+            <textarea name="focus_muted_source_names" rows="2" placeholder="每行一个昵称片段,例如某个常刷屏玩家">${escapeHtml((settings.focus_muted_source_names || []).join("\n"))}</textarea>
+          </label>
+          <label class="stacked-field">
             <span>关注关键词</span>
             <textarea name="focus_keywords" rows="8" placeholder="每行一个关键词">${escapeHtml((settings.focus_keywords || []).join("\n"))}</textarea>
           </label>
@@ -432,8 +440,10 @@ function openFilterSettingsModal() {
         own_aliases: splitLines(data.get("own_aliases")),
         leader_sender_ids: splitLines(data.get("leader_sender_ids")),
         leader_source_names: splitLines(data.get("leader_source_names")),
+        focus_muted_sender_ids: splitLines(data.get("focus_muted_sender_ids")),
+        focus_muted_source_names: splitLines(data.get("focus_muted_source_names")),
         focus_keywords: splitLines(data.get("focus_keywords")),
-        focus_exclude_patterns: splitLines(data.get("focus_exclude_patterns")),
+        focus_exclude_patterns: splitRows(data.get("focus_exclude_patterns")),
         focus_include_player_plain: data.get("focus_include_player_plain") === "on",
         archive_dot_commands: data.get("archive_dot_commands") === "on",
         archive_bot_replies: data.get("archive_bot_replies") === "on",
@@ -456,6 +466,13 @@ function openFilterSettingsModal() {
 function splitLines(value) {
   return String(value || "")
     .split(/\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function splitRows(value) {
+  return String(value || "")
+    .split(/\n/)
     .map((item) => item.trim())
     .filter(Boolean);
 }

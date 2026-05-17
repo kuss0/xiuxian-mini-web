@@ -6,7 +6,7 @@ from typing import Callable, Iterable
 
 from backend.domain.models import ParsedCard, RawMessageEvent
 
-CURRENT_MESSAGE_FILTER_VERSION = 6
+CURRENT_MESSAGE_FILTER_VERSION = 7
 
 
 DEFAULT_FOCUS_KEYWORDS = (
@@ -36,6 +36,11 @@ DEFAULT_FOCUS_KEYWORDS = (
 
 DEFAULT_FOCUS_EXCLUDE_PATTERNS = (
     r"^\d{1,2}$",
+    r"^[０-９]{1,2}$",
+    r"^[\W_]{1,4}$",
+    r"^(a+|o+|嗯+|哦+|噢+|喵+|哈+|哈哈+|哇+|呜+|额+|呃+|好+|好的|好的呢|好吧|行吧?|对|是|是的|收到|收到了|来了|来了来了|回来了|晚安|谢谢|谢谢老板|等下|稍等|明白|知道了|没问题|可以|冒泡|打卡|起来了|欸行|你好|早安|差不多|差不多了|得嘞|妥了|好嘞|在呢|在吗|嘿嘿|呵呵|了解|okk|619|555|拉屎好爽)$",
+    r"^(查看闭关|宗门点卯|宗门悬赏|宗门战况|天机代卜|闯塔|我的侍妾|查看侍妾|我的货摊|我的宗门|宗门宝库|每日问安|万宝楼|洞府|战力|状态|观星台|观星|助阵|启阵|出关|归来|强行出关|深度闭关|闭关修炼|闭关结束|登天阶|元婴状态|元婴出窍|元婴归窍|冲击元婴|第二元神|安抚星辰|入梦寻图|黄粱一梦|共历心劫|野外历练|斩妖除魔|小药园|洞天绘卷|宗门传功|我的灵根|收集精华|解散副本)$",
+    r"^(上架\s+.+\s+换\s+.+|炼制.+材料)$",
 )
 
 
@@ -105,17 +110,30 @@ def enrich_filter_channels(
     if "focus_exclude_patterns" not in settings:
         exclude_patterns = list(DEFAULT_FOCUS_EXCLUDE_PATTERNS)
     exclude_hits = focus_exclude_hits(text, exclude_patterns)
-    excluded_plain_noise = bool(
-        exclude_hits
-        and not mine
-        and not card_important
+    protected_important = (
+        mine
+        or bot_reply_to_mine
+        or own_mention
+        or leader
+        or card.severity == "risk"
+        or "risk" in channels
+        or bool(card.actions)
+    )
+    focus_muted = is_focus_muted_sender(
+        event,
+        muted_sender_ids=_int_list_setting(settings, "focus_muted_sender_ids"),
+        muted_source_names=_list_setting(settings, "focus_muted_source_names"),
+    )
+    excluded_focus = bool(
+        (exclude_hits or focus_muted)
+        and not protected_important
         and not bot_like
     )
     plain_player = (
         bool(settings.get("focus_include_player_plain", True))
         and not bot_like
         and not dot_command
-        and not excluded_plain_noise
+        and not excluded_focus
     )
 
     if leader:
@@ -134,8 +152,10 @@ def enrich_filter_channels(
     for hit in keyword_hits[:3]:
         _append_unique(tags, f"关键词:{hit}")
     for hit in exclude_hits[:1]:
-        if excluded_plain_noise:
+        if excluded_focus:
             _append_unique(tags, f"重点排除:{hit}")
+    if focus_muted and excluded_focus:
+        _append_unique(tags, f"重点静音:{event.source or event.sender_id or 'unknown'}")
 
     archive_dot = bool(settings.get("archive_dot_commands", True))
     archive_bot = bool(settings.get("archive_bot_replies", True))
@@ -144,7 +164,7 @@ def enrich_filter_channels(
         bot_reply_to_other
         or (bot_mentions_other and not bot_reply_to_mine)
         or (archive_dot and dot_command and not mine)
-        or excluded_plain_noise
+        or excluded_focus
     )
     if not suppress_focus and (card_important or plain_player):
         _append_unique(channels, "focus")
@@ -153,7 +173,7 @@ def enrich_filter_channels(
 
     archive_due_other = bot_like and not bot_reply_to_mine and (bot_reply_to_other or bot_mentions_other)
     archive_due_bot = archive_bot and bot_like and not card_important
-    if (archive_dot and dot_command) or archive_due_other or archive_due_bot or excluded_plain_noise:
+    if (archive_dot and dot_command) or archive_due_other or archive_due_bot or excluded_focus:
         _append_unique(channels, "archive")
         _append_unique(tags, "归档")
 
@@ -198,6 +218,21 @@ def is_leader_message(
     if not source:
         return False
     return any(name.lower() in source for name in leader_source_names if name)
+
+
+def is_focus_muted_sender(
+    event: RawMessageEvent,
+    *,
+    muted_sender_ids: list[int],
+    muted_source_names: list[str],
+) -> bool:
+    sender_id = _safe_int(event.sender_id)
+    if sender_id and sender_id in set(muted_sender_ids):
+        return True
+    source = str(event.source or "").strip().lower()
+    if not source:
+        return False
+    return any(name.lower() in source for name in muted_source_names if name)
 
 
 def focus_keyword_hits(text: str, keywords: list[str]) -> list[str]:

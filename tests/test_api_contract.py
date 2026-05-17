@@ -101,6 +101,50 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
         is_game_bot_sender=lambda _sid: False,
         my_identity_ids=[123],
     )
+    command_without_dot = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x8", chat_id=1, msg_id=8, text="洞天绘卷", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    keyword_command_without_dot = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x9", chat_id=1, msg_id=9, text="洞府", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True, "focus_keywords": ["洞府"]},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    command_without_dot_args = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x9b", chat_id=1, msg_id=91, text="上架 玄铁剑 换 灵石*8", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    muted_sender = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x10", chat_id=1, msg_id=10, text="今晚虚天殿有人吗", source="刷屏玩家", date="", sender_id=222),
+        {
+            "focus_include_player_plain": True,
+            "focus_keywords": ["虚天殿"],
+            "focus_muted_sender_ids": [222],
+        },
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    muted_sender_mentions_me = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x11", chat_id=1, msg_id=11, text="@wa2000 来看虚天殿", source="刷屏玩家", date="", sender_id=222),
+        {
+            "own_aliases": ["wa2000"],
+            "focus_include_player_plain": True,
+            "focus_keywords": ["虚天殿"],
+            "focus_muted_source_names": ["刷屏玩家"],
+        },
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
 
     assert "focus" in plain.channels
     assert "archive" in command.channels
@@ -116,6 +160,20 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
     assert "archive" in own_command.channels
     assert "我发出" in own_command.tags
     assert "focus" in short_reply_without_exclude.channels
+    assert "archive" in command_without_dot.channels
+    assert "focus" not in command_without_dot.channels
+    assert any(str(tag).startswith("重点排除:") for tag in command_without_dot.tags)
+    assert "archive" in keyword_command_without_dot.channels
+    assert "focus" not in keyword_command_without_dot.channels
+    assert any(str(tag).startswith("重点排除:") for tag in keyword_command_without_dot.tags)
+    assert "archive" in command_without_dot_args.channels
+    assert "focus" not in command_without_dot_args.channels
+    assert "archive" in muted_sender.channels
+    assert "focus" not in muted_sender.channels
+    assert any(str(tag).startswith("重点静音:") for tag in muted_sender.tags)
+    assert "focus" in muted_sender_mentions_me.channels
+    assert "archive" not in muted_sender_mentions_me.channels
+    assert "被@" in muted_sender_mentions_me.tags
 
 
 def test_message_filter_promotes_bot_reply_to_me_and_archives_reply_to_others():
@@ -315,6 +373,26 @@ def test_sqlite_settings_roundtrip(tmp_path):
     assert -1002049298748 in saved["leader_sender_ids"]
     assert "@iosdo7" in saved["leader_source_names"]
     assert SQLiteStore(tmp_path / "miniweb.db").get_settings()["listen_enabled"] is True
+
+
+def test_focus_exclude_patterns_preserve_regex_commas(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    saved = store.save_settings({"focus_exclude_patterns": r"^\d{1,2}$"})
+
+    assert r"^\d{1,2}$" in saved["focus_exclude_patterns"]
+    assert r"^\d{1" not in saved["focus_exclude_patterns"]
+    assert "2}$" not in saved["focus_exclude_patterns"]
+
+
+def test_focus_muted_senders_roundtrip(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    saved = store.save_settings({
+        "focus_muted_sender_ids": "222\n333",
+        "focus_muted_source_names": "刷屏玩家\n路人甲",
+    })
+
+    assert saved["focus_muted_sender_ids"] == [222, 333]
+    assert saved["focus_muted_source_names"] == ["刷屏玩家", "路人甲"]
 
 
 def test_settings_auto_collects_own_usernames(tmp_path):

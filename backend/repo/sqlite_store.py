@@ -429,6 +429,7 @@ class SQLiteStore:
                         if tag not in {"会长", "被@", "归档", "回复我", "回复别人", "提到别人", "我发出"}
                         and not str(tag).startswith("关键词:")
                         and not str(tag).startswith("重点排除:")
+                        and not str(tag).startswith("重点静音:")
                     ),
                 )
                 filtered = enrich_filter_channels(
@@ -966,6 +967,8 @@ class SQLiteStore:
             "own_aliases": [],
             "leader_sender_ids": list(DEFAULT_LEADER_SENDER_IDS),
             "leader_source_names": list(DEFAULT_LEADER_SOURCE_NAMES),
+            "focus_muted_sender_ids": [],
+            "focus_muted_source_names": [],
             "focus_keywords": list(DEFAULT_FOCUS_KEYWORDS),
             "focus_exclude_patterns": list(DEFAULT_FOCUS_EXCLUDE_PATTERNS),
             "focus_include_player_plain": True,
@@ -986,6 +989,10 @@ class SQLiteStore:
         defaults["own_aliases"] = _merge_str_defaults(
             defaults.get("own_aliases"),
             self._collect_my_aliases(),
+        )
+        defaults["focus_exclude_patterns"] = _merge_str_defaults(
+            defaults.get("focus_exclude_patterns"),
+            list(DEFAULT_FOCUS_EXCLUDE_PATTERNS),
         )
         return defaults
 
@@ -1764,7 +1771,7 @@ def _normalize_settings(payload: dict) -> dict:
         if raw is None:
             raw = default or []
         if isinstance(raw, str):
-            raw = raw.replace("\n", ",").split(",")
+            raw = raw.splitlines() if key == "focus_exclude_patterns" else raw.replace("\n", ",").split(",")
         return [str(item).strip() for item in raw if str(item or "").strip()]
 
     def int_list(key: str) -> list[int]:
@@ -1798,8 +1805,13 @@ def _normalize_settings(payload: dict) -> dict:
         "own_aliases": sorted(set(str_list("own_aliases"))),
         "leader_sender_ids": int_list("leader_sender_ids"),
         "leader_source_names": sorted(set(str_list("leader_source_names"))),
+        "focus_muted_sender_ids": int_list("focus_muted_sender_ids"),
+        "focus_muted_source_names": sorted(set(str_list("focus_muted_source_names"))),
         "focus_keywords": sorted(set(str_list("focus_keywords", list(DEFAULT_FOCUS_KEYWORDS)))),
-        "focus_exclude_patterns": sorted(set(str_list("focus_exclude_patterns", list(DEFAULT_FOCUS_EXCLUDE_PATTERNS)))),
+        "focus_exclude_patterns": _merge_str_defaults(
+            str_list("focus_exclude_patterns", []),
+            list(DEFAULT_FOCUS_EXCLUDE_PATTERNS),
+        ),
         "focus_include_player_plain": bool_value("focus_include_player_plain"),
         "archive_dot_commands": bool_value("archive_dot_commands"),
         "archive_bot_replies": bool_value("archive_bot_replies"),

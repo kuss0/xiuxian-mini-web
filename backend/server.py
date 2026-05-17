@@ -445,6 +445,8 @@ class MiniWebServer:
             "own_aliases",
             "leader_sender_ids",
             "leader_source_names",
+            "focus_muted_sender_ids",
+            "focus_muted_source_names",
             "focus_keywords",
             "focus_exclude_patterns",
             "focus_include_player_plain",
