@@ -76,8 +76,8 @@
               <span id="directSendIdentityLine">未选身份</span>
             </div>
             <div class="direct-send-tools">
-              <button id="emojiPickerButton" type="button">表情</button>
-              <button id="openSkillMenuButton" type="button">快捷指令</button>
+              <button id="emojiPickerButton" type="button" aria-controls="directSendEmojiPalette" aria-expanded="false">表情</button>
+              <button id="openSkillMenuButton" type="button" aria-controls="directSendSkillPanel" aria-expanded="false">快捷指令</button>
               <button id="openCultivationButton" type="button">修炼状态</button>
               <button id="scheduleButton" type="button">官方定时</button>
             </div>
@@ -94,6 +94,15 @@
             <button id="directSendSubmit" type="button">发送</button>
           </div>
           <div id="directSendEmojiPalette" class="emoji-palette direct-send-emoji-palette" hidden></div>
+          <div id="directSendSkillPanel" class="direct-send-skill-panel" hidden>
+            <div class="skill-bar-head">
+              <div class="skill-bar-tabs" id="skillBarTabs"></div>
+              <div class="skill-bar-meta">
+                <span id="skillBarIdentity" class="skill-bar-identity">未选身份</span>
+              </div>
+            </div>
+            <div id="skillBarChips" class="skill-bar-chips"></div>
+          </div>
           <p id="directSendStatus" class="direct-send-status" hidden></p>
         </footer>
       </main>

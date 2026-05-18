@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: emoji-palette-and-focus 2026-05-18T22:10
-console.log("[mini-web] build: emoji-palette-and-focus 2026-05-18T22:10 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: inline-skill-panel 2026-05-18T22:36
+console.log("[mini-web] build: inline-skill-panel 2026-05-18T22:36 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -77,6 +77,7 @@ const directSendSubmit = document.querySelector("#directSendSubmit");
 const directSendStatus = document.querySelector("#directSendStatus");
 const emojiPickerButton = document.querySelector("#emojiPickerButton");
 const directSendEmojiPalette = document.querySelector("#directSendEmojiPalette");
+const directSendSkillPanel = document.querySelector("#directSendSkillPanel");
 const openSkillMenuButton = document.querySelector("#openSkillMenuButton");
 const openCultivationButton = document.querySelector("#openCultivationButton");
 const outboxButton = document.querySelector("#outboxButton");
@@ -85,7 +86,6 @@ const logsButton = document.querySelector("#logsButton");
 const loginAccountButton = document.querySelector("#loginAccountButton");
 const addIdentityButton = document.querySelector("#addIdentityButton");
 const logoutAccountButton = document.querySelector("#logoutAccountButton");
-const skillBar = document.querySelector("#skillBar");
 const skillBarTabs = document.querySelector("#skillBarTabs");
 const skillBarChips = document.querySelector("#skillBarChips");
 const skillBarIdentity = document.querySelector("#skillBarIdentity");
@@ -5949,7 +5949,13 @@ if (directSendSubmit) {
 if (emojiPickerButton && directSendEmojiPalette) {
   bindEmojiPalette(directSendEmojiPalette, () => directSendInput);
   emojiPickerButton.addEventListener("click", () => {
-    directSendEmojiPalette.hidden = !directSendEmojiPalette.hidden;
+    const shouldOpen = directSendEmojiPalette.hidden;
+    directSendEmojiPalette.hidden = !shouldOpen;
+    emojiPickerButton.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+    if (shouldOpen && directSendSkillPanel) {
+      directSendSkillPanel.hidden = true;
+      openSkillMenuButton?.setAttribute("aria-expanded", "false");
+    }
     if (!directSendEmojiPalette.hidden) {
       directSendInput?.focus();
     }
@@ -5959,9 +5965,29 @@ if (emojiPickerButton && directSendEmojiPalette) {
 if (openSkillMenuButton) {
   openSkillMenuButton.addEventListener("click", async () => {
     try {
+      if (!directSendSkillPanel) {
+        await Promise.all([loadAccounts(), loadIdentities()]);
+        if (!state.skills.length) await loadSkills();
+        openSkillMenuModal();
+        return;
+      }
+      const shouldOpen = directSendSkillPanel.hidden;
+      if (!shouldOpen) {
+        directSendSkillPanel.hidden = true;
+        openSkillMenuButton.setAttribute("aria-expanded", "false");
+        directSendInput?.focus();
+        return;
+      }
       await Promise.all([loadAccounts(), loadIdentities()]);
       if (!state.skills.length) await loadSkills();
-      openSkillMenuModal();
+      if (directSendEmojiPalette) {
+        directSendEmojiPalette.hidden = true;
+        emojiPickerButton?.setAttribute("aria-expanded", "false");
+      }
+      directSendSkillPanel.hidden = false;
+      openSkillMenuButton.setAttribute("aria-expanded", "true");
+      renderSkillBar();
+      directSendInput?.focus();
     } catch (error) {
       showError(error);
     }
