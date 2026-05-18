@@ -292,7 +292,56 @@ def _raw_event_from_telethon(event, *, account_key: str = "default") -> RawMessa
         top_msg_id=top_id or None,
         mentions=tuple(),
         sender_is_bot=bool(getattr(getattr(message, "sender", None) or getattr(event, "sender", None), "bot", False)),
+        media_meta=_message_meta_from_telethon(message),
     )
+
+
+def _message_meta_from_telethon(message) -> dict | None:
+    entities = _extract_text_entities(message)
+    if not entities:
+        return None
+    return {"text_entities": entities}
+
+
+def _extract_text_entities(message) -> list[dict]:
+    out: list[dict] = []
+    for entity in getattr(message, "entities", None) or ():
+        try:
+            offset = int(getattr(entity, "offset", 0) or 0)
+            length = int(getattr(entity, "length", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if length <= 0:
+            continue
+        item = {
+            "type": _text_entity_type(entity),
+            "offset": offset,
+            "length": length,
+        }
+        for attr in ("url", "language"):
+            value = getattr(entity, attr, None)
+            if value:
+                item[attr] = str(value)
+        for attr in ("document_id", "user_id"):
+            value = getattr(entity, attr, None)
+            if value:
+                item[attr] = str(value)
+        out.append(item)
+    return out
+
+
+def _text_entity_type(entity) -> str:
+    name = entity.__class__.__name__
+    if name == "MessageEntityCustomEmoji":
+        return "custom_emoji"
+    if name.startswith("MessageEntity"):
+        name = name[len("MessageEntity"):]
+    chars: list[str] = []
+    for idx, ch in enumerate(name):
+        if idx and ch.isupper() and (not name[idx - 1].isupper()):
+            chars.append("_")
+        chars.append(ch.lower())
+    return "".join(chars) or "entity"
 
 
 async def _resolve_sender_display_name(event) -> str:

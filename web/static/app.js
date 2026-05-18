@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: identity-profile-race-guard 2026-05-18T15:10
-console.log("[mini-web] build: identity-profile-race-guard 2026-05-18T15:10 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: emoji-text-support 2026-05-18T21:05
+console.log("[mini-web] build: emoji-text-support 2026-05-18T21:05 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -48,6 +48,10 @@ const state = {
 const MESSAGE_PREVIEW_CHAR_LIMIT = 480;
 const MESSAGE_PREVIEW_LINE_LIMIT = 8;
 const NUMERIC_SOURCE_RE = /^-?\d{4,}$/;
+const GRAPHEME_SEGMENTER =
+  typeof Intl !== "undefined" && Intl.Segmenter
+    ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+    : null;
 
 const channelFilters = document.querySelector("#channelFilters");
 const selectAllChannels = document.querySelector("#selectAllChannels");
@@ -974,7 +978,7 @@ function renderReplyContext(message) {
   const parent = parentMessageOf(message);
   const parentId = `tg:${message.chat_id}:${message.reply_to_msg_id}`;
   if (parent) {
-    const preview = (parent.raw || parent.summary || "").trim().replace(/\s+/g, " ").slice(0, 60) || "(无内容)";
+    const preview = clipGraphemes((parent.raw || parent.summary || "").trim().replace(/\s+/g, " "), 60) || "(无内容)";
     return `
       <div class="chat-reply-context" data-reply-jump="${escapeAttr(parentId)}" title="点击跳到原消息">
         <span class="arrow">↪</span>
@@ -1568,19 +1572,20 @@ function renderChatBodyText(message, isExpanded) {
   const fallback = String(message.summary || message.title || "").trim();
   const text = raw || fallback || "（空消息）";
   const lines = text.split("\n");
+  const graphemeLength = countGraphemes(text);
   const tooLong =
-    text.length > MESSAGE_PREVIEW_CHAR_LIMIT || lines.length > MESSAGE_PREVIEW_LINE_LIMIT;
+    graphemeLength > MESSAGE_PREVIEW_CHAR_LIMIT || lines.length > MESSAGE_PREVIEW_LINE_LIMIT;
 
   if (!tooLong || isExpanded) {
-    return { html: escapeHtml(text), truncated: tooLong };
+    return { html: renderTelegramTextHtml(text, message), truncated: tooLong };
   }
 
   const previewLines = lines.slice(0, MESSAGE_PREVIEW_LINE_LIMIT);
   let preview = previewLines.join("\n");
-  if (preview.length > MESSAGE_PREVIEW_CHAR_LIMIT) {
-    preview = preview.slice(0, MESSAGE_PREVIEW_CHAR_LIMIT);
+  if (countGraphemes(preview) > MESSAGE_PREVIEW_CHAR_LIMIT) {
+    preview = clipGraphemes(preview, MESSAGE_PREVIEW_CHAR_LIMIT);
   }
-  return { html: `${escapeHtml(preview)}<span class="chat-text-ellipsis">…</span>`, truncated: true };
+  return { html: `${renderTelegramTextHtml(preview, message)}<span class="chat-text-ellipsis">…</span>`, truncated: true };
 }
 
 function groupMessagesByDate(messages) {
@@ -1669,7 +1674,7 @@ function sourceInitial(source, kind) {
   if (!clean) {
     return "?";
   }
-  return clean.slice(0, 1).toUpperCase();
+  return firstGrapheme(clean).toUpperCase();
 }
 
 function renderDetail() {
@@ -1712,7 +1717,7 @@ function renderDetail() {
 
     <div class="detail-block">
       <h5>Telegram 原文</h5>
-      <pre class="raw-text">${escapeHtml(message.raw || "（未抓取到原文）")}</pre>
+      <pre class="raw-text">${renderTelegramTextHtml(message.raw || "（未抓取到原文）", message)}</pre>
     </div>
 
     <div class="detail-block">
@@ -2336,7 +2341,7 @@ function openFocusArchiveModal(message, mode) {
 function focusArchiveBaseText(message) {
   const raw = String(message.raw || message.summary || "").trim();
   if (!raw) return "";
-  return raw.length > 500 ? raw.slice(0, 500) : raw;
+  return clipGraphemes(raw, 500);
 }
 
 function renderFocusArchivePreview(preview) {
@@ -2739,6 +2744,72 @@ function escapeHtml(value) {
 
 function escapeAttr(value) {
   return escapeHtml(value).replaceAll("\n", "&#10;");
+}
+
+function graphemes(value) {
+  const text = String(value ?? "");
+  if (!text) return [];
+  if (GRAPHEME_SEGMENTER) {
+    return Array.from(GRAPHEME_SEGMENTER.segment(text), (part) => part.segment);
+  }
+  return Array.from(text);
+}
+
+function countGraphemes(value) {
+  return graphemes(value).length;
+}
+
+function clipGraphemes(value, limit) {
+  const parts = graphemes(value);
+  if (parts.length <= limit) return String(value ?? "");
+  return parts.slice(0, limit).join("");
+}
+
+function firstGrapheme(value) {
+  return graphemes(value)[0] || "";
+}
+
+function telegramTextEntities(message) {
+  const meta = message && typeof message.media_meta === "object" ? message.media_meta : null;
+  const entities = Array.isArray(message?.text_entities)
+    ? message.text_entities
+    : (Array.isArray(meta?.text_entities) ? meta.text_entities : []);
+  return entities
+    .map((entity) => ({
+      type: String(entity.type || ""),
+      offset: Number(entity.offset || 0),
+      length: Number(entity.length || 0),
+      document_id: entity.document_id ? String(entity.document_id) : "",
+    }))
+    .filter((entity) => entity.type === "custom_emoji" && entity.length > 0 && entity.offset >= 0)
+    .sort((a, b) => a.offset - b.offset);
+}
+
+function renderTelegramTextHtml(value, message) {
+  const text = String(value ?? "");
+  if (!text) return "";
+  const entities = telegramTextEntities(message);
+  if (!entities.length) {
+    return escapeHtml(text);
+  }
+  let html = "";
+  let cursor = 0;
+  for (const entity of entities) {
+    const start = Math.max(0, Math.min(text.length, entity.offset));
+    const end = Math.max(start, Math.min(text.length, entity.offset + entity.length));
+    if (start < cursor || start >= text.length) {
+      continue;
+    }
+    html += escapeHtml(text.slice(cursor, start));
+    const chunk = text.slice(start, end);
+    if (chunk) {
+      const title = entity.document_id ? `Telegram 自定义表情 ${entity.document_id}` : "Telegram 自定义表情";
+      html += `<span class="tg-custom-emoji" title="${escapeAttr(title)}">${escapeHtml(chunk)}</span>`;
+    }
+    cursor = end;
+  }
+  html += escapeHtml(text.slice(cursor));
+  return html;
 }
 
 function renderSettings(settings) {
@@ -4069,9 +4140,9 @@ function bindScheduleModal(dialog, presets, _initialBatches) {
         syncResult.innerHTML = `
           <p><strong>Telegram 端当前 ${tg.length} 条 scheduled message</strong></p>
           <ul class="send-as-result-list">
-            ${tg.map((m) => `<li class="ok"><code>${escapeHtml(m.message.slice(0, 40))}</code> <small>${escapeHtml(m.schedule_text || "")}｜TG #${m.scheduled_msg_id}</small></li>`).join("") || "<li>(空)</li>"}
+            ${tg.map((m) => `<li class="ok"><code>${escapeHtml(clipGraphemes(m.message || "", 40))}</code> <small>${escapeHtml(m.schedule_text || "")}｜TG #${m.scheduled_msg_id}</small></li>`).join("") || "<li>(空)</li>"}
           </ul>
-          ${orphans.length ? `<p><strong>⚠ TG 有但 mini-web 没记录的 ${orphans.length} 条</strong>(可能是从其它工具或手机端排的):</p><ul class="send-as-result-list">${orphans.map((m) => `<li class="warn"><code>${escapeHtml(m.message.slice(0, 40))}</code> <small>TG #${m.scheduled_msg_id}｜${escapeHtml(m.schedule_text || "")}</small></li>`).join("")}</ul>` : ""}
+          ${orphans.length ? `<p><strong>⚠ TG 有但 mini-web 没记录的 ${orphans.length} 条</strong>(可能是从其它工具或手机端排的):</p><ul class="send-as-result-list">${orphans.map((m) => `<li class="warn"><code>${escapeHtml(clipGraphemes(m.message || "", 40))}</code> <small>TG #${m.scheduled_msg_id}｜${escapeHtml(m.schedule_text || "")}</small></li>`).join("")}</ul>` : ""}
           ${lost.length ? `<p><strong>⚠ 本地标已排但 TG 找不到的 ${lost.length} 条</strong>(可能被 TG 端取消了):</p><ul class="send-as-result-list">${lost.map((m) => `<li class="warn"><code>${escapeHtml(m.command)}</code> <small>本地 #${m.id}｜TG 期望 #${m.scheduled_msg_id}</small></li>`).join("")}</ul>` : ""}
         `;
       } catch (error) {
@@ -5550,7 +5621,7 @@ async function sendDirectComposerMessage() {
 function manualMessagePreview(message) {
   if (!message) return "";
   const raw = String(message.raw || message.summary || message.title || "").trim();
-  const compact = raw.replace(/\s+/g, " ").slice(0, 120);
+  const compact = clipGraphemes(raw.replace(/\s+/g, " "), 120);
   const source = displaySource(message.source);
   const msgId = message.msg_id ? `#${message.msg_id}` : message.id || "";
   return `${source} ${msgId}${compact ? `：${compact}` : ""}`;
@@ -6119,7 +6190,7 @@ function renderLogs(container, items) {
           <span class="logs-row-channel">${escapeHtml(channel)}</span>
           <small>from ${escapeHtml(String(sender))}</small>
         </div>
-        <pre class="logs-row-text">${escapeHtml(raw)}</pre>
+        <pre class="logs-row-text">${renderTelegramTextHtml(raw, m)}</pre>
       </article>
     `;
   }).join("");

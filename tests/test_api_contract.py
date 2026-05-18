@@ -720,6 +720,47 @@ def test_raw_event_falls_back_to_sender_id_when_sender_missing():
     assert event.sender_is_bot is False
 
 
+def test_raw_event_preserves_custom_emoji_entities():
+    class MessageEntityCustomEmoji:
+        offset = 2
+        length = 2
+        document_id = 1234567890123456789
+
+    class Sender:
+        first_name = "表情道人"
+        last_name = ""
+        username = "emoji_dao"
+        bot = False
+        title = None
+
+    class Message:
+        id = 11
+        message = "道友🔥"
+        entities = [MessageEntityCustomEmoji()]
+        date = None
+        reply_to_msg_id = None
+        reply_to = None
+        sender = Sender()
+
+    class Event:
+        message = Message()
+        sender_id = 8757550896
+        chat_id = -1002
+        sender = Sender()
+
+    event = _raw_event_from_telethon(Event())
+
+    assert event.text == "道友🔥"
+    assert event.media_meta["text_entities"] == [
+        {
+            "type": "custom_emoji",
+            "offset": 2,
+            "length": 2,
+            "document_id": "1234567890123456789",
+        }
+    ]
+
+
 def test_format_sender_display_uses_channel_title():
     class Channel:
         title = "凌霄宫公告"
@@ -2572,6 +2613,41 @@ def test_manual_send_uses_command_override_and_optional_reply(tmp_path, monkeypa
     assert captured["kwargs"].get("reply_to") == 7000
 
 
+def test_manual_send_preserves_emoji_text(tmp_path, monkeypatch):
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "1", "api_hash": "h",
+         "account_id": "8574677796", "target_chat": "-1001680975844",
+         "target_topic_id": "7310786"}
+    )
+    server.save_identity_payload(
+        {"send_as_id": "8574677796", "account_local_id": "main", "label": "self"}
+    )
+    captured: dict = {}
+
+    class FakeClient:
+        async def send_message(self, chat_id, command, **kwargs):
+            captured["command"] = command
+            class _Sent:
+                id = 88002
+            return _Sent()
+
+    class FakeListener:
+        def submit(self, coro_factory, *, timeout=30.0):
+            import asyncio
+            return asyncio.new_event_loop().run_until_complete(coro_factory(FakeClient()))
+    monkeypatch.setattr(server._listeners, "get_listener", lambda _id: FakeListener())
+
+    text = "今晚看坠魔谷 🧘‍♂️🔥🇨🇳"
+    result = server.skill_send_payload(
+        {"skill_key": "manual_send", "identity_id": 8574677796, "command_override": text}
+    )
+
+    assert result["ok"] is True
+    assert result["command"] == text
+    assert captured["command"] == text
+
+
 def test_skill_routes_registered():
     """前端能找到 /api/skills + /api/skills/send。"""
     from backend.app import GET_ROUTES, POST_ROUTES
@@ -2633,6 +2709,39 @@ def test_skill_send_ingests_outgoing_into_raw_messages(tmp_path, monkeypatch):
     assert row[4] == 7310786
     assert row[5] == "Wise Mole🤓", f"source should be first+last name from get_me, got {row[5]!r}"
     assert row[6] == "tg:-1001680975844:555000"
+
+
+def test_message_payload_keeps_custom_emoji_metadata(tmp_path):
+    store = SQLiteStore(tmp_path / "m.db")
+    server = MiniWebServer(store=store)
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1001:9001",
+            chat_id=-1001,
+            msg_id=9001,
+            text="群聊表情🔥",
+            source="表情道人",
+            date="2026-05-18T00:00:00+00:00",
+            sender_id=8757550896,
+            media_meta={
+                "text_entities": [
+                    {
+                        "type": "custom_emoji",
+                        "offset": 4,
+                        "length": 2,
+                        "document_id": "1234567890123456789",
+                    }
+                ]
+            },
+        )
+    )
+
+    payload = server.messages_payload("all", limit=10)
+    message = payload["messages"][0]
+
+    assert message["raw"] == "群聊表情🔥"
+    assert message["media_meta"]["text_entities"][0]["type"] == "custom_emoji"
+    assert message["media_meta"]["text_entities"][0]["document_id"] == "1234567890123456789"
 
 
 def test_skill_send_hydrates_account_and_identity_label_from_get_me(tmp_path, monkeypatch):
