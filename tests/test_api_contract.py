@@ -2809,6 +2809,66 @@ def test_state_patches_scoped_by_send_as_id(tmp_path):
     assert (B, "宗门") in keys_by_sender
 
 
+def test_state_patches_filter_accepts_negative_send_as_id(tmp_path):
+    """频道身份是 -100...;传 send_as_id 时也必须严格过滤,不能退回全量画像。"""
+    from backend.repo.sqlite_store import SQLiteStore
+    from backend.domain.models import RawMessageEvent
+
+    store = SQLiteStore(tmp_path / "m.db")
+    channel_identity = -1002049298748
+    user_identity = 8574677796
+    bot = 7900199668
+    chat = -1001680975844
+
+    store.ingest_event(RawMessageEvent(
+        id=f"tg:{chat}:2001:main",
+        chat_id=chat,
+        msg_id=2001,
+        text=".我的灵根",
+        source="channel",
+        date="2026-05-17T00:00:00+00:00",
+        sender_id=channel_identity,
+        sender_is_bot=False,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id=f"tg:{chat}:2002:main",
+        chat_id=chat,
+        msg_id=2002,
+        text="@channel 的天命玉牒\n────\n宗门: 【频道宗】\n灵根: 金灵根\n修为: 1 / 10\n",
+        source="bot",
+        date="2026-05-17T00:00:01+00:00",
+        sender_id=bot,
+        sender_is_bot=True,
+        reply_to_msg_id=2001,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id=f"tg:{chat}:2003:main",
+        chat_id=chat,
+        msg_id=2003,
+        text=".我的灵根",
+        source="user",
+        date="2026-05-17T00:00:02+00:00",
+        sender_id=user_identity,
+        sender_is_bot=False,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id=f"tg:{chat}:2004:main",
+        chat_id=chat,
+        msg_id=2004,
+        text="@user 的天命玉牒\n────\n宗门: 【用户宗】\n灵根: 木灵根\n修为: 2 / 20\n",
+        source="bot",
+        date="2026-05-17T00:00:03+00:00",
+        sender_id=bot,
+        sender_is_bot=True,
+        reply_to_msg_id=2003,
+    ))
+
+    patches = {p["key"]: p["value"] for p in store.list_state_patches("identity_profile", send_as_id=channel_identity)}
+    assert patches.get("宗门") == "【频道宗】"
+    assert patches.get("灵根") == "金灵根"
+    assert "用户宗" not in str(patches)
+
+
 # ---------- 通知 ----------
 
 def test_notify_card_titles_payload_returns_known_set():

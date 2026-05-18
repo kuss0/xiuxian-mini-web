@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: focus-archive-preview 2026-05-18T06:55
-console.log("[mini-web] build: focus-archive-preview 2026-05-18T06:55 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: identity-profile-race-guard 2026-05-18T15:10
+console.log("[mini-web] build: identity-profile-race-guard 2026-05-18T15:10 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -11,6 +11,9 @@ const state = {
   accounts: [],
   identities: [],
   identityPatches: [],
+  identityPatchesOwnerId: null,
+  identityPatchesLoading: false,
+  identityPatchesRequestSeq: 0,
   accountLimit: 0,
   identityLimit: 0,
   listenerSummary: null,
@@ -258,10 +261,16 @@ async function loadIdentities() {
   const payload = await fetchJson("/api/identities");
   state.identities = payload.identities || [];
   state.identityLimit = payload.max_identities || 0;
+  const previousActiveId = Number(state.activeIdentityId || 0) || null;
+  ensureActiveIdentity();
+  const activeChanged = previousActiveId !== (Number(state.activeIdentityId || 0) || null);
   renderSidebarIdentityList();
   renderSkillViews();
   renderDirectSendComposer();
   renderCharacterHud();
+  if (activeChanged && previousActiveId !== null) {
+    loadIdentityPatches({ reset: true }).catch((err) => console.warn("[mini-web] reload patches after identity refresh failed:", err));
+  }
   // 身份状态机摘要(深度闭关 / 抚摸 / 温养)— 失败不阻塞
   loadIdentityModuleStates().catch((err) => console.warn("[mini-web] identity state fetch failed:", err));
   return payload;
@@ -283,17 +292,70 @@ async function loadIdentityModuleStates() {
   }
 }
 
-async function loadIdentityPatches() {
-  const url = state.activeIdentityId
-    ? `/api/state-patches?scope=identity_profile&send_as_id=${encodeURIComponent(state.activeIdentityId)}`
-    : `/api/state-patches?scope=identity_profile`;
-  const payload = await fetchJson(url);
-  state.identityPatches = payload.state || [];
+function activeIdentityPatches() {
+  const activeId = Number(state.activeIdentityId || 0) || null;
+  if (!activeId || Number(state.identityPatchesOwnerId || 0) !== activeId) {
+    return [];
+  }
+  return state.identityPatches || [];
+}
+
+function renderIdentityProfileViews() {
   renderIdentitySnapshot();
   renderCharacterHud();
   renderSkillViews();
   renderDirectSendComposer();
   renderSidebarIdentityList();  // profile chips 也跟着重画
+}
+
+function clearIdentityPatchesForActive() {
+  const activeId = Number(state.activeIdentityId || 0) || null;
+  state.identityPatches = [];
+  state.identityPatchesOwnerId = activeId;
+  state.identityPatchesLoading = Boolean(activeId);
+  state.identityPatchesRequestSeq += 1;
+  renderIdentityProfileViews();
+}
+
+async function loadIdentityPatches(options = {}) {
+  const activeId = Number(state.activeIdentityId || 0) || null;
+  const requestSeq = ++state.identityPatchesRequestSeq;
+  if (!activeId) {
+    state.identityPatches = [];
+    state.identityPatchesOwnerId = null;
+    state.identityPatchesLoading = false;
+    renderIdentityProfileViews();
+    return state.identityPatches;
+  }
+
+  const ownerChanged = Number(state.identityPatchesOwnerId || 0) !== activeId;
+  if (options.reset || ownerChanged) {
+    state.identityPatches = [];
+    state.identityPatchesOwnerId = activeId;
+    state.identityPatchesLoading = true;
+    renderIdentityProfileViews();
+  } else {
+    state.identityPatchesLoading = true;
+  }
+
+  const url = `/api/state-patches?scope=identity_profile&send_as_id=${encodeURIComponent(activeId)}`;
+  let payload;
+  try {
+    payload = await fetchJson(url);
+  } catch (err) {
+    if (requestSeq === state.identityPatchesRequestSeq && Number(state.activeIdentityId || 0) === activeId) {
+      state.identityPatchesLoading = false;
+      renderIdentityProfileViews();
+    }
+    throw err;
+  }
+  if (requestSeq !== state.identityPatchesRequestSeq || Number(state.activeIdentityId || 0) !== activeId) {
+    return state.identityPatches;
+  }
+  state.identityPatches = payload.state || [];
+  state.identityPatchesOwnerId = activeId;
+  state.identityPatchesLoading = false;
+  renderIdentityProfileViews();
   return state.identityPatches;
 }
 
@@ -1079,7 +1141,32 @@ function renderIdentitySnapshot() {
   if (!identitySnapshot) {
     return;
   }
-  const map = new Map((state.identityPatches || []).map((item) => [item.key, item]));
+  const map = new Map(activeIdentityPatches().map((item) => [item.key, item]));
+  const activeId = Number(state.activeIdentityId || 0) || null;
+  if (!activeId) {
+    identitySnapshot.innerHTML = `
+      <button class="role-button active" type="button">
+        <span>未选择身份</span>
+        <strong>请选择左侧身份</strong>
+      </button>
+      <div class="snapshot-grid">
+        <p class="empty inline">选中身份后,这里显示对应角色状态。</p>
+      </div>
+    `;
+    return;
+  }
+  if (state.identityPatchesLoading && map.size === 0) {
+    identitySnapshot.innerHTML = `
+      <button class="role-button active" type="button">
+        <span>正在加载</span>
+        <strong>角色状态</strong>
+      </button>
+      <div class="snapshot-grid">
+        <p class="empty inline">正在读取当前身份的角色状态...</p>
+      </div>
+    `;
+    return;
+  }
   const primaryTitle =
     map.get("境界")?.value ||
     map.get("灵根")?.value ||
@@ -1112,9 +1199,9 @@ function renderIdentitySnapshot() {
 // 角色名/道号/灵根/境界/宗门 已经放在侧栏的身份行(避免顶部太挤),称号没拿到就别造。
 function renderCharacterHud() {
   if (!characterHud) return;
-  const patchMap = new Map((state.identityPatches || []).map((p) => [p.key, p.value]));
+  const patchMap = new Map(activeIdentityPatches().map((p) => [p.key, p.value]));
   const activeId = state.activeIdentityId;
-  const identity = activeId ? (state.identities || []).find((i) => i.send_as_id === activeId) : null;
+  const identity = activeId ? identityById(activeId) : null;
   const account = identity ? (state.accounts || []).find((a) => a.local_id === identity.account_local_id) : null;
 
   const accountId = account?.account_id || (identity ? identity.send_as_id : "");
@@ -1128,6 +1215,15 @@ function renderCharacterHud() {
   }
   if (accountId) {
     chips.push(_hudChip({ cls: "id", k: "#", v: String(accountId), title: "角色ID(== Telegram account_id)" }));
+  }
+  if (state.identityPatchesLoading && patchMap.size === 0) {
+    chips.push(_hudChip({
+      cls: "loading",
+      k: "…",
+      v: "资料加载中",
+      title: "正在读取当前身份的消息箱画像",
+      empty: true,
+    }));
   }
   chips.push(_hudChip({
     cls: "power",
@@ -3040,12 +3136,12 @@ function renderSidebarIdentityList() {
     renderCultivationModules();
     return;
   }
-  const patchMap = new Map((state.identityPatches || []).map((p) => [p.key, p.value]));
+  const patchMap = new Map(activeIdentityPatches().map((p) => [p.key, p.value]));
   sidebarIdentityList.innerHTML = state.identities.map((identity) => {
     const account = state.accounts.find((a) => a.local_id === identity.account_local_id);
     const status = identityRowStatusText(identity, account);
     const offline = identityRowIsOffline(identity, account);
-    const active = identity.send_as_id === state.activeIdentityId;
+    const active = Number(identity.send_as_id || 0) === Number(state.activeIdentityId || 0);
     const klass = ["identity-row", offline ? "offline" : "", active ? "active" : ""].filter(Boolean).join(" ");
     const name = identity.label || identity.username || identity.send_as_id;
     // 当前激活身份才有 profile chips(identityPatches 是按身份 scoped 的)
@@ -3067,13 +3163,10 @@ function renderSidebarIdentityList() {
     row.addEventListener("click", () => {
       const id = Number(row.dataset.identityRow);
       state.activeIdentityId = state.activeIdentityId === id ? null : id;
-      renderSidebarIdentityList();
-      renderSkillViews();
-      renderDirectSendComposer();
-      renderCharacterHud();
+      clearIdentityPatchesForActive();
       renderCultivationModules();
       // 切换身份 → 重新拉这个身份的 state patches
-      loadIdentityPatches().catch((err) => console.warn("[mini-web] reload patches failed:", err));
+      loadIdentityPatches({ reset: true }).catch((err) => console.warn("[mini-web] reload patches failed:", err));
     });
   });
   renderCultivationModules();
@@ -5296,6 +5389,27 @@ function accountForIdentity(identity) {
   return (state.accounts || []).find((account) => account.local_id === identity.account_local_id) || null;
 }
 
+function ensureActiveIdentity() {
+  const previous = Number(state.activeIdentityId || 0) || null;
+  if (previous && identityById(previous)) {
+    return previous;
+  }
+  const fallback =
+    (state.identities || []).find((identity) => identity.enabled && identityCanSend(identity)) ||
+    (state.identities || []).find((identity) => identity.enabled) ||
+    (state.identities || [])[0] ||
+    null;
+  const next = fallback ? Number(fallback.send_as_id || 0) || null : null;
+  if (next !== previous) {
+    state.activeIdentityId = next;
+    state.identityPatches = [];
+    state.identityPatchesOwnerId = next;
+    state.identityPatchesLoading = Boolean(next);
+    state.identityPatchesRequestSeq += 1;
+  }
+  return next;
+}
+
 function identityCanSend(identity) {
   const account = accountForIdentity(identity);
   const accountId = Number(account?.account_id || 0);
@@ -6041,13 +6155,13 @@ async function loadSkills() {
 // 当前激活身份的宗门 / 境界 — 从 identity_profile state_patches 拿。
 // 拿不到就返空(那时 sect/realm 都视为「未知」,不过滤)。
 function currentIdentitySect() {
-  const patches = state.identityPatches || [];
+  const patches = activeIdentityPatches();
   const raw = (patches.find((p) => p.key === "宗门") || {}).value || "";
   return String(raw || "").replace(/^【|】$/g, "").trim();
 }
 
 function currentIdentityRealm() {
-  const patches = state.identityPatches || [];
+  const patches = activeIdentityPatches();
   return String((patches.find((p) => p.key === "境界") || {}).value || "").trim();
 }
 
@@ -6113,10 +6227,6 @@ function openSkillMenuModal() {
 
 function renderSkillPanel(tabsEl, chipsEl, identityEl, rerender) {
   if (!tabsEl || !chipsEl) return;
-  // 自动选 active identity 如果只有一个
-  if (state.activeIdentityId == null && state.identities && state.identities.length === 1) {
-    state.activeIdentityId = state.identities[0].send_as_id;
-  }
   // tabs
   tabsEl.innerHTML = state.skillGroups.map((g) => {
     const cls = g === state.skillBarTab ? "skill-bar-tab active" : "skill-bar-tab";

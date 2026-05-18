@@ -1103,7 +1103,7 @@ class SQLiteStore:
     def list_state_patches(self, scope: str = "", send_as_id: int = 0) -> list[dict]:
         """列出 state patches。
         - scope:可选,空字符串返回全部 scope
-        - send_as_id:0 = 不过滤(返回所有身份);>0 = **严格**只返回该身份的 patch。
+        - send_as_id:0 = 不过滤(返回所有身份);非 0 = **严格**只返回该身份的 patch。
 
         老脚本对 identity_profile 是 per-identity 严格隔离的(model/state.py),
         不要 fallback 到 send_as_id=0 — 否则字段会从别人/历史污染过来
@@ -1117,7 +1117,7 @@ class SQLiteStore:
             if scope:
                 where.append("scope=?")
                 params.append(scope)
-            if send_as_id > 0:
+            if send_as_id != 0:
                 where.append("send_as_id=?")
                 params.append(send_as_id)
             where_sql = ("WHERE " + " AND ".join(where)) if where else ""
