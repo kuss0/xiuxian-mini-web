@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: focus-noise-controls 2026-05-18T03:20
-console.log("[mini-web] build: focus-noise-controls 2026-05-18T03:20 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: focus-noise-controls 2026-05-18T03:35
+console.log("[mini-web] build: focus-noise-controls 2026-05-18T03:35 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -1594,6 +1594,7 @@ function renderDetail() {
     .join("");
   const enhancedHtml = renderEnhancedBlock(message);
   const actionsHtml = renderDetailActions(message);
+  const focusMuteHtml = renderFocusMuteControl(message);
   const heading = String(message.title || "").trim() || "Telegram 消息";
   const summary = String(message.summary || "").trim();
 
@@ -1609,6 +1610,7 @@ function renderDetail() {
       </div>
       ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
       ${tagPills ? `<div class="tag-row">${tagPills}</div>` : ""}
+      ${focusMuteHtml}
       ${isRisk ? `<p class="detail-risk-hint">这是一条风险类消息，请人工查看原文后再决定如何回应。</p>` : ""}
     </div>
 
@@ -1630,6 +1632,35 @@ function renderDetail() {
   `;
 
   bindDetailActions(message);
+}
+
+function renderFocusMuteControl(message) {
+  if (!canFocusMuteMessage(message)) return "";
+  const senderId = Number(message.sender_id || 0);
+  const muted = isFocusMutedSenderId(senderId);
+  const label = muted ? "取消重点静音此人" : "重点流静音此人";
+  const hint = muted
+    ? "此 sender 的普通玩家消息已从重点流移到归档。"
+    : "只影响普通玩家噪音；@我、我的发送、风险、动作和天尊回复我仍会显示。";
+  return `
+    <div class="detail-focus-tools">
+      <button type="button" class="action-tertiary" data-detail-action="focus-mute-toggle">${escapeHtml(label)}</button>
+      <span>${escapeHtml(hint)} sender_id=${escapeHtml(String(senderId))}</span>
+    </div>
+  `;
+}
+
+function canFocusMuteMessage(message) {
+  const senderId = Number(message?.sender_id || 0);
+  if (!Number.isFinite(senderId) || senderId === 0) return false;
+  if (messageKind(message) !== "player") return false;
+  if ((message.channels || []).includes("mine")) return false;
+  return true;
+}
+
+function isFocusMutedSenderId(senderId) {
+  const ids = ((state.settings || {}).focus_muted_sender_ids || []).map((id) => Number(id));
+  return ids.includes(Number(senderId));
 }
 
 // 卡片专用 renderer 注册表 — 按 message.title 派发,落不到具体 renderer 就走通用 fields grid。
@@ -1993,6 +2024,9 @@ function renderActionContextLine(action) {
 
 function bindDetailActions(message) {
   const actions = message.actions || [];
+  detailPanel.querySelector('[data-detail-action="focus-mute-toggle"]')?.addEventListener("click", async (event) => {
+    await toggleFocusMuteSender(message, event.currentTarget);
+  });
   detailPanel.querySelectorAll('[data-rich-collapse="1"]').forEach((btn) => {
     btn.addEventListener("click", () => {
       const list = btn.previousElementSibling;
@@ -2077,6 +2111,39 @@ function bindDetailActions(message) {
       }
     });
   });
+}
+
+async function toggleFocusMuteSender(message, button) {
+  const senderId = Number(message?.sender_id || 0);
+  if (!Number.isFinite(senderId) || senderId === 0) return;
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = "处理中…";
+  try {
+    const settings = state.settings || (await loadSettings());
+    const ids = new Set(((settings.focus_muted_sender_ids || []).map((id) => Number(id))).filter((id) => Number.isFinite(id) && id !== 0));
+    if (ids.has(senderId)) {
+      ids.delete(senderId);
+    } else {
+      ids.add(senderId);
+    }
+    const saved = await postJson("/api/settings", {
+      focus_muted_sender_ids: Array.from(ids),
+    });
+    state.settings = saved.settings || (await loadSettings());
+    state.lastMessageSeq = 0;
+    state.messages = [];
+    await loadMessages({ incremental: false });
+    renderQuickFilters();
+    renderMessages();
+    renderDetail();
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = error.message || originalText || "操作失败";
+    setTimeout(() => {
+      button.textContent = originalText || "重点流静音此人";
+    }, 1600);
+  }
 }
 
 async function copyCommandToClipboard(command, button) {
