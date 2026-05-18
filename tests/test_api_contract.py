@@ -145,6 +145,20 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
         is_game_bot_sender=lambda _sid: False,
         my_identity_ids=[123],
     )
+    punctuation_noise = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x12", chat_id=1, msg_id=12, text="？？", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    emoji_only = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x13", chat_id=1, msg_id=13, text="🔥", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
 
     assert "focus" in plain.channels
     assert "archive" in command.channels
@@ -174,6 +188,10 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
     assert "focus" in muted_sender_mentions_me.channels
     assert "archive" not in muted_sender_mentions_me.channels
     assert "被@" in muted_sender_mentions_me.tags
+    assert "archive" in punctuation_noise.channels
+    assert "focus" not in punctuation_noise.channels
+    assert "focus" in emoji_only.channels
+    assert "archive" not in emoji_only.channels
 
 
 def test_message_filter_promotes_bot_reply_to_me_and_archives_reply_to_others():

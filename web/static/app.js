@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: emoji-text-support 2026-05-18T21:05
-console.log("[mini-web] build: emoji-text-support 2026-05-18T21:05 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: emoji-palette-and-focus 2026-05-18T22:10
+console.log("[mini-web] build: emoji-palette-and-focus 2026-05-18T22:10 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -48,6 +48,12 @@ const state = {
 const MESSAGE_PREVIEW_CHAR_LIMIT = 480;
 const MESSAGE_PREVIEW_LINE_LIMIT = 8;
 const NUMERIC_SOURCE_RE = /^-?\d{4,}$/;
+const EMOJI_PALETTE = [
+  "😀", "😂", "🤣", "😅", "🥹", "😎", "🙃", "😭",
+  "👍", "🙏", "👌", "👏", "🤝", "👀", "💤", "💢",
+  "🔥", "✨", "⚔️", "🧘‍♂️", "🍃", "💧", "🌙", "🎉",
+  "⚠️", "🚫", "✅", "❌", "❓", "💰", "📦", "🧩",
+];
 const GRAPHEME_SEGMENTER =
   typeof Intl !== "undefined" && Intl.Segmenter
     ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
@@ -69,6 +75,8 @@ const directSendIdentitySelect = document.querySelector("#directSendIdentitySele
 const directSendInput = document.querySelector("#directSendInput");
 const directSendSubmit = document.querySelector("#directSendSubmit");
 const directSendStatus = document.querySelector("#directSendStatus");
+const emojiPickerButton = document.querySelector("#emojiPickerButton");
+const directSendEmojiPalette = document.querySelector("#directSendEmojiPalette");
 const openSkillMenuButton = document.querySelector("#openSkillMenuButton");
 const openCultivationButton = document.querySelector("#openCultivationButton");
 const outboxButton = document.querySelector("#outboxButton");
@@ -1290,6 +1298,41 @@ function copyToClipboardSilent(text) {
   try {
     navigator.clipboard.writeText(text);
   } catch (_e) { /* noop */ }
+}
+
+function emojiPaletteHtml() {
+  const buttons = EMOJI_PALETTE.map((emoji) => `
+    <button type="button" class="emoji-palette-button" data-emoji="${escapeAttr(emoji)}" title="插入 ${escapeAttr(emoji)}">${escapeHtml(emoji)}</button>
+  `).join("");
+  return `
+    <div class="emoji-palette-buttons">${buttons}</div>
+    <span class="emoji-palette-hint">系统表情: Windows 用 Win+.，macOS 用 Ctrl+Cmd+Space</span>
+  `;
+}
+
+function bindEmojiPalette(container, getTextarea) {
+  if (!container) return;
+  container.innerHTML = emojiPaletteHtml();
+  container.querySelectorAll("[data-emoji]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const textarea = getTextarea ? getTextarea() : null;
+      if (!textarea) return;
+      insertTextAtCursor(textarea, button.dataset.emoji || "");
+    });
+  });
+}
+
+function insertTextAtCursor(textarea, text) {
+  if (!textarea || !text) return;
+  const start = Number.isInteger(textarea.selectionStart) ? textarea.selectionStart : textarea.value.length;
+  const end = Number.isInteger(textarea.selectionEnd) ? textarea.selectionEnd : start;
+  const before = textarea.value.slice(0, start);
+  const after = textarea.value.slice(end);
+  textarea.value = `${before}${text}${after}`;
+  const next = start + text.length;
+  textarea.focus();
+  textarea.setSelectionRange(next, next);
+  textarea.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 function renderActiveChannelText() {
@@ -5681,6 +5724,7 @@ function openManualSendModal(replyMessage = null, opts = {}) {
             <label class="span-2 stacked-field">
               <span>发送内容</span>
               <textarea name="command" rows="5" placeholder="例如 .查看闭关，或输入任意要发到 Telegram 的文本">${escapeHtml(initialCommand)}</textarea>
+              <div id="manualSendEmojiPalette" class="emoji-palette manual-send-emoji-palette"></div>
             </label>
           </div>
         </form>
@@ -5702,9 +5746,11 @@ function bindManualSendModal(dialog, { replyMessage = null } = {}) {
   const chatInput = form?.querySelector('[name="chat_id"]');
   const topicInput = form?.querySelector('[name="top_msg_id"]');
   const commandInput = form?.querySelector('[name="command"]');
+  const manualEmojiPalette = dialog.querySelector("#manualSendEmojiPalette");
   const status = dialog.querySelector("#manualSendStatus");
   const confirm = dialog.querySelector("#manualSendConfirm");
   if (!form || !identitySelect || !commandInput || !confirm) return;
+  bindEmojiPalette(manualEmojiPalette, () => commandInput);
 
   const syncTargetDefaults = (force = false) => {
     const identity = identityById(identitySelect.value);
@@ -5897,6 +5943,16 @@ if (directSendInput) {
 if (directSendSubmit) {
   directSendSubmit.addEventListener("click", () => {
     sendDirectComposerMessage();
+  });
+}
+
+if (emojiPickerButton && directSendEmojiPalette) {
+  bindEmojiPalette(directSendEmojiPalette, () => directSendInput);
+  emojiPickerButton.addEventListener("click", () => {
+    directSendEmojiPalette.hidden = !directSendEmojiPalette.hidden;
+    if (!directSendEmojiPalette.hidden) {
+      directSendInput?.focus();
+    }
   });
 }
 

@@ -3499,6 +3499,52 @@ pre {
   line-height: 1.45;
 }
 
+.emoji-palette {
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.emoji-palette[hidden] {
+  display: none;
+}
+
+.emoji-palette-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.emoji-palette-button {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font-family: var(--emoji-font), inherit;
+  font-size: 17px;
+  line-height: 1;
+  padding: 0;
+}
+
+.emoji-palette-button:hover {
+  border-color: var(--accent);
+  background: rgba(37, 99, 235, 0.16);
+}
+
+.emoji-palette-hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.manual-send-emoji-palette {
+  margin-top: 4px;
+}
+
 #directSendSubmit {
   border: 1px solid var(--accent);
   border-radius: 8px;
