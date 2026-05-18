@@ -2429,21 +2429,52 @@ def test_skill_send_rejects_missing_identity(tmp_path):
     assert "identity" in result["error"]
 
 
-def test_skill_send_rejects_non_self_identity(tmp_path):
-    """禁止以「非 self」send_as 发送(暂未接 send_as= 路径)。"""
+def test_skill_send_allows_non_self_send_as_identity(tmp_path, monkeypatch):
+    """非 self identity 走 SendMessageRequest(send_as=...),用于频道/身份发送。"""
     server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
     server.save_account_payload(
         {"local_id": "main", "api_id": "1", "api_hash": "h",
          "account_id": "8574677796", "target_chat": "-1001680975844"}
     )
     server.save_identity_payload(
-        {"send_as_id": "8668975549", "account_local_id": "main", "label": "OtherSendAs"}
+        {"send_as_id": "-1001234567890", "account_local_id": "main", "label": "凌霄频道"}
     )
+    captured: dict = {}
+
+    class FakeChannel:
+        title = "凌霄频道"
+
+    class FakeClient:
+        async def get_input_entity(self, value):
+            return f"peer:{value}"
+
+        async def get_entity(self, value):
+            assert value == -1001234567890
+            return FakeChannel()
+
+        async def __call__(self, request):
+            captured["request"] = request
+
+            class _Update:
+                id = 88003
+
+            class _Result:
+                updates = [_Update()]
+            return _Result()
+
+    class FakeListener:
+        def submit(self, coro_factory, *, timeout=30.0):
+            import asyncio
+            return asyncio.new_event_loop().run_until_complete(coro_factory(FakeClient()))
+    monkeypatch.setattr(server._listeners, "get_listener", lambda _id: FakeListener())
+
     result = server.skill_send_payload(
-        {"skill_key": "wild_training", "identity_id": 8668975549}
+        {"skill_key": "wild_training", "identity_id": -1001234567890}
     )
-    assert result["ok"] is False
-    assert "自己身份" in result["error"]
+    assert result["ok"] is True
+    assert result["sent_msg_id"] == 88003
+    assert captured["request"].message == ".野外历练"
+    assert captured["request"].send_as == "peer:-1001234567890"
 
 
 def test_skill_send_required_reply_mode_blocks_without_reply_to(tmp_path, monkeypatch):

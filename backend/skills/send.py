@@ -5,8 +5,9 @@
 - 直接发送(reply_to=None):标准 send_message
 - 回复发送(reply_to=msg_id):带 reply_to 标志,bot 才知道上下文(如 .加入副本 N、.抉择 ...)
 
-skill_send_payload 只接受 reply_to_msg_id;不接受发送给非自己 send_as
-(self-identity 才发,其它 send_as 留 TODO)。
+skill_send_payload 只接受 reply_to_msg_id;发送身份来自 UI 当前选中的
+identity。self-identity 走普通 send_message,频道 / send_as 身份走
+SendMessageRequest(send_as=...)。
 
 发送成功后会立即把自己的 outgoing 消息 ingest 进 raw_messages(经由 event_sink 回调),
 不再等 telethon 自己的 NewMessage 回调 — 老脚本里 outgoing 事件不稳定,solo 模式靠
@@ -83,6 +84,7 @@ class SkillSendService:
         chat_id: int,
         account_local_id: str,
         sender_id: int = 0,
+        send_as_id: int = 0,
         sender_display: str = "",
         account_key: str = "",
         reply_to_msg_id: int | None = None,
@@ -105,6 +107,7 @@ class SkillSendService:
         if chat_id_int == 0:
             return SkillSendResult(ok=False, error="chat_id 不能为 0", skill_key=skill_key, command=command)
 
+        self._last_display = ""
         reply_id = int(reply_to_msg_id or 0)
         topic = int(topic_id or 0)
         if skill.reply_mode == "required" and reply_id <= 0:
@@ -132,6 +135,7 @@ class SkillSendService:
                     command=command,
                     reply_to_msg_id=reply_id,
                     topic_id=topic,
+                    send_as_id=int(send_as_id or 0),
                 )
             )
         except Exception as exc:
@@ -157,7 +161,7 @@ class SkillSendService:
         sent_msg_id = int((sent or {}).get("msg_id") or 0)
         # 优先用 client.get_me() 返回的真名,fallback 才用 server 传过来的 sender_display
         resolved_display = str((sent or {}).get("display") or "").strip()
-        if resolved_display:
+        if resolved_display and int(send_as_id or 0) == 0:
             self._last_display = resolved_display
         sent_at = self._time_fn()
         # outgoing 也 ingest 进消息箱,solo 模式才能把 bot 回复跟我的命令串起来
@@ -195,33 +199,49 @@ class SkillSendService:
         command: str,
         reply_to_msg_id: int,
         topic_id: int = 0,
+        send_as_id: int = 0,
     ) -> dict:
         """在已连接 client 上发一条。返回 {msg_id, display}。
 
-        display 来自 client.get_me() 的 first_name/last_name/username,这样
-        chat 里显示的发送者名跟 listener 解析其它消息时用的同一个口径
-        (而不是 account.label 写死的手机号)。
+        self 身份的 display 来自 client.get_me();send_as 身份优先从
+        get_entity(send_as_id) 拿 title / username。拿不到时由调用方的
+        sender_display 兜底。
         """
-        if topic_id > 0 and reply_to_msg_id > 0:
+        send_as_peer = None
+        send_as_display = ""
+        if int(send_as_id or 0) != 0:
+            try:
+                send_as_peer = await client.get_input_entity(int(send_as_id))
+            except Exception as exc:
+                raise RuntimeError(f"无法解析 send_as 身份 {send_as_id}:{exc}") from exc
+            try:
+                send_as_entity = await client.get_entity(int(send_as_id))
+                send_as_display = _format_entity_display(send_as_entity)
+            except Exception:
+                send_as_display = ""
+
+        if send_as_peer is not None or (topic_id > 0 and reply_to_msg_id > 0):
             from telethon import functions, types
             peer = await client.get_input_entity(chat_id)
-            reply_to_spec = types.InputReplyToMessage(
-                reply_to_msg_id=int(reply_to_msg_id),
-                top_msg_id=int(topic_id),
-            )
+            reply_to_spec = None
+            if topic_id > 0 and reply_to_msg_id > 0:
+                reply_to_spec = types.InputReplyToMessage(
+                    reply_to_msg_id=int(reply_to_msg_id),
+                    top_msg_id=int(topic_id),
+                )
+            elif reply_to_msg_id > 0:
+                reply_to_spec = types.InputReplyToMessage(reply_to_msg_id=int(reply_to_msg_id))
+            elif topic_id > 0:
+                reply_to_spec = types.InputReplyToMessage(reply_to_msg_id=int(topic_id))
             result = await client(
                 functions.messages.SendMessageRequest(
                     peer=peer,
                     message=command,
                     reply_to=reply_to_spec,
+                    send_as=send_as_peer,
                 )
             )
-            msg_id = 0
-            for update in (getattr(result, "updates", None) or []):
-                mid = getattr(update, "id", 0)
-                if mid:
-                    msg_id = int(mid)
-                    break
+            msg_id = _extract_sent_message_id(result)
         else:
             kwargs: dict[str, Any] = {}
             if reply_to_msg_id > 0:
@@ -231,12 +251,13 @@ class SkillSendService:
             sent = await client.send_message(chat_id, command, **kwargs)
             msg_id = int(getattr(sent, "id", 0) or 0)
 
-        display = ""
-        try:
-            me = await client.get_me()
-            display = _format_user_display(me)
-        except Exception:
-            display = ""
+        display = send_as_display
+        if not display and int(send_as_id or 0) == 0:
+            try:
+                me = await client.get_me()
+                display = _format_user_display(me)
+            except Exception:
+                display = ""
         return {"msg_id": msg_id, "display": display}
 
 
@@ -252,6 +273,34 @@ def _format_user_display(user) -> str:
     if username:
         return f"@{str(username).lstrip('@').strip()}"
     return ""
+
+
+def _format_entity_display(entity) -> str:
+    if entity is None:
+        return ""
+    title = str(getattr(entity, "title", "") or "").strip()
+    if title:
+        return title
+    return _format_user_display(entity)
+
+
+def _extract_sent_message_id(result) -> int:
+    direct_id = int(getattr(result, "id", 0) or 0)
+    if direct_id:
+        return direct_id
+    for update in (getattr(result, "updates", None) or []):
+        mid = int(getattr(update, "id", 0) or 0)
+        if mid:
+            return mid
+        message = getattr(update, "message", None)
+        mid = int(getattr(message, "id", 0) or 0)
+        if mid:
+            return mid
+    for message in (getattr(result, "messages", None) or []):
+        mid = int(getattr(message, "id", 0) or 0)
+        if mid:
+            return mid
+    return 0
 
 
 def _outgoing_event(

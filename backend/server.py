@@ -1008,17 +1008,13 @@ class MiniWebServer:
         if account is None:
             return {"ok": False, "error": f"找不到 account {account_local_id}"}
 
-        # 暂时只允许 self-identity 发送(identity.send_as_id == account.account_id);
-        # 别的 send_as 走 SendMessageRequest(send_as=...) 路径还没实现。
         try:
             account_id = int(str(account.get("account_id") or 0).strip())
         except (TypeError, ValueError):
             account_id = 0
-        if account_id == 0 or identity_id != account_id:
-            return {
-                "ok": False,
-                "error": "目前只支持以「自己身份」发送 (send_as_id == account_id),其它 send_as 待接入",
-            }
+        if account_id == 0:
+            return {"ok": False, "error": "account_id 为空,请先确认该 Telegram 账号已登录成功"}
+        send_as_id = 0 if identity_id == account_id else identity_id
 
         chat_id_raw = payload.get("chat_id") or account.get("target_chat") or ""
         try:
@@ -1038,8 +1034,9 @@ class MiniWebServer:
             skill_key=skill_key,
             chat_id=chat_id,
             account_local_id=account_local_id,
-            sender_id=account_id,
-            sender_display=str(account.get("label") or identity.get("label") or "我"),
+            sender_id=identity_id,
+            send_as_id=send_as_id,
+            sender_display=str(identity.get("label") or account.get("label") or "我"),
             account_key=account_local_id,
             reply_to_msg_id=reply_to,
             topic_id=topic_id,
@@ -1049,7 +1046,7 @@ class MiniWebServer:
         # 顺手把 client.get_me() 抓到的真名 hydrate 回 account.label / identity.label
         # —— 之前两者都是手机号,UI 显示 +44... 很丑
         display = self._skill_send.last_display()
-        if result.ok and display:
+        if result.ok and display and identity_id == account_id:
             self._maybe_hydrate_account_display(account, identity, display)
         return api
 
