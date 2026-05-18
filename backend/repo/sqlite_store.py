@@ -15,6 +15,7 @@ from backend.processors.message_filter import (
     CURRENT_MESSAGE_FILTER_VERSION,
     DEFAULT_FOCUS_EXCLUDE_PATTERNS,
     DEFAULT_FOCUS_KEYWORDS,
+    LEGACY_FOCUS_EXCLUDE_PATTERNS,
     enrich_filter_channels,
 )
 from backend.repo.sample_store import SAMPLE_EVENTS
@@ -990,9 +991,8 @@ class SQLiteStore:
             defaults.get("own_aliases"),
             self._collect_my_aliases(),
         )
-        defaults["focus_exclude_patterns"] = _merge_str_defaults(
+        defaults["focus_exclude_patterns"] = _merge_focus_exclude_defaults(
             defaults.get("focus_exclude_patterns"),
-            list(DEFAULT_FOCUS_EXCLUDE_PATTERNS),
         )
         return defaults
 
@@ -1808,9 +1808,8 @@ def _normalize_settings(payload: dict) -> dict:
         "focus_muted_sender_ids": int_list("focus_muted_sender_ids"),
         "focus_muted_source_names": sorted(set(str_list("focus_muted_source_names"))),
         "focus_keywords": sorted(set(str_list("focus_keywords", list(DEFAULT_FOCUS_KEYWORDS)))),
-        "focus_exclude_patterns": _merge_str_defaults(
+        "focus_exclude_patterns": _merge_focus_exclude_defaults(
             str_list("focus_exclude_patterns", []),
-            list(DEFAULT_FOCUS_EXCLUDE_PATTERNS),
         ),
         "focus_include_player_plain": bool_value("focus_include_player_plain"),
         "archive_dot_commands": bool_value("archive_dot_commands"),
@@ -1858,6 +1857,16 @@ def _merge_str_defaults(raw_value, defaults: list[str]) -> list[str]:
             seen.add(text)
             items.append(text)
     return items
+
+
+def _merge_focus_exclude_defaults(raw_value) -> list[str]:
+    legacy = {str(item).strip() for item in LEGACY_FOCUS_EXCLUDE_PATTERNS}
+    custom = [
+        str(item or "").strip()
+        for item in list(raw_value or [])
+        if str(item or "").strip() and str(item or "").strip() not in legacy
+    ]
+    return _merge_str_defaults(custom, list(DEFAULT_FOCUS_EXCLUDE_PATTERNS))
 
 
 def _normalize_account(payload: dict) -> dict:

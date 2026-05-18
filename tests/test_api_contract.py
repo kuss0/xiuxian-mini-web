@@ -384,6 +384,16 @@ def test_focus_exclude_patterns_preserve_regex_commas(tmp_path):
     assert "2}$" not in saved["focus_exclude_patterns"]
 
 
+def test_focus_exclude_patterns_prune_legacy_defaults(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    legacy_short_noise = r"^(嗯+|哦+|噢+|好+|好的|行吧?|对|是|收到|收到了|来了|回来了|晚安|谢谢|谢谢老板)$"
+    saved = store.save_settings({"focus_exclude_patterns": [legacy_short_noise, "第二期机缘"]})
+
+    assert legacy_short_noise not in saved["focus_exclude_patterns"]
+    assert "第二期机缘" in saved["focus_exclude_patterns"]
+    assert any("拉屎好爽" in item for item in saved["focus_exclude_patterns"])
+
+
 def test_focus_muted_senders_roundtrip(tmp_path):
     store = SQLiteStore(tmp_path / "miniweb.db")
     saved = store.save_settings({
