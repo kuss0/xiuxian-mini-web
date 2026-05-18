@@ -172,6 +172,9 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
     Skill("dungeon_join", "查询", "加入副本", ".加入副本",
           reply_mode="required",
           note="副本公告出现时,回复并附副本ID;或在卡片 actions 区点预填命令"),
+    Skill("dungeon_zhuimo_choice", "查询", "坠魔抉择", ".坠魔抉择",
+          reply_mode="required",
+          note="坠魔谷推进提示出现时,回复路径1/路径2/路径3"),
 )
 
 

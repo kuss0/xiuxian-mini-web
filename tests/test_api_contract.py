@@ -2397,6 +2397,7 @@ def test_skills_payload_exposes_default_layout():
     # 回复类必须显式标记
     assert by_key["quiz_answer"]["reply_mode"] == "required"
     assert by_key["dungeon_join"]["reply_mode"] == "required"
+    assert by_key["dungeon_zhuimo_choice"]["reply_mode"] == "required"
     # 新增的命令必须在
     assert "storage_bag" in by_key  # .储物袋
     assert "concubine_romance" in by_key  # .红尘寻缘

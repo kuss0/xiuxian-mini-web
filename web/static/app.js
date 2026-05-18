@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: inline-skill-panel 2026-05-18T22:36
-console.log("[mini-web] build: inline-skill-panel 2026-05-18T22:36 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: dungeon-cards 2026-05-18T23:10
+console.log("[mini-web] build: dungeon-cards 2026-05-18T23:10 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -1878,6 +1878,9 @@ function renderEnhancedBlock(message) {
       return renderDetailFields(message.fields);
     }
   }
+  if ((message.channels || []).includes("dungeon")) {
+    return renderDungeonCard(message);
+  }
   return renderDetailFields(message.fields);
 }
 
@@ -2072,17 +2075,32 @@ function renderSecondSoulCard(message) {
 
 function renderDungeonCard(message) {
   const f = message.fields || {};
+  const tags = message.tags || [];
+  const title = String(message.title || "副本消息").trim();
+  const dungeonName = String(f["副本名"] || "").trim() || title.replace(/(开启|推进)$/, "") || "副本";
   const dungeonId = f["副本ID"] ? String(f["副本ID"]).trim() : "—";
+  const stage = f["阶段"] ? String(f["阶段"]).trim() : "";
+  const status = String(f["状态"] || "").trim()
+    || (tags.includes("可加入") ? "可加入" : tags.includes("解散") ? "已解散" : tags.includes("加入") ? "已加入" : "副本消息");
+  const heroValue = dungeonId !== "—" ? `#${dungeonId}` : (stage || status);
+  const paths = Array.isArray(f["可选路径"]) ? f["可选路径"] : [];
+  const summary = String(message.summary || "").trim();
   return `
     <div class="card-rich card-rich-dungeon">
-      <div class="rich-hero">
-        <span class="rich-hero-icon">🛡️</span>
-        <div class="rich-hero-text">
-          <span class="rich-hero-label">虚天殿 · 副本 ID</span>
-          <span class="rich-hero-value rich-hero-id">#${escapeHtml(dungeonId)}</span>
-        </div>
-      </div>
-      ${richChips([["状态", "可加入"], ["操作", "actions 区一键加入"]])}
+      ${richHero("🛡️", `${dungeonName} · ${status}`, heroValue)}
+      ${summary ? `<p class="muted" style="margin:0;font-size:12px;">${escapeHtml(summary)}</p>` : ""}
+      ${richStatGrid([
+        ["副本ID", dungeonId !== "—" ? dungeonId : ""],
+        ["阶段", stage],
+        ["开门人", f["开门人"] || ""],
+        ["人数上限", f["人数上限"] || ""],
+      ])}
+      ${richChips([
+        ["静场令", f["静场令"] || ""],
+        ["消耗道具", f["消耗道具"] || ""],
+        ["操作", (message.actions || []).length ? "下方按钮手动发送" : ""],
+      ])}
+      ${richCollapsibleList("可选路径", paths, 3)}
     </div>
   `;
 }
