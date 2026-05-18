@@ -1,5 +1,5 @@
 from backend.domain import CHANNELS
-from backend.domain.models import ParsedCard, RawMessageEvent
+from backend.domain.models import ParsedCard, RawMessageEvent, utc_now_iso
 from backend.app import MiniWebHandler, create_handler, is_authorized_api_headers
 from backend.config import MAX_ACCOUNTS, MAX_IDENTITIES, MAX_LISTENERS
 import backend.server as server_module
@@ -403,6 +403,23 @@ def test_focus_muted_senders_roundtrip(tmp_path):
 
     assert saved["focus_muted_sender_ids"] == [222, 333]
     assert saved["focus_muted_source_names"] == ["刷屏玩家", "路人甲"]
+
+
+def test_focus_exclude_preview_only_counts_unprotected_plain_focus(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_identity({"send_as_id": 123, "label": "me"})
+    now = utc_now_iso()
+    store.ingest_event(RawMessageEvent(id="plain", chat_id=1, msg_id=1, text="是这样", source="玩家", date=now, sender_id=222))
+    store.ingest_event(RawMessageEvent(id="mine", chat_id=1, msg_id=2, text="是这样", source="我", date=now, sender_id=123))
+    store.ingest_event(RawMessageEvent(id="bot", chat_id=1, msg_id=3, text="是这样", source="韩天尊", date=now, sender_id=7900199668))
+
+    preview = MiniWebServer(store=store).focus_exclude_preview_payload({"mode": "exact", "text": "是这样"})
+
+    assert preview["ok"] is True
+    assert preview["pattern"] == "^是这样$"
+    assert preview["total"] == 1
+    assert preview["last_24h"] == 1
+    assert preview["samples"][0]["sender_id"] == 222
 
 
 def test_settings_auto_collects_own_usernames(tmp_path):

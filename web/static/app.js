@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: focus-noise-controls 2026-05-18T03:35
-console.log("[mini-web] build: focus-noise-controls 2026-05-18T03:35 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: focus-archive-preview 2026-05-18T06:55
+console.log("[mini-web] build: focus-archive-preview 2026-05-18T06:55 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -1594,7 +1594,7 @@ function renderDetail() {
     .join("");
   const enhancedHtml = renderEnhancedBlock(message);
   const actionsHtml = renderDetailActions(message);
-  const focusMuteHtml = renderFocusMuteControl(message);
+  const focusInsightHtml = renderFocusInsight(message);
   const heading = String(message.title || "").trim() || "Telegram 消息";
   const summary = String(message.summary || "").trim();
 
@@ -1610,7 +1610,7 @@ function renderDetail() {
       </div>
       ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
       ${tagPills ? `<div class="tag-row">${tagPills}</div>` : ""}
-      ${focusMuteHtml}
+      ${focusInsightHtml}
       ${isRisk ? `<p class="detail-risk-hint">这是一条风险类消息，请人工查看原文后再决定如何回应。</p>` : ""}
     </div>
 
@@ -1634,27 +1634,72 @@ function renderDetail() {
   bindDetailActions(message);
 }
 
-function renderFocusMuteControl(message) {
-  if (!canFocusMuteMessage(message)) return "";
+function renderFocusInsight(message) {
+  const reasons = focusReasonList(message);
+  const reasonsHtml = reasons.length
+    ? `<div class="focus-reason-list">${reasons.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`
+    : '<p class="empty inline">这条消息当前不在重点流。</p>';
+  const toolsHtml = renderFocusTools(message);
+  return `
+    <div class="detail-focus-section">
+      <h5>入重点原因</h5>
+      ${reasonsHtml}
+      ${toolsHtml}
+    </div>
+  `;
+}
+
+function renderFocusTools(message) {
+  if (!canFocusArchiveMessage(message)) return "";
   const senderId = Number(message.sender_id || 0);
   const muted = isFocusMutedSenderId(senderId);
-  const label = muted ? "取消重点静音此人" : "重点流静音此人";
+  const muteLabel = muted ? "取消重点静音此人" : "重点流静音此人";
   const hint = muted
     ? "此 sender 的普通玩家消息已从重点流移到归档。"
     : "只影响普通玩家噪音；@我、我的发送、风险、动作和天尊回复我仍会显示。";
   return `
     <div class="detail-focus-tools">
-      <button type="button" class="action-tertiary" data-detail-action="focus-mute-toggle">${escapeHtml(label)}</button>
+      <button type="button" class="action-tertiary" data-detail-action="focus-archive-exact">归档这句话</button>
+      <button type="button" class="action-tertiary" data-detail-action="focus-archive-contains">归档包含短语</button>
+      <button type="button" class="action-tertiary" data-detail-action="focus-mute-toggle">${escapeHtml(muteLabel)}</button>
       <span>${escapeHtml(hint)} sender_id=${escapeHtml(String(senderId))}</span>
     </div>
   `;
 }
 
-function canFocusMuteMessage(message) {
+function focusReasonList(message) {
+  const reasons = [];
+  const channels = message.channels || [message.channel];
+  const tags = message.tags || [];
+  if (!channels.includes("focus")) return reasons;
+  if (tags.includes("我发出")) reasons.push("我的发送");
+  if (tags.includes("回复我")) reasons.push("天尊回复我");
+  if (tags.includes("被@")) reasons.push("被 @");
+  if (tags.includes("会长")) reasons.push("会长 / 情报源");
+  if (message.severity === "risk" || channels.includes("risk")) reasons.push("风险消息");
+  (tags || []).forEach((tag) => {
+    if (String(tag).startsWith("关键词:")) reasons.push(`关键词命中：${String(tag).slice(4)}`);
+  });
+  if ((message.actions || []).length) reasons.push("有动作草稿");
+  if (channels.includes("dungeon")) reasons.push("副本消息");
+  if (channels.includes("resource")) reasons.push("资源 / 背包消息");
+  if (channels.includes("training")) reasons.push("修炼状态消息");
+  if (channels.includes("home")) reasons.push("洞府 / 家园消息");
+  if (messageKind(message) === "player" && !reasons.length) reasons.push("普通玩家消息策略");
+  if (!tags.some((tag) => String(tag).startsWith("重点排除:") || String(tag).startsWith("重点静音:"))) {
+    reasons.push("未被排除规则命中");
+  }
+  return Array.from(new Set(reasons));
+}
+
+function canFocusArchiveMessage(message) {
   const senderId = Number(message?.sender_id || 0);
   if (!Number.isFinite(senderId) || senderId === 0) return false;
   if (messageKind(message) !== "player") return false;
   if ((message.channels || []).includes("mine")) return false;
+  if ((message.actions || []).length) return false;
+  if (message.severity === "risk" || (message.channels || []).includes("risk")) return false;
+  if ((message.tags || []).some((tag) => ["被@", "回复我", "会长", "我发出"].includes(String(tag)))) return false;
   return true;
 }
 
@@ -2024,6 +2069,12 @@ function renderActionContextLine(action) {
 
 function bindDetailActions(message) {
   const actions = message.actions || [];
+  detailPanel.querySelector('[data-detail-action="focus-archive-exact"]')?.addEventListener("click", () => {
+    openFocusArchiveModal(message, "exact");
+  });
+  detailPanel.querySelector('[data-detail-action="focus-archive-contains"]')?.addEventListener("click", () => {
+    openFocusArchiveModal(message, "contains");
+  });
   detailPanel.querySelector('[data-detail-action="focus-mute-toggle"]')?.addEventListener("click", async (event) => {
     await toggleFocusMuteSender(message, event.currentTarget);
   });
@@ -2111,6 +2162,123 @@ function bindDetailActions(message) {
       }
     });
   });
+}
+
+function openFocusArchiveModal(message, mode) {
+  const text = focusArchiveBaseText(message);
+  const title = mode === "contains" ? "归档包含短语" : "归档这句话";
+  const help = mode === "contains"
+    ? "输入一个短语；命中该短语的普通重点消息会转入归档。关键词关注仍可对其他消息生效。"
+    : "按完整文本生成精确规则；只会归档完全相同的普通重点消息。";
+  const dialog = openModal({
+    title,
+    body: `
+      <section class="modal-section">
+        <p class="muted">${escapeHtml(help)}</p>
+        <label class="stacked-field">
+          <span>${mode === "contains" ? "短语" : "完整文本"}</span>
+          <textarea id="focusArchiveText" rows="${mode === "contains" ? "2" : "4"}">${escapeHtml(text)}</textarea>
+        </label>
+        <p class="modal-status-line info" id="focusArchiveStatus">先预览影响范围，再确认保存规则。</p>
+        <div id="focusArchivePreview" class="focus-preview-box"></div>
+      </section>
+    `,
+    footer: `
+      <button type="button" data-modal-close>取消</button>
+      <button type="button" id="focusArchivePreviewButton">预览影响</button>
+      <button type="button" class="primary" id="focusArchiveApplyButton" disabled>确认归档此类</button>
+    `,
+  });
+  if (!dialog) return;
+  let lastPreview = null;
+  const input = dialog.querySelector("#focusArchiveText");
+  const status = dialog.querySelector("#focusArchiveStatus");
+  const previewBox = dialog.querySelector("#focusArchivePreview");
+  const applyButton = dialog.querySelector("#focusArchiveApplyButton");
+  const previewButton = dialog.querySelector("#focusArchivePreviewButton");
+  const setStatus = (kind, value) => {
+    status.className = `modal-status-line ${kind}`;
+    status.textContent = value;
+  };
+  previewButton?.addEventListener("click", async () => {
+    const value = String(input?.value || "").trim();
+    if (!value) {
+      setStatus("warn", "内容为空，不能生成规则。");
+      return;
+    }
+    previewButton.disabled = true;
+    applyButton.disabled = true;
+    setStatus("info", "正在预览…");
+    try {
+      lastPreview = await postJson("/api/focus-exclude/preview", { mode, text: value });
+      if (!lastPreview.ok) throw new Error(lastPreview.error || "预览失败");
+      previewBox.innerHTML = renderFocusArchivePreview(lastPreview);
+      setStatus("ok", `规则已生成：${lastPreview.pattern}`);
+      applyButton.disabled = false;
+    } catch (error) {
+      lastPreview = null;
+      previewBox.innerHTML = "";
+      setStatus("error", error.message || "预览失败");
+    } finally {
+      previewButton.disabled = false;
+    }
+  });
+  applyButton?.addEventListener("click", async () => {
+    if (!lastPreview || !lastPreview.pattern) return;
+    applyButton.disabled = true;
+    setStatus("info", "正在保存规则并重分流…");
+    try {
+      await applyFocusExcludePattern(lastPreview.pattern);
+      closeModal();
+    } catch (error) {
+      applyButton.disabled = false;
+      setStatus("error", error.message || "保存失败");
+    }
+  });
+}
+
+function focusArchiveBaseText(message) {
+  const raw = String(message.raw || message.summary || "").trim();
+  if (!raw) return "";
+  return raw.length > 500 ? raw.slice(0, 500) : raw;
+}
+
+function renderFocusArchivePreview(preview) {
+  const samples = preview.samples || [];
+  const sampleHtml = samples.length
+    ? samples.map((item) => `
+        <li>
+          <strong>${escapeHtml(item.source || String(item.sender_id || "未知"))}</strong>
+          <span>${escapeHtml(formatChatTime(item.time) || item.time || "")}</span>
+          <p>${escapeHtml(item.text || "")}</p>
+        </li>
+      `).join("")
+    : '<li><p>当前历史里没有会被这条规则影响的普通重点消息。</p></li>';
+  const regexWarn = preview.invalid_regex
+    ? `<p class="modal-status-line warn">正则无效，已按纯文本完全相等预览：${escapeHtml(preview.invalid_regex)}</p>`
+    : "";
+  return `
+    <div class="focus-preview-counts">
+      <span>近 24 小时：<strong>${Number(preview.last_24h || 0)}</strong></span>
+      <span>近 7 天：<strong>${Number(preview.last_7d || 0)}</strong></span>
+      <span>全部历史：<strong>${Number(preview.total || 0)}</strong></span>
+    </div>
+    ${regexWarn}
+    <ul class="focus-preview-samples">${sampleHtml}</ul>
+  `;
+}
+
+async function applyFocusExcludePattern(pattern) {
+  const settings = state.settings || (await loadSettings());
+  const patterns = Array.from(new Set([...(settings.focus_exclude_patterns || []), pattern]));
+  const saved = await postJson("/api/settings", { focus_exclude_patterns: patterns });
+  state.settings = saved.settings || (await loadSettings());
+  state.lastMessageSeq = 0;
+  state.messages = [];
+  await loadMessages({ incremental: false });
+  renderQuickFilters();
+  renderMessages();
+  renderDetail();
 }
 
 async function toggleFocusMuteSender(message, button) {

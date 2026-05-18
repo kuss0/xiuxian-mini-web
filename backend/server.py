@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Protocol
 
 from backend.config import MAX_ACCOUNTS, MAX_IDENTITIES, MAX_LISTENERS
@@ -459,6 +460,27 @@ class MiniWebServer:
             if callable(reclassify):
                 rebuilt = int(reclassify() or 0)
         return {"ok": True, "settings": public_settings(saved), "rebuilt_messages": rebuilt}
+
+    def focus_exclude_preview_payload(self, payload: dict) -> dict:
+        mode = str(payload.get("mode") or "exact").strip().lower()
+        raw_text = str(payload.get("text") or payload.get("phrase") or payload.get("pattern") or "").strip()
+        if not raw_text:
+            return {"ok": False, "error": "请输入要归档的内容"}
+        if mode == "contains":
+            pattern = re.escape(raw_text)
+            label = f"包含短语：{raw_text}"
+        elif mode == "regex":
+            pattern = raw_text
+            label = f"正则：{raw_text}"
+        else:
+            pattern = f"^{re.escape(raw_text)}$"
+            label = f"完全相同：{raw_text}"
+        preview = self._store.preview_focus_exclude_pattern(pattern)
+        return {
+            **preview,
+            "mode": mode,
+            "label": label,
+        }
 
     def accounts_payload(self) -> dict:
         self._ensure_collector_running()

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import uuid
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -945,6 +947,85 @@ class SQLiteStore:
             return None
         return int(row[0]), ParsedCard.from_api(json.loads(row[1]))
 
+    def preview_focus_exclude_pattern(self, pattern: str, *, sample_limit: int = 8) -> dict:
+        """预览新增 focus_exclude_patterns 后会从重点流移走的普通玩家消息。
+
+        这里按当前过滤器的保护口径近似:
+        - 只看当前在 focus 的消息
+        - 跳过 bot / 游戏 bot
+        - 跳过我的发送、回复我、被@、会长、风险、动作草稿
+        """
+        item = str(pattern or "").strip()
+        if not item:
+            return {"ok": False, "error": "规则为空"}
+        sample_limit = max(1, min(30, int(sample_limit or 8)))
+        game_bot_ids = {int(x) for x in self._collect_game_bot_ids() if x}
+        now = datetime.now(timezone.utc)
+        cutoff_24h = now - timedelta(hours=24)
+        cutoff_7d = now - timedelta(days=7)
+        total = 0
+        last_24h = 0
+        last_7d = 0
+        samples: list[dict] = []
+        invalid_regex = ""
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT pc.rowid, pc.payload_json,
+                       rm.text, rm.source, rm.date, rm.sender_id, rm.sender_is_bot, rm.msg_id
+                FROM parsed_cards pc
+                JOIN raw_messages rm ON rm.id = pc.raw_message_id
+                WHERE pc.channels_json LIKE '%"focus"%'
+                ORDER BY pc.rowid DESC
+                """
+            ).fetchall()
+
+        for row in rows:
+            card = ParsedCard.from_api(json.loads(row[1]))
+            raw_text = str(row[2] or card.raw or "")
+            sender_id = _safe_int(row[5])
+            bot_like = bool(row[6]) or bool(sender_id and sender_id in game_bot_ids)
+            if bot_like:
+                continue
+            if _is_focus_protected_card(card):
+                continue
+            try:
+                matched = bool(re.search(item, raw_text.strip()))
+            except re.error as exc:
+                invalid_regex = str(exc)
+                matched = item == raw_text.strip()
+            if not matched:
+                continue
+
+            total += 1
+            dt = _parse_message_dt(row[4])
+            if dt and dt >= cutoff_7d:
+                last_7d += 1
+            if dt and dt >= cutoff_24h:
+                last_24h += 1
+            if len(samples) < sample_limit:
+                samples.append(
+                    {
+                        "seq": int(row[0]),
+                        "source": row[3] or "",
+                        "sender_id": sender_id,
+                        "time": row[4] or "",
+                        "msg_id": int(row[7] or 0),
+                        "text": raw_text[:240],
+                    }
+                )
+
+        return {
+            "ok": True,
+            "pattern": item,
+            "invalid_regex": invalid_regex,
+            "total": total,
+            "last_24h": last_24h,
+            "last_7d": last_7d,
+            "samples": samples,
+        }
+
     def get_settings(self) -> dict:
         defaults = {
             "api_id": "",
@@ -1867,6 +1948,36 @@ def _merge_focus_exclude_defaults(raw_value) -> list[str]:
         if str(item or "").strip() and str(item or "").strip() not in legacy
     ]
     return _merge_str_defaults(custom, list(DEFAULT_FOCUS_EXCLUDE_PATTERNS))
+
+
+def _is_focus_protected_card(card: ParsedCard) -> bool:
+    tags = set(card.tags or ())
+    channels = set(card.channels or ())
+    if tags.intersection({"我发出", "回复我", "被@", "会长"}):
+        return True
+    if card.severity == "risk" or "risk" in channels:
+        return True
+    return bool(card.actions)
+
+
+def _parse_message_dt(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _safe_int(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _normalize_account(payload: dict) -> dict:

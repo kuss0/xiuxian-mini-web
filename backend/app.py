@@ -305,6 +305,13 @@ def _post_settings(request: MiniWebHandler, payload: dict) -> dict:
     return _app(request).save_settings_payload(payload)
 
 
+def _post_focus_exclude_preview(request: MiniWebHandler, payload: dict) -> dict:
+    try:
+        return _app(request).focus_exclude_preview_payload(payload)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 def _post_account(request: MiniWebHandler, payload: dict) -> dict:
     try:
         return _app(request).save_account_payload(payload)
@@ -513,6 +520,7 @@ GET_ROUTES = {
 
 POST_ROUTES = {
     "/api/settings": PostRoute(_post_settings, needs_payload=True),
+    "/api/focus-exclude/preview": PostRoute(_post_focus_exclude_preview, needs_payload=True),
     "/api/accounts": PostRoute(_post_account, needs_payload=True),
     "/api/accounts/delete": PostRoute(_post_account_delete, needs_payload=True),
     "/api/accounts/logout": PostRoute(_post_account_logout, needs_payload=True),
