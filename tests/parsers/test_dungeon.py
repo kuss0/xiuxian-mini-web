@@ -34,6 +34,123 @@ def test_extracts_full_open_announcement_context():
     assert card.actions[0].command == ".加入副本 393"
 
 
+def test_xutian_open_adds_luck_advice_from_same_trigram_history():
+    event = make_event(
+        "【虚天殿已开启】\n"
+        "@boxboxji 消耗了【虚天残图】，开启了前往虚天殿的传送门！\n"
+        "副本ID: 662\n"
+        "其他道友可使用 .加入副本 662 加入队伍！(5人满)\n"
+        "- 本轮卦象已锁定，冷却周期内解散重开不会刷新。\n\n"
+        "【卦象词条】 乾天上巽风下 · 四爻转阵\n"
+        "- 阵骨：土 必带\n"
+        "- 主锋：金 x2（只认真位，不吃借生）\n"
+        "- 引灵：木 位，可由 水 借生代行\n"
+        "- 旁合：土 位更佳，若用 火 强顶只算偏配\n"
+        "- 行运：后续道路与阵策同样受卦象牵引，但不会直示吉路与吉策。\n"
+        "- 爻意：四爻重转阵，若无人护阵则整局易散。"
+    )
+    output = DungeonParser().parse(event)
+    assert output is not None
+    card = output.cards[0]
+    assert card.fields["卦象"] == "乾天上巽风下 · 四爻转阵"
+    assert card.fields["行运建议"] == "火路 / 压策"
+    assert card.fields["建议置信"] == "同卦系推断"
+    assert "冰路 / 稳策 (#662 逆)" in card.fields["历史反例"]
+
+
+def test_xutian_oracle_adds_exact_luck_advice_and_team_fit():
+    event = make_event(
+        "【卦象验阵】\n"
+        "【卦象词条】 兑泽上离火下 · 四爻转阵\n"
+        "- 阵骨：土 必带\n"
+        "- 主锋：火 x2（只认真位，不吃借生）\n"
+        "- 引灵：火 位，可由 木 借生代行\n"
+        "- 旁合：土 位更佳，若用 火 强顶只算偏配\n"
+        "- 行运：后续道路与阵策同样受卦象牵引，但不会直示吉路与吉策。\n"
+        "- 当前契合：顺卦 (阵骨 已立 | 主锋 2/2 | 引灵 木借生代位 | 旁合 欠土)"
+    )
+    output = DungeonParser().parse(event)
+    assert output is not None
+    card = output.cards[0]
+    assert card.title == "虚天殿卦象"
+    assert card.fields["行运建议"] == "冰路 / 稳策"
+    assert card.fields["建议置信"] == "实测顺合"
+    assert card.fields["队伍契合"].startswith("顺卦")
+
+
+def test_extracts_xutian_second_stage_route_actions():
+    event = make_event(
+        "【第二关·冰火之路】\n"
+        "前方出现了两条岔路：一条寒气逼人，一条烈焰熊熊。\n"
+        "队长 @boxboxji，请在2分钟内点击下方按钮抉择，"
+        "或使用 .选择道路 冰 / .选择道路 火 做出决定！\n"
+        "定下路线后，还需再选一次推进阵策。"
+    )
+    output = DungeonParser().parse(event)
+    assert output is not None
+    card = output.cards[0]
+    assert card.title == "虚天殿推进"
+    assert card.fields["阶段"] == "第二关·冰火之路"
+    assert [action.command for action in card.actions] == [
+        ".选择道路 冰",
+        ".选择道路 火",
+    ]
+
+
+def test_extracts_xutian_strategy_and_cauldron_actions():
+    strategy = make_event(
+        "【第二关·玄冰秘径】\n"
+        "你们已定下 玄冰秘径，但要破此偏殿，还需先定推进阵策。\n"
+        "队长 @boxboxji，请在 2分钟 内点击按钮，或输入 .阵策 稳/压/势 继续推进："
+    )
+    output = DungeonParser().parse(strategy)
+    assert output is not None
+    assert [action.command for action in output.cards[0].actions] == [".阵策 稳", ".阵策 压", ".阵策 势"]
+
+    cauldron = make_event(
+        "【鼎前抉择】\n"
+        "队长 @boxboxji，请在 120秒 内抉择：\n"
+        "- 点击下方按钮，或输入 .争鼎 求稳 / .争鼎 夺鼎\n"
+        "若迟迟不决，天机阁将自动按【求稳】结算。"
+    )
+    output = DungeonParser().parse(cauldron)
+    assert output is not None
+    assert [action.command for action in output.cards[0].actions] == [".争鼎 求稳", ".争鼎 夺鼎"]
+
+
+def test_extracts_xutian_route_result_verdict():
+    event = make_event(
+        "【极寒冰魄】的光芒被成功压制！冰火炼心阵威力大减，你们通过了第二关的考验。\n"
+        "第二关余势犹存，第三关开局士气额外 +5%。\n"
+        "阵策【稳扎稳打】额外稳住了队伍心气，第三关再获 +8% 士气。\n"
+        "你们此轮路策逆卦而行，第三关将额外承受 4% 的卦象压力。"
+    )
+    output = DungeonParser().parse(event)
+    assert output is not None
+    card = output.cards[0]
+    assert card.title == "虚天殿路策结果"
+    assert card.fields["路线"] == "冰路"
+    assert card.fields["阵策"] == "稳策"
+    assert card.fields["路策判定"] == "逆卦"
+
+
+def test_extracts_xutian_route_selection_card():
+    event = make_event(
+        "你们选定了 【玄冰秘径】，主攻阵眼锁定为 【极寒冰魄】。\n"
+        "当前阵策：稳扎稳打\n"
+        "契合此路的主力道友：@WalterWA2000\n"
+        "开局士气：128%"
+    )
+    output = DungeonParser().parse(event)
+    assert output is not None
+    card = output.cards[0]
+    assert card.title == "虚天殿路线已选"
+    assert card.fields["路线"] == "冰路"
+    assert card.fields["阵策"] == "稳策"
+    assert card.fields["主力道友"] == "@WalterWA2000"
+    assert card.fields["开局士气"] == "128%"
+
+
 def test_extracts_zhuimo_progress_choices_and_silence_status():
     event = make_event(
         "【坠魔谷·第一幕：裂隙外谷】\n"

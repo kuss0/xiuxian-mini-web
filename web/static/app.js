@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: dungeon-result-failed 2026-05-18T23:48
-console.log("[mini-web] build: dungeon-result-failed 2026-05-18T23:48 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: xutian-luck-advice 2026-05-19T02:18
+console.log("[mini-web] build: xutian-luck-advice 2026-05-19T02:18 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -2086,6 +2086,8 @@ function renderDungeonCard(message) {
     || (tags.includes("失败") ? "加入失败" : tags.includes("解散") ? "已解散" : tags.includes("可加入") ? "可加入" : tags.includes("加入") ? "已加入" : "副本消息");
   const heroValue = dungeonId !== "—" ? `#${dungeonId}` : (stage || status);
   const paths = Array.isArray(f["可选路径"]) ? f["可选路径"] : [];
+  const successExamples = Array.isArray(f["历史顺例"]) ? f["历史顺例"] : [];
+  const failureExamples = Array.isArray(f["历史反例"]) ? f["历史反例"] : [];
   const summary = String(message.summary || "").trim();
   return `
     <div class="card-rich card-rich-dungeon">
@@ -2094,16 +2096,26 @@ function renderDungeonCard(message) {
       ${richStatGrid([
         ["副本ID", dungeonId !== "—" ? dungeonId : ""],
         ["阶段", stage],
+        ["卦象", f["卦象"] || ""],
+        ["行运建议", f["行运建议"] || ""],
+        ["路策判定", f["路策判定"] || ""],
         ["开门人", f["开门人"] || ""],
         ["人数上限", f["人数上限"] || ""],
         ["失败原因", f["失败原因"] || ""],
       ])}
       ${richChips([
+        ["依据", f["建议依据"] || ""],
+        ["置信", f["建议置信"] || ""],
+        ["队伍契合", f["队伍契合"] || ""],
+        ["路线", f["路线"] || ""],
+        ["阵策", f["阵策"] || ""],
         ["静场令", f["静场令"] || ""],
         ["消耗道具", f["消耗道具"] || ""],
         ["操作", (message.actions || []).length ? "下方按钮手动发送" : ""],
       ])}
       ${richCollapsibleList("可选路径", paths, 3)}
+      ${richCollapsibleList("历史顺例", successExamples, 3)}
+      ${richCollapsibleList("历史反例", failureExamples, 3)}
     </div>
   `;
 }
