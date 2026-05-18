@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: dungeon-cards 2026-05-18T23:10
-console.log("[mini-web] build: dungeon-cards 2026-05-18T23:10 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: dungeon-result-failed 2026-05-18T23:48
+console.log("[mini-web] build: dungeon-result-failed 2026-05-18T23:48 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -718,7 +718,7 @@ async function openNotifySettingsModal() {
       { name: "🚨 高危", keys: ["风险提醒", "天道审判"] },
       { name: "🎯 prompt", keys: ["玄骨考校", "天机考验", "极阴祖师", "南陇侯", "共历心劫", "第二元神归位"] },
       { name: "🎉 里程碑", keys: ["境界突破", "赐予道号", "试炼古塔战报", "深度闭关总结", "闭关成功"] },
-      { name: "📦 副本/物品", keys: ["虚天殿开启", "加入副本成功", "副本房间解散", "储物袋快照", "灵树采摘"] },
+      { name: "📦 副本/物品", keys: ["虚天殿开启", "加入副本成功", "加入副本失败", "副本房间解散", "储物袋快照", "灵树采摘"] },
     ];
     const used = new Set();
     let html = "";
@@ -2077,11 +2077,13 @@ function renderDungeonCard(message) {
   const f = message.fields || {};
   const tags = message.tags || [];
   const title = String(message.title || "副本消息").trim();
-  const dungeonName = String(f["副本名"] || "").trim() || title.replace(/(开启|推进)$/, "") || "副本";
+  const dungeonName = String(f["副本名"] || "").trim()
+    || (/加入副本|副本房间/.test(title) ? "副本" : title.replace(/(开启|推进)$/, ""))
+    || "副本";
   const dungeonId = f["副本ID"] ? String(f["副本ID"]).trim() : "—";
   const stage = f["阶段"] ? String(f["阶段"]).trim() : "";
   const status = String(f["状态"] || "").trim()
-    || (tags.includes("可加入") ? "可加入" : tags.includes("解散") ? "已解散" : tags.includes("加入") ? "已加入" : "副本消息");
+    || (tags.includes("失败") ? "加入失败" : tags.includes("解散") ? "已解散" : tags.includes("可加入") ? "可加入" : tags.includes("加入") ? "已加入" : "副本消息");
   const heroValue = dungeonId !== "—" ? `#${dungeonId}` : (stage || status);
   const paths = Array.isArray(f["可选路径"]) ? f["可选路径"] : [];
   const summary = String(message.summary || "").trim();
@@ -2094,6 +2096,7 @@ function renderDungeonCard(message) {
         ["阶段", stage],
         ["开门人", f["开门人"] || ""],
         ["人数上限", f["人数上限"] || ""],
+        ["失败原因", f["失败原因"] || ""],
       ])}
       ${richChips([
         ["静场令", f["静场令"] || ""],
@@ -5447,7 +5450,7 @@ async function _hydrateNotifySection(settings) {
       { name: "🚨 高危", keys: ["风险提醒", "天道审判"] },
       { name: "🎯 prompt", keys: ["玄骨考校", "天机考验", "极阴祖师", "南陇侯", "共历心劫", "第二元神归位"] },
       { name: "🎉 里程碑", keys: ["境界突破", "赐予道号", "试炼古塔战报", "深度闭关总结", "闭关成功"] },
-      { name: "📦 副本/物品", keys: ["虚天殿开启", "加入副本成功", "副本房间解散", "储物袋快照", "灵树采摘"] },
+      { name: "📦 副本/物品", keys: ["虚天殿开启", "加入副本成功", "加入副本失败", "副本房间解散", "储物袋快照", "灵树采摘"] },
     ];
     const used = new Set();
     let html = "";

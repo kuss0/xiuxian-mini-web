@@ -27,6 +27,17 @@ def test_extracts_room_dissolved():
     assert output.cards[0].fields["副本ID"] == "7777"
 
 
+def test_extracts_join_failed_when_room_missing():
+    event = make_event("找不到此副本房间，可能已解散或ID错误。")
+    output = DungeonResultParser().parse(event)
+    assert output is not None
+    card = output.cards[0]
+    assert card.title == "加入副本失败"
+    assert card.fields["状态"] == "加入失败"
+    assert card.fields["失败原因"] == "找不到房间，可能已解散或ID错误"
+    assert "失败" in card.tags
+
+
 def test_skips_unrelated():
     event = make_event("普通聊天")
     assert DungeonResultParser().parse(event) is None
