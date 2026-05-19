@@ -55,6 +55,16 @@ class CardStore(Protocol):
     ) -> dict:
         ...
 
+    def list_inventory_snapshots(
+        self,
+        *,
+        owner: str = "",
+        latest_only: bool = True,
+        include_items: bool = True,
+        limit: int = 80,
+    ) -> list[dict]:
+        ...
+
     def save_settings(self, payload: dict) -> dict:
         ...
 
@@ -146,6 +156,13 @@ class MiniWebServer:
                     "[mini-web] 资源统计历史 backfill: "
                     f"写入 {resource_backfilled.get('events', 0)} 条 resource_events, "
                     f"{resource_backfilled.get('deltas', 0)} 条 resource_deltas"
+                )
+            inventory_backfilled = sqlite_store.backfill_inventory_snapshots_if_needed()
+            if inventory_backfilled.get("snapshots") or inventory_backfilled.get("items"):
+                print(
+                    "[mini-web] 储物袋历史 backfill: "
+                    f"写入 {inventory_backfilled.get('snapshots', 0)} 条快照, "
+                    f"{inventory_backfilled.get('items', 0)} 条物品"
                 )
             store = sqlite_store
         self._store = store
@@ -429,6 +446,37 @@ class MiniWebServer:
             source_name=source_name,
             limit=limit,
         )
+
+    def inventory_payload(
+        self,
+        *,
+        owner: str = "",
+        latest_only: bool = True,
+        limit: int = 80,
+    ) -> dict:
+        if not hasattr(self._store, "list_inventory_snapshots"):
+            return {"ok": False, "error": "store does not support inventory", "snapshots": []}
+        snapshots = self._store.list_inventory_snapshots(
+            owner=owner,
+            latest_only=latest_only,
+            include_items=True,
+            limit=limit,
+        )
+        return {
+            "ok": True,
+            "snapshots": snapshots,
+            "notes": [
+                "库存来自最近一次 .储物袋 面板,不是实时账本。",
+                "生成转移命令不会自动发送,也不会自动核减库存。",
+            ],
+        }
+
+    def inventory_transfer_plan_payload(self, payload: dict) -> dict:
+        try:
+            plan = build_inventory_transfer_plan(payload)
+            return {"ok": True, **plan}
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
 
     def discovered_bots_payload(self) -> dict:
         """从消息箱「自动发现」可能是游戏 bot 的 sender(必须真的产出过游戏关键词消息,
@@ -1864,6 +1912,92 @@ def synth_self_identity(account: dict) -> dict | None:
 
 def public_outbox_draft(draft: dict) -> dict:
     return dict(draft)
+
+
+def build_inventory_transfer_plan(payload: dict) -> dict:
+    """Generate manual commands for multi-item inventory transfer.
+
+    交易玩法里“资源号提供物品、购买方集中资源”的安全流程通常是:
+    1. 购买方先上架低价值诱饵,换目标物品;
+    2. 资源号打开购买方货摊,按实际 ID 购买。
+
+    货摊 ID 只能从 bot 回复里拿,这里不伪造 ID,只生成可复制命令和待填
+    模板。miniweb 不自动发送、不扣库存。
+    """
+    buyer = str(payload.get("buyer") or payload.get("buyer_owner") or "").strip().lstrip("@")
+    provider = str(payload.get("provider") or payload.get("provider_owner") or "").strip().lstrip("@")
+    bait_name = str(payload.get("bait_name") or "凝血草").strip()
+    try:
+        bait_amount = int(str(payload.get("bait_amount") or "1").strip())
+    except (TypeError, ValueError):
+        bait_amount = 1
+    bait_amount = max(1, bait_amount)
+    raw_items = payload.get("items") or []
+    if not isinstance(raw_items, list):
+        raise ValueError("items 必须是数组")
+    if not buyer:
+        raise ValueError("请填写购买方")
+    if not bait_name:
+        raise ValueError("请填写诱饵物品")
+
+    commands: list[dict] = []
+    wanted: list[dict] = []
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or raw.get("item_name") or "").strip()
+        if not name:
+            continue
+        try:
+            amount = int(str(raw.get("amount") or raw.get("qty") or "0").strip())
+        except (TypeError, ValueError):
+            amount = 0
+        if amount <= 0:
+            continue
+        amount = min(amount, 999999)
+        wanted.append({"name": name, "amount": amount})
+        commands.append(
+            {
+                "role": "buyer",
+                "owner": buyer,
+                "command": f"上架 {bait_name}*{bait_amount} 换 {name}*{amount}",
+                "note": f"购买方 @{buyer} 先发,用诱饵换资源号的 {name} x{amount}",
+            }
+        )
+    if not wanted:
+        raise ValueError("请至少选择一种要转移的物品")
+
+    commands.append(
+        {
+            "role": "provider",
+            "owner": provider,
+            "command": f".我的货摊 @{buyer}" if buyer else ".我的货摊",
+            "note": "资源号查看购买方货摊,从回复里拿真实 ID。",
+        }
+    )
+    for item in wanted:
+        commands.append(
+            {
+                "role": "provider",
+                "owner": provider,
+                "command": f".购买 <货摊ID> {item['amount']}",
+                "note": f"把 <货摊ID> 换成 {item['name']} 对应那条货摊 ID 后再发。",
+                "template": True,
+            }
+        )
+
+    return {
+        "buyer": buyer,
+        "provider": provider,
+        "bait": {"name": bait_name, "amount": bait_amount},
+        "items": wanted,
+        "commands": commands,
+        "notes": [
+            "这里只生成命令,不自动发送。",
+            "库存来自最近快照,转移后请重新 .储物袋 刷新。",
+            "购买命令里的货摊 ID 必须按 .我的货摊 回复填写。",
+        ],
+    }
 
 
 def coerce_send_as_id(value: object) -> int:

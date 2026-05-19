@@ -34,6 +34,61 @@ def test_resource_deltas_are_persisted_idempotently(tmp_path):
     assert events[0]["result"] == "success"
 
 
+def test_inventory_snapshots_are_persisted_idempotently(tmp_path):
+    store = SQLiteStore(tmp_path / "state.db")
+    event = RawMessageEvent(
+        id="tg:-1:90",
+        chat_id=-1,
+        msg_id=90,
+        text="""@seller 的储物袋
+
+材料:
+- 灵石 x 100
+- 阴凝之晶 x 2
+- 阴凝之晶 x 3""",
+        source="韩天尊",
+        date="2026-05-15T10:00:00+00:00",
+        sender_id=7900199668,
+        sender_is_bot=True,
+    )
+
+    store.ingest_event(event)
+    store.ingest_event(event)
+
+    snapshots = store.list_inventory_snapshots(owner="seller")
+    assert len(snapshots) == 1
+    assert snapshots[0]["owner"] == "seller"
+    assert {(item["name"], item["amount"]) for item in snapshots[0]["items"]} == {
+        ("灵石", 100),
+        ("阴凝之晶", 5),
+    }
+
+
+def test_inventory_transfer_plan_generates_manual_commands():
+    server = MiniWebServer(store=SQLiteStore(":memory:"))
+    payload = server.inventory_transfer_plan_payload(
+        {
+            "provider": "seller",
+            "buyer": "buyer",
+            "bait_name": "凝血草",
+            "bait_amount": 1,
+            "items": [
+                {"name": "阴凝之晶", "amount": 5},
+                {"name": "虚天残图", "amount": 2},
+            ],
+        }
+    )
+
+    assert payload["ok"] is True
+    commands = [item["command"] for item in payload["commands"]]
+    assert commands[:2] == [
+        "上架 凝血草*1 换 阴凝之晶*5",
+        "上架 凝血草*1 换 虚天残图*2",
+    ]
+    assert ".我的货摊 @buyer" in commands
+    assert commands[-1] == ".购买 <货摊ID> 2"
+
+
 def test_resource_stats_api_groups_by_period_and_excludes_blood_trial(tmp_path):
     store = SQLiteStore(tmp_path / "state.db")
     store.ingest_event(

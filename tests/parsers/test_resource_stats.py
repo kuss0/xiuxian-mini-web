@@ -242,3 +242,84 @@ def test_extracts_wind_xi_result_as_separate_resource_source():
     }
     assert all(delta.source_type == "wind_xi" for delta in output.resource_deltas)
     assert all(delta.source_name == "风希" for delta in output.resource_deltas)
+
+
+def test_extracts_deep_retreat_summary_resources():
+    event = make_event(
+        """📜 修士 @qiyiang_tg 深度闭关总结
+【深度闭关总结】
+- 天降奇遇: 12 次
+  - 一阵地动山摇后，你的洞府一角竟裂开缝隙，露出了一截深埋地底的【百年铁木】！
+  - 你在洞府周围布置警戒阵法时，意外发现五株年份不低的【凝血草】，小心采摘后收入囊中。
+  - 你闭关时神魂出窍，误入一处古战场，心神回归之际，竟带回了几缕【阴魂丝】！
+  - 你于洞府中潜心打坐，无意间竟在蒲团下摸到一处暗格，其中藏有前人遗留的【灵石】x25！
+
+本次深度闭关，你的修为最终变化了 34087 点！
+*(因 【始皇的新衣】奇遇+50%, 奇遇几率提升至 55%)*"""
+    )
+    output = ResourceStatsParser().parse(event)
+    assert output is not None
+    assert output.resource_events[0].source_type == "deep_retreat"
+    assert output.resource_events[0].result == "settled"
+    assert {(delta.resource_name, delta.amount) for delta in output.resource_deltas} == {
+        ("修为", 34087),
+        ("百年铁木", 1),
+        ("凝血草", 5),
+        ("阴魂丝", 1),
+        ("灵石", 25),
+    }
+
+
+def test_extracts_shallow_retreat_tree_and_pet_resources():
+    retreat = ResourceStatsParser().parse(
+        make_event(
+            """【闭关成功】
+本次闭关，你的修为最终增加了 972 点。
+【奇遇】一道流光砸在你的洞府门前，竟是一块天外陨石，你从中提炼出了【金精矿】x1！
+你感到一阵疲惫，需要打坐调息 11 分钟方可再次闭关。"""
+        )
+    )
+    assert retreat is not None
+    assert {(delta.resource_name, delta.amount) for delta in retreat.resource_deltas} == {
+        ("修为", 972),
+        ("金精矿", 1),
+    }
+
+    tree = ResourceStatsParser().parse(
+        make_event(
+            """【灵果入腹 · 造化自生】
+你摘下一枚【万年灵木果 (极品)】。
+💪 修为增长: +28000
+✨ 灵纹回馈: 本轮额外转化了 +3000 点修为
+🌰 树髓余珍: 获得【灵眼木髓碎片】x3"""
+        )
+    )
+    assert tree is not None
+    assert {(delta.resource_name, delta.amount) for delta in tree.resource_deltas} == {
+        ("修为", 28000),
+        ("修为", 3000),
+        ("灵眼木髓碎片", 3),
+    }
+
+    touch = ResourceStatsParser().parse(make_event("“鼎儿”在你手中微微颤动，似乎很享受。\n(默契 +3, 经验 +17)"))
+    assert touch is not None
+    assert {(delta.resource_name, delta.amount) for delta in touch.resource_deltas} == {
+        ("默契", 3),
+        ("经验", 17),
+    }
+
+    warm = ResourceStatsParser().parse(
+        make_event(
+            """【温养器灵】
+你以灵石淬洗法宝灵窍，又焚化养魂木为引，细细温养 【青竹蜂云剑（庚金版）】。
+- 消耗：灵石x3000、养魂木x3
+- 默契提升：+0
+- 经验提升：+50"""
+        )
+    )
+    assert warm is not None
+    assert {(delta.resource_name, delta.amount) for delta in warm.resource_deltas} == {
+        ("灵石", -3000),
+        ("养魂木", -3),
+        ("经验", 50),
+    }

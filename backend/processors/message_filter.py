@@ -199,11 +199,11 @@ def enrich_filter_channels(
         muted_sender_ids=_int_list_setting(settings, "focus_muted_sender_ids"),
         muted_source_names=_list_setting(settings, "focus_muted_source_names"),
     )
-    excluded_focus = bool(
-        (exclude_hits or focus_muted)
-        and not protected_important
-        and not bot_like
-    )
+    # 自定义归档规则应当能压过关键词关注,例如:
+    # focus_keywords=["坠魔谷"], focus_exclude_patterns=["坠魔谷护持"]
+    # 时,“坠魔谷护持”进 archive,其它“坠魔谷”仍进 focus。
+    # 只保护真正需要人工处理的消息:我发的、bot 回复我、@我、会长、风险和动作卡。
+    excluded_focus = bool((exclude_hits or focus_muted) and not protected_important)
     plain_player = (
         bool(settings.get("focus_include_player_plain", True))
         and not bot_like

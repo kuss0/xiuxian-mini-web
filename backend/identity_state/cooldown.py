@@ -237,6 +237,14 @@ DEFAULT_COOLDOWN_SPECS: tuple[CooldownSpec, ...] = (
         daily_window_utc_hour=1,
     ),
     CooldownSpec(
+        key="retreat_shallow",
+        label="闭关修炼",
+        commands=(".闭关修炼",),
+        default_cd_sec=10 * 60,
+        success_patterns=("【闭关成功】",),
+        cooldown_patterns=("打坐调息", "再次闭关"),
+    ),
+    CooldownSpec(
         key="yuanying",
         label="元婴出窍",
         commands=(".元婴出窍", ".元婴状态"),

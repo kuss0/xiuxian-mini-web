@@ -14,13 +14,30 @@ HUANGLONG_RESULT_RE = re.compile(r"【黄龙山大战[·・]\s*(?P<name>[^】]+)
 KUNWU_RESULT_RE = re.compile(r"【登顶昆吾山】")
 ZHUI_MO_RESULT_RE = re.compile(r"【坠魔谷[·・]\s*(?P<name>[^】]+)】")
 WIND_XI_TITLE_RE = re.compile(r"【逆天之举】")
+DEEP_RETREAT_TITLE_RE = re.compile(r"【深度闭关总结】")
+RETREAT_SUCCESS_TITLE_RE = re.compile(r"【闭关成功】")
+TREE_HARVEST_TITLE_RE = re.compile(r"【灵果入腹[^】]*】")
+PET_TOUCH_RE = re.compile(r"[(（]\s*默契\s*\+\s*(?P<intimacy>\d+)\s*[,，]\s*经验\s*\+\s*(?P<exp>\d+)\s*[)）]")
+PET_WARM_TITLE_RE = re.compile(r"【温养器灵】")
 PLAYER_RE = re.compile(r"@(?P<user>[A-Za-z0-9_]+)")
 RESOURCE_PLUS_RE = re.compile(r"(?P<name>修为|贡献|灵石)\s*[+＋]\s*(?P<amount>\d+)")
 RESOURCE_LOSS_RE = re.compile(r"(?P<name>修为)\s*折损\s*[-－]?\s*(?P<amount>\d+)")
 AMOUNT_BEFORE_RESOURCE_RE = re.compile(r"(?P<amount>\d+)\s*(?:点\s*)?(?P<name>修为|贡献|灵石)")
 EXP_SURGE_RE = re.compile(r"修为(?:暴涨|大涨|提升|增加)\s*(?P<amount>\d+)\s*点")
+DEEP_RETREAT_GAIN_RE = re.compile(r"修为最终变化了\s*(?P<amount>-?\d+)\s*点")
+RETREAT_TOTAL_RE = re.compile(r"修为最终增加了\s*(?P<amount>\d+)\s*点")
+TREE_FRUIT_RE = re.compile(r"你摘下一枚【(?P<name>[^】]+)】")
+TREE_XIUWEI_RE = re.compile(r"修为增长[:：]\s*\+?\s*(?P<amount>[\d,]+)")
+TREE_EXTRA_XIUWEI_RE = re.compile(r"额外转化了\s*\+?\s*(?P<amount>[\d,]+)\s*点修为")
+PET_WARM_CONSUME_RE = re.compile(r"消耗[：:]\s*(?P<items>[^\n]+)")
+PET_WARM_GAIN_RE = re.compile(r"(?P<name>默契|经验)提升[：:]\s*\+?\s*(?P<amount>\d+)")
 RESOURCE_X_RE = re.compile(
-    r"(?:【(?P<bracket>[^】]+)】|(?P<name>[\u4e00-\u9fff][\u4e00-\u9fff0-9]*))\s*[xX×*]\s*(?P<amount>\d+)"
+    r"(?:【(?P<bracket>[^】]+)】|(?P<name>[\u4e00-\u9fff][\u4e00-\u9fff0-9]*))\s*[xX×*]\s*(?P<amount>[\d,]+)"
+)
+BRACKET_ITEM_RE = re.compile(r"【(?P<name>[^】]+)】(?:\s*[xX×*]\s*(?P<amount>\d+))?")
+SMALL_CN_AMOUNT_RE = re.compile(
+    r"(?P<cn>一|二|两|三|四|五|六|七|八|九|十|几)\s*"
+    r"(?:株|缕|截|块|枚|份)?[^【\n]{0,12}【(?P<name>[^】]+)】"
 )
 ITEM_WITHOUT_AMOUNT_RE = re.compile(
     r"(?:^|[\s，。！:：])"
@@ -58,6 +75,16 @@ class ResourceStatsParser:
         text = event.text or ""
         if not text:
             return None
+        if DEEP_RETREAT_TITLE_RE.search(text):
+            return self._parse_deep_retreat(event)
+        if RETREAT_SUCCESS_TITLE_RE.search(text):
+            return self._parse_retreat_success(event)
+        if TREE_HARVEST_TITLE_RE.search(text):
+            return self._parse_tree_harvest(event)
+        if PET_WARM_TITLE_RE.search(text):
+            return self._parse_pet_warm(event)
+        if PET_TOUCH_RE.search(text):
+            return self._parse_pet_touch(event)
         if WIND_XI_TITLE_RE.search(text) and "风希" in text and "【战利品】" in text:
             return self._parse_wind_xi(event)
         if WILD_TITLE_RE.search(text):
@@ -135,6 +162,228 @@ class ResourceStatsParser:
             player=player,
             result=result,
             outcome=title_detail.strip(),
+            meta=meta,
+        )
+        return ParserOutput(resource_deltas=tuple(deltas), resource_events=(event_row,))
+
+    def _parse_deep_retreat(self, event: RawMessageEvent) -> ParserOutput | None:
+        text = event.text or ""
+        player = _first_player(text)
+        meta = {"title": "深度闭关总结"}
+        deltas: list[ResourceDelta] = []
+        if match := DEEP_RETREAT_GAIN_RE.search(text):
+            deltas.append(
+                _resource_delta(
+                    event,
+                    source_type="deep_retreat",
+                    source_name="深度闭关",
+                    player=player,
+                    resource_name="修为",
+                    amount=_to_int(match.group("amount")),
+                    basis="player",
+                    meta=meta,
+                )
+            )
+        deltas.extend(
+            _extract_bracket_item_deltas(
+                event,
+                _indented_lines(text),
+                source_type="deep_retreat",
+                source_name="深度闭关",
+                player=player,
+                basis="player",
+                meta=meta | {"from": "adventure"},
+            )
+        )
+        if not deltas:
+            return None
+        event_row = _resource_event(
+            event,
+            source_type="deep_retreat",
+            source_name="深度闭关",
+            player=player,
+            result="settled",
+            outcome="深度闭关总结",
+            meta=meta,
+        )
+        return ParserOutput(resource_deltas=tuple(deltas), resource_events=(event_row,))
+
+    def _parse_retreat_success(self, event: RawMessageEvent) -> ParserOutput | None:
+        text = event.text or ""
+        player = _first_player(text)
+        meta = {"title": "闭关成功"}
+        deltas: list[ResourceDelta] = []
+        if match := RETREAT_TOTAL_RE.search(text):
+            deltas.append(
+                _resource_delta(
+                    event,
+                    source_type="retreat_shallow",
+                    source_name="闭关修炼",
+                    player=player,
+                    resource_name="修为",
+                    amount=_to_int(match.group("amount")),
+                    basis="player",
+                    meta=meta,
+                )
+            )
+        adventure_lines = "\n".join(line for line in text.splitlines() if "【奇遇】" in line)
+        deltas.extend(
+            _extract_bracket_item_deltas(
+                event,
+                adventure_lines,
+                source_type="retreat_shallow",
+                source_name="闭关修炼",
+                player=player,
+                basis="player",
+                meta=meta | {"from": "adventure"},
+            )
+        )
+        if not deltas:
+            return None
+        event_row = _resource_event(
+            event,
+            source_type="retreat_shallow",
+            source_name="闭关修炼",
+            player=player,
+            result="settled",
+            outcome="闭关成功",
+            meta=meta,
+        )
+        return ParserOutput(resource_deltas=tuple(deltas), resource_events=(event_row,))
+
+    def _parse_tree_harvest(self, event: RawMessageEvent) -> ParserOutput | None:
+        text = event.text or ""
+        fruit = TREE_FRUIT_RE.search(text)
+        meta = {"title": "灵果入腹"}
+        if fruit:
+            meta["fruit"] = fruit.group("name").strip()
+        deltas: list[ResourceDelta] = []
+        if match := TREE_XIUWEI_RE.search(text):
+            deltas.append(
+                _resource_delta(
+                    event,
+                    source_type="tree_harvest",
+                    source_name="灵树采摘",
+                    player="",
+                    resource_name="修为",
+                    amount=_to_int(match.group("amount")),
+                    basis="player",
+                    meta=meta,
+                )
+            )
+        if match := TREE_EXTRA_XIUWEI_RE.search(text):
+            deltas.append(
+                _resource_delta(
+                    event,
+                    source_type="tree_harvest",
+                    source_name="灵树采摘",
+                    player="",
+                    resource_name="修为",
+                    amount=_to_int(match.group("amount")),
+                    basis="player",
+                    meta=meta | {"from": "灵纹回馈"},
+                )
+            )
+        deltas.extend(
+            _extract_reward_deltas(
+                event,
+                "\n".join(line for line in text.splitlines() if "获得" in line),
+                source_type="tree_harvest",
+                source_name="灵树采摘",
+                player="",
+                basis="player",
+                meta=meta,
+            )
+        )
+        if not deltas:
+            return None
+        event_row = _resource_event(
+            event,
+            source_type="tree_harvest",
+            source_name="灵树采摘",
+            player="",
+            result="success",
+            outcome=meta.get("fruit", ""),
+            meta=meta,
+        )
+        return ParserOutput(resource_deltas=tuple(deltas), resource_events=(event_row,))
+
+    def _parse_pet_touch(self, event: RawMessageEvent) -> ParserOutput | None:
+        text = event.text or ""
+        match = PET_TOUCH_RE.search(text)
+        if not match:
+            return None
+        meta = {"title": "抚摸法宝"}
+        deltas = _numeric_stat_deltas(
+            event,
+            source_type="pet_touch",
+            source_name="抚摸法宝",
+            player="",
+            basis="player",
+            meta=meta,
+            values={
+                "默契": _to_int(match.group("intimacy")),
+                "经验": _to_int(match.group("exp")),
+            },
+        )
+        if not deltas:
+            return None
+        event_row = _resource_event(
+            event,
+            source_type="pet_touch",
+            source_name="抚摸法宝",
+            player="",
+            result="success",
+            outcome="抚摸法宝",
+            meta=meta,
+        )
+        return ParserOutput(resource_deltas=tuple(deltas), resource_events=(event_row,))
+
+    def _parse_pet_warm(self, event: RawMessageEvent) -> ParserOutput | None:
+        text = event.text or ""
+        meta = {"title": "温养器灵"}
+        deltas: list[ResourceDelta] = []
+        if consume := PET_WARM_CONSUME_RE.search(text):
+            for match in RESOURCE_X_RE.finditer(consume.group("items")):
+                name = match.group("bracket") or match.group("name")
+                amount = _to_int(match.group("amount"))
+                if name and amount > 0:
+                    deltas.append(
+                        _resource_delta(
+                            event,
+                            source_type="pet_warm",
+                            source_name="温养器灵",
+                            player="",
+                            resource_name=name.strip(),
+                            amount=-amount,
+                            basis="player",
+                            meta=meta | {"from": "consume"},
+                        )
+                    )
+        for match in PET_WARM_GAIN_RE.finditer(text):
+            amount = _to_int(match.group("amount"))
+            if amount > 0:
+                deltas.append(
+                    _resource_delta(
+                        event,
+                        source_type="pet_warm",
+                        source_name="温养器灵",
+                        player="",
+                        resource_name=match.group("name"),
+                        amount=amount,
+                        basis="player",
+                        meta=meta,
+                    )
+                )
+        if not deltas:
+            return None
+        event_row = _resource_event(
+            event,
+            source_type="pet_warm",
+            source_name="温养器灵",
+            player="",
+            result="success",
+            outcome="温养器灵",
             meta=meta,
         )
         return ParserOutput(resource_deltas=tuple(deltas), resource_events=(event_row,))
@@ -359,10 +608,7 @@ def _extract_reward_deltas(
         resource_name = str(name or "").strip()
         if not resource_name:
             return
-        try:
-            value = int(str(amount or "0").strip())
-        except ValueError:
-            return
+        value = _to_int(amount)
         if value <= 0:
             return
         found.append(
@@ -420,6 +666,73 @@ def _extract_explicit_item_deltas(
     return found
 
 
+def _extract_bracket_item_deltas(
+    event: RawMessageEvent,
+    text: str,
+    *,
+    source_type: str,
+    source_name: str,
+    player: str,
+    basis: str,
+    meta: dict,
+) -> list[ResourceDelta]:
+    found: list[ResourceDelta] = []
+    seen: set[tuple[int, str]] = set()
+    for match in BRACKET_ITEM_RE.finditer(text):
+        name = str(match.group("name") or "").strip()
+        if not name or _is_non_item_bracket(name):
+            continue
+        amount = _to_int(match.group("amount") or _small_cn_amount_before(text, match.start()))
+        if amount <= 0:
+            amount = 1
+        key = (match.start(), name)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(
+            _resource_delta(
+                event,
+                source_type=source_type,
+                source_name=source_name,
+                player=player,
+                resource_name=name,
+                amount=amount,
+                basis=basis,
+                meta=meta | {"implicit_amount": match.group("amount") is None},
+            )
+        )
+    return found
+
+
+def _numeric_stat_deltas(
+    event: RawMessageEvent,
+    *,
+    source_type: str,
+    source_name: str,
+    player: str,
+    basis: str,
+    meta: dict,
+    values: dict[str, int],
+) -> list[ResourceDelta]:
+    found: list[ResourceDelta] = []
+    for name, amount in values.items():
+        if int(amount or 0) <= 0:
+            continue
+        found.append(
+            _resource_delta(
+                event,
+                source_type=source_type,
+                source_name=source_name,
+                player=player,
+                resource_name=name,
+                amount=int(amount),
+                basis=basis,
+                meta=meta,
+            )
+        )
+    return found
+
+
 def _extract_kunwu_rare_deltas(
     event: RawMessageEvent,
     text: str,
@@ -459,10 +772,7 @@ def _extract_exp_surge_deltas(
 ) -> list[ResourceDelta]:
     found: list[ResourceDelta] = []
     for match in EXP_SURGE_RE.finditer(text):
-        try:
-            amount = int(match.group("amount") or "0")
-        except ValueError:
-            continue
+        amount = _to_int(match.group("amount"))
         if amount <= 0:
             continue
         found.append(
@@ -519,10 +829,7 @@ def _extract_loss_deltas(
 ) -> list[ResourceDelta]:
     found: list[ResourceDelta] = []
     for match in RESOURCE_LOSS_RE.finditer(text):
-        try:
-            amount = -int(match.group("amount") or "0")
-        except ValueError:
-            continue
+        amount = -abs(_to_int(match.group("amount")))
         if amount >= 0:
             continue
         found.append(
@@ -607,6 +914,67 @@ def _line_owner_for_match(text: str, pos: int) -> str:
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
     return any(marker in text for marker in markers)
+
+
+def _to_int(value: object) -> int:
+    raw = str(value or "").strip().replace(",", "")
+    if not raw:
+        return 0
+    if raw in CN_DIGITS:
+        return CN_DIGITS[raw]
+    try:
+        return int(raw)
+    except ValueError:
+        return 0
+
+
+CN_DIGITS = {
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+    # 文案里的「几缕」没有精确数量,这里只按一次产出记录。
+    "几": 1,
+}
+
+
+def _small_cn_amount_before(text: str, pos: int) -> str:
+    start = text.rfind("\n", 0, max(0, pos)) + 1
+    prefix = text[start:pos]
+    if match := re.search(
+        r"(一|二|两|三|四|五|六|七|八|九|十|几)\s*(?:株|缕|截|块|枚|份)?[^【\n]{0,12}$",
+        prefix,
+    ):
+        return match.group(1)
+    return ""
+
+
+def _indented_lines(text: str) -> str:
+    return "\n".join(
+        line for line in str(text or "").splitlines()
+        if re.match(r"^\s{2,}-\s+", line)
+    )
+
+
+def _is_non_item_bracket(name: str) -> bool:
+    text = str(name or "").strip()
+    return text in {
+        "奇遇",
+        "深度闭关总结",
+        "闭关成功",
+        "战利品",
+        "温养器灵",
+        "逆天之举",
+        "灵果入腹",
+        "灵果入腹 · 造化自生",
+    }
 
 
 def _infer_wild_strategy(text: str) -> str:

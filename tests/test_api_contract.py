@@ -145,6 +145,28 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
         is_game_bot_sender=lambda _sid: False,
         my_identity_ids=[123],
     )
+    keyword_blacklist = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x11b", chat_id=1, msg_id=111, text="坠魔谷护持还有人要吗", source="玩家", date="", sender_id=222),
+        {
+            "focus_include_player_plain": True,
+            "focus_keywords": ["坠魔谷"],
+            "focus_exclude_patterns": ["坠魔谷护持"],
+        },
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    keyword_still_focus = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x11c", chat_id=1, msg_id=112, text="坠魔谷路线怎么走", source="玩家", date="", sender_id=222),
+        {
+            "focus_include_player_plain": True,
+            "focus_keywords": ["坠魔谷"],
+            "focus_exclude_patterns": ["坠魔谷护持"],
+        },
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
     punctuation_noise = enrich_filter_channels(
         base,
         RawMessageEvent(id="x12", chat_id=1, msg_id=12, text="？？", source="玩家", date="", sender_id=222),
@@ -188,6 +210,11 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
     assert "focus" in muted_sender_mentions_me.channels
     assert "archive" not in muted_sender_mentions_me.channels
     assert "被@" in muted_sender_mentions_me.tags
+    assert "archive" in keyword_blacklist.channels
+    assert "focus" not in keyword_blacklist.channels
+    assert any(str(tag).startswith("重点排除:") for tag in keyword_blacklist.tags)
+    assert "focus" in keyword_still_focus.channels
+    assert "archive" not in keyword_still_focus.channels
     assert "archive" in punctuation_noise.channels
     assert "focus" not in punctuation_noise.channels
     assert "focus" in emoji_only.channels
@@ -2059,6 +2086,24 @@ def test_generic_cooldown_module_records_pet_trial_cd():
     assert state["last_status"] == "success"
 
 
+def test_generic_cooldown_module_records_shallow_retreat_wait():
+    from backend.identity_state.cooldown import DEFAULT_COOLDOWN_SPECS, CooldownModule
+    spec = next(item for item in DEFAULT_COOLDOWN_SPECS if item.key == "retreat_shallow")
+    module = CooldownModule(spec)
+    parent = _evt(id="p", msg_id=315, text=".闭关修炼", sender_id=12345)
+    event = _evt(
+        id="e",
+        msg_id=316,
+        text="【闭关成功】\n本次闭关，你的修为最终增加了 972 点。\n你感到一阵疲惫，需要打坐调息 11 分钟方可再次闭关。",
+        sender_id=-1003983937918,
+        reply_to_msg_id=315,
+    )
+    ctx = _fake_ctx(parent=parent, sender_kind="bot")
+    state = module.observe(event, ctx, dict(module.default_state))
+    assert state["cooldown_until"] == ctx.now + 11 * 60
+    assert state["last_status"] == "cooldown"
+
+
 def test_generic_cooldown_module_uses_real_wait_text():
     from backend.identity_state.cooldown import DEFAULT_COOLDOWN_SPECS, CooldownModule
     spec = next(item for item in DEFAULT_COOLDOWN_SPECS if item.key == "taiyi_cycle")
@@ -2786,6 +2831,7 @@ def test_skills_payload_exposes_default_layout():
     assert by_key["deep_retreat"]["reply_mode"] == "none"
     assert by_key["deep_retreat"]["cd_module"] == "deep_retreat"
     assert by_key["wild_training"]["cd_module"] == "wild_training"
+    assert by_key["retreat_shallow"]["cd_module"] == "retreat_shallow"
     assert by_key["pet_trial"]["cd_module"] == "pet_trial"
     assert by_key["tianti_gangfeng"]["cd_module"] == "tianti_gangfeng"
     assert by_key["node_search"]["cd_module"] == "taiyi_cycle"

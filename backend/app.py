@@ -270,6 +270,21 @@ def _get_resource_stats(request: MiniWebHandler, query: dict) -> dict:
     )
 
 
+def _get_inventory(request: MiniWebHandler, query: dict) -> dict:
+    owner = (query.get("owner") or [""])[0]
+    latest_raw = str((query.get("latest_only") or ["1"])[0]).lower()
+    latest_only = latest_raw not in {"0", "false", "no"}
+    try:
+        limit = int((query.get("limit") or ["80"])[0])
+    except (TypeError, ValueError):
+        limit = 80
+    return _app(request).inventory_payload(
+        owner=owner,
+        latest_only=latest_only,
+        limit=limit,
+    )
+
+
 def _get_discovered_bots(request: MiniWebHandler, query: dict) -> dict:
     return _app(request).discovered_bots_payload()
 
@@ -324,6 +339,13 @@ def _post_settings(request: MiniWebHandler, payload: dict) -> dict:
 def _post_focus_exclude_preview(request: MiniWebHandler, payload: dict) -> dict:
     try:
         return _app(request).focus_exclude_preview_payload(payload)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def _post_inventory_transfer_plan(request: MiniWebHandler, payload: dict) -> dict:
+    try:
+        return _app(request).inventory_transfer_plan_payload(payload)
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -517,6 +539,7 @@ GET_ROUTES = {
     "/api/settings": _get_settings,
     "/api/state-patches": _get_state_patches,
     "/api/resource-stats": _get_resource_stats,
+    "/api/inventory": _get_inventory,
     "/api/discovered-bots": _get_discovered_bots,
     "/api/accounts": _get_accounts,
     "/api/identities": _get_identities,
@@ -538,6 +561,7 @@ GET_ROUTES = {
 POST_ROUTES = {
     "/api/settings": PostRoute(_post_settings, needs_payload=True),
     "/api/focus-exclude/preview": PostRoute(_post_focus_exclude_preview, needs_payload=True),
+    "/api/inventory/transfer-plan": PostRoute(_post_inventory_transfer_plan, needs_payload=True),
     "/api/accounts": PostRoute(_post_account, needs_payload=True),
     "/api/accounts/delete": PostRoute(_post_account_delete, needs_payload=True),
     "/api/accounts/logout": PostRoute(_post_account_logout, needs_payload=True),

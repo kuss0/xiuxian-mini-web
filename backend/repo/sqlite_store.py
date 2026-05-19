@@ -20,6 +20,7 @@ from backend.domain.models import (
 )
 from backend.identity_state import build_default_registry
 from backend.parsers import build_parser_registry
+from backend.parsers.inventory import parse_inventory_snapshot
 from backend.parsers.resource_stats import infer_wild_strategy_from_command
 from backend.processors import MessagePipeline
 from backend.processors.message_filter import (
@@ -39,10 +40,19 @@ DEFAULT_LEADER_SOURCE_NAMES = ["@iosdo7"]
 DEFAULT_TARGET_CHAT = "-1001680975844"
 DEFAULT_TARGET_TOPIC_ID = "7310786"
 ACCOUNT_SECRET_KEYS = {"api_hash", "proxy_password"}
-RESOURCE_STATS_SCHEMA_VERSION = 5
+RESOURCE_STATS_SCHEMA_VERSION = 6
+INVENTORY_SCHEMA_VERSION = 1
 RESOURCE_BASIC_NAMES = ("修为", "贡献", "灵石")
 RESOURCE_RARE_NAMES = (
     "阴凝之晶",
+    "金精矿",
+    "凝血草",
+    "清灵草",
+    "天雷竹",
+    "朱果",
+    "百年铁木",
+    "阴魂丝",
+    "灵眼木髓碎片",
     "天凤之翎",
     "风雷翅图纸",
     "风之祝福",
@@ -349,6 +359,11 @@ class SQLiteStore:
                    OR text LIKE '%黄龙山大战%'
                    OR text LIKE '%登顶昆吾山%'
                    OR text LIKE '%坠魔谷%'
+                   OR text LIKE '%深度闭关总结%'
+                   OR text LIKE '%【闭关成功】%'
+                   OR text LIKE '%灵果入腹%'
+                   OR text LIKE '%温养器灵%'
+                   OR (text LIKE '%默契%' AND text LIKE '%经验%')
                    OR (text LIKE '%逆天之举%' AND text LIKE '%风希%')
                 ORDER BY rowid ASC
                 """
@@ -405,6 +420,72 @@ class SQLiteStore:
     def backfill_resource_deltas_if_empty(self) -> int:
         """兼容旧调用名。返回本次写入的 resource_deltas 数量。"""
         return self.backfill_resource_records_if_needed()["deltas"]
+
+    def backfill_inventory_snapshots_if_needed(self) -> dict[str, int]:
+        """从历史消息箱补储物袋快照。
+
+        库存是“最近一次储物袋面板”的投影,不是实时账本。这里不回放购买/
+        上架流水去推库存,避免用不完整事件造出一个看似准确的余额。
+        """
+        with self._connect() as conn:
+            stored_version_row = conn.execute(
+                "SELECT value_json FROM settings WHERE key='inventory_schema_version'"
+            ).fetchone()
+            try:
+                stored_version = int(json.loads(stored_version_row[0])) if stored_version_row else 0
+            except (TypeError, ValueError, json.JSONDecodeError):
+                stored_version = 0
+            existing = conn.execute("SELECT COUNT(*) FROM inventory_snapshots").fetchone()[0]
+            if existing and stored_version >= INVENTORY_SCHEMA_VERSION:
+                return {"snapshots": 0, "items": 0}
+            rows = conn.execute(
+                """
+                SELECT id, chat_id, msg_id, text, source, date, sender_id,
+                       reply_to_msg_id, top_msg_id, mentions_json, sender_is_bot,
+                       edited_at, deleted_at, media_kind, media_meta_json
+                FROM raw_messages
+                WHERE text LIKE '%储物袋%'
+                ORDER BY rowid ASC
+                """
+            ).fetchall()
+        snapshot_count = 0
+        item_count = 0
+        with self._connect() as conn:
+            conn.execute("DELETE FROM inventory_items")
+            conn.execute("DELETE FROM inventory_snapshots")
+            for row in rows:
+                event = RawMessageEvent(
+                    id=row[0],
+                    chat_id=int(row[1]),
+                    msg_id=int(row[2]),
+                    text=row[3],
+                    source=row[4],
+                    date=row[5],
+                    sender_id=row[6],
+                    reply_to_msg_id=row[7],
+                    top_msg_id=row[8],
+                    mentions=tuple(json.loads(row[9] or "[]")),
+                    sender_is_bot=bool(row[10]),
+                    edited_at=row[11],
+                    deleted_at=row[12],
+                    media_kind=row[13],
+                    media_meta=(json.loads(row[14]) if row[14] else None),
+                )
+                before = conn.execute("SELECT COUNT(*) FROM inventory_items").fetchone()[0]
+                self._replace_inventory_snapshot(conn, event)
+                after = conn.execute("SELECT COUNT(*) FROM inventory_items").fetchone()[0]
+                if after > before:
+                    snapshot_count += 1
+                    item_count += after - before
+            conn.execute(
+                """
+                INSERT INTO settings(key, value_json)
+                VALUES(?, ?)
+                ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json
+                """,
+                ("inventory_schema_version", json.dumps(INVENTORY_SCHEMA_VERSION)),
+            )
+        return {"snapshots": snapshot_count, "items": item_count}
 
     def latest_message_id(self, chat_id: int, topic_id: int = 0) -> int:
         """返回当前消息箱在指定 chat/topic 里已落库的最大 Telegram msg_id。"""
@@ -829,6 +910,7 @@ class SQLiteStore:
                 output.resource_deltas,
                 output.resource_events,
             )
+            self._replace_inventory_snapshot(conn, event)
             for patch in output.state_patches:
                 # 解析 send_as_id:patch 自己有就用;没有就回退到本条 event sender,
                 # 如果本条是「游戏 bot 回复」(根据 settings.game_bot_ids 判断,不是
@@ -1029,6 +1111,64 @@ class SQLiteStore:
                     int(delta.chat_id or event.chat_id or 0),
                     int(delta.msg_id or event.msg_id or 0),
                     json.dumps(delta.meta or {}, ensure_ascii=False),
+                ),
+            )
+
+    def _replace_inventory_snapshot(self, conn, event: RawMessageEvent) -> None:
+        existing = conn.execute(
+            "SELECT id FROM inventory_snapshots WHERE raw_message_id=?",
+            (event.id,),
+        ).fetchall()
+        for row in existing:
+            conn.execute("DELETE FROM inventory_items WHERE snapshot_id=?", (int(row[0]),))
+        conn.execute("DELETE FROM inventory_snapshots WHERE raw_message_id=?", (event.id,))
+
+        snapshot = parse_inventory_snapshot(event)
+        if snapshot is None:
+            return
+        items = list(snapshot.get("items") or [])
+        if not items:
+            return
+        total_amount = sum(int(item.get("amount") or 0) for item in items)
+        cur = conn.execute(
+            """
+            INSERT INTO inventory_snapshots(
+                owner, raw_message_id, source, event_time, chat_id, msg_id,
+                item_count, total_amount, created_at
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(snapshot.get("owner") or ""),
+                event.id,
+                str(snapshot.get("source") or event.source or ""),
+                str(snapshot.get("event_time") or event.date or utc_now_iso()),
+                int(snapshot.get("chat_id") or event.chat_id or 0),
+                int(snapshot.get("msg_id") or event.msg_id or 0),
+                len(items),
+                total_amount,
+                utc_now_iso(),
+            ),
+        )
+        snapshot_id = int(cur.lastrowid)
+        for item in items:
+            conn.execute(
+                """
+                INSERT INTO inventory_items(
+                    snapshot_id, owner, section, item_name, amount, extra,
+                    event_time, raw_message_id
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    snapshot_id,
+                    str(snapshot.get("owner") or ""),
+                    str(item.get("section") or ""),
+                    str(item.get("name") or ""),
+                    int(item.get("amount") or 0),
+                    str(item.get("extra") or ""),
+                    str(snapshot.get("event_time") or event.date or utc_now_iso()),
+                    event.id,
                 ),
             )
 
@@ -1557,6 +1697,77 @@ class SQLiteStore:
             ).fetchall()
         return [_resource_event_row_to_api(row) for row in rows]
 
+    def list_inventory_snapshots(
+        self,
+        *,
+        owner: str = "",
+        latest_only: bool = True,
+        include_items: bool = True,
+        limit: int = 80,
+    ) -> list[dict]:
+        owner = str(owner or "").strip().lstrip("@")
+        try:
+            limit = int(limit or 80)
+        except (TypeError, ValueError):
+            limit = 80
+        limit = max(1, min(limit, 300))
+        params: list = []
+        where = []
+        if owner:
+            where.append("LOWER(owner)=LOWER(?)")
+            params.append(owner)
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+        if latest_only:
+            sql = f"""
+                WITH ranked AS (
+                    SELECT *,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY LOWER(owner)
+                               ORDER BY event_time DESC, id DESC
+                           ) AS rn
+                    FROM inventory_snapshots
+                    {where_sql}
+                )
+                SELECT id, owner, raw_message_id, source, event_time, chat_id, msg_id,
+                       item_count, total_amount, created_at
+                FROM ranked
+                WHERE rn=1
+                ORDER BY event_time DESC, id DESC
+                LIMIT ?
+            """
+        else:
+            sql = f"""
+                SELECT id, owner, raw_message_id, source, event_time, chat_id, msg_id,
+                       item_count, total_amount, created_at
+                FROM inventory_snapshots
+                {where_sql}
+                ORDER BY event_time DESC, id DESC
+                LIMIT ?
+            """
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+            snapshots = [_inventory_snapshot_row_to_api(row) for row in rows]
+            if include_items and snapshots:
+                ids = [int(item["id"]) for item in snapshots]
+                placeholders = ",".join("?" for _ in ids)
+                item_rows = conn.execute(
+                    f"""
+                    SELECT snapshot_id, owner, section, item_name, amount, extra,
+                           event_time, raw_message_id
+                    FROM inventory_items
+                    WHERE snapshot_id IN ({placeholders})
+                    ORDER BY section ASC, item_name ASC, extra ASC
+                    """,
+                    ids,
+                ).fetchall()
+                grouped: dict[int, list[dict]] = {}
+                for row in item_rows:
+                    grouped.setdefault(int(row[0]), []).append(_inventory_item_row_to_api(row))
+                for snapshot in snapshots:
+                    snapshot["items"] = grouped.get(int(snapshot["id"]), [])
+        return snapshots
+
     def resource_stats(
         self,
         *,
@@ -1672,6 +1883,7 @@ class SQLiteStore:
                 "野外历练单独统计成功、失败和冷却;资源成果按正收益/负收益分开,不做净额抵消。",
                 "副本结算按具体副本/入口分开统计,按单次结算文案记录,不按队伍人数放大。",
                 "风希单独统计逆天之举收益,含限时增益出现次数。",
+                "深度闭关、浅闭关、灵树采摘、抚摸法宝和温养器灵只统计明确结算文案。",
                 "血色试炼结算已排除。",
             ],
         }
@@ -2231,6 +2443,44 @@ class SQLiteStore:
                 CREATE INDEX IF NOT EXISTS idx_resource_events_result
                     ON resource_events(result);
 
+                CREATE TABLE IF NOT EXISTS inventory_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    owner TEXT NOT NULL,
+                    raw_message_id TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT '',
+                    event_time TEXT NOT NULL,
+                    chat_id INTEGER NOT NULL DEFAULT 0,
+                    msg_id INTEGER NOT NULL DEFAULT 0,
+                    item_count INTEGER NOT NULL DEFAULT 0,
+                    total_amount INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(raw_message_id) REFERENCES raw_messages(id)
+                );
+
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_snapshots_raw
+                    ON inventory_snapshots(raw_message_id);
+                CREATE INDEX IF NOT EXISTS idx_inventory_snapshots_owner
+                    ON inventory_snapshots(owner, event_time DESC);
+
+                CREATE TABLE IF NOT EXISTS inventory_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    snapshot_id INTEGER NOT NULL,
+                    owner TEXT NOT NULL,
+                    section TEXT NOT NULL DEFAULT '',
+                    item_name TEXT NOT NULL,
+                    amount INTEGER NOT NULL,
+                    extra TEXT NOT NULL DEFAULT '',
+                    event_time TEXT NOT NULL,
+                    raw_message_id TEXT NOT NULL,
+                    FOREIGN KEY(snapshot_id) REFERENCES inventory_snapshots(id) ON DELETE CASCADE,
+                    FOREIGN KEY(raw_message_id) REFERENCES raw_messages(id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_inventory_items_snapshot
+                    ON inventory_items(snapshot_id);
+                CREATE INDEX IF NOT EXISTS idx_inventory_items_name
+                    ON inventory_items(item_name);
+
                 CREATE TABLE IF NOT EXISTS state_patches (
                     scope TEXT NOT NULL,
                     send_as_id INTEGER NOT NULL DEFAULT 0,
@@ -2619,6 +2869,35 @@ def _resource_event_row_to_api(row) -> dict:
         "day": row[7],
         "week": row[8],
         "month": row[9],
+    }
+
+
+def _inventory_snapshot_row_to_api(row) -> dict:
+    return {
+        "id": int(row[0]),
+        "owner": row[1] or "",
+        "raw_message_id": row[2] or "",
+        "source": row[3] or "",
+        "event_time": row[4] or "",
+        "chat_id": int(row[5] or 0),
+        "msg_id": int(row[6] or 0),
+        "item_count": int(row[7] or 0),
+        "total_amount": int(row[8] or 0),
+        "created_at": row[9] or "",
+        "items": [],
+    }
+
+
+def _inventory_item_row_to_api(row) -> dict:
+    return {
+        "snapshot_id": int(row[0] or 0),
+        "owner": row[1] or "",
+        "section": row[2] or "",
+        "name": row[3] or "",
+        "amount": int(row[4] or 0),
+        "extra": row[5] or "",
+        "event_time": row[6] or "",
+        "raw_message_id": row[7] or "",
     }
 
 

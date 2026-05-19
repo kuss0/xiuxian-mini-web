@@ -84,6 +84,7 @@ const outboxButton = document.querySelector("#outboxButton");
 const scheduleButton = document.querySelector("#scheduleButton");
 const logsButton = document.querySelector("#logsButton");
 const resourceStatsButton = document.querySelector("#resourceStatsButton");
+const inventoryButton = document.querySelector("#inventoryButton");
 const loginAccountButton = document.querySelector("#loginAccountButton");
 const addIdentityButton = document.querySelector("#addIdentityButton");
 const logoutAccountButton = document.querySelector("#logoutAccountButton");
@@ -664,7 +665,7 @@ async function openResourceStatsModal() {
     body: `
       <section class="modal-section">
         <h4>全服资源统计</h4>
-        <p class="muted">当前统计消息箱采集到的「野外历练」「风希」和「非血色副本战利品结算」。副本可按入口单独筛选，稀有产物会优先展示。</p>
+        <p class="muted">当前统计消息箱采集到的「野外历练」「风希」「非血色副本」「闭关/灵树/器灵」结算。副本可按入口单独筛选，稀有产物会优先展示。</p>
         <div class="form-grid resource-stats-controls">
           <label>
             <span>周期</span>
@@ -680,6 +681,11 @@ async function openResourceStatsModal() {
               <option value="all">全部</option>
               <option value="wild_training">野外历练</option>
               <option value="wind_xi">风希</option>
+              <option value="deep_retreat">深度闭关</option>
+              <option value="retreat_shallow">闭关修炼</option>
+              <option value="tree_harvest">灵树采摘</option>
+              <option value="pet_touch">抚摸法宝</option>
+              <option value="pet_warm">温养器灵</option>
               <option value="dungeon">副本结算（全部）</option>
               <option value="dungeon|虚天殿·夺鼎">副本 · 虚天殿 · 夺鼎</option>
               <option value="dungeon|虚天殿·求稳">副本 · 虚天殿 · 求稳</option>
@@ -960,16 +966,22 @@ function renderResourceStatsSummary(rows, eventSummary) {
   for (const item of summaryEvents.slice(0, 4)) {
     if (cards.length >= 6) break;
     const successRate = formatSuccessRate(item.success_rate);
+    const eventTotal = Number(item.total || 0);
+    const dungeonCount = Number((item.settled || 0) + (item.basic_only || 0) + (item.extra_success || 0));
     const main = item.source_type === "wild_training"
       ? `${formatNumber(item.success || 0)} 成 / ${formatNumber(item.failed || 0)} 败`
       : item.source_type === "wind_xi"
         ? `${formatNumber(item.success || 0)} 次成功`
-        : `${formatNumber((item.settled || 0) + (item.basic_only || 0) + (item.extra_success || 0))} 次`;
+        : item.source_type === "dungeon"
+          ? `${formatNumber(dungeonCount)} 次`
+          : `${formatNumber(eventTotal || dungeonCount)} 次`;
     const sub = item.source_type === "wild_training"
       ? `CD ${formatNumber(item.cooldown || 0)}｜成功率 ${successRate}`
       : item.source_type === "wind_xi"
         ? `成功率 ${successRate}`
-        : `额外 ${formatNumber(item.extra_success || 0)}｜基础 ${formatNumber(item.basic_only || 0)}`;
+        : item.source_type === "dungeon"
+          ? `额外 ${formatNumber(item.extra_success || 0)}｜基础 ${formatNumber(item.basic_only || 0)}`
+          : `成功 ${formatNumber(item.success || 0)}｜结算 ${formatNumber(item.settled || 0)}`;
     cards.push(`
       <div class="resource-stat-card">
         <span>${escapeHtml(resourceSourceLabel(item.source_type, item.source_name))}｜${escapeHtml(item.period || "")}</span>
@@ -993,6 +1005,11 @@ function resourceSourceLabel(sourceType, sourceName) {
   if (sourceType === "wild_training") return sourceName || "野外历练";
   if (sourceType === "wind_xi") return "风希";
   if (sourceType === "dungeon") return sourceName ? `副本 · ${sourceName}` : "副本结算";
+  if (sourceType === "deep_retreat") return sourceName || "深度闭关";
+  if (sourceType === "retreat_shallow") return sourceName || "闭关修炼";
+  if (sourceType === "tree_harvest") return sourceName || "灵树采摘";
+  if (sourceType === "pet_touch") return sourceName || "抚摸法宝";
+  if (sourceType === "pet_warm") return sourceName || "温养器灵";
   return sourceName || sourceType || "未知";
 }
 
@@ -1027,6 +1044,226 @@ function formatNumber(value) {
   const n = Number(value || 0);
   if (!Number.isFinite(n)) return String(value || 0);
   return new Intl.NumberFormat("zh-CN").format(n);
+}
+
+// ---------- 储物袋 / 批量转移 ----------
+
+async function openInventoryModal() {
+  const dialog = openModal({
+    title: "库存 / 批量转移",
+    body: `
+      <section class="modal-section">
+        <h4>最近储物袋快照</h4>
+        <p class="muted">库存来自消息箱里最近一次 .储物袋 回复,不是实时账本。生成命令不会自动发送,也不会自动核减库存。</p>
+        <div class="form-grid">
+          <label>
+            <span>资源号</span>
+            <select id="inventoryOwnerSelect"></select>
+          </label>
+          <label>
+            <span>搜索物品</span>
+            <input id="inventorySearch" placeholder="例如 阴凝、残图、灵石" />
+          </label>
+          <label>
+            <span>购买方</span>
+            <input id="inventoryBuyer" placeholder="集中资源的 @username" />
+          </label>
+          <label>
+            <span>诱饵物品</span>
+            <input id="inventoryBaitName" value="凝血草" />
+          </label>
+          <label>
+            <span>诱饵数量</span>
+            <input id="inventoryBaitAmount" inputmode="numeric" value="1" />
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="button" id="inventoryRefresh">刷新快照</button>
+          <button type="button" class="primary" id="inventoryPlan">生成转移命令</button>
+        </div>
+        <p class="modal-status-line info" id="inventoryStatus" hidden></p>
+      </section>
+      <section class="modal-section">
+        <div id="inventorySnapshots" class="inventory-snapshots"></div>
+        <div id="inventoryItems" class="inventory-items"></div>
+        <div id="inventoryPlanResult" class="send-as-result" hidden></div>
+      </section>
+    `,
+    footer: `<button type="button" data-modal-close>关闭</button>`,
+  });
+  if (!dialog) return;
+  bindInventoryModal(dialog);
+  await refreshInventorySnapshots(dialog);
+}
+
+function bindInventoryModal(dialog) {
+  dialog.querySelector("#inventoryRefresh")?.addEventListener("click", () => {
+    refreshInventorySnapshots(dialog).catch((error) => setInventoryStatus(dialog, "error", error.message));
+  });
+  dialog.querySelector("#inventoryOwnerSelect")?.addEventListener("change", () => renderInventoryItems(dialog));
+  dialog.querySelector("#inventorySearch")?.addEventListener("input", () => renderInventoryItems(dialog));
+  dialog.querySelector("#inventoryPlan")?.addEventListener("click", () => {
+    planInventoryTransfer(dialog).catch((error) => setInventoryStatus(dialog, "error", error.message));
+  });
+}
+
+async function refreshInventorySnapshots(dialog) {
+  setInventoryStatus(dialog, "info", "读取最近储物袋快照…");
+  const payload = await fetchJson("/api/inventory?latest_only=1&limit=200");
+  dialog._inventorySnapshots = payload.snapshots || [];
+  renderInventoryOwnerSelect(dialog);
+  renderInventoryItems(dialog);
+  const count = dialog._inventorySnapshots.length;
+  setInventoryStatus(dialog, count ? "ok" : "warn", count ? `已载入 ${count} 个角色的最近快照。` : "还没有储物袋快照。先用 .储物袋 让消息箱采到。");
+}
+
+function renderInventoryOwnerSelect(dialog) {
+  const select = dialog.querySelector("#inventoryOwnerSelect");
+  if (!select) return;
+  const snapshots = dialog._inventorySnapshots || [];
+  const prev = select.value;
+  select.innerHTML = snapshots.map((snapshot) => {
+    const label = `@${snapshot.owner}｜${formatNumber(snapshot.item_count)} 类｜${formatInventoryTime(snapshot.event_time)}`;
+    return `<option value="${escapeAttr(snapshot.owner)}">${escapeHtml(label)}</option>`;
+  }).join("") || '<option value="">暂无快照</option>';
+  if (prev && snapshots.some((snapshot) => snapshot.owner === prev)) {
+    select.value = prev;
+  }
+}
+
+function renderInventoryItems(dialog) {
+  const owner = dialog.querySelector("#inventoryOwnerSelect")?.value || "";
+  const search = (dialog.querySelector("#inventorySearch")?.value || "").trim();
+  const snapshots = dialog._inventorySnapshots || [];
+  const snapshot = snapshots.find((item) => item.owner === owner) || snapshots[0] || null;
+  const snapshotBox = dialog.querySelector("#inventorySnapshots");
+  const itemBox = dialog.querySelector("#inventoryItems");
+  const resultBox = dialog.querySelector("#inventoryPlanResult");
+  if (resultBox) {
+    resultBox.hidden = true;
+    resultBox.innerHTML = "";
+  }
+  if (!snapshot) {
+    if (snapshotBox) snapshotBox.innerHTML = '<p class="empty inline">暂无储物袋快照。</p>';
+    if (itemBox) itemBox.innerHTML = "";
+    return;
+  }
+  if (snapshotBox) {
+    snapshotBox.innerHTML = `
+      <div class="inventory-summary">
+        <strong>@${escapeHtml(snapshot.owner)}</strong>
+        <span>${escapeHtml(formatNumber(snapshot.item_count))} 类 / ${escapeHtml(formatNumber(snapshot.total_amount))} 件</span>
+        <span>更新 ${escapeHtml(formatInventoryTime(snapshot.event_time))}</span>
+        <span>消息 #${escapeHtml(String(snapshot.msg_id || ""))}</span>
+      </div>
+    `;
+  }
+  const items = (snapshot.items || [])
+    .filter((item) => !search || `${item.name} ${item.section} ${item.extra}`.includes(search))
+    .sort((a, b) => String(a.section || "").localeCompare(String(b.section || ""), "zh-CN") || String(a.name || "").localeCompare(String(b.name || ""), "zh-CN"));
+  if (!itemBox) return;
+  if (!items.length) {
+    itemBox.innerHTML = '<p class="empty inline">没有匹配物品。</p>';
+    return;
+  }
+  itemBox.innerHTML = `
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          <th>选</th>
+          <th>分组</th>
+          <th>物品</th>
+          <th>库存</th>
+          <th>转移数量</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map((item, index) => `
+          <tr>
+            <td><input type="checkbox" data-inventory-pick="${index}" data-name="${escapeAttr(item.name)}" data-max="${escapeAttr(String(item.amount || 0))}" /></td>
+            <td>${escapeHtml(item.section || "")}</td>
+            <td>${escapeHtml(item.name || "")}${item.extra ? ` <small>${escapeHtml(item.extra)}</small>` : ""}</td>
+            <td class="num">${escapeHtml(formatNumber(item.amount || 0))}</td>
+            <td><input class="inventory-qty" data-inventory-qty="${index}" inputmode="numeric" min="1" max="${escapeAttr(String(item.amount || 0))}" value="${escapeAttr(String(Math.min(Number(item.amount || 1), 1)))}" /></td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+  itemBox.querySelectorAll("[data-inventory-qty]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const idx = input.dataset.inventoryQty;
+      const pick = itemBox.querySelector(`[data-inventory-pick="${CSS.escape(idx)}"]`);
+      if (pick && String(input.value || "").trim()) pick.checked = true;
+    });
+  });
+}
+
+async function planInventoryTransfer(dialog) {
+  const owner = dialog.querySelector("#inventoryOwnerSelect")?.value || "";
+  const buyer = (dialog.querySelector("#inventoryBuyer")?.value || "").trim().replace(/^@/, "");
+  const baitName = (dialog.querySelector("#inventoryBaitName")?.value || "").trim();
+  const baitAmount = Number(dialog.querySelector("#inventoryBaitAmount")?.value || 1);
+  const itemBox = dialog.querySelector("#inventoryItems");
+  const items = [];
+  itemBox?.querySelectorAll("[data-inventory-pick]:checked").forEach((pick) => {
+    const idx = pick.dataset.inventoryPick;
+    const qtyInput = itemBox.querySelector(`[data-inventory-qty="${CSS.escape(idx)}"]`);
+    const amount = Number(qtyInput?.value || 0);
+    if (pick.dataset.name && amount > 0) {
+      items.push({ name: pick.dataset.name, amount });
+    }
+  });
+  const payload = await postJson("/api/inventory/transfer-plan", {
+    provider: owner,
+    buyer,
+    bait_name: baitName,
+    bait_amount: baitAmount,
+    items,
+  });
+  if (!payload.ok) throw new Error(payload.error || "生成失败");
+  renderInventoryPlan(dialog, payload);
+  setInventoryStatus(dialog, "ok", `已生成 ${payload.commands.length} 条命令。`);
+}
+
+function renderInventoryPlan(dialog, plan) {
+  const box = dialog.querySelector("#inventoryPlanResult");
+  if (!box) return;
+  box.hidden = false;
+  box.innerHTML = `
+    <p><strong>转移计划</strong>｜资源号 @${escapeHtml(plan.provider || "未填")} → 购买方 @${escapeHtml(plan.buyer || "")}</p>
+    <ul class="send-as-result-list">
+      ${(plan.commands || []).map((item, index) => `
+        <li class="${item.template ? "warn" : "ok"}">
+          <code>${escapeHtml(item.command || "")}</code>
+          <small>${escapeHtml(item.note || "")}</small>
+          <button type="button" data-inventory-copy="${index}">复制</button>
+        </li>
+      `).join("")}
+    </ul>
+    ${(plan.notes || []).length ? `<div class="resource-stats-notes">${plan.notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>` : ""}
+  `;
+  box.querySelectorAll("[data-inventory-copy]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const idx = Number(button.dataset.inventoryCopy || 0);
+      const command = (plan.commands || [])[idx]?.command || "";
+      await copyCommandToClipboard(command, button);
+    });
+  });
+}
+
+function setInventoryStatus(dialog, kind, text) {
+  const status = dialog.querySelector("#inventoryStatus");
+  if (!status) return;
+  status.hidden = !text;
+  status.className = `modal-status-line ${kind || "info"}`;
+  status.textContent = text || "";
+}
+
+function formatInventoryTime(value) {
+  const raw = String(value || "");
+  if (!raw) return "未知";
+  return raw.replace("T", " ").replace(/\..+$/, "").replace(/\+.+$/, "");
 }
 
 // ---------- 通知设置 modal ----------
@@ -6452,6 +6689,16 @@ if (resourceStatsButton) {
   resourceStatsButton.addEventListener("click", async () => {
     try {
       await openResourceStatsModal();
+    } catch (error) {
+      showError(error);
+    }
+  });
+}
+
+if (inventoryButton) {
+  inventoryButton.addEventListener("click", async () => {
+    try {
+      await openInventoryModal();
     } catch (error) {
       showError(error);
     }

@@ -1,9 +1,24 @@
-"""储物袋 parser:识别「储物袋」类消息,目前只生成卡片,后续可投影库存。"""
+"""储物袋 parser。
+
+职责保持轻:parser 负责从真实 bot 文案里抽出快照字段和卡片;库存持久化
+由 SQLiteStore 在 ingest 阶段调用 parse_inventory_snapshot() 完成。
+"""
 
 from __future__ import annotations
 
+import re
+
 from backend.domain.models import ParsedCard, RawMessageEvent
 from backend.domain.registry import ParserOutput
+
+
+OWNER_RE = re.compile(r"^\s*@?(?P<owner>[A-Za-z0-9_]+)\s*的储物袋", re.MULTILINE)
+ALT_OWNER_RE = re.compile(r"【(?P<owner>[^】]+)的储物袋】")
+SECTION_RE = re.compile(r"^\s*(?P<section>[^:\n：]{1,24})\s*[:：]\s*$")
+ITEM_RE = re.compile(
+    r"^\s*[-•]?\s*(?P<name>.+?)\s*[xX×*]\s*(?P<amount>\d+)"
+    r"(?:\s*(?P<extra>[(（][^)）]+[)）]))?\s*$"
+)
 
 
 class InventoryParser:
@@ -11,19 +26,106 @@ class InventoryParser:
 
     def parse(self, event: RawMessageEvent) -> ParserOutput | None:
         text = event.text
-        if "储物袋" not in text:
+        snapshot = parse_inventory_snapshot(event)
+        if snapshot is None:
             return None
+        owner = snapshot.get("owner") or ""
+        item_count = len(snapshot.get("items") or [])
+        total_amount = sum(int(item.get("amount") or 0) for item in snapshot.get("items") or [])
         return ParserOutput(
             cards=(
                 ParsedCard(
                     id=event.id,
                     channels=("system", "resource", "console"),
                     title="储物袋快照",
-                    summary="已识别背包/资源类消息,后续可投影库存。",
+                    summary=f"@{owner} 的储物袋: {item_count} 类物品 / {total_amount} 件" if owner else "已识别储物袋快照",
                     source=event.source,
                     time=event.date,
                     tags=("资源", "储物袋"),
                     raw=event.text,
+                    fields={
+                        "owner": owner,
+                        "item_count": item_count,
+                        "total_amount": total_amount,
+                    },
                 ),
             )
         )
+
+
+def parse_inventory_snapshot(event: RawMessageEvent) -> dict | None:
+    """Parse a 储物袋 panel into a normalized snapshot.
+
+    Accepted examples:
+    - ``@ANekokro 的储物袋``
+    - ``【example的储物袋】``
+
+    Repeated item names in the same snapshot are aggregated per section+name.
+    Extra suffixes such as ``(耐久 100/100)`` are preserved as ``extra`` but do
+    not affect the item key.
+    """
+    text = event.text or ""
+    if "储物袋" not in text:
+        return None
+    owner = _extract_owner(text)
+    if not owner:
+        return None
+    items_by_key: dict[tuple[str, str, str], dict] = {}
+    section = "未分组"
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if section_match := SECTION_RE.match(line):
+            section = section_match.group("section").strip()
+            continue
+        item_match = ITEM_RE.match(line)
+        if not item_match:
+            continue
+        name = _clean_item_name(item_match.group("name"))
+        if not name:
+            continue
+        amount = int(item_match.group("amount") or 0)
+        if amount <= 0:
+            continue
+        extra = (item_match.group("extra") or "").strip()
+        key = (section, name, extra)
+        item = items_by_key.setdefault(
+            key,
+            {
+                "section": section,
+                "name": name,
+                "amount": 0,
+                "extra": extra,
+            },
+        )
+        item["amount"] += amount
+    items = list(items_by_key.values())
+    if not items:
+        return None
+    return {
+        "raw_message_id": event.id,
+        "chat_id": int(event.chat_id or 0),
+        "msg_id": int(event.msg_id or 0),
+        "owner": owner,
+        "source": event.source or "",
+        "event_time": event.date or "",
+        "items": items,
+    }
+
+
+def _extract_owner(text: str) -> str:
+    if match := OWNER_RE.search(text):
+        return match.group("owner").strip().lstrip("@")
+    if match := ALT_OWNER_RE.search(text):
+        return match.group("owner").strip().lstrip("@")
+    return ""
+
+
+def _clean_item_name(value: str) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"\s+", " ", text)
+    return text.strip("-• \t")
+
+
+__all__ = ["InventoryParser", "parse_inventory_snapshot"]

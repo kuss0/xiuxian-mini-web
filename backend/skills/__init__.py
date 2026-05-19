@@ -66,7 +66,7 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
     Skill("sect_teach", "日常", "宗门传功", ".宗门传功", icon="📖"),
     Skill("tower", "日常", "闯塔", ".闯塔", cd_module="tower", icon="🗼"),
     Skill("deep_retreat", "日常", "深度闭关", ".深度闭关", cd_module="deep_retreat", icon="📿"),
-    Skill("retreat_shallow", "日常", "闭关修炼", ".闭关修炼", icon="🧘"),
+    Skill("retreat_shallow", "日常", "闭关修炼", ".闭关修炼", cd_module="retreat_shallow", icon="🧘"),
     Skill("yuanying", "日常", "元婴出窍", ".元婴出窍", cd_module="yuanying", icon="👻", realm_min="元婴初期"),
 
     # ---------- 法宝 ----------
