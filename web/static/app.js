@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: resource-stats-manual 2026-05-19T11:00
-console.log("[mini-web] build: resource-stats-manual 2026-05-19T11:00 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: resource-stats-status-fix 2026-05-19T11:12
+console.log("[mini-web] build: resource-stats-status-fix 2026-05-19T11:12 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -749,6 +749,14 @@ function resetResourceStatsPlaceholder(dialog) {
     table.innerHTML = '<p class="empty inline">筛选条件已改变，点击「刷新统计」重新读取。</p>';
   }
   setResourceStatsStatus(dialog, "info", "未自动刷新，避免打开或切换时重复扫统计。");
+}
+
+function setResourceStatsStatus(dialog, kind, text) {
+  const status = dialog.querySelector("#resourceStatsStatus");
+  if (!status) return;
+  status.hidden = !text;
+  status.className = `modal-status-line ${kind || "info"}`;
+  status.textContent = text || "";
 }
 
 function renderResourceStats(dialog, payload) {
