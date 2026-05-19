@@ -280,6 +280,56 @@ class SQLiteStore:
             count += 1
         return count
 
+    def backfill_resource_deltas_if_empty(self) -> int:
+        """资源流水表首次启用时,从历史消息箱补一次。
+
+        只跑 parser registry 提取 resource_deltas,不走 ingest_event,避免重建卡片、
+        observe 状态机或触发通知。
+        """
+        with self._connect() as conn:
+            existing = conn.execute("SELECT COUNT(*) FROM resource_deltas").fetchone()[0]
+            if existing:
+                return 0
+            rows = conn.execute(
+                """
+                SELECT id, chat_id, msg_id, text, source, date, sender_id,
+                       reply_to_msg_id, top_msg_id, mentions_json, sender_is_bot,
+                       edited_at, deleted_at, media_kind, media_meta_json
+                FROM raw_messages
+                WHERE text LIKE '%野外历练%' OR text LIKE '%战利品结算%'
+                ORDER BY rowid ASC
+                """
+            ).fetchall()
+        if not rows:
+            return 0
+        registry = build_parser_registry()
+        count = 0
+        with self._connect() as conn:
+            for row in rows:
+                event = RawMessageEvent(
+                    id=row[0],
+                    chat_id=int(row[1]),
+                    msg_id=int(row[2]),
+                    text=row[3],
+                    source=row[4],
+                    date=row[5],
+                    sender_id=row[6],
+                    reply_to_msg_id=row[7],
+                    top_msg_id=row[8],
+                    mentions=tuple(json.loads(row[9] or "[]")),
+                    sender_is_bot=bool(row[10]),
+                    edited_at=row[11],
+                    deleted_at=row[12],
+                    media_kind=row[13],
+                    media_meta=(json.loads(row[14]) if row[14] else None),
+                )
+                output = registry.parse(event)
+                if not output.resource_deltas:
+                    continue
+                self._replace_resource_deltas(conn, event, output.resource_deltas)
+                count += len(output.resource_deltas)
+        return count
+
     def rebuild_parsed_cards_if_legacy(self) -> int:
         """如果 parsed_cards 有任何「老结构」就全量重建。两种 legacy 情况:
         1. primary_channel='hall'(老 fallback 把未分类消息丢到 hall,UI 看不见)
@@ -602,37 +652,7 @@ class SQLiteStore:
                         json.dumps(card.to_api(), ensure_ascii=False),
                     ),
                 )
-            conn.execute("DELETE FROM resource_deltas WHERE raw_message_id=?", (event.id,))
-            for delta in output.resource_deltas:
-                event_time = delta.event_time or event.date or utc_now_iso()
-                day_key, week_key, month_key = _resource_period_keys(event_time)
-                conn.execute(
-                    """
-                    INSERT INTO resource_deltas(
-                        raw_message_id, source_type, source_name, player,
-                        resource_name, amount, unit, basis, event_time,
-                        day_key, week_key, month_key, chat_id, msg_id, meta_json
-                    )
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        delta.raw_message_id or event.id,
-                        delta.source_type,
-                        delta.source_name,
-                        delta.player,
-                        delta.resource_name,
-                        int(delta.amount),
-                        delta.unit,
-                        delta.basis,
-                        event_time,
-                        day_key,
-                        week_key,
-                        month_key,
-                        int(delta.chat_id or event.chat_id or 0),
-                        int(delta.msg_id or event.msg_id or 0),
-                        json.dumps(delta.meta or {}, ensure_ascii=False),
-                    ),
-                )
+            self._replace_resource_deltas(conn, event, output.resource_deltas)
             for patch in output.state_patches:
                 # 解析 send_as_id:patch 自己有就用;没有就回退到本条 event sender,
                 # 如果本条是「游戏 bot 回复」(根据 settings.game_bot_ids 判断,不是
@@ -708,6 +728,39 @@ class SQLiteStore:
         # 重新分流,否则「bot 回复我」会停留在 archive,首页重点流看不到。
         self._reclassify_direct_reply_children(event)
         return cards
+
+    def _replace_resource_deltas(self, conn, event: RawMessageEvent, deltas: Iterable[ResourceDelta]) -> None:
+        conn.execute("DELETE FROM resource_deltas WHERE raw_message_id=?", (event.id,))
+        for delta in deltas:
+            event_time = delta.event_time or event.date or utc_now_iso()
+            day_key, week_key, month_key = _resource_period_keys(event_time)
+            conn.execute(
+                """
+                INSERT INTO resource_deltas(
+                    raw_message_id, source_type, source_name, player,
+                    resource_name, amount, unit, basis, event_time,
+                    day_key, week_key, month_key, chat_id, msg_id, meta_json
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    delta.raw_message_id or event.id,
+                    delta.source_type,
+                    delta.source_name,
+                    delta.player,
+                    delta.resource_name,
+                    int(delta.amount),
+                    delta.unit,
+                    delta.basis,
+                    event_time,
+                    day_key,
+                    week_key,
+                    month_key,
+                    int(delta.chat_id or event.chat_id or 0),
+                    int(delta.msg_id or event.msg_id or 0),
+                    json.dumps(delta.meta or {}, ensure_ascii=False),
+                ),
+            )
 
     def _reclassify_direct_reply_children(self, parent_event: RawMessageEvent) -> int:
         """父消息落库后,重算直接回复它的卡片过滤频道。

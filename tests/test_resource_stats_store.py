@@ -69,5 +69,54 @@ def test_resource_stats_api_groups_by_period_and_excludes_blood_trial(tmp_path):
     assert "血色试炼结算已排除。" in payload["notes"]
 
 
+def test_resource_backfill_reads_existing_raw_messages_without_reingest(tmp_path):
+    store = SQLiteStore(tmp_path / "state.db")
+    with store._connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO raw_messages(
+                id, chat_id, msg_id, text, source, date, mentions_json, sender_is_bot
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "tg:-1:200",
+                -1,
+                200,
+                """【野外历练 · 灵机暗藏】
+@salt9527 获得修为 +12000，获得 【灵石】x399。""",
+                "韩天尊",
+                "2026-05-15T12:00:00+00:00",
+                "[]",
+                1,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO raw_messages(
+                id, chat_id, msg_id, text, source, date, mentions_json, sender_is_bot
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "tg:-1:201",
+                -1,
+                201,
+                "【战利品结算·血色试炼】\n所有队员均获得 9999修为 和 999贡献！",
+                "韩天尊",
+                "2026-05-15T13:00:00+00:00",
+                "[]",
+                1,
+            ),
+        )
+
+    assert store.backfill_resource_deltas_if_empty() == 2
+    assert store.backfill_resource_deltas_if_empty() == 0
+    assert {(item["resource_name"], item["amount"]) for item in store.list_resource_deltas()} == {
+        ("修为", 12000),
+        ("灵石", 399),
+    }
+
+
 def test_resource_stats_route_is_registered():
     assert "/api/resource-stats" in GET_ROUTES
