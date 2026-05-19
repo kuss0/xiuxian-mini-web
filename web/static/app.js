@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: xutian-luck-advice 2026-05-19T02:18
-console.log("[mini-web] build: xutian-luck-advice 2026-05-19T02:18 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: cooldown-autorefresh 2026-05-19T02:42
+console.log("[mini-web] build: cooldown-autorefresh 2026-05-19T02:42 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -220,7 +220,7 @@ async function loadMessages({ incremental = false } = {}) {
     // merge 进现有 state.messages,按 id 去重
     if (incoming.length === 0) {
       state.lastMessageSeq = Math.max(state.lastMessageSeq, serverMax);
-      return;
+      return { changed: false, count: 0 };
     }
     const byId = new Map(state.messages.map((m) => [m.id, m]));
     for (const card of incoming) {
@@ -243,6 +243,7 @@ async function loadMessages({ incremental = false } = {}) {
   if (!incremental && state.detailMode === "message") {
     renderDetail();
   }
+  return { changed: incoming.length > 0, count: incoming.length };
 }
 
 async function loadOutboxDrafts() {
@@ -299,6 +300,7 @@ async function loadIdentityModuleStates() {
     renderSidebarIdentityList();
     renderCultivationModules();
     renderDirectSendComposer();
+    renderSkillViews();
   } catch (err) {
     console.warn("[mini-web] loadIdentityModuleStates:", err);
   }
@@ -3535,6 +3537,10 @@ function renderIdentityModulesLine(sendAsId) {
 }
 
 function tickIdentityModuleChips() {
+  // 底部快捷指令倒计时不能依赖左侧身份 chip 是否存在;否则刚产生 CD 时
+  // state 已更新但按钮不会重画,用户要再点一次才看见灰态。
+  tickSkillBarChips();
+  tickCultivationModules();
   if (!sidebarIdentityList) return;
   const chips = sidebarIdentityList.querySelectorAll('[data-module-chip="1"]');
   if (!chips.length) return;
@@ -3559,10 +3565,6 @@ function tickIdentityModuleChips() {
     if (timeEl) timeEl.textContent = `剩 ${fmtCountdown(remaining)}`;
     if (fillEl) fillEl.style.width = `${pct.toFixed(1)}%`;
   });
-  // 顺手 tick 底栏技能盘的冷却显示
-  tickSkillBarChips();
-  // 也 tick 修炼面板里的卡片倒计时
-  tickCultivationModules();
 }
 
 function tickSkillBarChips() {
@@ -6522,6 +6524,7 @@ async function sendSkill(skillKey, opts) {
     if (result.ok) {
       const replyText = result.reply_to_msg_id ? ` (回复 #${result.reply_to_msg_id})` : "";
       showSkillToast(`✅ 已发: ${result.command}${replyText}`, "ok");
+      schedulePostSendRefresh();
     } else {
       showSkillToast(`❌ ${result.error || "发送失败"}`, "err");
     }
@@ -6531,6 +6534,16 @@ async function sendSkill(skillKey, opts) {
     state.skillBarBusyKeys.delete(skillKey);
     renderSkillViews();
   }
+}
+
+function schedulePostSendRefresh() {
+  [2500, 6500, 12000].forEach((delay) => {
+    window.setTimeout(() => {
+      if (document.hidden) return;
+      loadMessages({ incremental: true }).catch((err) => console.warn("[mini-web] post-send message refresh failed:", err));
+      loadIdentityModuleStates().catch((err) => console.warn("[mini-web] post-send identity state refresh failed:", err));
+    }, delay);
+  });
 }
 
 let _skillToastTimer = null;
@@ -6559,15 +6572,15 @@ async function pollTick() {
   try {
     // 即使用户切到草稿箱/官方定时视图,后台也继续把新消息 merge 进 state,
     // 这样切回 chat 时立刻看见最新的。listener 写得很快,前端再不跟就脱节。
-    await Promise.all([
+    const [messageResult] = await Promise.all([
       loadMessages({ incremental: true }),
       loadAccounts(),
       loadDiscoveredBots(),
     ]);
-    // 玩法状态机摘要每 ~6 个 tick(~30s)刷一次,纯展示,不阻塞主链。
+    // 有新消息时立刻同步玩法状态;否则每 ~6 个 tick(~30s)保底刷新一次。
     pollTickCount = (pollTickCount + 1) % 6;
-    if (pollTickCount === 0) {
-      loadIdentityModuleStates().catch(() => {});
+    if ((messageResult && messageResult.changed) || pollTickCount === 0) {
+      await loadIdentityModuleStates().catch(() => {});
     }
   } catch (error) {
     console.warn("[mini-web] poll tick failed:", error);
