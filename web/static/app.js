@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: channel-merge-dungeon-feedback 2026-05-20T02:55
-console.log("[mini-web] build: channel-merge-dungeon-feedback 2026-05-20T02:55 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: dungeon-status-filter-tools 2026-05-20T03:20
+console.log("[mini-web] build: dungeon-status-filter-tools 2026-05-20T03:20 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -83,6 +83,7 @@ const openCultivationButton = document.querySelector("#openCultivationButton");
 const outboxButton = document.querySelector("#outboxButton");
 const scheduleButton = document.querySelector("#scheduleButton");
 const logsButton = document.querySelector("#logsButton");
+const dungeonStatusButton = document.querySelector("#dungeonStatusButton");
 const resourceStatsButton = document.querySelector("#resourceStatsButton");
 const inventoryButton = document.querySelector("#inventoryButton");
 const loginAccountButton = document.querySelector("#loginAccountButton");
@@ -490,10 +491,29 @@ function openFilterSettingsModal() {
             <span>关注关键词</span>
             <textarea name="focus_keywords" rows="8" placeholder="每行一个关键词">${escapeHtml((settings.focus_keywords || []).join("\n"))}</textarea>
           </label>
+          <div class="filter-helper-row" aria-label="关注关键词预设">
+            ${["虚天殿", "坠魔谷", "共历心劫", "第二元神", "天道审判"].map((item) => `
+              <button type="button" data-filter-keyword-preset="${escapeAttr(item)}">关注 ${escapeHtml(item)}</button>
+            `).join("")}
+          </div>
           <label class="stacked-field">
             <span>重点流排除规则（正则）</span>
             <textarea name="focus_exclude_patterns" rows="3" placeholder="每行一条正则，例如 ^\\d{1,2}$">${escapeHtml((settings.focus_exclude_patterns || []).join("\n"))}</textarea>
           </label>
+          <div class="filter-rule-helper">
+            <label class="stacked-field">
+              <span>新增排除短语 / 正则</span>
+              <input id="filterExcludeDraft" placeholder="例如 坠魔谷护持；只会压普通重点消息，不压 @我/风险/动作卡" />
+            </label>
+            <div class="filter-helper-row">
+              <button type="button" data-filter-exclude-preset="坠魔谷护持" data-mode="contains">排除 坠魔谷护持</button>
+              <button type="button" data-filter-exclude-preset="^\\d{1,2}$" data-mode="regex">排除单独数字</button>
+              <button type="button" id="filterExcludePreview">预览新增规则</button>
+              <button type="button" id="filterExcludeAddContains">按短语加入</button>
+              <button type="button" id="filterExcludeAddRegex">按正则加入</button>
+            </div>
+            <div id="filterRulePreview" class="focus-preview-box"></div>
+          </div>
           <label class="toggle-row">
             <input type="checkbox" name="focus_include_player_plain" ${settings.focus_include_player_plain === false ? "" : "checked"} />
             <span>不带点的玩家消息进入重点流</span>
@@ -518,12 +538,63 @@ function openFilterSettingsModal() {
   if (!dialog) return;
   const status = dialog.querySelector("#filterSettingsStatus");
   const form = dialog.querySelector("#filterSettingsForm");
+  const keywordTextarea = form?.querySelector('[name="focus_keywords"]');
+  const excludeTextarea = form?.querySelector('[name="focus_exclude_patterns"]');
+  const excludeDraft = dialog.querySelector("#filterExcludeDraft");
+  const previewBox = dialog.querySelector("#filterRulePreview");
   const setStatus = (kind, text) => {
     if (!status) return;
     status.hidden = !text;
     status.className = `modal-status-line ${kind}`;
     status.textContent = text || "";
   };
+  dialog.querySelectorAll("[data-filter-keyword-preset]").forEach((button) => {
+    button.addEventListener("click", () => appendUniqueLine(keywordTextarea, button.dataset.filterKeywordPreset || ""));
+  });
+  dialog.querySelectorAll("[data-filter-exclude-preset]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const value = button.dataset.filterExcludePreset || "";
+      if (excludeDraft) excludeDraft.value = value;
+      await previewAndMaybeAppendFilterRule({
+        mode: button.dataset.mode || "contains",
+        input: excludeDraft,
+        target: excludeTextarea,
+        previewBox,
+        append: true,
+        setStatus,
+      });
+    });
+  });
+  dialog.querySelector("#filterExcludePreview")?.addEventListener("click", () => {
+    previewAndMaybeAppendFilterRule({
+      mode: looksLikeRegex(excludeDraft?.value || "") ? "regex" : "contains",
+      input: excludeDraft,
+      target: excludeTextarea,
+      previewBox,
+      append: false,
+      setStatus,
+    });
+  });
+  dialog.querySelector("#filterExcludeAddContains")?.addEventListener("click", () => {
+    previewAndMaybeAppendFilterRule({
+      mode: "contains",
+      input: excludeDraft,
+      target: excludeTextarea,
+      previewBox,
+      append: true,
+      setStatus,
+    });
+  });
+  dialog.querySelector("#filterExcludeAddRegex")?.addEventListener("click", () => {
+    previewAndMaybeAppendFilterRule({
+      mode: "regex",
+      input: excludeDraft,
+      target: excludeTextarea,
+      previewBox,
+      append: true,
+      setStatus,
+    });
+  });
   dialog.querySelector("#filterSettingsSave")?.addEventListener("click", async () => {
     const data = new FormData(form);
     setStatus("info", "保存中…");
@@ -567,6 +638,51 @@ function splitRows(value) {
     .split(/\n/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function appendUniqueLine(textarea, value) {
+  if (!textarea) return false;
+  const item = String(value || "").trim();
+  if (!item) return false;
+  const rows = splitRows(textarea.value);
+  if (!rows.includes(item)) {
+    rows.push(item);
+    textarea.value = rows.join("\n");
+  }
+  textarea.focus();
+  return true;
+}
+
+function looksLikeRegex(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  return text.startsWith("^") || text.endsWith("$") || /[\\[\]().+*?|{}]/.test(text);
+}
+
+async function previewAndMaybeAppendFilterRule({ mode, input, target, previewBox, append, setStatus }) {
+  const value = String(input?.value || "").trim();
+  if (!value) {
+    setStatus?.("warn", "先输入要排除的短语或正则。");
+    return null;
+  }
+  setStatus?.("info", "正在预览规则影响…");
+  if (previewBox) previewBox.innerHTML = '<p class="empty inline">预览中…</p>';
+  try {
+    const preview = await postJson("/api/focus-exclude/preview", { mode, text: value });
+    if (!preview.ok) throw new Error(preview.error || "预览失败");
+    if (previewBox) previewBox.innerHTML = renderFocusArchivePreview(preview);
+    if (append && preview.pattern) {
+      appendUniqueLine(target, preview.pattern);
+      setStatus?.("ok", `已加入排除规则：${preview.pattern}。预览影响 ${preview.total || 0} 条，点击保存后才会重分流。`);
+    } else {
+      setStatus?.("ok", `预览完成：${preview.pattern}，影响 ${preview.total || 0} 条。`);
+    }
+    return preview;
+  } catch (error) {
+    if (previewBox) previewBox.innerHTML = "";
+    setStatus?.("error", error.message || "预览失败");
+    return null;
+  }
 }
 
 function renderGameBotsDiscoveredList(dialog) {
@@ -1058,6 +1174,375 @@ function formatNumber(value) {
   const n = Number(value || 0);
   if (!Number.isFinite(n)) return String(value || 0);
   return new Intl.NumberFormat("zh-CN").format(n);
+}
+
+// ---------- 副本状态 ----------
+
+async function openDungeonStatusModal() {
+  const dialog = openModal({
+    title: "副本状态",
+    body: `
+      <section class="modal-section">
+        <h4>近期副本汇总</h4>
+        <p class="muted">只汇总消息箱里已经采集到的副本卡片，不维护独立状态机，不自动加入。发送 .加入副本 后仍要等天尊回复成功/失败。</p>
+        <p class="modal-status-line info" id="dungeonStatusLine">正在读取最近副本消息…</p>
+      </section>
+      <section class="modal-section">
+        <div id="dungeonStatusSummary" class="dungeon-status-summary"></div>
+        <div id="dungeonStatusList" class="dungeon-status-list">
+          <p class="empty inline">加载中…</p>
+        </div>
+      </section>
+    `,
+    footer: `
+      <button type="button" id="dungeonStatusRefresh">刷新</button>
+      <button type="button" data-modal-close>关闭</button>
+    `,
+  });
+  if (!dialog) return;
+  dialog.classList.add("dungeon-status-modal");
+  bindDungeonStatusModal(dialog);
+  await refreshDungeonStatusModal(dialog);
+}
+
+function bindDungeonStatusModal(dialog) {
+  dialog.querySelector("#dungeonStatusRefresh")?.addEventListener("click", () => {
+    refreshDungeonStatusModal(dialog).catch((error) => {
+      setDungeonStatusLine(dialog, "error", error.message || "刷新失败");
+    });
+  });
+}
+
+async function refreshDungeonStatusModal(dialog) {
+  const refreshButton = dialog.querySelector("#dungeonStatusRefresh");
+  const list = dialog.querySelector("#dungeonStatusList");
+  const summary = dialog.querySelector("#dungeonStatusSummary");
+  if (refreshButton) refreshButton.disabled = true;
+  if (list) list.innerHTML = '<p class="empty inline">加载中…</p>';
+  if (summary) summary.innerHTML = "";
+  setDungeonStatusLine(dialog, "info", "正在读取最近副本消息…");
+  try {
+    const params = new URLSearchParams({ channel: "all", channels: "dungeon", limit: "300" });
+    const payload = await fetchJson(`/api/messages?${params.toString()}`);
+    const messages = payload.messages || [];
+    const summaries = aggregateDungeonStatuses(messages);
+    renderDungeonStatusModal(dialog, summaries, messages.length);
+  } finally {
+    if (refreshButton) refreshButton.disabled = false;
+  }
+}
+
+function renderDungeonStatusModal(dialog, summaries, rawCount) {
+  const list = dialog.querySelector("#dungeonStatusList");
+  const summary = dialog.querySelector("#dungeonStatusSummary");
+  const openCount = summaries.filter((item) => item.statusKind === "open" || item.statusKind === "choice").length;
+  const closedCount = summaries.filter((item) => item.statusKind === "closed" || item.statusKind === "failed").length;
+  const actionCount = summaries.reduce((total, item) => total + item.actions.length, 0);
+  if (summary) {
+    summary.innerHTML = `
+      <div class="resource-stat-card">
+        <span>读取消息</span>
+        <strong>${escapeHtml(formatNumber(rawCount))}</strong>
+        <small>最近副本频道卡片</small>
+      </div>
+      <div class="resource-stat-card">
+        <span>活跃副本</span>
+        <strong>${escapeHtml(formatNumber(openCount))}</strong>
+        <small>可加入 / 进行中 / 需要抉择</small>
+      </div>
+      <div class="resource-stat-card">
+        <span>可用动作</span>
+        <strong>${escapeHtml(formatNumber(actionCount))}</strong>
+        <small>只复制或跳转，不自动发送</small>
+      </div>
+      <div class="resource-stat-card">
+        <span>结束/失败</span>
+        <strong>${escapeHtml(formatNumber(closedCount))}</strong>
+        <small>解散或加入失败</small>
+      </div>
+    `;
+  }
+  if (!list) return;
+  if (!summaries.length) {
+    list.innerHTML = '<p class="empty inline">最近没有采集到副本消息。先确认 listener 正在采集，或去「日志」里看全部消息。</p>';
+    return;
+  }
+  list.innerHTML = summaries.map(renderDungeonStatusCard).join("");
+  bindDungeonStatusCards(list, summaries);
+  setDungeonStatusLine(dialog, "ok", `已汇总 ${summaries.length} 个近期副本线索。`);
+}
+
+function aggregateDungeonStatuses(messages) {
+  const grouped = new Map();
+  const sorted = [...messages].sort((a, b) => messageTimeMs(b) - messageTimeMs(a));
+  for (const message of sorted) {
+    const key = dungeonGroupKey(message);
+    const summary = grouped.get(key) || makeDungeonSummary(key, message);
+    updateDungeonSummary(summary, message);
+    grouped.set(key, summary);
+  }
+  return Array.from(grouped.values()).sort((a, b) => {
+    const rankDiff = dungeonStatusRank(a.statusKind) - dungeonStatusRank(b.statusKind);
+    if (rankDiff !== 0) return rankDiff;
+    return messageTimeMs(b.latestMessage) - messageTimeMs(a.latestMessage);
+  });
+}
+
+function dungeonGroupKey(message) {
+  const fields = message.fields || {};
+  const dungeonId = cleanText(fields["副本ID"]);
+  if (dungeonId) return `id:${dungeonId}`;
+  const title = cleanText(message.title);
+  const name = cleanText(fields["副本名"]) || dungeonNameFromText(`${title}\n${message.raw || ""}`) || title || "副本";
+  const chat = message.chat_id ?? "";
+  return `name:${name}:${chat}`;
+}
+
+function makeDungeonSummary(key, message) {
+  const fields = message.fields || {};
+  const title = cleanText(message.title);
+  const name = cleanText(fields["副本名"]) || dungeonNameFromText(`${title}\n${message.raw || ""}`) || fallbackDungeonNameFromTitle(title);
+  const dungeonId = key.startsWith("id:") ? key.slice(3) : cleanText(fields["副本ID"]);
+  return {
+    key,
+    dungeonId,
+    dungeonName: name,
+    status: "副本消息",
+    statusKind: "info",
+    latestStage: "",
+    openedBy: "",
+    capacity: "",
+    oracle: "",
+    advice: "",
+    route: "",
+    strategy: "",
+    silenceOrder: "",
+    joinSuccess: [],
+    failures: [],
+    actions: [],
+    messages: [],
+    latestMessage: message,
+    statusMessage: null,
+  };
+}
+
+function updateDungeonSummary(summary, message) {
+  const fields = message.fields || {};
+  const tags = message.tags || [];
+  const title = cleanText(message.title);
+  const raw = String(message.raw || "");
+  summary.latestMessage = newerMessage(summary.latestMessage, message);
+  summary.dungeonId = summary.dungeonId || cleanText(fields["副本ID"]);
+  const candidateName = cleanText(fields["副本名"]) || dungeonNameFromText(`${title}\n${raw}`) || fallbackDungeonNameFromTitle(title);
+  if (!summary.dungeonName || shouldReplaceDungeonName(summary.dungeonName, candidateName)) {
+    summary.dungeonName = candidateName;
+  }
+  summary.latestStage = summary.latestStage || cleanText(fields["阶段"]);
+  summary.openedBy = summary.openedBy || cleanText(fields["开门人"]);
+  summary.capacity = summary.capacity || cleanText(fields["人数上限"]);
+  summary.oracle = summary.oracle || cleanText(fields["卦象"]);
+  summary.advice = summary.advice || cleanText(fields["行运建议"]);
+  summary.route = summary.route || cleanText(fields["路线"]);
+  summary.strategy = summary.strategy || cleanText(fields["阵策"]);
+  summary.silenceOrder = summary.silenceOrder || cleanText(fields["静场令"]);
+  if (title === "加入副本成功" || (tags.includes("加入") && !tags.includes("失败"))) {
+    const username = cleanText(fields.username) || usernameFromText(raw);
+    if (username && !summary.joinSuccess.includes(username)) summary.joinSuccess.push(username);
+  }
+  if (title === "加入副本失败" || tags.includes("失败")) {
+    const reason = cleanText(fields["失败原因"]) || cleanText(message.summary) || "加入失败";
+    if (!summary.failures.includes(reason)) summary.failures.push(reason);
+  }
+  for (const action of message.actions || []) {
+    const command = cleanText(action.command);
+    if (!command) continue;
+    const key = `${command}|${action.reply_to_msg_id || ""}|${action.chat_id || ""}`;
+    if (!summary.actions.some((item) => item.key === key)) {
+      summary.actions.push({ ...action, key, sourceMessageId: message.id, sourceTitle: title });
+    }
+  }
+  summary.messages.push(message);
+  summary.messages = summary.messages
+    .sort((a, b) => messageTimeMs(b) - messageTimeMs(a))
+    .slice(0, 8);
+  const statusInfo = dungeonStatusFromMessage(message);
+  const statusTime = messageTimeMs(message);
+  const currentStatusTime = summary.statusMessage ? messageTimeMs(summary.statusMessage) : -Infinity;
+  if (statusInfo.kind !== "info" && (!summary.statusMessage || statusTime >= currentStatusTime)) {
+    summary.status = statusInfo.label;
+    summary.statusKind = statusInfo.kind;
+    summary.statusMessage = message;
+  } else if (!summary.statusMessage && summary.statusKind === "info") {
+    summary.status = statusInfo.label;
+  }
+}
+
+function dungeonStatusFromMessage(message) {
+  const fields = message.fields || {};
+  const tags = message.tags || [];
+  const title = cleanText(message.title);
+  const status = cleanText(fields["状态"]);
+  if (title === "副本房间解散" || tags.includes("解散")) {
+    return { kind: "closed", label: "已解散", rank: dungeonStatusRank("closed") };
+  }
+  if (title === "加入副本失败" || tags.includes("失败")) {
+    return { kind: "failed", label: "加入失败", rank: dungeonStatusRank("failed") };
+  }
+  if (/静场/.test(status) || tags.includes("静场令")) {
+    return { kind: "choice", label: status || "静场令", rank: dungeonStatusRank("choice") };
+  }
+  if (/需要抉择/.test(status) || tags.includes("需要抉择")) {
+    return { kind: "choice", label: status || "需要抉择", rank: dungeonStatusRank("choice") };
+  }
+  if (/可加入/.test(status) || tags.includes("可加入") || /开启$/.test(title)) {
+    return { kind: "open", label: status || "可加入", rank: dungeonStatusRank("open") };
+  }
+  if (/已加入/.test(status) || title === "加入副本成功") {
+    return { kind: "joined", label: status || "已加入", rank: dungeonStatusRank("joined") };
+  }
+  if (/进行中|路线已选|卦象|路策/.test(status) || /推进|卦象|路线|路策/.test(title)) {
+    return { kind: "active", label: status || "进行中", rank: dungeonStatusRank("active") };
+  }
+  return { kind: "info", label: status || title || "副本消息", rank: dungeonStatusRank("info") };
+}
+
+function dungeonStatusRank(kind) {
+  return {
+    choice: 0,
+    open: 1,
+    active: 2,
+    joined: 3,
+    failed: 4,
+    closed: 5,
+    info: 6,
+  }[kind] ?? 6;
+}
+
+function renderDungeonStatusCard(summary) {
+  const chips = [
+    ["副本ID", summary.dungeonId ? `#${summary.dungeonId}` : ""],
+    ["阶段", summary.latestStage],
+    ["开门人", summary.openedBy],
+    ["人数", summary.capacity],
+    ["卦象", summary.oracle],
+    ["建议", summary.advice],
+    ["路线", summary.route],
+    ["阵策", summary.strategy],
+    ["静场令", summary.silenceOrder],
+  ].filter(([, value]) => value);
+  const latestId = summary.latestMessage?.id || "";
+  const joins = summary.joinSuccess.length ? summary.joinSuccess.map((user) => `@${user}`).join("、") : "";
+  return `
+    <article class="dungeon-status-card ${escapeAttr(summary.statusKind)}" data-dungeon-key="${escapeAttr(summary.key)}">
+      <div class="dungeon-status-head">
+        <div class="dungeon-status-title">
+          <strong>${escapeHtml(summary.dungeonName || "副本")}${summary.dungeonId ? ` #${escapeHtml(summary.dungeonId)}` : ""}</strong>
+          <span class="status-pill ${escapeAttr(dungeonStatusPillClass(summary.statusKind))}">${escapeHtml(summary.status)}</span>
+        </div>
+        <small>${escapeHtml(formatChatTime(summary.latestMessage?.time) || summary.latestMessage?.time || "")}</small>
+      </div>
+      ${chips.length ? `<div class="dungeon-status-meta">${chips.map(([key, value]) => `<span><b>${escapeHtml(key)}</b>${escapeHtml(value)}</span>`).join("")}</div>` : ""}
+      ${joins ? `<p class="dungeon-status-note ok">已成功加入：${escapeHtml(joins)}</p>` : ""}
+      ${summary.failures.length ? `<p class="dungeon-status-note warn">失败：${escapeHtml(summary.failures.slice(0, 2).join("；"))}</p>` : ""}
+      ${summary.actions.length ? `
+        <div class="dungeon-status-actions">
+          ${summary.actions.slice(0, 4).map((action, index) => `
+            <button type="button" data-dungeon-key="${escapeAttr(summary.key)}" data-dungeon-action-index="${index}" title="复制命令，不会直接发送">${escapeHtml(action.command || "复制命令")}</button>
+          `).join("")}
+        </div>
+      ` : ""}
+      <ol class="dungeon-status-timeline">
+        ${summary.messages.slice(0, 5).map((message) => `
+          <li>
+            <button type="button" data-dungeon-jump="${escapeAttr(message.id)}">${escapeHtml(formatChatTime(message.time) || "时间")}</button>
+            <span>${escapeHtml(message.title || "副本消息")}</span>
+            <small>${escapeHtml(clipGraphemes(String(message.summary || message.raw || "").replace(/\s+/g, " "), 90))}</small>
+          </li>
+        `).join("")}
+      </ol>
+      ${latestId ? `<button type="button" class="dungeon-status-open" data-dungeon-jump="${escapeAttr(latestId)}">查看最新消息</button>` : ""}
+    </article>
+  `;
+}
+
+function bindDungeonStatusCards(root, summaries) {
+  const byKey = new Map(summaries.map((item) => [item.key, item]));
+  root.querySelectorAll("[data-dungeon-action-index]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const key = button.dataset.dungeonKey || "";
+      const summary = byKey.get(key);
+      const action = summary?.actions[Number(button.dataset.dungeonActionIndex || 0)];
+      if (!action?.command) return;
+      await copyCommandToClipboard(action.command, button);
+    });
+  });
+  root.querySelectorAll("[data-dungeon-jump]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = button.dataset.dungeonJump || "";
+      if (!id) return;
+      let target = state.messages.find((message) => message.id === id);
+      if (!target) target = await fetchMessageById(id);
+      if (target) {
+        closeModal();
+        jumpToMessage(target);
+      }
+    });
+  });
+}
+
+function dungeonStatusPillClass(kind) {
+  if (kind === "open" || kind === "joined") return "ok";
+  if (kind === "choice" || kind === "active") return "warn";
+  if (kind === "failed" || kind === "closed") return "risk";
+  return "info";
+}
+
+function setDungeonStatusLine(dialog, kind, text) {
+  const status = dialog.querySelector("#dungeonStatusLine");
+  if (!status) return;
+  status.hidden = !text;
+  status.className = `modal-status-line ${kind || "info"}`;
+  status.textContent = text || "";
+}
+
+function newerMessage(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return messageTimeMs(b) >= messageTimeMs(a) ? b : a;
+}
+
+function messageTimeMs(message) {
+  const time = Date.parse(message?.time || "");
+  if (Number.isFinite(time)) return time;
+  return Number(message?.seq || message?.msg_id || 0);
+}
+
+function cleanText(value) {
+  return String(value ?? "").trim();
+}
+
+function dungeonNameFromText(value) {
+  const text = String(value || "");
+  for (const name of ["虚天殿", "黄龙山", "昆吾山", "坠魔谷", "血色试炼"]) {
+    if (text.includes(name)) return name;
+  }
+  return "";
+}
+
+function fallbackDungeonNameFromTitle(title) {
+  const text = cleanText(title);
+  if (!text || /加入副本|副本房间|副本消息/.test(text)) return "副本";
+  return text.replace(/(开启|推进|卦象|路线已选|路策结果)$/, "") || "副本";
+}
+
+function shouldReplaceDungeonName(current, candidate) {
+  if (!candidate || candidate === "副本") return false;
+  return !current || current === "副本" || /加入副本|副本房间|副本消息/.test(current);
+}
+
+function usernameFromText(value) {
+  const match = /@([A-Za-z0-9_]+)/.exec(String(value || ""));
+  return match ? match[1] : "";
 }
 
 // ---------- 储物袋 / 批量转移 ----------
@@ -6745,6 +7230,16 @@ if (resourceStatsButton) {
   resourceStatsButton.addEventListener("click", async () => {
     try {
       await openResourceStatsModal();
+    } catch (error) {
+      showError(error);
+    }
+  });
+}
+
+if (dungeonStatusButton) {
+  dungeonStatusButton.addEventListener("click", async () => {
+    try {
+      await openDungeonStatusModal();
     } catch (error) {
       showError(error);
     }
