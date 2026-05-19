@@ -208,13 +208,20 @@ def _get_channels(request: MiniWebHandler, query: dict) -> dict:
 
 def _get_messages(request: MiniWebHandler, query: dict) -> dict:
     channel = (query.get("channel") or ["all"])[0]
+    channels = query.get("channels") or []
     since_seq = (query.get("since_seq") or ["0"])[0]
     before_seq = (query.get("before_seq") or ["0"])[0]
     limit = (query.get("limit") or ["0"])[0]
     target_id = (query.get("id") or query.get("target_id") or [""])[0]
     mode = (query.get("mode") or [""])[0]
     return _app(request).messages_payload(
-        channel, since_seq=since_seq, before_seq=before_seq, limit=limit, target_id=target_id, mode=mode
+        channel,
+        channels=channels,
+        since_seq=since_seq,
+        before_seq=before_seq,
+        limit=limit,
+        target_id=target_id,
+        mode=mode,
     )
 
 

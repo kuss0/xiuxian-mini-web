@@ -193,14 +193,26 @@ class MiniWebServer:
     def channels_payload(self) -> dict:
         return {"channels": [channel.to_api() for channel in CHANNELS]}
 
-    def messages_payload(self, channel: str = "all", *, since_seq: int = 0, before_seq: int = 0, limit: int = 0, target_id: str = "", mode: str = "") -> dict:
+    def messages_payload(
+        self,
+        channel: str = "all",
+        *,
+        channels: list[str] | tuple[str, ...] | None = None,
+        since_seq: int = 0,
+        before_seq: int = 0,
+        limit: int = 0,
+        target_id: str = "",
+        mode: str = "",
+    ) -> dict:
         """对照 docs/architecture.md inbox 设计:
         - 空 since_seq → 取最近 limit 条(默认 200),前端初始化用
         - since_seq > 0 → 增量,只返 rowid > since_seq 的新卡片(轮询用)
+        - channels 给定 → 多频道 OR 合并过滤,支撑网游频道式合并视图
         - target_id 给定 → 只返这一条(回复跳转用,父消息不在 state 时按需拉)
         - mode='solo' → server 端 SQL 过滤「我发的 + bot 回我的」,不依赖前端窗口
         - 返回 max_seq 让前端记录新水位
         """
+        channel_filters = normalize_channel_filters(channel, channels)
         target_id = str(target_id or "").strip()
         if target_id and hasattr(self._store, "get_card"):
             result = self._store.get_card(target_id)
@@ -250,14 +262,16 @@ class MiniWebServer:
                 bot_ids=list({int(x) for x in bot_ids if x}),
                 since_seq=since_seq,
                 limit=limit,
-                channel=channel,
+                channel="all" if channel_filters else channel,
+                channels=channel_filters,
             )
         else:
             page = self._store.list_card_page(
                 since_seq=since_seq,
                 before_seq=before_seq,
                 limit=limit,
-                channel=channel,
+                channel="all" if channel_filters else channel,
+                channels=channel_filters,
             )
         messages = []
         max_seq = since_seq
@@ -275,6 +289,7 @@ class MiniWebServer:
             "max_seq": max_seq,
             "incremental": since_seq > 0,
             "mode": str(mode or "all"),
+            "channels": channel_filters or ([str(channel or "all")] if str(channel or "all") != "all" else []),
         }
 
     def messages_export_payload(self, channel: str = "all", *, mode: str = "", fmt: str = "jsonl") -> dict:
@@ -1912,6 +1927,29 @@ def synth_self_identity(account: dict) -> dict | None:
 
 def public_outbox_draft(draft: dict) -> dict:
     return dict(draft)
+
+
+def normalize_channel_filters(
+    channel: str = "all",
+    channels: list[str] | tuple[str, ...] | None = None,
+) -> list[str]:
+    raw_items: list[str] = []
+    for item in channels or ():
+        for part in str(item or "").split(","):
+            raw_items.append(part.strip())
+    channel = str(channel or "all").strip()
+    if channel and channel != "all":
+        raw_items.append(channel)
+
+    result: list[str] = []
+    seen: set[str] = set()
+    known = {item.key for item in CHANNELS}
+    for item in raw_items:
+        if not item or item == "all" or item in seen or item not in known:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
 
 
 def build_inventory_transfer_plan(payload: dict) -> dict:

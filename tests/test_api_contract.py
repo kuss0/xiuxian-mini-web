@@ -642,6 +642,18 @@ def test_server_payload_shape_stays_compatible():
     assert {"id", "channel", "title", "summary", "actions"} <= set(payload["messages"][0])
 
 
+def test_messages_payload_supports_multi_channel_sample_store():
+    server = MiniWebServer(store=SampleStore())
+
+    payload = server.messages_payload("all", channels=["dungeon,risk"])
+
+    assert payload["channels"] == ["dungeon", "risk"]
+    titles = {message["title"] for message in payload["messages"]}
+    assert "虚天殿开启" in titles
+    assert titles & {"风险提醒", "天道审判"}
+    assert all({"dungeon", "risk"}.intersection(message.get("channels") or [message["channel"]]) for message in payload["messages"])
+
+
 def test_action_suggestions_keep_reply_context():
     dungeon = [card.to_api() for card in SampleStore().list_cards("dungeon")][0]
     action = dungeon["actions"][0]
@@ -1353,6 +1365,20 @@ def test_messages_payload_supports_incremental_pull(tmp_path):
     assert incremental["messages"] == [], "没有新卡片应返空"
     assert incremental["max_seq"] >= high_water
     assert incremental["incremental"] is True
+
+
+def test_messages_payload_supports_multi_channel_sqlite_store(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.seed_samples_if_empty()
+    server = MiniWebServer(store=store)
+
+    payload = server.messages_payload("all", channels=["dungeon", "risk"], limit=200)
+
+    assert payload["channels"] == ["dungeon", "risk"]
+    titles = {message["title"] for message in payload["messages"]}
+    assert "虚天殿开启" in titles
+    assert titles & {"风险提醒", "天道审判"}
+    assert all({"dungeon", "risk"}.intersection(message.get("channels") or [message["channel"]]) for message in payload["messages"])
 
 
 def test_messages_payload_initial_caps_with_default_limit(tmp_path):

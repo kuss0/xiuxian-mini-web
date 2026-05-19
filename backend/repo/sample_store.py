@@ -5,6 +5,27 @@ from backend.parsers import build_parser_registry
 from backend.processors import MessagePipeline
 
 
+def _normalize_channel_filters(
+    channel: str = "all",
+    channels: list[str] | tuple[str, ...] | None = None,
+) -> list[str]:
+    raw_items: list[str] = []
+    if channels:
+        raw_items.extend(str(item or "").strip() for item in channels)
+    channel = str(channel or "all").strip()
+    if channel and channel != "all":
+        raw_items.append(channel)
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        if not item or item == "all" or item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
+
+
 SAMPLE_EVENTS = [
     RawMessageEvent(
         id="sample-1",
@@ -116,11 +137,14 @@ class SampleStore:
         before_seq: int = 0,
         limit: int = 0,
         channel: str = "all",
+        channels: list[str] | tuple[str, ...] | None = None,
     ) -> list[tuple[int, ParsedCard]]:
         """In-memory mirror of SQLiteStore.list_card_page。把列表索引当 seq。"""
         ordered = list(enumerate(self._cards, start=1))  # (seq, card),最旧 seq=1
-        if channel != "all":
-            ordered = [(seq, card) for seq, card in ordered if channel in card.channels]
+        filters = _normalize_channel_filters(channel, channels)
+        if filters:
+            wanted = set(filters)
+            ordered = [(seq, card) for seq, card in ordered if wanted.intersection(card.channels)]
         if since_seq > 0:
             ordered = [(seq, card) for seq, card in ordered if seq > since_seq]
         if before_seq > 0:

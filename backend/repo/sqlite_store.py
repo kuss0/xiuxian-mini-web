@@ -1294,12 +1294,13 @@ class SQLiteStore:
         before_seq: int = 0,
         limit: int = 0,
         channel: str = "all",
+        channels: list[str] | tuple[str, ...] | None = None,
     ) -> list[tuple[int, ParsedCard]]:
         """对照 docs/architecture.md 的 inbox 设计:支持游标式增量拉。
         - since_seq:只返 rowid > since_seq 的新卡片(轮询用)
         - before_seq:只返 rowid < before_seq 的旧卡片(日志 modal 往下翻用)
         - limit:封顶,初始化时取最近 200 条避免一次性拉全
-        - channel:服务端先过滤,省带宽
+        - channel/channels:服务端先过滤,省带宽;channels 为 OR 组合
 
         rowid 是 SQLite 自动递增的插入序号,新进来的卡片 rowid 一定更大。
         Edit 走 UPSERT,rowid 不变 —— 当前不专门追踪「编辑过的旧卡片是否要重发」,
@@ -1313,9 +1314,10 @@ class SQLiteStore:
         if before_seq > 0:
             where.append("rowid < ?")
             params.append(int(before_seq))
-        if channel != "all":
-            where.append("channels_json LIKE ?")
-            params.append(f'%"{channel}"%')
+        channel_filters = _normalize_channel_filters(channel, channels)
+        if channel_filters:
+            where.append("(" + " OR ".join("channels_json LIKE ?" for _ in channel_filters) + ")")
+            params.extend(f'%"{item}"%' for item in channel_filters)
         if where:
             sql_parts.append("WHERE " + " AND ".join(where))
         # since_seq 模式按 rowid ASC 给前端,前端按到来顺序 merge;
@@ -1351,6 +1353,7 @@ class SQLiteStore:
         since_seq: int = 0,
         limit: int = 0,
         channel: str = "all",
+        channels: list[str] | tuple[str, ...] | None = None,
     ) -> list[tuple[int, ParsedCard]]:
         """单机模式专用:只返「我发的」+「bot 直接回我的」。
 
@@ -1396,6 +1399,10 @@ class SQLiteStore:
         if since_seq > 0:
             where_parts.append("parsed_cards.rowid > ?")
             params.append(int(since_seq))
+        channel_filters = _normalize_channel_filters(channel, channels)
+        if channel_filters:
+            where_parts.append("(" + " OR ".join("parsed_cards.channels_json LIKE ?" for _ in channel_filters) + ")")
+            params.extend(f'%"{item}"%' for item in channel_filters)
 
         order = "ORDER BY parsed_cards.rowid ASC" if since_seq > 0 else "ORDER BY parsed_cards.rowid DESC"
         limit_clause = ""
@@ -1417,8 +1424,6 @@ class SQLiteStore:
         result: list[tuple[int, ParsedCard]] = []
         for rowid, payload in rows:
             card = ParsedCard.from_api(json.loads(payload))
-            if channel != "all" and channel not in card.channels:
-                continue
             result.append((int(rowid), card))
         return result
 
@@ -2953,6 +2958,27 @@ def _safe_int(value: object) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _normalize_channel_filters(
+    channel: str = "all",
+    channels: list[str] | tuple[str, ...] | None = None,
+) -> list[str]:
+    raw_items: list[str] = []
+    if channels:
+        raw_items.extend(str(item or "").strip() for item in channels)
+    channel = str(channel or "all").strip()
+    if channel and channel != "all":
+        raw_items.append(channel)
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        if not item or item == "all" or item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
 
 
 def _normalize_account(payload: dict) -> dict:

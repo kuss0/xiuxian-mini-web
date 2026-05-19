@@ -24,10 +24,17 @@
           </div>
         </section>
 
-        <!-- 隐藏面板(功能未完成):当前角色、频道过滤 -->
+        <section class="panel channel-panel">
+          <div class="panel-head">
+            <h2>频道</h2>
+            <button id="selectAllChannels" type="button">全选</button>
+          </div>
+          <p id="activeChannelText" class="muted-line">重点</p>
+          <div id="channelFilters" class="channel-filters"></div>
+        </section>
+
+        <!-- 隐藏面板(功能未完成):当前角色 -->
         <div id="identitySnapshot" hidden></div>
-        <div id="channelFilters" hidden></div>
-        <button id="selectAllChannels" type="button" hidden></button>
       </aside>
 
       <main class="main">
@@ -51,7 +58,6 @@
               <div id="quickFilters" class="quick-filters"></div>
               <span id="messageCount" class="message-count-pill">0 条</span>
             </div>
-            <p id="activeChannelText" hidden></p>
             <div id="characterHud" class="character-hud" hidden></div>
             <div id="messageList" class="message-list"></div>
             <button id="jumpToLatest" class="jump-to-latest" type="button" hidden>↑ 回到最新</button>

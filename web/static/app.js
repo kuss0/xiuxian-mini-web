@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: resource-stats-aggregate-summary 2026-05-20T00:10
-console.log("[mini-web] build: resource-stats-aggregate-summary 2026-05-20T00:10 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: channel-merge-dungeon-feedback 2026-05-20T02:55
+console.log("[mini-web] build: channel-merge-dungeon-feedback 2026-05-20T02:55 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -196,8 +196,20 @@ async function loadChannels() {
 async function loadMessages({ incremental = false } = {}) {
   // 增量:轮询用,只拉 rowid > lastSeq 的新卡片(可能 0 条)
   // 初始化:首次/手动刷新用,拉最近 200 条
-  // channel:默认 focus(重点流);日志按钮单独走全量 modal
-  const params = new URLSearchParams({ channel: serverChannelForCurrentView() });
+  // channel/channels:默认 focus(重点流);多频道组合由后端 OR 过滤;日志按钮单独走全量 modal
+  if (state.channels.length > 0 && selectedChannelKeys().length === 0) {
+    if (!incremental) {
+      state.lastMessageSeq = 0;
+      state.messages = [];
+      state.selectedMessageId = null;
+      renderChannelFilters();
+      renderQuickFilters();
+      renderMessages();
+      if (state.detailMode === "message") renderDetail();
+    }
+    return { changed: false, count: 0 };
+  }
+  const params = messageQueryParamsForCurrentView();
   const mode = state.viewMode === "solo" ? "solo" : "";
   if (mode) params.set("mode", mode);
   if (incremental && state.lastMessageSeq > 0) {
@@ -239,6 +251,8 @@ async function loadMessages({ incremental = false } = {}) {
   if (!visibleMessages().some((message) => message.id === state.selectedMessageId)) {
     state.selectedMessageId = visibleMessages()[0]?.id ?? null;
   }
+  renderChannelFilters();
+  renderQuickFilters();
   renderMessages();
   // 轮询走的增量更新不要碰右侧详情面板 — 用户可能正在看某条消息的详情,
   // 重渲会让按钮和滚动闪一下。初始化 / 手动刷新才重渲详情。
@@ -1540,6 +1554,64 @@ function serverChannelForCurrentView() {
   return "all";
 }
 
+function selectedChannelKeys() {
+  const known = new Set(state.channels.map((channel) => channel.key));
+  return [...state.selectedChannels].filter((key) => known.has(key));
+}
+
+function messageQueryParamsForCurrentView() {
+  const keys = selectedChannelKeys();
+  const allSelected = state.channels.length > 0 && keys.length === state.channels.length;
+  const params = new URLSearchParams({ channel: allSelected ? "all" : serverChannelForCurrentView() });
+  if (!allSelected && keys.length > 1) {
+    params.set("channel", "all");
+    params.set("channels", keys.join(","));
+  }
+  return params;
+}
+
+function isDungeonJoinRequest(skillKey, command) {
+  return skillKey === "dungeon_join" || /^\s*\.加入副本(?:\s|$)/.test(String(command || ""));
+}
+
+function sentStatusText(result, { skillKey = "", command = "", replySeparator = "，回复 #" } = {}) {
+  const sentId = result?.sent_msg_id || "?";
+  const replyId = result?.reply_to_msg_id || "";
+  const replyText = replyId ? `${replySeparator}${replyId}` : "";
+  const sentCommand = result?.command || command || "";
+  if (isDungeonJoinRequest(skillKey, sentCommand)) {
+    return `加入副本请求已发送 #${sentId}，等待天尊返回结果${replyText}`;
+  }
+  return `已发送 #${sentId}${replyText}`;
+}
+
+function sentToastText(result, { skillKey = "", command = "" } = {}) {
+  const replyText = result?.reply_to_msg_id ? ` (回复 #${result.reply_to_msg_id})` : "";
+  const sentCommand = result?.command || command || "";
+  if (isDungeonJoinRequest(skillKey, sentCommand)) {
+    return `✅ 加入副本请求已发送，等待天尊返回结果${replyText}`;
+  }
+  return `✅ 已发: ${sentCommand}${replyText}`;
+}
+
+async function applyChannelSelection(nextChannels) {
+  const known = new Set(state.channels.map((channel) => channel.key));
+  const filtered = [...(nextChannels || [])].filter((key) => known.has(key));
+  state.selectedChannels = new Set(filtered);
+  state.lastMessageSeq = 0;
+  state.messages = [];
+  state.selectedMessageId = null;
+  state.detailMode = "message";
+  renderQuickFilters();
+  renderChannelFilters();
+  renderMessages();
+  renderDetail();
+  if (filtered.length === 0) {
+    return { changed: false, count: 0 };
+  }
+  await loadMessages({ incremental: false });
+}
+
 function parentMessageOf(card) {
   if (!card.reply_to_msg_id || !card.chat_id) return null;
   const parentId = `tg:${card.chat_id}:${card.reply_to_msg_id}`;
@@ -1651,18 +1723,16 @@ function renderChannelFilters() {
         <span class="channel-chip-count">${count}</span>
       `;
       button.addEventListener("click", () => {
+        const next = new Set(state.selectedChannels);
         if (state.selectedChannels.has(channel.key)) {
-          state.selectedChannels.delete(channel.key);
+          next.delete(channel.key);
         } else {
-          state.selectedChannels.add(channel.key);
+          next.add(channel.key);
         }
-        if (!visibleMessages().some((message) => message.id === state.selectedMessageId)) {
-          state.selectedMessageId = visibleMessages()[0]?.id ?? null;
-        }
-        state.detailMode = "message";
-        renderChannelFilters();
-        renderMessages();
-        renderDetail();
+        applyChannelSelection(next).catch((error) => {
+          console.warn("[mini-web] channel selection failed:", error);
+          showSkillToast(`频道加载失败: ${error.message || error}`, "err");
+        });
       });
       return button;
     })
@@ -1726,24 +1796,15 @@ function renderQuickFilters() {
 }
 
 async function applyQuickFilter(key) {
+  let nextChannels;
   if (key === "__all") {
-    state.selectedChannels = new Set(state.channels.map((c) => c.key));
+    nextChannels = state.channels.map((c) => c.key);
   } else if (quickFilterActiveKey() === key) {
-    state.selectedChannels = new Set(["focus"]);
+    nextChannels = ["focus"];
   } else {
-    state.selectedChannels = new Set([key]);
+    nextChannels = [key];
   }
-  if (!visibleMessages().some((message) => message.id === state.selectedMessageId)) {
-    state.selectedMessageId = visibleMessages()[0]?.id ?? null;
-  }
-  state.lastMessageSeq = 0;
-  state.messages = [];
-  state.detailMode = "message";
-  renderQuickFilters();
-  renderChannelFilters();
-  renderMessages();
-  renderDetail();
-  await loadMessages({ incremental: false });
+  await applyChannelSelection(nextChannels);
 }
 
 function channelMessageCounts() {
@@ -6306,8 +6367,8 @@ async function sendDirectComposerMessage() {
       command_override: command,
     });
     if (result.ok) {
-      setDirectSendStatus(`已发送 #${result.sent_msg_id || "?"}`, "ok");
-      showSkillToast(`✅ 已发: ${result.command}`, "ok");
+      setDirectSendStatus(sentStatusText(result, { skillKey: "manual_send", command }), "ok");
+      showSkillToast(sentToastText(result, { skillKey: "manual_send", command }), "ok");
       directSendInput.value = "";
       await loadMessages().catch((err) => console.warn("[direct-send] refresh failed:", err));
     } else {
@@ -6481,12 +6542,11 @@ function bindManualSendModal(dialog, { replyMessage = null } = {}) {
     try {
       const result = await postJson("/api/skills/send", payload);
       if (result.ok) {
-        const replyText = result.reply_to_msg_id ? `，回复 #${result.reply_to_msg_id}` : "";
         if (status) {
           status.className = "modal-status-line ok";
-          status.textContent = `已发送 #${result.sent_msg_id || "?"}${replyText}`;
+          status.textContent = sentStatusText(result, { skillKey: "manual_send", command });
         }
-        showSkillToast(`✅ 已发: ${result.command}`, "ok");
+        showSkillToast(sentToastText(result, { skillKey: "manual_send", command }), "ok");
         commandInput.value = "";
         await loadMessages().catch((err) => console.warn("[manual-send] refresh failed:", err));
       } else {
@@ -6512,17 +6572,13 @@ function bindManualSendModal(dialog, { replyMessage = null } = {}) {
 }
 
 selectAllChannels.addEventListener("click", () => {
-  if (state.selectedChannels.size === state.channels.length) {
-    state.selectedChannels.clear();
-  } else {
-    state.selectedChannels = new Set(state.channels.map((channel) => channel.key));
-  }
-  state.selectedMessageId = visibleMessages()[0]?.id ?? null;
-  state.detailMode = "message";
-  renderChannelFilters();
-  renderQuickFilters();
-  renderMessages();
-  renderDetail();
+  const next = state.selectedChannels.size === state.channels.length
+    ? []
+    : state.channels.map((channel) => channel.key);
+  applyChannelSelection(next).catch((error) => {
+    console.warn("[mini-web] select all channels failed:", error);
+    showSkillToast(`频道加载失败: ${error.message || error}`, "err");
+  });
 });
 
 // viewMode 切换在主界面已下线 — 默认 focus,「全部」走顶部「日志」按钮的 modal。
@@ -7153,8 +7209,7 @@ async function sendSkill(skillKey, opts) {
     if (opts.chat_id) payload.chat_id = opts.chat_id;
     const result = await postJson("/api/skills/send", payload);
     if (result.ok) {
-      const replyText = result.reply_to_msg_id ? ` (回复 #${result.reply_to_msg_id})` : "";
-      showSkillToast(`✅ 已发: ${result.command}${replyText}`, "ok");
+      showSkillToast(sentToastText(result, { skillKey, command: opts.command_override }), "ok");
       schedulePostSendRefresh();
     } else {
       showSkillToast(`❌ ${result.error || "发送失败"}`, "err");
