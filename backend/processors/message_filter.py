@@ -6,7 +6,7 @@ from typing import Callable, Iterable
 
 from backend.domain.models import ParsedCard, RawMessageEvent
 
-CURRENT_MESSAGE_FILTER_VERSION = 8
+CURRENT_MESSAGE_FILTER_VERSION = 10
 
 
 DEFAULT_FOCUS_KEYWORDS = (
@@ -52,6 +52,54 @@ LEGACY_FOCUS_EXCLUDE_PATTERNS = (
     r"^[\W_]{1,4}$",
 )
 
+BOT_FORMAT_MARKERS = (
+    "【",
+    "】",
+    "────",
+    "━━━━",
+    "当前",
+    "进度",
+    "奖励",
+    "获得",
+    "消耗",
+    "灵石",
+    "贡献",
+    "冷却",
+    "倒计时",
+    "请在",
+    "无法",
+    "不足",
+    "尚未",
+    "并未",
+    "成功",
+    "失败",
+    "已进入",
+    "已加入",
+    "已完成",
+    "正在",
+    "下一次发言",
+    "自动结算",
+    "将在外",
+    "队伍",
+    "房间",
+    "副本ID",
+    "使用.",
+    "使用 .",
+    "命令:",
+    "命令：",
+    "相关指令",
+    "卦象验阵",
+    "卦门灵机",
+    "心劫锚点",
+    "天机剧变",
+    "重宝降世",
+    "情缘未至",
+    "方可代卜天机",
+    "天道综合指数",
+    "走势图",
+)
+_UNSET_REPLY = object()
+
 
 @dataclass(frozen=True)
 class FilterResult:
@@ -66,6 +114,7 @@ def enrich_filter_channels(
     *,
     is_game_bot_sender: Callable[[int | None], bool],
     parent_event: RawMessageEvent | None = None,
+    clean_reply_to_msg_id: int | None | object = _UNSET_REPLY,
     my_identity_ids: Iterable[int] = (),
 ) -> FilterResult:
     """Add product-level message filtering channels.
@@ -81,6 +130,12 @@ def enrich_filter_channels(
     bot_like = bool(event.sender_is_bot) or bool(is_game_bot_sender(sender_id))
     dot_command = is_dot_command(text)
     my_ids = _int_set(my_identity_ids)
+    clean_reply_id = (
+        _safe_int(event.reply_to_msg_id)
+        if clean_reply_to_msg_id is _UNSET_REPLY
+        else _safe_int(clean_reply_to_msg_id)
+    )
+    has_real_reply = bool(parent_event is not None or clean_reply_id)
     mine = bool(_safe_int(sender_id) and _safe_int(sender_id) in my_ids)
     parent_sender = _safe_int(parent_event.sender_id if parent_event else None)
     bot_reply_to_mine = bool(bot_like and parent_sender and parent_sender in my_ids)
@@ -94,11 +149,22 @@ def enrich_filter_channels(
     bot_mentions_other = bool(
         bot_like and has_any_mention(text, mentions=event.mentions) and not own_mention
     )
-    leader = is_leader_message(
+    configured_leader_sender = is_leader_message(
         event,
         leader_sender_ids=_int_list_setting(settings, "leader_sender_ids"),
         leader_source_names=_list_setting(settings, "leader_source_names"),
     )
+    configured_leader = configured_leader_sender and is_plain_leader_message(
+        text,
+        has_real_reply=has_real_reply,
+    )
+    tianzun_plain_leader = is_plain_tianzun_leader_message(
+        event,
+        text,
+        is_confirmed_tianzun_sender=bool(sender_id and is_game_bot_sender(sender_id)),
+        has_real_reply=has_real_reply,
+    )
+    leader = configured_leader or tianzun_plain_leader
     keyword_hits = focus_keyword_hits(
         text,
         _list_setting(settings, "focus_keywords") or list(DEFAULT_FOCUS_KEYWORDS),
@@ -148,6 +214,8 @@ def enrich_filter_channels(
     if leader:
         _append_unique(channels, "leader")
         _append_unique(tags, "会长")
+    if tianzun_plain_leader:
+        _append_unique(tags, "会长上号")
     if mine:
         _append_unique(tags, "我发出")
     if own_mention:
@@ -221,12 +289,15 @@ def is_leader_message(
     leader_source_names: list[str],
 ) -> bool:
     sender_id = int(event.sender_id or 0)
-    if sender_id and sender_id in set(leader_sender_ids):
-        return True
-    source = str(event.source or "").strip().lower()
-    if not source:
-        return False
-    return any(name.lower() in source for name in leader_source_names if name)
+    # 会长频道的身份判定只认 sender_id，避免普通玩家把 source/昵称伪装成
+    # 会长或情报源后被抬进重点流。leader_source_names 仅作为旧设置保留。
+    _ = leader_source_names
+    return bool(sender_id and sender_id in set(leader_sender_ids))
+
+
+def is_plain_leader_message(text: str, *, has_real_reply: bool = False) -> bool:
+    raw = str(text or "").strip()
+    return bool(raw and not is_dot_command(raw) and not has_real_reply)
 
 
 def is_focus_muted_sender(
@@ -242,6 +313,43 @@ def is_focus_muted_sender(
     if not source:
         return False
     return any(name.lower() in source for name in muted_source_names if name)
+
+
+def is_plain_tianzun_leader_message(
+    event: RawMessageEvent,
+    text: str,
+    *,
+    is_confirmed_tianzun_sender: bool,
+    has_real_reply: bool = False,
+) -> bool:
+    """确认过的天尊 ID 的普通发言按会长频道处理。
+
+    游戏 bot 的大多数回复都有稳定结构:面板括号、数值、CD、资源、命令提示、
+    或者是对某条玩家命令的 reply。会长借天尊身份说话通常更像普通聊天文本。
+    这里按结构保守识别,避免把大量重复游戏回复塞进会长频道。
+    """
+    if not is_confirmed_tianzun_sender:
+        return False
+    raw = str(text or "").strip()
+    if not raw or is_dot_command(raw):
+        return False
+    if has_real_reply:
+        return False
+    if has_any_mention(raw, mentions=event.mentions):
+        return False
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if len(lines) > 8:
+        return False
+    if raw.startswith("*") and raw.endswith("*"):
+        return False
+    compact = raw.replace(" ", "")
+    if any(marker in compact for marker in BOT_FORMAT_MARKERS):
+        return False
+    if re.search(r"(^|\n)\s*[-•]\s+", raw):
+        return False
+    if re.search(r"(^|[\s(（:：])[+＋-]\s*\d+", raw):
+        return False
+    return True
 
 
 def focus_keyword_hits(text: str, keywords: list[str]) -> list[str]:

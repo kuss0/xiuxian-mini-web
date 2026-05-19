@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: resource-stats-rare-splits 2026-05-19T14:05
-console.log("[mini-web] build: resource-stats-rare-splits 2026-05-19T14:05 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: resource-stats-aggregate-summary 2026-05-20T00:10
+console.log("[mini-web] build: resource-stats-aggregate-summary 2026-05-20T00:10 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -449,19 +449,19 @@ function openFilterSettingsModal() {
     body: `
       <section class="modal-section">
         <h4>重点流规则</h4>
-        <p class="muted">首页默认只看重点流。自己的发送一定显示;点命令和普通天尊回复会进入归档;被 @、会长、关键词、风险和副本动作会提到首页。</p>
+        <p class="muted">首页默认只看重点流。自己的发送一定显示;点命令和格式化天尊回复会进入归档;只有会长 sender ID 与已确认游戏 Bot/天尊 ID 的非回复普通发言会进入会长频道。</p>
         <form id="filterSettingsForm" class="settings-form">
           <label class="stacked-field">
             <span>我的 @ 名称</span>
             <textarea name="own_aliases" rows="2" placeholder="每行一个,例如 wa2000 或 @wa2000">${escapeHtml((settings.own_aliases || []).join("\n"))}</textarea>
           </label>
           <label class="stacked-field">
-            <span>会长 sender IDs</span>
+            <span>会长 sender IDs（会长频道判定）</span>
             <textarea name="leader_sender_ids" rows="2" placeholder="每行一个 sender_id">${escapeHtml((settings.leader_sender_ids || []).join("\n"))}</textarea>
           </label>
           <label class="stacked-field">
-            <span>会长昵称 / 情报源名称</span>
-            <textarea name="leader_source_names" rows="2" placeholder="每行一个昵称,用于 source 文本包含匹配">${escapeHtml((settings.leader_source_names || []).join("\n"))}</textarea>
+            <span>会长昵称备注（不参与判定）</span>
+            <textarea name="leader_source_names" rows="2" placeholder="每行一个备注昵称；会长频道只按 sender_id 判定">${escapeHtml((settings.leader_source_names || []).join("\n"))}</textarea>
           </label>
           <label class="stacked-field">
             <span>重点流静音 sender IDs</span>
@@ -664,7 +664,7 @@ async function openResourceStatsModal() {
     body: `
       <section class="modal-section">
         <h4>全服资源统计</h4>
-        <p class="muted">当前只统计消息箱采集到的「野外历练」和「非血色副本战利品结算」。野外按谨慎/均衡/深入拆；虚天殿按夺鼎/求稳拆；稀有产物会优先展示。</p>
+        <p class="muted">当前统计消息箱采集到的「野外历练」「风希」和「非血色副本战利品结算」。副本可按入口单独筛选，稀有产物会优先展示。</p>
         <div class="form-grid resource-stats-controls">
           <label>
             <span>周期</span>
@@ -679,7 +679,13 @@ async function openResourceStatsModal() {
             <select id="resourceStatsSource">
               <option value="all">全部</option>
               <option value="wild_training">野外历练</option>
-              <option value="dungeon">副本结算</option>
+              <option value="wind_xi">风希</option>
+              <option value="dungeon">副本结算（全部）</option>
+              <option value="dungeon|虚天殿·夺鼎">副本 · 虚天殿 · 夺鼎</option>
+              <option value="dungeon|虚天殿·求稳">副本 · 虚天殿 · 求稳</option>
+              <option value="dungeon|黄龙山">副本 · 黄龙山</option>
+              <option value="dungeon|昆吾山">副本 · 昆吾山</option>
+              <option value="dungeon|坠魔谷">副本 · 坠魔谷</option>
             </select>
           </label>
         </div>
@@ -719,14 +725,15 @@ function bindResourceStatsModal(dialog) {
 
 async function refreshResourceStats(dialog) {
   const period = dialog.querySelector("#resourceStatsPeriod")?.value || "day";
-  const sourceType = dialog.querySelector("#resourceStatsSource")?.value || "all";
+  const sourceFilter = parseResourceStatsSource(dialog.querySelector("#resourceStatsSource")?.value || "all");
   const table = dialog.querySelector("#resourceStatsTable");
   const refreshButton = dialog.querySelector("#resourceStatsRefresh");
   if (table) table.innerHTML = '<p class="empty inline">加载中…</p>';
   if (refreshButton) refreshButton.disabled = true;
   setResourceStatsStatus(dialog, "info", "正在读取统计…");
   try {
-    const params = new URLSearchParams({ period, source_type: sourceType, limit: "500" });
+    const params = new URLSearchParams({ period, source_type: sourceFilter.source_type, limit: "500" });
+    if (sourceFilter.source_name) params.set("source_name", sourceFilter.source_name);
     const payload = await fetchJson(`/api/resource-stats?${params.toString()}`);
     renderResourceStats(dialog, payload);
     const count = (payload.rows || []).length + (payload.events || []).length;
@@ -817,11 +824,61 @@ function renderResourceEventTable(summaryRows) {
 
 function renderResourceDeltaTable(rows) {
   if (!rows.length) return "";
-  return groupResourceRowsBySource(rows).map((group) => `
+  return `
+    ${renderResourceDeltaAggregateTable(rows)}
+    ${groupResourceRowsBySource(rows).map((group) => `
     ${renderResourceDeltaSubTable("稀有产物", group.rows.filter((row) => row.resource_category === "rare"), group.label)}
     ${renderResourceDeltaSubTable("正收益", group.rows.filter((row) => row.resource_category !== "rare" && row.amount_kind !== "loss"), group.label)}
     ${renderResourceDeltaSubTable("负收益", group.rows.filter((row) => row.amount_kind === "loss"), group.label)}
-  `).join("");
+  `).join("")}
+  `;
+}
+
+function renderResourceDeltaAggregateTable(rows) {
+  const sourceCount = new Set(rows.map((row) => `${row.source_type || ""}|${row.source_name || ""}`)).size;
+  if (sourceCount <= 1) return "";
+  const aggregateRows = aggregateResourceRows(rows);
+  return `
+    ${renderResourceDeltaSubTable("稀有产物", aggregateRows.filter((row) => row.resource_category === "rare"), "全部来源汇总")}
+    ${renderResourceDeltaSubTable("正收益", aggregateRows.filter((row) => row.resource_category !== "rare" && row.amount_kind !== "loss"), "全部来源汇总")}
+    ${renderResourceDeltaSubTable("负收益", aggregateRows.filter((row) => row.amount_kind === "loss"), "全部来源汇总")}
+  `;
+}
+
+function aggregateResourceRows(rows) {
+  const grouped = new Map();
+  for (const row of rows) {
+    const key = [
+      row.period || "",
+      row.resource_name || "",
+      row.unit || "",
+      row.basis || "",
+      row.amount_kind || "",
+      row.resource_category || "",
+    ].join("|");
+    const prev = grouped.get(key) || {
+      period: row.period || "",
+      source_type: "aggregate",
+      source_name: "全部来源汇总",
+      resource_name: row.resource_name || "",
+      unit: row.unit || "",
+      basis: row.basis || "",
+      amount_kind: row.amount_kind || "",
+      resource_category: row.resource_category || "",
+      total_amount: 0,
+      event_count: 0,
+    };
+    prev.total_amount += Number(row.total_amount || 0);
+    prev.event_count += Number(row.event_count || 0);
+    grouped.set(key, prev);
+  }
+  return Array.from(grouped.values()).sort((a, b) => (
+    String(b.period || "").localeCompare(String(a.period || ""), "zh-CN")
+    || String(b.resource_category || "").localeCompare(String(a.resource_category || ""), "zh-CN")
+    || String(a.amount_kind || "").localeCompare(String(b.amount_kind || ""), "zh-CN")
+    || Math.abs(Number(b.total_amount || 0)) - Math.abs(Number(a.total_amount || 0))
+    || String(a.resource_name || "").localeCompare(String(b.resource_name || ""), "zh-CN")
+  ));
 }
 
 function renderResourceDeltaSubTable(title, rows, label) {
@@ -866,10 +923,18 @@ function groupResourceRowsBySource(rows) {
 
 function renderResourceStatsSummary(rows, eventSummary) {
   if (!rows.length && !eventSummary.length) return "";
+  const rareRows = rows.filter((row) => row.resource_category === "rare");
+  const latestRarePeriod = latestResourcePeriod(rareRows, []);
+  const latestEventPeriod = latestResourcePeriod([], eventSummary);
+  const summaryRows = latestRarePeriod
+    ? rareRows.filter((row) => String(row.period || "") === latestRarePeriod)
+    : rareRows;
+  const summaryEvents = latestEventPeriod
+    ? eventSummary.filter((row) => String(row.period || "") === latestEventPeriod)
+    : eventSummary;
   const cards = [];
   const totals = new Map();
-  for (const row of rows) {
-    if (row.resource_category !== "rare") continue;
+  for (const row of summaryRows) {
     const key = `${row.resource_name || ""}|${row.unit || ""}|${row.basis || ""}`;
     const prev = totals.get(key) || {
       resource_name: row.resource_name || "",
@@ -886,21 +951,25 @@ function renderResourceStatsSummary(rows, eventSummary) {
     .sort((a, b) => b.total_amount - a.total_amount || String(a.resource_name).localeCompare(String(b.resource_name), "zh-CN"))
     .slice(0, 4);
   cards.push(...top.map((item) => `
-    <div class="resource-stat-card">
-      <span>稀有｜${escapeHtml(item.resource_name || "资源")}</span>
-      <strong>${escapeHtml(formatResourceAmount(item.total_amount, item.unit))}</strong>
-      <small>${escapeHtml(resourceBasisLabel(item.basis))}｜${escapeHtml(formatNumber(item.event_count))} 次</small>
-    </div>
+      <div class="resource-stat-card">
+        <span>稀有｜${escapeHtml(item.resource_name || "资源")}</span>
+        <strong>${escapeHtml(formatResourceAmount(item.total_amount, item.unit))}</strong>
+        <small>${escapeHtml(latestRarePeriod || "本期")}｜${escapeHtml(resourceBasisLabel(item.basis))}｜${escapeHtml(formatNumber(item.event_count))} 次</small>
+      </div>
   `));
-  for (const item of eventSummary.slice(0, 4)) {
+  for (const item of summaryEvents.slice(0, 4)) {
     if (cards.length >= 6) break;
     const successRate = formatSuccessRate(item.success_rate);
     const main = item.source_type === "wild_training"
       ? `${formatNumber(item.success || 0)} 成 / ${formatNumber(item.failed || 0)} 败`
-      : `${formatNumber((item.settled || 0) + (item.basic_only || 0) + (item.extra_success || 0))} 次`;
+      : item.source_type === "wind_xi"
+        ? `${formatNumber(item.success || 0)} 次成功`
+        : `${formatNumber((item.settled || 0) + (item.basic_only || 0) + (item.extra_success || 0))} 次`;
     const sub = item.source_type === "wild_training"
       ? `CD ${formatNumber(item.cooldown || 0)}｜成功率 ${successRate}`
-      : `额外 ${formatNumber(item.extra_success || 0)}｜基础 ${formatNumber(item.basic_only || 0)}`;
+      : item.source_type === "wind_xi"
+        ? `成功率 ${successRate}`
+        : `额外 ${formatNumber(item.extra_success || 0)}｜基础 ${formatNumber(item.basic_only || 0)}`;
     cards.push(`
       <div class="resource-stat-card">
         <span>${escapeHtml(resourceSourceLabel(item.source_type, item.source_name))}｜${escapeHtml(item.period || "")}</span>
@@ -912,10 +981,28 @@ function renderResourceStatsSummary(rows, eventSummary) {
   return cards.join("");
 }
 
+function latestResourcePeriod(rows, eventSummary) {
+  const periods = [...rows, ...eventSummary]
+    .map((row) => String(row.period || ""))
+    .filter(Boolean);
+  if (!periods.length) return "";
+  return periods.sort((a, b) => b.localeCompare(a, "zh-CN"))[0] || "";
+}
+
 function resourceSourceLabel(sourceType, sourceName) {
   if (sourceType === "wild_training") return sourceName || "野外历练";
+  if (sourceType === "wind_xi") return "风希";
   if (sourceType === "dungeon") return sourceName ? `副本 · ${sourceName}` : "副本结算";
   return sourceName || sourceType || "未知";
+}
+
+function parseResourceStatsSource(value) {
+  const raw = String(value || "all");
+  const [sourceType, ...rest] = raw.split("|");
+  return {
+    source_type: sourceType || "all",
+    source_name: rest.join("|").trim(),
+  };
 }
 
 function resourceBasisLabel(value) {

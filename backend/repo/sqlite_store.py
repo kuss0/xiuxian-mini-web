@@ -39,7 +39,29 @@ DEFAULT_LEADER_SOURCE_NAMES = ["@iosdo7"]
 DEFAULT_TARGET_CHAT = "-1001680975844"
 DEFAULT_TARGET_TOPIC_ID = "7310786"
 ACCOUNT_SECRET_KEYS = {"api_hash", "proxy_password"}
-RESOURCE_STATS_SCHEMA_VERSION = 4
+RESOURCE_STATS_SCHEMA_VERSION = 5
+RESOURCE_BASIC_NAMES = ("修为", "贡献", "灵石")
+RESOURCE_RARE_NAMES = (
+    "阴凝之晶",
+    "天凤之翎",
+    "风雷翅图纸",
+    "风之祝福",
+    "风行丹丹方",
+    "黄龙阵旗残片",
+    "龙蛇回元散丹方",
+    "皇鳞甲图纸",
+    "第二元神残篇",
+    "虚天鼎残片·甲",
+    "虚天鼎残片·乙",
+    "虚天鼎残片·丙",
+    "虚天鼎残片·丁",
+    "大挪移令",
+    "坠魔谷禁制令",
+    "苍坤路线残图",
+    "残缺阴环",
+    "碧鸠毒囊",
+    "紫铖兜图谱",
+)
 
 
 class SQLiteStore:
@@ -327,6 +349,7 @@ class SQLiteStore:
                    OR text LIKE '%黄龙山大战%'
                    OR text LIKE '%登顶昆吾山%'
                    OR text LIKE '%坠魔谷%'
+                   OR (text LIKE '%逆天之举%' AND text LIKE '%风希%')
                 ORDER BY rowid ASC
                 """
             ).fetchall()
@@ -382,6 +405,91 @@ class SQLiteStore:
     def backfill_resource_deltas_if_empty(self) -> int:
         """兼容旧调用名。返回本次写入的 resource_deltas 数量。"""
         return self.backfill_resource_records_if_needed()["deltas"]
+
+    def latest_message_id(self, chat_id: int, topic_id: int = 0) -> int:
+        """返回当前消息箱在指定 chat/topic 里已落库的最大 Telegram msg_id。"""
+        chat_id = int(chat_id or 0)
+        topic_id = int(topic_id or 0)
+        if not chat_id:
+            return 0
+        with self._connect() as conn:
+            if topic_id:
+                row = conn.execute(
+                    """
+                    SELECT MAX(msg_id)
+                    FROM raw_messages
+                    WHERE chat_id=?
+                      AND (top_msg_id=? OR reply_to_msg_id=?)
+                    """,
+                    (chat_id, topic_id, topic_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT MAX(msg_id) FROM raw_messages WHERE chat_id=?",
+                    (chat_id,),
+                ).fetchone()
+        return int((row or [0])[0] or 0)
+
+    def message_id_gaps(
+        self,
+        chat_id: int,
+        topic_id: int = 0,
+        *,
+        since_hours: int = 24,
+        min_gap_seconds: int = 300,
+        limit: int = 8,
+    ) -> list[dict]:
+        """返回最近一段时间内 msg_id/date 明显断档的区间,供 Telegram history 补采。"""
+        chat_id = int(chat_id or 0)
+        topic_id = int(topic_id or 0)
+        if not chat_id:
+            return []
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=max(1, int(since_hours or 24)))).isoformat()
+        params: list = [chat_id, cutoff]
+        topic_sql = ""
+        if topic_id:
+            topic_sql = "AND (top_msg_id=? OR reply_to_msg_id=?)"
+            params.extend([topic_id, topic_id])
+        params.extend([max(1, int(min_gap_seconds or 300)), max(1, int(limit or 8))])
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                WITH ordered AS (
+                    SELECT
+                        msg_id,
+                        date,
+                        LAG(msg_id) OVER (ORDER BY msg_id) AS prev_msg_id,
+                        LAG(date) OVER (ORDER BY msg_id) AS prev_date
+                    FROM raw_messages
+                    WHERE chat_id=?
+                      AND date >= ?
+                      {topic_sql}
+                )
+                SELECT prev_msg_id, msg_id, prev_date, date,
+                       CAST((julianday(date) - julianday(prev_date)) * 86400 AS INTEGER) AS gap_seconds,
+                       msg_id - prev_msg_id - 1 AS missing_msg_ids
+                FROM ordered
+                WHERE prev_msg_id IS NOT NULL
+                  AND msg_id - prev_msg_id > 1
+                  AND (julianday(date) - julianday(prev_date)) * 86400 >= ?
+                ORDER BY
+                    CASE WHEN msg_id - prev_msg_id - 1 <= 1000 THEN 0 ELSE 1 END ASC,
+                    prev_msg_id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [
+            {
+                "after_msg_id": int(row[0] or 0),
+                "before_msg_id": int(row[1] or 0),
+                "after_date": row[2] or "",
+                "before_date": row[3] or "",
+                "gap_seconds": int(row[4] or 0),
+                "missing_msg_ids": int(row[5] or 0),
+            }
+            for row in rows
+        ]
 
     def rebuild_parsed_cards_if_legacy(self) -> int:
         """如果 parsed_cards 有任何「老结构」就全量重建。两种 legacy 情况:
@@ -539,7 +647,16 @@ class SQLiteStore:
                     ),
                     tags=tuple(
                         tag for tag in card.tags
-                        if tag not in {"会长", "被@", "归档", "回复我", "回复别人", "提到别人", "我发出"}
+                        if tag not in {
+                            "会长",
+                            "会长上号",
+                            "被@",
+                            "归档",
+                            "回复我",
+                            "回复别人",
+                            "提到别人",
+                            "我发出",
+                        }
                         and not str(tag).startswith("关键词:")
                         and not str(tag).startswith("重点排除:")
                         and not str(tag).startswith("重点静音:")
@@ -551,6 +668,7 @@ class SQLiteStore:
                     settings,
                     is_game_bot_sender=self._is_game_bot_sender,
                     parent_event=parent,
+                    clean_reply_to_msg_id=clean_reply,
                     my_identity_ids=my_identity_ids,
                 )
                 updated_card = replace(
@@ -973,7 +1091,16 @@ class SQLiteStore:
                     ),
                     tags=tuple(
                         tag for tag in card.tags
-                        if tag not in {"会长", "被@", "归档", "回复我", "回复别人", "提到别人", "我发出"}
+                        if tag not in {
+                            "会长",
+                            "会长上号",
+                            "被@",
+                            "归档",
+                            "回复我",
+                            "回复别人",
+                            "提到别人",
+                            "我发出",
+                        }
                         and not str(tag).startswith("关键词:")
                         and not str(tag).startswith("重点排除:")
                     ),
@@ -984,6 +1111,7 @@ class SQLiteStore:
                     settings,
                     is_game_bot_sender=self._is_game_bot_sender,
                     parent_event=parent,
+                    clean_reply_to_msg_id=clean_reply,
                     my_identity_ids=my_identity_ids,
                 )
                 updated_card = replace(
@@ -1429,7 +1557,14 @@ class SQLiteStore:
             ).fetchall()
         return [_resource_event_row_to_api(row) for row in rows]
 
-    def resource_stats(self, *, period: str = "day", source_type: str = "", limit: int = 120) -> dict:
+    def resource_stats(
+        self,
+        *,
+        period: str = "day",
+        source_type: str = "",
+        source_name: str = "",
+        limit: int = 120,
+    ) -> dict:
         period = str(period or "day").strip().lower()
         period_col = {
             "day": "day_key",
@@ -1448,10 +1583,17 @@ class SQLiteStore:
         if source_type and source_type != "all":
             where.append("source_type=?")
             params.append(source_type)
+        source_name = str(source_name or "").strip()
+        if source_name:
+            where.append("source_name=?")
+            params.append(source_name)
         where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+        basic_placeholders = ",".join("?" for _ in RESOURCE_BASIC_NAMES)
+        rare_placeholders = ",".join("?" for _ in RESOURCE_RARE_NAMES)
+        category_params = list(RESOURCE_BASIC_NAMES) + list(RESOURCE_RARE_NAMES)
         event_params = list(params)
         event_params.append(limit)
-        delta_params = list(params)
+        delta_params = category_params + list(params)
         delta_params.append(limit)
         with self._connect() as conn:
             event_rows = conn.execute(
@@ -1473,8 +1615,9 @@ class SQLiteStore:
                        resource_name, unit, basis,
                        CASE WHEN amount < 0 THEN 'loss' ELSE 'gain' END AS amount_kind,
                        CASE
-                           WHEN resource_name IN ('修为', '贡献', '灵石') THEN 'basic'
-                           ELSE 'rare'
+                           WHEN resource_name IN ({basic_placeholders}) THEN 'basic'
+                           WHEN resource_name IN ({rare_placeholders}) THEN 'rare'
+                           ELSE 'common'
                        END AS resource_category,
                        SUM(amount) AS total_amount,
                        COUNT(DISTINCT raw_message_id) AS event_count, MIN(event_time), MAX(event_time)
@@ -1505,6 +1648,7 @@ class SQLiteStore:
             "ok": True,
             "period": period,
             "source_type": source_type or "all",
+            "source_name": source_name,
             "events": events,
             "event_summary": _resource_event_summary(events),
             "rows": [
@@ -1527,6 +1671,7 @@ class SQLiteStore:
             "notes": [
                 "野外历练单独统计成功、失败和冷却;资源成果按正收益/负收益分开,不做净额抵消。",
                 "副本结算按具体副本/入口分开统计,按单次结算文案记录,不按队伍人数放大。",
+                "风希单独统计逆天之举收益,含限时增益出现次数。",
                 "血色试炼结算已排除。",
             ],
         }
@@ -2242,11 +2387,11 @@ class SQLiteStore:
     def _connect(self) -> sqlite3.Connection:
         # 多线程并发写(listener 线程在 ingest 消息 + HTTP 请求在保存账号/身份)
         # 默认 SQLite 不容忍并发,会立刻报 "database is locked"。
-        # 加 WAL 模式让读不阻塞写,加 busy_timeout=5s 让写等而不立刻 fail。
-        conn = sqlite3.connect(self.db_path, timeout=5.0)
+        # 加 WAL 模式让读不阻塞写,加更长 busy_timeout 让写等而不立刻 fail。
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA busy_timeout=30000")
         conn.execute("PRAGMA synchronous=NORMAL")
         return conn
 

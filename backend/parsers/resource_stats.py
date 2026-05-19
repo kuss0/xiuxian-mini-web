@@ -13,10 +13,12 @@ DUNGEON_LOOT_TITLE_RE = re.compile(r"【战利品结算(?:[·・]\s*(?P<name>[^�
 HUANGLONG_RESULT_RE = re.compile(r"【黄龙山大战[·・]\s*(?P<name>[^】]+)】")
 KUNWU_RESULT_RE = re.compile(r"【登顶昆吾山】")
 ZHUI_MO_RESULT_RE = re.compile(r"【坠魔谷[·・]\s*(?P<name>[^】]+)】")
+WIND_XI_TITLE_RE = re.compile(r"【逆天之举】")
 PLAYER_RE = re.compile(r"@(?P<user>[A-Za-z0-9_]+)")
 RESOURCE_PLUS_RE = re.compile(r"(?P<name>修为|贡献|灵石)\s*[+＋]\s*(?P<amount>\d+)")
 RESOURCE_LOSS_RE = re.compile(r"(?P<name>修为)\s*折损\s*[-－]?\s*(?P<amount>\d+)")
 AMOUNT_BEFORE_RESOURCE_RE = re.compile(r"(?P<amount>\d+)\s*(?:点\s*)?(?P<name>修为|贡献|灵石)")
+EXP_SURGE_RE = re.compile(r"修为(?:暴涨|大涨|提升|增加)\s*(?P<amount>\d+)\s*点")
 RESOURCE_X_RE = re.compile(
     r"(?:【(?P<bracket>[^】]+)】|(?P<name>[\u4e00-\u9fff][\u4e00-\u9fff0-9]*))\s*[xX×*]\s*(?P<amount>\d+)"
 )
@@ -56,6 +58,8 @@ class ResourceStatsParser:
         text = event.text or ""
         if not text:
             return None
+        if WIND_XI_TITLE_RE.search(text) and "风希" in text and "【战利品】" in text:
+            return self._parse_wind_xi(event)
         if WILD_TITLE_RE.search(text):
             return self._parse_wild_training(event)
         if DUNGEON_LOOT_TITLE_RE.search(text):
@@ -131,6 +135,52 @@ class ResourceStatsParser:
             player=player,
             result=result,
             outcome=title_detail.strip(),
+            meta=meta,
+        )
+        return ParserOutput(resource_deltas=tuple(deltas), resource_events=(event_row,))
+
+    def _parse_wind_xi(self, event: RawMessageEvent) -> ParserOutput | None:
+        text = event.text or ""
+        player = _first_player(text)
+        meta = {"title": "逆天之举", "target": "风希"}
+        reward_text = text.split("【战利品】", 1)[1] if "【战利品】" in text else text
+        deltas = _extract_reward_deltas(
+            event,
+            reward_text,
+            source_type="wind_xi",
+            source_name="风希",
+            player=player,
+            basis="player",
+            meta=meta,
+        )
+        deltas.extend(
+            _extract_exp_surge_deltas(
+                event,
+                reward_text,
+                source_type="wind_xi",
+                source_name="风希",
+                player=player,
+                basis="player",
+                meta=meta,
+            )
+        )
+        deltas.extend(
+            _extract_wind_xi_buff_deltas(
+                event,
+                reward_text,
+                player=player,
+                meta=meta,
+            )
+        )
+        if not deltas:
+            return None
+        event_row = _resource_event(
+            event,
+            source_type="wind_xi",
+            source_name="风希",
+            player=player,
+            result="success",
+            outcome="逆天之举",
             meta=meta,
         )
         return ParserOutput(resource_deltas=tuple(deltas), resource_events=(event_row,))
@@ -392,6 +442,66 @@ def _extract_kunwu_rare_deltas(
                 amount=count * amount,
                 basis="run",
                 meta=meta | {"source": "route_log"},
+            )
+        )
+    return found
+
+
+def _extract_exp_surge_deltas(
+    event: RawMessageEvent,
+    text: str,
+    *,
+    source_type: str,
+    source_name: str,
+    player: str,
+    basis: str,
+    meta: dict,
+) -> list[ResourceDelta]:
+    found: list[ResourceDelta] = []
+    for match in EXP_SURGE_RE.finditer(text):
+        try:
+            amount = int(match.group("amount") or "0")
+        except ValueError:
+            continue
+        if amount <= 0:
+            continue
+        found.append(
+            _resource_delta(
+                event,
+                source_type=source_type,
+                source_name=source_name,
+                player=player,
+                resource_name="修为",
+                amount=amount,
+                basis=basis,
+                meta=meta,
+            )
+        )
+    return found
+
+
+def _extract_wind_xi_buff_deltas(
+    event: RawMessageEvent,
+    text: str,
+    *,
+    player: str,
+    meta: dict,
+) -> list[ResourceDelta]:
+    found: list[ResourceDelta] = []
+    for match in re.finditer(r"获得限时增益\s*【(?P<name>[^】]+)】", text):
+        item = str(match.group("name") or "").strip()
+        if not item:
+            continue
+        found.append(
+            _resource_delta(
+                event,
+                source_type="wind_xi",
+                source_name="风希",
+                player=player,
+                resource_name=item,
+                amount=1,
+                basis="player",
+                meta=meta | {"buff": True, "implicit_amount": True},
             )
         )
     return found

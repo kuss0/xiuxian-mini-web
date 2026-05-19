@@ -257,11 +257,17 @@ def _get_state_patches(request: MiniWebHandler, query: dict) -> dict:
 def _get_resource_stats(request: MiniWebHandler, query: dict) -> dict:
     period = (query.get("period") or ["day"])[0]
     source_type = (query.get("source_type") or [""])[0]
+    source_name = (query.get("source_name") or [""])[0]
     try:
         limit = int((query.get("limit") or ["120"])[0])
     except (TypeError, ValueError):
         limit = 120
-    return _app(request).resource_stats_payload(period=period, source_type=source_type, limit=limit)
+    return _app(request).resource_stats_payload(
+        period=period,
+        source_type=source_type,
+        source_name=source_name,
+        limit=limit,
+    )
 
 
 def _get_discovered_bots(request: MiniWebHandler, query: dict) -> dict:

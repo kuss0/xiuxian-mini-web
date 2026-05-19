@@ -14,9 +14,10 @@ Telegram 修仙群的消息过滤与官方定时副手。
 > - ✅ 解析器框架 + 一批战报/状态卡(深度闭关、闭关成功、试炼古塔、战力评估、角色信息 等)
 > - ✅ 官方定时(schedule)：自定义命令 + CD + 次数为主，玩法预设为辅
 > - ✅ 手动快捷回复 / outbox 草稿
+> - ✅ 资源统计：野外历练、风希、非血色副本按来源/稀有产物聚合
 > - 🚧 轻量状态提示(识别冷却 / 闭关倒计时 / 抚摸法宝 等)— 只做展示和排班参考
 > - 🚧 卡片视觉「页游化」— 新卡已套主题渐变,老卡待统一
-> - 🛠 待办:身份自动发现(基于 telethon `out` 标志)、批量身份一次性定时
+> - 🛠 待办:身份自动发现(基于 telethon `out` 标志)、储物袋库存投影、更多玩法资源统计
 
 Telegram 修仙群聊的 Web 游戏化辅助界面。
 
@@ -118,6 +119,10 @@ MINIWEB_ACCESS_TOKEN='换成你的长随机口令' .venv/bin/python backend/app.
 - `GET /api/state-patches?scope=identity_profile`
 - `GET /api/outbox`
 - `GET /api/outbox/drafts?status=draft`
+- `GET /api/resource-stats?period=day&source_type=all`
+- `GET /api/schedule`
+- `GET /api/schedule/presets`
+- `GET /api/schedule/sync?send_as_id=123`
 - `GET /api/accounts/send-as-peers?local_id=xxx&target_chat=xxx`：按账号 session 调 `channels.GetSendAs` 拉可用身份列表。
 
 写入（均需人工触发，不会被 parser 自动调用）：
@@ -125,6 +130,10 @@ MINIWEB_ACCESS_TOKEN='换成你的长随机口令' .venv/bin/python backend/app.
 - `POST /api/outbox/plan`：仅生成发送计划，便于复制或入队，不会发送。
 - `POST /api/outbox/drafts`：把动作入队到 outbox 草稿，等待人工确认。
 - `POST /api/outbox/drafts/delete`：删除草稿。
+- `POST /api/schedule/preview`：预览官方定时排班，不写入 Telegram。
+- `POST /api/schedule/create`：人工确认后创建 Telegram 官方定时消息。
+- `POST /api/schedule/cancel`：取消还未排到 Telegram 的本地批次。
+- `POST /api/schedule/delete`：软删本地批次，并尝试删除已排到 Telegram 的定时消息。
 - `POST /api/accounts/resolve-entity`：用账号 session 调 `get_entity` 解析 send_as_id 的 username/title，给身份表单做 hydrate。
 
 ## 验证

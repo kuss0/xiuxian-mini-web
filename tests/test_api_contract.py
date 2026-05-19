@@ -291,6 +291,323 @@ def test_message_filter_archives_bot_mentions_to_others():
     assert "archive" not in reply_to_me.channels
 
 
+def test_message_filter_promotes_plain_tianzun_speech_to_leader():
+    base = ParsedCard(
+        id="tianzun-plain",
+        channels=("system",),
+        title="系统消息",
+        summary="",
+        source="韩天尊",
+        time="",
+        tags=("未分类",),
+        raw="",
+    )
+    settings = {
+        "archive_bot_replies": True,
+        "focus_keywords": [],
+        "leader_sender_ids": [2049298748],
+        "leader_source_names": ["@iosdo7", "韩天尊"],
+    }
+
+    plain = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="tz1",
+            chat_id=1,
+            msg_id=31,
+            text="今晚先别开虚天殿，等我看一下新机制",
+            source="韩天尊",
+            date="",
+            sender_id=7900199668,
+        ),
+        settings,
+        is_game_bot_sender=lambda sid: sid == 7900199668,
+    )
+    gameplay_note = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="tz1-note",
+            chat_id=1,
+            msg_id=41,
+            text=(
+                "每轮重生固定生成三条命途：稳妥之身、承脉之身、赌命之身。\n"
+                "灵根由代码按前世因果生成，不再交给 AI 随机乱抽。\n"
+                "权重会参考前世灵根、境界/总修为、击杀数带来的业力、五行淬体、第二元神等信息。\n"
+                "同一轮仍然只锁一组结果，不能反复 .夺舍重生 刷词条。\n"
+                "展示里增加了 命途 和 批命，能看懂三条路分别在赌什么。"
+            ),
+            source="韩天尊",
+            date="",
+            sender_id=7900199668,
+        ),
+        settings,
+        is_game_bot_sender=lambda sid: sid == 7900199668,
+    )
+    titled_system_notice = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="tz1-title",
+            chat_id=1,
+            msg_id=42,
+            text="【天机异闻·夺舍重生】\n天道轮回，命途已定。",
+            source="韩天尊",
+            date="",
+            sender_id=7900199668,
+        ),
+        settings,
+        is_game_bot_sender=lambda sid: sid == 7900199668,
+    )
+    source_spoof_plain = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="tz2",
+            chat_id=1,
+            msg_id=32,
+            text="今晚先别开虚天殿，等我看一下新机制",
+            source="韩天尊",
+            date="",
+            sender_id=8272757053,
+        ),
+        settings,
+        is_game_bot_sender=lambda _sid: False,
+    )
+    configured_leader = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="leader1",
+            chat_id=1,
+            msg_id=35,
+            text="坠魔谷这个先别急，等新机制说明",
+            source="@iosdo7",
+            date="",
+            sender_id=2049298748,
+        ),
+        settings,
+        is_game_bot_sender=lambda _sid: False,
+    )
+    configured_leader_command = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="leader1-cmd",
+            chat_id=1,
+            msg_id=38,
+            text=".admin unreport",
+            source="@iosdo7",
+            date="",
+            sender_id=2049298748,
+        ),
+        settings,
+        is_game_bot_sender=lambda _sid: False,
+    )
+    source_name_only = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="leader2",
+            chat_id=1,
+            msg_id=36,
+            text="我是会长昵称但不是会长 ID",
+            source="@iosdo7",
+            date="",
+            sender_id=111,
+        ),
+        settings,
+        is_game_bot_sender=lambda _sid: False,
+    )
+    formatted = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="tz3",
+            chat_id=1,
+            msg_id=33,
+            text="牵引成功！\n你消耗了 640 点修为，成功在 8 号引星盘上牵引了【庚金星】之力！",
+            source="韩天尊",
+            date="",
+            sender_id=7900199668,
+        ),
+        settings,
+        is_game_bot_sender=lambda sid: sid == 7900199668,
+    )
+    command_reply = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="tz4",
+            chat_id=1,
+            msg_id=34,
+            text="你并未处于深度闭关之中。",
+            source="韩天尊",
+            date="",
+            sender_id=7900199668,
+            reply_to_msg_id=30,
+        ),
+        settings,
+        is_game_bot_sender=lambda sid: sid == 7900199668,
+        parent_event=RawMessageEvent(
+            id="parent",
+            chat_id=1,
+            msg_id=30,
+            text="查看闭关",
+            source="玩家",
+            date="",
+            sender_id=123,
+        ),
+    )
+    missing_parent_reply = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="tz5",
+            chat_id=1,
+            msg_id=37,
+            text="这条是回复链，父消息没查到也不要进会长频道",
+            source="韩天尊",
+            date="",
+            sender_id=7900199668,
+            reply_to_msg_id=99,
+        ),
+        settings,
+        is_game_bot_sender=lambda sid: sid == 7900199668,
+        clean_reply_to_msg_id=99,
+    )
+    bot_result_plainish = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="tz6",
+            chat_id=1,
+            msg_id=39,
+            text="你感觉到与青竹蜂云剑（神雷版）的联系更加紧密了，器灵传来了喜悦的情绪。\n(默契 +3, 经验 +19)",
+            source="韩天尊",
+            date="",
+            sender_id=7900199668,
+        ),
+        settings,
+        is_game_bot_sender=lambda sid: sid == 7900199668,
+    )
+    delayed_settlement_result = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="tz7",
+            chat_id=1,
+            msg_id=40,
+            text="你心念一动，丹田中的元婴化作一道流光飞出，消失在天际。\n它将在外云游 8 小时，为你寻觅天地奇珍。下一次发言时若已归来，将自动结算收获。",
+            source="韩天尊",
+            date="",
+            sender_id=7900199668,
+        ),
+        settings,
+        is_game_bot_sender=lambda sid: sid == 7900199668,
+    )
+    italic_flavor_text = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="tz8",
+            chat_id=1,
+            msg_id=43,
+            text="*灵气微弱，元婴震颤，帖子？怎能填我空虚之渴……*",
+            source="韩天尊",
+            date="",
+            sender_id=7900199668,
+        ),
+        settings,
+        is_game_bot_sender=lambda sid: sid == 7900199668,
+    )
+    heart_trial_anchor_result = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="tz9",
+            chat_id=1,
+            msg_id=44,
+            text="心劫锚点已散，需重新引动天劫。",
+            source="韩天尊",
+            date="",
+            sender_id=8757550896,
+        ),
+        settings,
+        is_game_bot_sender=lambda sid: sid == 8757550896,
+    )
+    hexagram_result = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="tz10",
+            chat_id=1,
+            msg_id=45,
+            text="卦象验阵：大顺\n卦门灵机已随你们的选择暗中流转，吉凶不会在此刻直示，只能靠破阵结果见分晓。",
+            source="韩天尊",
+            date="",
+            sender_id=8388633812,
+        ),
+        settings,
+        is_game_bot_sender=lambda sid: sid == 8388633812,
+    )
+    treasure_notice = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="tz11",
+            chat_id=1,
+            msg_id=46,
+            text="🌌 天机剧变，重宝降世！",
+            source="韩天尊",
+            date="",
+            sender_id=8388633812,
+        ),
+        settings,
+        is_game_bot_sender=lambda sid: sid == 8388633812,
+    )
+    concubine_threshold_result = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="tz12",
+            chat_id=1,
+            msg_id=47,
+            text="你与侍妾情缘未至，至少需 300 情缘方可代卜天机。",
+            source="韩天尊",
+            date="",
+            sender_id=7900199668,
+        ),
+        settings,
+        is_game_bot_sender=lambda sid: sid == 7900199668,
+    )
+    economy_chart_notice = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="tz13",
+            chat_id=1,
+            msg_id=48,
+            text="📊 天道综合指数 (TDI) 走势图\n_反映修仙界整体经济荣枯_",
+            source="韩天尊",
+            date="",
+            sender_id=8388633812,
+        ),
+        settings,
+        is_game_bot_sender=lambda sid: sid == 8388633812,
+    )
+
+    assert "leader" in plain.channels
+    assert "focus" in plain.channels
+    assert "archive" not in plain.channels
+    assert "会长上号" in plain.tags
+    assert "leader" in gameplay_note.channels
+    assert "会长上号" in gameplay_note.tags
+    assert "leader" not in titled_system_notice.channels
+    assert "leader" not in source_spoof_plain.channels
+    assert "会长上号" not in source_spoof_plain.tags
+    assert "leader" in configured_leader.channels
+    assert "leader" not in configured_leader_command.channels
+    assert "archive" in configured_leader_command.channels
+    assert "leader" not in source_name_only.channels
+    assert "leader" not in formatted.channels
+    assert "archive" in formatted.channels
+    assert "leader" not in command_reply.channels
+    assert "archive" in command_reply.channels
+    assert "leader" not in missing_parent_reply.channels
+    assert "leader" not in bot_result_plainish.channels
+    assert "leader" not in delayed_settlement_result.channels
+    assert "leader" not in italic_flavor_text.channels
+    assert "leader" not in heart_trial_anchor_result.channels
+    assert "leader" not in hexagram_result.channels
+    assert "leader" not in treasure_notice.channels
+    assert "leader" not in concubine_threshold_result.channels
+    assert "leader" not in economy_chart_notice.channels
+
+
 def test_server_payload_shape_stays_compatible():
     server = MiniWebServer(store=SampleStore())
     payload = server.messages_payload("all")

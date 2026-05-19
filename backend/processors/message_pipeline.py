@@ -245,6 +245,7 @@ class MessagePipeline:
             settings,
             is_game_bot_sender=self._is_game_bot_sender,
             parent_event=parent,
+            clean_reply_to_msg_id=clean_reply,
             my_identity_ids=my_identity_ids,
         )
         return replace(

@@ -37,6 +37,24 @@ def test_wild_training_does_not_parse_username_with_x_digits_as_resource():
     assert output.resource_events[0].result == "success"
 
 
+def test_wild_training_sums_multi_amount_rare_drop():
+    event = make_event(
+        """【野外历练 · 妖兽遭遇】
+@TrickPlayer 遭遇 变异碧眼金蟾。
+战力对比: 你 1378174928 / 妖兽 1848017514，胜算 31%。
+一番斗法后，妖兽伏诛。
+获得修为 +45000，获得 【阴凝之晶】x2。
+此战只结算 NPC 历练收益，不触发玩家仇怨。"""
+    )
+    output = ResourceStatsParser().parse(event)
+    assert output is not None
+    assert {(delta.resource_name, delta.amount) for delta in output.resource_deltas} == {
+        ("修为", 45000),
+        ("阴凝之晶", 2),
+    }
+    assert output.resource_events[0].result == "success"
+
+
 def test_extracts_wild_training_failed_event_and_loss():
     event = make_event(
         """【野外历练 · 负伤而归】
@@ -196,3 +214,31 @@ def test_extracts_zhui_mo_failure_result():
         ("修为", 2000),
         ("贡献", 120),
     }
+
+
+def test_extracts_wind_xi_result_as_separate_resource_source():
+    event = make_event(
+        """【逆天之举】
+面对风希分神，@mc 竟不退反进，祭出所有神通法宝奋力一搏！竟成功将其击溃！
+风希的意志传下话来：“该死的人类，竟有如此实力，这风雷翅便暂归你所有罢！”
+
+【战利品】
+- 你因此番感悟，修为暴涨 28860 点！
+- 获得上界奇珍 【天凤之翎】x1！
+- 获得限时增益 【风之祝福】(12小时)！
+- 更令人惊喜的是，你在其消散的神魂中，捕获了一件至宝：【风雷翅图纸】x1！"""
+    )
+    output = ResourceStatsParser().parse(event)
+    assert output is not None
+    assert output.resource_events[0].source_type == "wind_xi"
+    assert output.resource_events[0].source_name == "风希"
+    assert output.resource_events[0].result == "success"
+    assert output.resource_events[0].player == "mc"
+    assert {(delta.resource_name, delta.amount) for delta in output.resource_deltas} == {
+        ("修为", 28860),
+        ("天凤之翎", 1),
+        ("风之祝福", 1),
+        ("风雷翅图纸", 1),
+    }
+    assert all(delta.source_type == "wind_xi" for delta in output.resource_deltas)
+    assert all(delta.source_name == "风希" for delta in output.resource_deltas)

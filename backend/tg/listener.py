@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import threading
 from dataclasses import replace
 from datetime import timezone
@@ -14,6 +15,12 @@ class EventSink(Protocol):
     def ingest_event(self, event: RawMessageEvent):
         ...
 
+    def latest_message_id(self, chat_id: int, topic_id: int = 0) -> int:
+        ...
+
+    def message_id_gaps(self, chat_id: int, topic_id: int = 0, **kwargs) -> list[dict]:
+        ...
+
 
 class TelegramReadOnlyListener:
     # 自愈参数:断线后退避重连,1s 起、每次翻倍、封顶 60s。
@@ -21,6 +28,13 @@ class TelegramReadOnlyListener:
     _BACKOFF_INITIAL = 1.0
     _BACKOFF_MAX = 60.0
     _STABLE_UPTIME_THRESHOLD = 60.0
+    _HISTORY_BACKFILL_LIMIT = 10000
+    _HISTORY_BOOTSTRAP_LIMIT = 300
+    _HISTORY_GAP_SCAN_LIMIT = 8
+    _HISTORY_GAP_RANGE_LIMIT = 1000
+    _HISTORY_GAP_MAX_PAGES = 10
+    _INGEST_BUSY_ATTEMPTS = 6
+    _INGEST_BUSY_BASE_SLEEP = 0.2
 
     def __init__(self, sink: EventSink, *, account_key: str = "default") -> None:
         self._sink = sink
@@ -153,7 +167,7 @@ class TelegramReadOnlyListener:
                     display_name = await _resolve_sender_display_name(event)
                     if display_name:
                         raw_event = replace(raw_event, source=display_name)
-                    self._sink.ingest_event(raw_event)
+                    await self._ingest_event_with_retry(raw_event)
 
                 @client.on(telethon.events.MessageEdited(chats=target_chat, incoming=True, outgoing=True))
                 async def _on_message_edited(event):
@@ -176,9 +190,11 @@ class TelegramReadOnlyListener:
                             raw_event,
                             edited_at=edit_date.astimezone(timezone.utc).isoformat(),
                         )
-                    self._sink.ingest_event(raw_event)
+                    await self._ingest_event_with_retry(raw_event)
 
-                self._set_status("running", "只读监听运行中")
+                self._set_status("running", "历史补采中")
+                backfill_message = await self._backfill_history(client, target_chat, topic_id)
+                self._set_status("running", backfill_message or "只读监听运行中")
                 connected_at = asyncio.get_event_loop().time()
                 await client.run_until_disconnected()
             except asyncio.CancelledError:
@@ -223,6 +239,177 @@ class TelegramReadOnlyListener:
             self._status = status
             self._message = message
 
+    async def _backfill_history(self, client, target_chat, topic_id: int) -> str:
+        chat_id = _target_chat_storage_id(target_chat)
+        if not chat_id:
+            return "只读监听运行中"
+        latest_msg_id = self._latest_ingested_message_id(chat_id, topic_id)
+        limit = self._HISTORY_BACKFILL_LIMIT if latest_msg_id > 0 else self._HISTORY_BOOTSTRAP_LIMIT
+        if limit <= 0:
+            return "只读监听运行中"
+
+        try:
+            entity = await client.get_entity(target_chat)
+        except Exception as exc:
+            print(f"[mini-web] history backfill skipped: get_entity failed: {exc}")
+            return f"只读监听运行中｜历史补采跳过:{exc}"
+
+        scanned = 0
+        ingested = 0
+        gap_ranges = 0
+        gap_ingested = 0
+        try:
+            if latest_msg_id > 0:
+                async for message in client.iter_messages(
+                    entity,
+                    min_id=latest_msg_id,
+                    reverse=True,
+                    limit=limit,
+                ):
+                    if self._stop_flag.is_set():
+                        break
+                    scanned += 1
+                    if topic_id and _message_topic_id(message) != topic_id:
+                        continue
+                    raw_event = await _raw_event_from_message(
+                        message,
+                        chat_id=chat_id,
+                        account_key=self._account_key,
+                    )
+                    if await self._ingest_event_with_retry(raw_event):
+                        ingested += 1
+                gap_ranges, gap_scanned, gap_ingested = await self._backfill_known_gaps(
+                    client,
+                    entity,
+                    chat_id,
+                    topic_id,
+                )
+                scanned += gap_scanned
+                ingested += gap_ingested
+            else:
+                recent = []
+                async for message in client.iter_messages(entity, limit=limit):
+                    if self._stop_flag.is_set():
+                        break
+                    recent.append(message)
+                scanned = len(recent)
+                for message in reversed(recent):
+                    if self._stop_flag.is_set():
+                        break
+                    if topic_id and _message_topic_id(message) != topic_id:
+                        continue
+                    raw_event = await _raw_event_from_message(
+                        message,
+                        chat_id=chat_id,
+                        account_key=self._account_key,
+                    )
+                    if await self._ingest_event_with_retry(raw_event):
+                        ingested += 1
+        except Exception as exc:
+            print(f"[mini-web] history backfill failed: {exc}")
+            return f"只读监听运行中｜历史补采失败:{exc}"
+
+        if scanned >= limit and latest_msg_id > 0:
+            return f"只读监听运行中｜历史补采 {ingested} 条，已达上限 {limit}"
+        if gap_ranges:
+            return f"只读监听运行中｜历史补采 {ingested} 条，修补空窗 {gap_ranges} 段/{gap_ingested} 条"
+        if ingested:
+            return f"只读监听运行中｜历史补采 {ingested} 条"
+        if scanned:
+            return f"只读监听运行中｜历史补采扫描 {scanned} 条，无新增入库"
+        return "只读监听运行中｜历史补采无新增"
+
+    async def _backfill_known_gaps(self, client, entity, chat_id: int, topic_id: int) -> tuple[int, int, int]:
+        gaps = self._known_message_gaps(chat_id, topic_id)
+        ranges = 0
+        scanned = 0
+        ingested = 0
+        for gap in gaps:
+            if self._stop_flag.is_set():
+                break
+            after_id = int(gap.get("after_msg_id") or 0)
+            before_id = int(gap.get("before_msg_id") or 0)
+            if after_id <= 0 or before_id <= after_id + 1:
+                continue
+            ranges += 1
+            pages = 0
+            while after_id < before_id - 1 and pages < self._HISTORY_GAP_MAX_PAGES:
+                pages += 1
+                range_limit = min(self._HISTORY_GAP_RANGE_LIMIT, before_id - after_id - 1)
+                last_scanned_id = after_id
+                async for message in client.iter_messages(
+                    entity,
+                    min_id=after_id,
+                    max_id=before_id,
+                    reverse=True,
+                    limit=range_limit,
+                ):
+                    if self._stop_flag.is_set():
+                        break
+                    scanned += 1
+                    msg_id = int(getattr(message, "id", 0) or 0)
+                    if msg_id > last_scanned_id:
+                        last_scanned_id = msg_id
+                    if topic_id and _message_topic_id(message) != topic_id:
+                        continue
+                    raw_event = await _raw_event_from_message(
+                        message,
+                        chat_id=chat_id,
+                        account_key=self._account_key,
+                    )
+                    if await self._ingest_event_with_retry(raw_event):
+                        ingested += 1
+                if self._stop_flag.is_set() or last_scanned_id <= after_id:
+                    break
+                after_id = last_scanned_id
+        return ranges, scanned, ingested
+
+    def _latest_ingested_message_id(self, chat_id: int, topic_id: int) -> int:
+        getter = getattr(self._sink, "latest_message_id", None)
+        if not callable(getter):
+            return 0
+        try:
+            return int(getter(int(chat_id), int(topic_id or 0)) or 0)
+        except Exception as exc:
+            print(f"[mini-web] latest_message_id failed: {exc}")
+            return 0
+
+    def _known_message_gaps(self, chat_id: int, topic_id: int) -> list[dict]:
+        getter = getattr(self._sink, "message_id_gaps", None)
+        if not callable(getter):
+            return []
+        try:
+            return list(
+                getter(
+                    int(chat_id),
+                    int(topic_id or 0),
+                    since_hours=24,
+                    min_gap_seconds=300,
+                    limit=self._HISTORY_GAP_SCAN_LIMIT,
+                )
+                or []
+            )
+        except Exception as exc:
+            print(f"[mini-web] message_id_gaps failed: {exc}")
+            return []
+
+    async def _ingest_event_with_retry(self, raw_event: RawMessageEvent) -> bool:
+        for index in range(self._INGEST_BUSY_ATTEMPTS):
+            try:
+                self._sink.ingest_event(raw_event)
+                return True
+            except sqlite3.OperationalError as exc:
+                if not _is_sqlite_busy(exc) or index >= self._INGEST_BUSY_ATTEMPTS - 1:
+                    print(f"[mini-web] ingest failed: {exc}")
+                    self._set_status("running", f"消息写入失败:{exc}")
+                    return False
+                await asyncio.sleep(self._INGEST_BUSY_BASE_SLEEP * (2 ** index))
+            except Exception as exc:
+                print(f"[mini-web] ingest failed: {exc}")
+                self._set_status("running", f"消息写入失败:{exc}")
+                return False
+        return False
+
 
 def _validate_settings(settings: dict) -> None:
     parse_api_id(settings.get("api_id"))
@@ -249,15 +436,47 @@ def _parse_optional_int(value: object) -> int:
 
 
 def _event_topic_id(event) -> int:
-    message = getattr(event, "message", None)
+    return _message_topic_id(getattr(event, "message", None))
+
+
+def _message_topic_id(message) -> int:
     reply_to = getattr(message, "reply_to", None)
     return int(getattr(reply_to, "reply_to_top_id", 0) or getattr(message, "reply_to_msg_id", 0) or 0)
 
 
 def _raw_event_from_telethon(event, *, account_key: str = "default") -> RawMessageEvent:
-    message = event.message
-    sender_id = int(getattr(event, "sender_id", 0) or 0) or None
-    chat_id = int(getattr(event, "chat_id", 0) or 0)
+    return _raw_event_from_message_data(
+        event.message,
+        chat_id=int(getattr(event, "chat_id", 0) or 0),
+        sender_id=int(getattr(event, "sender_id", 0) or 0) or None,
+        sender=getattr(event, "sender", None),
+        account_key=account_key,
+    )
+
+
+async def _raw_event_from_message(message, *, chat_id: int = 0, account_key: str = "default") -> RawMessageEvent:
+    raw_event = _raw_event_from_message_data(message, chat_id=chat_id, account_key=account_key)
+    display_name = await _resolve_sender_display_name_from_message(message)
+    if display_name:
+        raw_event = replace(raw_event, source=display_name)
+    edit_date = getattr(message, "edit_date", None)
+    if edit_date is not None:
+        if getattr(edit_date, "tzinfo", None) is None:
+            edit_date = edit_date.replace(tzinfo=timezone.utc)
+        raw_event = replace(raw_event, edited_at=edit_date.astimezone(timezone.utc).isoformat())
+    return raw_event
+
+
+def _raw_event_from_message_data(
+    message,
+    *,
+    chat_id: int = 0,
+    sender_id: int | None = None,
+    sender=None,
+    account_key: str = "default",
+) -> RawMessageEvent:
+    sender_id = int(sender_id or getattr(message, "sender_id", 0) or 0) or None
+    chat_id = int(chat_id or getattr(message, "chat_id", 0) or 0)
     msg_id = int(getattr(message, "id", 0) or 0)
     date = getattr(message, "date", None)
     if date is not None:
@@ -266,7 +485,7 @@ def _raw_event_from_telethon(event, *, account_key: str = "default") -> RawMessa
         date_text = date.astimezone(timezone.utc).isoformat()
     else:
         date_text = ""
-    cached_source = _format_sender_display(getattr(message, "sender", None) or getattr(event, "sender", None))
+    cached_source = _format_sender_display(getattr(message, "sender", None) or sender)
     source = cached_source or (str(sender_id) if sender_id else "未知发送者")
 
     raw_reply = getattr(message, "reply_to_msg_id", None)
@@ -291,9 +510,19 @@ def _raw_event_from_telethon(event, *, account_key: str = "default") -> RawMessa
         reply_to_msg_id=cleaned_reply,
         top_msg_id=top_id or None,
         mentions=tuple(),
-        sender_is_bot=bool(getattr(getattr(message, "sender", None) or getattr(event, "sender", None), "bot", False)),
+        sender_is_bot=bool(getattr(getattr(message, "sender", None) or sender, "bot", False)),
         media_meta=_message_meta_from_telethon(message),
     )
+
+
+def _target_chat_storage_id(value: object) -> int:
+    parsed = _parse_target_chat(value)
+    return parsed if isinstance(parsed, int) else 0
+
+
+def _is_sqlite_busy(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "database is locked" in text or "database table is locked" in text or "database is busy" in text
 
 
 def _message_meta_from_telethon(message) -> dict | None:
@@ -348,6 +577,18 @@ async def _resolve_sender_display_name(event) -> str:
     sender = getattr(event.message, "sender", None) or getattr(event, "sender", None)
     if sender is None:
         getter = getattr(event, "get_sender", None)
+        if getter is not None:
+            try:
+                sender = await getter()
+            except Exception:
+                sender = None
+    return _format_sender_display(sender)
+
+
+async def _resolve_sender_display_name_from_message(message) -> str:
+    sender = getattr(message, "sender", None)
+    if sender is None:
+        getter = getattr(message, "get_sender", None)
         if getter is not None:
             try:
                 sender = await getter()
