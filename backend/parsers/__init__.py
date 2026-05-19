@@ -32,6 +32,7 @@ from .prompts import (
 )
 from .realm_breakthrough import RealmBreakthroughParser
 from .retreat_success import RetreatSuccessParser
+from .resource_stats import ResourceStatsParser
 from .risk import RiskParser
 from .second_soul import SecondSoulParser
 from .tower_trial_report import TowerTrialReportParser
@@ -68,6 +69,7 @@ def build_parser_registry() -> ParserRegistry:
     registry.register(DeepRetreatSummaryParser())
     registry.register(RetreatSuccessParser())
     registry.register(TowerTrialReportParser())
+    registry.register(ResourceStatsParser())
     return registry
 
 

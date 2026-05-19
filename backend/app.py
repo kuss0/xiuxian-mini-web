@@ -254,6 +254,16 @@ def _get_state_patches(request: MiniWebHandler, query: dict) -> dict:
     return _app(request).state_patches_payload(scope, send_as_id=send_as_id)
 
 
+def _get_resource_stats(request: MiniWebHandler, query: dict) -> dict:
+    period = (query.get("period") or ["day"])[0]
+    source_type = (query.get("source_type") or [""])[0]
+    try:
+        limit = int((query.get("limit") or ["120"])[0])
+    except (TypeError, ValueError):
+        limit = 120
+    return _app(request).resource_stats_payload(period=period, source_type=source_type, limit=limit)
+
+
 def _get_discovered_bots(request: MiniWebHandler, query: dict) -> dict:
     return _app(request).discovered_bots_payload()
 
@@ -500,6 +510,7 @@ GET_ROUTES = {
     "/api/outbox/drafts": _get_outbox_drafts,
     "/api/settings": _get_settings,
     "/api/state-patches": _get_state_patches,
+    "/api/resource-stats": _get_resource_stats,
     "/api/discovered-bots": _get_discovered_bots,
     "/api/accounts": _get_accounts,
     "/api/identities": _get_identities,

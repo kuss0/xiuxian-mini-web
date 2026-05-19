@@ -9,7 +9,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
-from backend.domain.models import OutboxDraft, ParsedCard, RawMessageEvent, StatePatch, utc_now_iso
+from backend.domain.models import (
+    OutboxDraft,
+    ParsedCard,
+    RawMessageEvent,
+    ResourceDelta,
+    StatePatch,
+    utc_now_iso,
+)
 from backend.identity_state import build_default_registry
 from backend.parsers import build_parser_registry
 from backend.processors import MessagePipeline
@@ -595,6 +602,37 @@ class SQLiteStore:
                         json.dumps(card.to_api(), ensure_ascii=False),
                     ),
                 )
+            conn.execute("DELETE FROM resource_deltas WHERE raw_message_id=?", (event.id,))
+            for delta in output.resource_deltas:
+                event_time = delta.event_time or event.date or utc_now_iso()
+                day_key, week_key, month_key = _resource_period_keys(event_time)
+                conn.execute(
+                    """
+                    INSERT INTO resource_deltas(
+                        raw_message_id, source_type, source_name, player,
+                        resource_name, amount, unit, basis, event_time,
+                        day_key, week_key, month_key, chat_id, msg_id, meta_json
+                    )
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        delta.raw_message_id or event.id,
+                        delta.source_type,
+                        delta.source_name,
+                        delta.player,
+                        delta.resource_name,
+                        int(delta.amount),
+                        delta.unit,
+                        delta.basis,
+                        event_time,
+                        day_key,
+                        week_key,
+                        month_key,
+                        int(delta.chat_id or event.chat_id or 0),
+                        int(delta.msg_id or event.msg_id or 0),
+                        json.dumps(delta.meta or {}, ensure_ascii=False),
+                    ),
+                )
             for patch in output.state_patches:
                 # 解析 send_as_id:patch 自己有就用;没有就回退到本条 event sender,
                 # 如果本条是「游戏 bot 回复」(根据 settings.game_bot_ids 判断,不是
@@ -1144,6 +1182,87 @@ class SQLiteStore:
             )
         return out
 
+    def list_resource_deltas(self, raw_message_id: str = "") -> list[dict]:
+        where = []
+        params: list = []
+        if raw_message_id:
+            where.append("raw_message_id=?")
+            params.append(str(raw_message_id))
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT raw_message_id, source_type, source_name, player,
+                       resource_name, amount, unit, basis, event_time,
+                       day_key, week_key, month_key, chat_id, msg_id, meta_json
+                FROM resource_deltas
+                {where_sql}
+                ORDER BY event_time DESC, id DESC
+                """,
+                params,
+            ).fetchall()
+        return [_resource_delta_row_to_api(row) for row in rows]
+
+    def resource_stats(self, *, period: str = "day", source_type: str = "", limit: int = 120) -> dict:
+        period = str(period or "day").strip().lower()
+        period_col = {
+            "day": "day_key",
+            "week": "week_key",
+            "month": "month_key",
+        }.get(period, "day_key")
+        period = {"day_key": "day", "week_key": "week", "month_key": "month"}[period_col]
+        try:
+            limit = int(limit or 120)
+        except (TypeError, ValueError):
+            limit = 120
+        limit = max(1, min(limit, 500))
+        where = []
+        params: list = []
+        source_type = str(source_type or "").strip()
+        if source_type and source_type != "all":
+            where.append("source_type=?")
+            params.append(source_type)
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {period_col} AS period_key, source_type, source_name,
+                       resource_name, unit, basis, SUM(amount) AS total_amount,
+                       COUNT(*) AS event_count, MIN(event_time), MAX(event_time)
+                FROM resource_deltas
+                {where_sql}
+                GROUP BY {period_col}, source_type, source_name, resource_name, unit, basis
+                ORDER BY {period_col} DESC, source_type ASC, source_name ASC, resource_name ASC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return {
+            "ok": True,
+            "period": period,
+            "source_type": source_type or "all",
+            "rows": [
+                {
+                    "period": row[0],
+                    "source_type": row[1],
+                    "source_name": row[2],
+                    "resource_name": row[3],
+                    "unit": row[4],
+                    "basis": row[5],
+                    "total_amount": int(row[6] or 0),
+                    "event_count": int(row[7] or 0),
+                    "first_event_time": row[8],
+                    "last_event_time": row[9],
+                }
+                for row in rows
+            ],
+            "notes": [
+                "副本结算当前按每位队员人均收益记录,不按未知队伍人数放大。",
+                "血色试炼结算已排除。",
+            ],
+        }
+
     def list_discovered_bots(self) -> list[dict]:
         """从消息箱抓「真的发过游戏 bot 风格消息」的 sender,给 UI 让用户勾选哪些是游戏 bot
         (写到 settings.game_bot_ids)。识别条件:
@@ -1643,6 +1762,37 @@ class SQLiteStore:
                 CREATE INDEX IF NOT EXISTS idx_parsed_cards_primary_channel
                     ON parsed_cards(primary_channel);
 
+                CREATE TABLE IF NOT EXISTS resource_deltas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    raw_message_id TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    source_name TEXT NOT NULL DEFAULT '',
+                    player TEXT NOT NULL DEFAULT '',
+                    resource_name TEXT NOT NULL,
+                    amount INTEGER NOT NULL,
+                    unit TEXT NOT NULL DEFAULT '',
+                    basis TEXT NOT NULL DEFAULT 'event',
+                    event_time TEXT NOT NULL,
+                    day_key TEXT NOT NULL,
+                    week_key TEXT NOT NULL,
+                    month_key TEXT NOT NULL,
+                    chat_id INTEGER NOT NULL DEFAULT 0,
+                    msg_id INTEGER NOT NULL DEFAULT 0,
+                    meta_json TEXT NOT NULL DEFAULT '{}',
+                    FOREIGN KEY(raw_message_id) REFERENCES raw_messages(id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_resource_deltas_period
+                    ON resource_deltas(day_key, week_key, month_key);
+                CREATE INDEX IF NOT EXISTS idx_resource_deltas_week
+                    ON resource_deltas(week_key);
+                CREATE INDEX IF NOT EXISTS idx_resource_deltas_month
+                    ON resource_deltas(month_key);
+                CREATE INDEX IF NOT EXISTS idx_resource_deltas_source
+                    ON resource_deltas(source_type, source_name);
+                CREATE INDEX IF NOT EXISTS idx_resource_deltas_resource
+                    ON resource_deltas(resource_name);
+
                 CREATE TABLE IF NOT EXISTS state_patches (
                     scope TEXT NOT NULL,
                     send_as_id INTEGER NOT NULL DEFAULT 0,
@@ -1971,6 +2121,43 @@ def _parse_message_dt(value: object) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _resource_period_keys(value: object) -> tuple[str, str, str]:
+    parsed = _parse_message_dt(value) or datetime.now(timezone.utc)
+    local = parsed.astimezone(timezone(timedelta(hours=8)))
+    iso_year, iso_week, _ = local.isocalendar()
+    return (
+        local.date().isoformat(),
+        f"{iso_year:04d}-W{iso_week:02d}",
+        f"{local.year:04d}-{local.month:02d}",
+    )
+
+
+def _resource_delta_row_to_api(row) -> dict:
+    meta = {}
+    try:
+        meta = json.loads(row[14] or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        meta = {}
+    return ResourceDelta(
+        raw_message_id=row[0],
+        source_type=row[1],
+        source_name=row[2],
+        player=row[3],
+        resource_name=row[4],
+        amount=int(row[5] or 0),
+        unit=row[6] or "",
+        basis=row[7] or "event",
+        event_time=row[8] or "",
+        chat_id=int(row[12] or 0),
+        msg_id=int(row[13] or 0),
+        meta=meta,
+    ).to_api() | {
+        "day": row[9],
+        "week": row[10],
+        "month": row[11],
+    }
 
 
 def _safe_int(value: object) -> int:

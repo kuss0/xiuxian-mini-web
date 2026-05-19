@@ -45,6 +45,9 @@ class CardStore(Protocol):
     def list_state_patches(self, scope: str = "", send_as_id: int = 0) -> list[dict]:
         ...
 
+    def resource_stats(self, *, period: str = "day", source_type: str = "", limit: int = 120) -> dict:
+        ...
+
     def save_settings(self, payload: dict) -> dict:
         ...
 
@@ -395,6 +398,11 @@ class MiniWebServer:
             "ok": True,
             "state": self._store.list_state_patches(scope, send_as_id=send_as_id),
         }
+
+    def resource_stats_payload(self, *, period: str = "day", source_type: str = "", limit: int = 120) -> dict:
+        if not hasattr(self._store, "resource_stats"):
+            return {"ok": False, "error": "store does not support resource stats", "rows": []}
+        return self._store.resource_stats(period=period, source_type=source_type, limit=limit)
 
     def discovered_bots_payload(self) -> dict:
         """从消息箱「自动发现」可能是游戏 bot 的 sender(必须真的产出过游戏关键词消息,

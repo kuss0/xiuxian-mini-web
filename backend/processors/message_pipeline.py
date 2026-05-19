@@ -89,6 +89,7 @@ class MessagePipeline:
                     ),
                 ),
                 state_patches=output.state_patches,
+                resource_deltas=output.resource_deltas,
             )
             enriched = self._enrich(fallback_output, event)
 
@@ -220,7 +221,11 @@ class MessagePipeline:
             )
             for card in output.cards
         )
-        return ParserOutput(cards=enriched, state_patches=output.state_patches)
+        return ParserOutput(
+            cards=enriched,
+            state_patches=output.state_patches,
+            resource_deltas=output.resource_deltas,
+        )
 
     def _enrich_one_card(
         self,
