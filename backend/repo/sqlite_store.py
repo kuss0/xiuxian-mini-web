@@ -20,6 +20,7 @@ from backend.domain.models import (
 )
 from backend.identity_state import build_default_registry
 from backend.parsers import build_parser_registry
+from backend.parsers.resource_stats import infer_wild_strategy_from_command
 from backend.processors import MessagePipeline
 from backend.processors.message_filter import (
     CURRENT_MESSAGE_FILTER_VERSION,
@@ -38,6 +39,7 @@ DEFAULT_LEADER_SOURCE_NAMES = ["@iosdo7"]
 DEFAULT_TARGET_CHAT = "-1001680975844"
 DEFAULT_TARGET_TOPIC_ID = "7310786"
 ACCOUNT_SECRET_KEYS = {"api_hash", "proxy_password"}
+RESOURCE_STATS_SCHEMA_VERSION = 4
 
 
 class SQLiteStore:
@@ -292,7 +294,18 @@ class SQLiteStore:
             legacy_per_member = conn.execute(
                 "SELECT COUNT(*) FROM resource_deltas WHERE basis='per_member'"
             ).fetchone()[0]
-            if existing_events and not legacy_per_member:
+            stored_version_row = conn.execute(
+                "SELECT value_json FROM settings WHERE key='resource_stats_schema_version'"
+            ).fetchone()
+            try:
+                stored_version = int(json.loads(stored_version_row[0])) if stored_version_row else 0
+            except (TypeError, ValueError, json.JSONDecodeError):
+                stored_version = 0
+            if (
+                existing_events
+                and not legacy_per_member
+                and stored_version >= RESOURCE_STATS_SCHEMA_VERSION
+            ):
                 return {"events": 0, "deltas": 0}
             rows = conn.execute(
                 """
@@ -300,7 +313,11 @@ class SQLiteStore:
                        reply_to_msg_id, top_msg_id, mentions_json, sender_is_bot,
                        edited_at, deleted_at, media_kind, media_meta_json
                 FROM raw_messages
-                WHERE text LIKE '%野外历练%' OR text LIKE '%战利品结算%'
+                WHERE text LIKE '%野外历练%'
+                   OR text LIKE '%战利品结算%'
+                   OR text LIKE '%黄龙山大战%'
+                   OR text LIKE '%登顶昆吾山%'
+                   OR text LIKE '%坠魔谷%'
                 ORDER BY rowid ASC
                 """
             ).fetchall()
@@ -343,6 +360,14 @@ class SQLiteStore:
                 )
                 event_count += len(output.resource_events)
                 delta_count += len(output.resource_deltas)
+            conn.execute(
+                """
+                INSERT INTO settings(key, value_json)
+                VALUES(?, ?)
+                ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json
+                """,
+                ("resource_stats_schema_version", json.dumps(RESOURCE_STATS_SCHEMA_VERSION)),
+            )
         return {"events": event_count, "deltas": delta_count}
 
     def backfill_resource_deltas_if_empty(self) -> int:
@@ -760,6 +785,7 @@ class SQLiteStore:
         deltas: Iterable[ResourceDelta],
         events: Iterable[ResourceEvent],
     ) -> None:
+        deltas, events = self._enrich_resource_records_from_parent(conn, event, deltas, events)
         conn.execute("DELETE FROM resource_events WHERE raw_message_id=?", (event.id,))
         self._replace_resource_deltas(conn, event, deltas)
         for resource_event in events:
@@ -790,6 +816,61 @@ class SQLiteStore:
                     json.dumps(resource_event.meta or {}, ensure_ascii=False),
                 ),
             )
+
+    def _enrich_resource_records_from_parent(
+        self,
+        conn,
+        event: RawMessageEvent,
+        deltas: Iterable[ResourceDelta],
+        events: Iterable[ResourceEvent],
+    ) -> tuple[tuple[ResourceDelta, ...], tuple[ResourceEvent, ...]]:
+        deltas_tuple = tuple(deltas)
+        events_tuple = tuple(events)
+        if not events_tuple:
+            return deltas_tuple, events_tuple
+        if not any(
+            item.source_type == "wild_training" and item.source_name == "野外历练·未知"
+            for item in events_tuple
+        ):
+            return deltas_tuple, events_tuple
+        parent_text = self._lookup_parent_text_for_event(conn, event)
+        strategy = infer_wild_strategy_from_command(parent_text)
+        if not strategy:
+            return deltas_tuple, events_tuple
+        source_name = f"野外历练·{strategy}"
+
+        def patch_meta(meta: dict) -> dict:
+            return dict(meta or {}) | {"strategy": strategy, "strategy_source": "reply_parent"}
+
+        return (
+            tuple(
+                replace(delta, source_name=source_name, meta=patch_meta(delta.meta))
+                if delta.source_type == "wild_training" and delta.source_name == "野外历练·未知"
+                else delta
+                for delta in deltas_tuple
+            ),
+            tuple(
+                replace(resource_event, source_name=source_name, meta=patch_meta(resource_event.meta))
+                if resource_event.source_type == "wild_training"
+                and resource_event.source_name == "野外历练·未知"
+                else resource_event
+                for resource_event in events_tuple
+            ),
+        )
+
+    def _lookup_parent_text_for_event(self, conn, event: RawMessageEvent) -> str:
+        if not event.reply_to_msg_id:
+            return ""
+        row = conn.execute(
+            """
+            SELECT text
+            FROM raw_messages
+            WHERE chat_id=? AND msg_id=?
+            LIMIT 1
+            """,
+            (int(event.chat_id or 0), int(event.reply_to_msg_id or 0)),
+        ).fetchone()
+        return str(row[0] or "") if row else ""
 
     def _replace_resource_deltas(self, conn, event: RawMessageEvent, deltas: Iterable[ResourceDelta]) -> None:
         conn.execute("DELETE FROM resource_deltas WHERE raw_message_id=?", (event.id,))
@@ -1380,12 +1461,20 @@ class SQLiteStore:
             rows = conn.execute(
                 f"""
                 SELECT {period_col} AS period_key, source_type, source_name,
-                       resource_name, unit, basis, SUM(amount) AS total_amount,
+                       resource_name, unit, basis,
+                       CASE WHEN amount < 0 THEN 'loss' ELSE 'gain' END AS amount_kind,
+                       CASE
+                           WHEN resource_name IN ('修为', '贡献', '灵石') THEN 'basic'
+                           ELSE 'rare'
+                       END AS resource_category,
+                       SUM(amount) AS total_amount,
                        COUNT(DISTINCT raw_message_id) AS event_count, MIN(event_time), MAX(event_time)
                 FROM resource_deltas
                 {where_sql}
-                GROUP BY {period_col}, source_type, source_name, resource_name, unit, basis
-                ORDER BY {period_col} DESC, source_type ASC, source_name ASC, resource_name ASC
+                GROUP BY {period_col}, source_type, source_name, resource_name, unit, basis,
+                         amount_kind, resource_category
+                ORDER BY {period_col} DESC, source_type ASC, source_name ASC,
+                         resource_category DESC, amount_kind ASC, ABS(SUM(amount)) DESC, resource_name ASC
                 LIMIT ?
                 """,
                 delta_params,
@@ -1417,16 +1506,18 @@ class SQLiteStore:
                     "resource_name": row[3],
                     "unit": row[4],
                     "basis": row[5],
-                    "total_amount": int(row[6] or 0),
-                    "event_count": int(row[7] or 0),
-                    "first_event_time": row[8],
-                    "last_event_time": row[9],
+                    "amount_kind": row[6],
+                    "resource_category": row[7],
+                    "total_amount": int(row[8] or 0),
+                    "event_count": int(row[9] or 0),
+                    "first_event_time": row[10],
+                    "last_event_time": row[11],
                 }
                 for row in rows
             ],
             "notes": [
-                "野外历练单独统计成功、失败和冷却;成功率不把冷却计入分母。",
-                "副本结算按单次结算文案记录,不按队伍人数放大;幸运掉落按文案归属记录。",
+                "野外历练单独统计成功、失败和冷却;资源成果按正收益/负收益分开,不做净额抵消。",
+                "副本结算按具体副本/入口分开统计,按单次结算文案记录,不按队伍人数放大。",
                 "血色试炼结算已排除。",
             ],
         }

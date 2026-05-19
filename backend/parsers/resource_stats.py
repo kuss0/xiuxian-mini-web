@@ -10,21 +10,43 @@ from backend.domain.registry import ParserOutput
 
 WILD_TITLE_RE = re.compile(r"【野外历练(?:\s*[·・]\s*(?P<name>[^】]+))?】")
 DUNGEON_LOOT_TITLE_RE = re.compile(r"【战利品结算(?:[·・]\s*(?P<name>[^】]+))?】")
+HUANGLONG_RESULT_RE = re.compile(r"【黄龙山大战[·・]\s*(?P<name>[^】]+)】")
+KUNWU_RESULT_RE = re.compile(r"【登顶昆吾山】")
+ZHUI_MO_RESULT_RE = re.compile(r"【坠魔谷[·・]\s*(?P<name>[^】]+)】")
 PLAYER_RE = re.compile(r"@(?P<user>[A-Za-z0-9_]+)")
 RESOURCE_PLUS_RE = re.compile(r"(?P<name>修为|贡献|灵石)\s*[+＋]\s*(?P<amount>\d+)")
-RESOURCE_LOSS_RE = re.compile(r"(?P<name>修为)\s*折损\s*[-－]\s*(?P<amount>\d+)")
-AMOUNT_BEFORE_RESOURCE_RE = re.compile(r"(?P<amount>\d+)\s*(?P<name>修为|贡献|灵石)")
+RESOURCE_LOSS_RE = re.compile(r"(?P<name>修为)\s*折损\s*[-－]?\s*(?P<amount>\d+)")
+AMOUNT_BEFORE_RESOURCE_RE = re.compile(r"(?P<amount>\d+)\s*(?:点\s*)?(?P<name>修为|贡献|灵石)")
 RESOURCE_X_RE = re.compile(
     r"(?:【(?P<bracket>[^】]+)】|(?P<name>[\u4e00-\u9fff][\u4e00-\u9fff0-9]*))\s*[xX×*]\s*(?P<amount>\d+)"
 )
-ITEM_WITHOUT_AMOUNT_RE = re.compile(r"(?:^|[\s，。！])(?:@(?P<user>[A-Za-z0-9_]+)\s*)?额?外?获得了\s*【(?P<name>[^】]+)】(?=$|[\s，。！])")
+ITEM_WITHOUT_AMOUNT_RE = re.compile(
+    r"(?:^|[\s，。！:：])"
+    r"(?:@(?P<user>[A-Za-z0-9_]+)(?:[、,，]\s*@[A-Za-z0-9_]+)*\s*)?"
+    r"(?:额外)?获得(?:了)?(?:[^【\n]{0,12})?【(?P<name>[^】]+)】"
+    r"(?!\s*[xX×*]\s*\d)(?=$|[\s，。！])"
+)
 
 NON_BLOOD_DUNGEONS = ("虚天殿", "黄龙山", "昆吾山", "坠魔谷")
+DUNGEON_ROUTE_NAMES = {
+    "玄冰秘径": "虚天殿",
+    "焚炎秘径": "虚天殿",
+    "极寒冰魄": "虚天殿",
+    "焚天烈焰": "虚天殿",
+}
 BLOOD_MARKERS = ("血色试炼", "血色副本")
 WILD_COOLDOWN_MARKERS = ("山中灵机未复", "后再来")
 WILD_FAILED_MARKERS = ("NPC 历练失败", "修为折损")
 DUNGEON_BASIC_ONLY_MARKERS = ("额外宝藏尽毁", "只保住了基础收获", "引发了反噬")
 DUNGEON_EXTRA_MARKERS = ("全队额外获得", "额外获得了")
+KUNWU_RARE_PATTERNS = (
+    ("金精矿", "金精矿", 1),
+    ("凝血草", "凝血草", 1),
+    ("清灵草", "清灵草", 1),
+    ("天雷竹", "天雷竹", 1),
+    ("朱果", "朱果", 1),
+    ("几枚一阶妖丹", "一阶妖丹", 3),
+)
 
 
 class ResourceStatsParser:
@@ -38,6 +60,26 @@ class ResourceStatsParser:
             return self._parse_wild_training(event)
         if DUNGEON_LOOT_TITLE_RE.search(text):
             return self._parse_dungeon_loot(event)
+        if HUANGLONG_RESULT_RE.search(text):
+            return self._parse_named_dungeon_result(
+                event,
+                source_name="黄龙山",
+                title="黄龙山大战",
+                title_re=HUANGLONG_RESULT_RE,
+                success_markers=("夺宝即退", "阵斩神师", "守住黄龙山"),
+                failure_markers=("战线崩解",),
+            )
+        if KUNWU_RESULT_RE.search(text):
+            return self._parse_kunwu_result(event)
+        if ZHUI_MO_RESULT_RE.search(text):
+            return self._parse_named_dungeon_result(
+                event,
+                source_name="坠魔谷",
+                title="坠魔谷",
+                title_re=ZHUI_MO_RESULT_RE,
+                success_markers=("封魔成功", "净谷成功", "通关"),
+                failure_markers=("封魔失败", "超时失败"),
+            )
         return None
 
     def _parse_wild_training(self, event: RawMessageEvent) -> ParserOutput | None:
@@ -45,15 +87,18 @@ class ResourceStatsParser:
         title = WILD_TITLE_RE.search(text)
         player = _first_player(text)
         title_detail = (title.group("name") if title else "") or ""
+        strategy = _infer_wild_strategy(text)
         meta = {"title": "野外历练"}
         if title_detail:
             meta["title_detail"] = title_detail.strip()
+        if strategy:
+            meta["strategy"] = strategy
 
         deltas = _extract_reward_deltas(
             event,
             text,
             source_type="wild_training",
-            source_name="野外历练",
+            source_name=_wild_source_name(strategy),
             player=player,
             basis="player",
             meta=meta,
@@ -63,7 +108,7 @@ class ResourceStatsParser:
                 event,
                 text,
                 source_type="wild_training",
-                source_name="野外历练",
+                source_name=_wild_source_name(strategy),
                 player=player,
                 basis="player",
                 meta=meta,
@@ -82,10 +127,109 @@ class ResourceStatsParser:
         event_row = _resource_event(
             event,
             source_type="wild_training",
-            source_name="野外历练",
+            source_name=_wild_source_name(strategy),
             player=player,
             result=result,
             outcome=title_detail.strip(),
+            meta=meta,
+        )
+        return ParserOutput(resource_deltas=tuple(deltas), resource_events=(event_row,))
+
+    def _parse_named_dungeon_result(
+        self,
+        event: RawMessageEvent,
+        *,
+        source_name: str,
+        title: str,
+        title_re: re.Pattern,
+        success_markers: tuple[str, ...],
+        failure_markers: tuple[str, ...],
+    ) -> ParserOutput | None:
+        text = event.text or ""
+        if "奖励一览" in text:
+            return None
+        title_match = title_re.search(text)
+        title_detail = ((title_match.group("name") if title_match else "") or "").strip()
+        reward_lines = "\n".join(line for line in text.splitlines() if "获得" in line)
+        if not reward_lines:
+            return None
+        meta = {"title": title}
+        if title_detail:
+            meta["settlement"] = title_detail
+        result = "settled"
+        if title_detail and any(marker in title_detail for marker in failure_markers):
+            result = "failed"
+        elif title_detail and any(marker in title_detail for marker in success_markers):
+            result = "success"
+        elif re.search(r"额外获得|首通奖励", reward_lines):
+            result = "extra_success"
+        deltas = _extract_reward_deltas(
+            event,
+            reward_lines,
+            source_type="dungeon",
+            source_name=source_name,
+            player="",
+            basis="run",
+            meta=meta,
+        )
+        deltas.extend(
+            _extract_explicit_item_deltas(
+                event,
+                reward_lines,
+                source_type="dungeon",
+                source_name=source_name,
+                basis="run",
+                meta=meta,
+            )
+        )
+        if not deltas:
+            return None
+        event_row = _resource_event(
+            event,
+            source_type="dungeon",
+            source_name=source_name,
+            player="",
+            result=result,
+            outcome=title_detail,
+            meta=meta,
+        )
+        return ParserOutput(resource_deltas=tuple(deltas), resource_events=(event_row,))
+
+    def _parse_kunwu_result(self, event: RawMessageEvent) -> ParserOutput | None:
+        text = event.text or ""
+        if "最终收获" not in text:
+            return None
+        source_name = "昆吾山"
+        meta = {"title": "登顶昆吾山"}
+        deltas = _extract_reward_deltas(
+            event,
+            "\n".join(line for line in text.splitlines() if "获得" in line),
+            source_type="dungeon",
+            source_name=source_name,
+            player="",
+            basis="run",
+            meta=meta,
+        )
+        deltas.extend(
+            _extract_explicit_item_deltas(
+                event,
+                "\n".join(line for line in text.splitlines() if "获得" in line),
+                source_type="dungeon",
+                source_name=source_name,
+                basis="run",
+                meta=meta,
+            )
+        )
+        deltas.extend(_extract_kunwu_rare_deltas(event, text, source_name=source_name, meta=meta))
+        if not deltas:
+            return None
+        event_row = _resource_event(
+            event,
+            source_type="dungeon",
+            source_name=source_name,
+            player="",
+            result="success",
+            outcome="登顶",
             meta=meta,
         )
         return ParserOutput(resource_deltas=tuple(deltas), resource_events=(event_row,))
@@ -106,6 +250,8 @@ class ResourceStatsParser:
             meta["settlement"] = title_detail
         if "天命所归" in text or re.search(r"@[A-Za-z0-9_]+\s*额外获得了", text):
             meta["lucky_drop"] = True
+        if route := _infer_dungeon_route(text):
+            meta["route"] = route
 
         result = "settled"
         if _contains_any(text, DUNGEON_BASIC_ONLY_MARKERS):
@@ -113,11 +259,12 @@ class ResourceStatsParser:
         elif _contains_any(text, DUNGEON_EXTRA_MARKERS):
             result = "extra_success"
 
+        dungeon_name = _infer_dungeon_name(text, title_detail)
         deltas = _extract_reward_deltas(
             event,
             reward_lines,
             source_type="dungeon",
-            source_name=_infer_dungeon_name(text),
+            source_name=dungeon_name,
             player="",
             basis="run",
             meta=meta,
@@ -127,7 +274,7 @@ class ResourceStatsParser:
                 event,
                 reward_lines,
                 source_type="dungeon",
-                source_name=_infer_dungeon_name(text),
+                source_name=dungeon_name,
                 basis="run",
                 meta=meta,
             )
@@ -137,7 +284,7 @@ class ResourceStatsParser:
         event_row = _resource_event(
             event,
             source_type="dungeon",
-            source_name=_infer_dungeon_name(text),
+            source_name=dungeon_name,
             player="",
             result=result,
             outcome=title_detail,
@@ -223,6 +370,33 @@ def _extract_explicit_item_deltas(
     return found
 
 
+def _extract_kunwu_rare_deltas(
+    event: RawMessageEvent,
+    text: str,
+    *,
+    source_name: str,
+    meta: dict,
+) -> list[ResourceDelta]:
+    found: list[ResourceDelta] = []
+    for marker, resource_name, amount in KUNWU_RARE_PATTERNS:
+        count = text.count(marker)
+        if count <= 0:
+            continue
+        found.append(
+            _resource_delta(
+                event,
+                source_type="dungeon",
+                source_name=source_name,
+                player="",
+                resource_name=resource_name,
+                amount=count * amount,
+                basis="run",
+                meta=meta | {"source": "route_log"},
+            )
+        )
+    return found
+
+
 def _extract_loss_deltas(
     event: RawMessageEvent,
     text: str,
@@ -279,7 +453,7 @@ def _resource_delta(
         event_time=event.date,
         chat_id=int(event.chat_id or 0),
         msg_id=int(event.msg_id or 0),
-        meta=dict(meta),
+        meta=dict(meta) | {"amount_kind": "gain" if amount >= 0 else "loss"},
     )
 
 
@@ -325,10 +499,48 @@ def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
     return any(marker in text for marker in markers)
 
 
-def _infer_dungeon_name(text: str) -> str:
+def _infer_wild_strategy(text: str) -> str:
+    if match := re.search(r"选择【(?P<strategy>谨慎|均衡|深入)】策略", text):
+        return match.group("strategy")
+    return infer_wild_strategy_from_command(text)
+
+
+def infer_wild_strategy_from_command(text: str) -> str:
+    if match := re.search(r"\.野外历练\s+(?P<strategy>谨慎|均衡|深入)(?:\s|$)", text or ""):
+        return match.group("strategy")
+    if re.fullmatch(r"\s*\.野外历练\s*", text or ""):
+        return "均衡"
+    return ""
+
+
+def _wild_source_name(strategy: str) -> str:
+    return f"野外历练·{strategy}" if strategy else "野外历练·未知"
+
+
+def _infer_dungeon_name(text: str, title_detail: str = "") -> str:
+    settlement = str(title_detail or "").strip()
+    if settlement in {"夺鼎", "求稳"}:
+        return _dungeon_source_name("虚天殿", settlement)
     for name in NON_BLOOD_DUNGEONS:
         if name in text:
-            return name
-    if any(marker in text for marker in ("玄冰秘径", "极寒冰魄", "焚天烈焰", "夺鼎", "求稳")):
-        return "虚天殿"
+            return _dungeon_source_name(name, settlement)
+    for marker, name in DUNGEON_ROUTE_NAMES.items():
+        if marker in text:
+            return _dungeon_source_name(name, settlement)
+    if any(marker in text for marker in ("夺鼎", "求稳")):
+        return _dungeon_source_name("副本·未识别", settlement)
     return "副本"
+
+
+def _infer_dungeon_route(text: str) -> str:
+    if "玄冰秘径" in text or "极寒冰魄" in text:
+        return "玄冰秘径"
+    if "焚炎秘径" in text or "焚天烈焰" in text:
+        return "焚炎秘径"
+    return ""
+
+
+def _dungeon_source_name(name: str, settlement: str) -> str:
+    if name.startswith("虚天殿") and settlement in {"夺鼎", "求稳"}:
+        return f"{name}·{settlement}"
+    return name

@@ -70,7 +70,9 @@ def test_resource_stats_api_groups_by_period_and_excludes_blood_trial(tmp_path):
     assert payload["ok"] is True
     assert rows == {("修为", 5000), ("贡献", 500), ("养魂木", 1)}
     assert all(row["basis"] == "run" for row in payload["rows"])
+    assert {row["resource_category"] for row in payload["rows"]} == {"basic", "rare"}
     assert summary["source_type"] == "dungeon"
+    assert summary["source_name"] == "虚天殿·夺鼎"
     assert summary["settled"] == 1
     assert "血色试炼结算已排除。" in payload["notes"]
 
@@ -105,14 +107,62 @@ def test_resource_stats_api_tracks_wild_training_success_failed_and_cooldown(tmp
         )
 
     payload = MiniWebServer(store=store).resource_stats_payload(period="day", source_type="wild_training")
-    summary = payload["event_summary"][0]
+    summary = next(row for row in payload["event_summary"] if row["source_name"] == "野外历练·未知")
     assert summary["success"] == 1
     assert summary["failed"] == 1
     assert summary["cooldown"] == 1
     assert summary["success_rate"] == 50.0
-    assert ("修为", -2177) in {
-        (row["resource_name"], row["total_amount"]) for row in payload["rows"]
+    assert ("修为", "loss", -2522) in {
+        (row["resource_name"], row["amount_kind"], row["total_amount"]) for row in payload["rows"]
     }
+
+
+def test_resource_stats_backfill_adds_wild_strategy_from_reply_parent(tmp_path):
+    store = SQLiteStore(tmp_path / "state.db")
+    with store._connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO raw_messages(
+                id, chat_id, msg_id, text, source, date, mentions_json, sender_is_bot
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "tg:-1:400",
+                -1,
+                400,
+                ".野外历练 深入",
+                "玩家",
+                "2026-05-15T11:59:00+00:00",
+                "[]",
+                0,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO raw_messages(
+                id, chat_id, msg_id, text, source, date, reply_to_msg_id,
+                mentions_json, sender_is_bot
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "tg:-1:401",
+                -1,
+                401,
+                """【野外历练 · 灵机暗藏】
+@salt9527 获得修为 +12000，获得 【灵石】x399。""",
+                "韩天尊",
+                "2026-05-15T12:00:00+00:00",
+                400,
+                "[]",
+                1,
+            ),
+        )
+
+    assert store.backfill_resource_records_if_needed() == {"events": 1, "deltas": 2}
+    assert {item["source_name"] for item in store.list_resource_events()} == {"野外历练·深入"}
+    assert {item["source_name"] for item in store.list_resource_deltas()} == {"野外历练·深入"}
 
 
 def test_resource_backfill_reads_existing_raw_messages_without_reingest(tmp_path):
@@ -202,6 +252,7 @@ def test_resource_backfill_reads_existing_raw_messages_without_reingest(tmp_path
         ("修为", 12000),
         ("灵石", 399),
     }
+    assert {item["source_name"] for item in store.list_resource_deltas()} == {"野外历练·未知"}
     assert [item["result"] for item in store.list_resource_events()] == ["success"]
 
 

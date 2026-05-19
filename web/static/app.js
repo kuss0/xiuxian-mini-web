@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: resource-stats-events 2026-05-19T12:05
-console.log("[mini-web] build: resource-stats-events 2026-05-19T12:05 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: resource-stats-rare-splits 2026-05-19T14:05
+console.log("[mini-web] build: resource-stats-rare-splits 2026-05-19T14:05 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -664,7 +664,7 @@ async function openResourceStatsModal() {
     body: `
       <section class="modal-section">
         <h4>全服资源统计</h4>
-        <p class="muted">当前只统计消息箱采集到的「野外历练」和「非血色副本战利品结算」。野外会记录成功、失败、冷却；副本按单次结算文案记录，不做人均放大。</p>
+        <p class="muted">当前只统计消息箱采集到的「野外历练」和「非血色副本战利品结算」。野外按谨慎/均衡/深入拆；虚天殿按夺鼎/求稳拆；稀有产物会优先展示。</p>
         <div class="form-grid resource-stats-controls">
           <label>
             <span>周期</span>
@@ -726,7 +726,7 @@ async function refreshResourceStats(dialog) {
   if (refreshButton) refreshButton.disabled = true;
   setResourceStatsStatus(dialog, "info", "正在读取统计…");
   try {
-    const params = new URLSearchParams({ period, source_type: sourceType, limit: "200" });
+    const params = new URLSearchParams({ period, source_type: sourceType, limit: "500" });
     const payload = await fetchJson(`/api/resource-stats?${params.toString()}`);
     renderResourceStats(dialog, payload);
     const count = (payload.rows || []).length + (payload.events || []).length;
@@ -774,8 +774,8 @@ function renderResourceStats(dialog, payload) {
     return;
   }
   table.innerHTML = `
-    ${renderResourceEventTable(eventSummary)}
     ${renderResourceDeltaTable(rows)}
+    ${renderResourceEventTable(eventSummary)}
     ${Array.isArray(payload.notes) && payload.notes.length
       ? `<div class="resource-stats-notes">${payload.notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>`
       : ""}
@@ -818,12 +818,20 @@ function renderResourceEventTable(summaryRows) {
 function renderResourceDeltaTable(rows) {
   if (!rows.length) return "";
   return groupResourceRowsBySource(rows).map((group) => `
-    <div class="resource-stats-subtitle">资源成果 · ${escapeHtml(group.label)}</div>
+    ${renderResourceDeltaSubTable("稀有产物", group.rows.filter((row) => row.resource_category === "rare"), group.label)}
+    ${renderResourceDeltaSubTable("正收益", group.rows.filter((row) => row.resource_category !== "rare" && row.amount_kind !== "loss"), group.label)}
+    ${renderResourceDeltaSubTable("负收益", group.rows.filter((row) => row.amount_kind === "loss"), group.label)}
+  `).join("");
+}
+
+function renderResourceDeltaSubTable(title, rows, label) {
+  if (!rows.length) return "";
+  return `
+    <div class="resource-stats-subtitle">${escapeHtml(title)} · ${escapeHtml(label)}</div>
     <table class="resource-stats-table">
       <thead>
         <tr>
           <th>周期</th>
-          <th>来源</th>
           <th>资源</th>
           <th>合计</th>
           <th>单数</th>
@@ -831,10 +839,9 @@ function renderResourceDeltaTable(rows) {
         </tr>
       </thead>
       <tbody>
-        ${group.rows.map((row) => `
+        ${rows.map((row) => `
           <tr>
             <td>${escapeHtml(row.period || "")}</td>
-            <td>${escapeHtml(resourceSourceLabel(row.source_type, row.source_name))}</td>
             <td>${escapeHtml(row.resource_name || "")}</td>
             <td class="num ${Number(row.total_amount || 0) < 0 ? "negative" : ""}">${escapeHtml(formatResourceAmount(row.total_amount, row.unit))}</td>
             <td class="num">${escapeHtml(formatNumber(row.event_count || 0))}</td>
@@ -843,7 +850,7 @@ function renderResourceDeltaTable(rows) {
         `).join("")}
       </tbody>
     </table>
-  `).join("");
+  `;
 }
 
 function groupResourceRowsBySource(rows) {
@@ -860,7 +867,33 @@ function groupResourceRowsBySource(rows) {
 function renderResourceStatsSummary(rows, eventSummary) {
   if (!rows.length && !eventSummary.length) return "";
   const cards = [];
+  const totals = new Map();
+  for (const row of rows) {
+    if (row.resource_category !== "rare") continue;
+    const key = `${row.resource_name || ""}|${row.unit || ""}|${row.basis || ""}`;
+    const prev = totals.get(key) || {
+      resource_name: row.resource_name || "",
+      unit: row.unit || "",
+      basis: row.basis || "",
+      total_amount: 0,
+      event_count: 0,
+    };
+    prev.total_amount += Number(row.total_amount || 0);
+    prev.event_count += Number(row.event_count || 0);
+    totals.set(key, prev);
+  }
+  const top = Array.from(totals.values())
+    .sort((a, b) => b.total_amount - a.total_amount || String(a.resource_name).localeCompare(String(b.resource_name), "zh-CN"))
+    .slice(0, 4);
+  cards.push(...top.map((item) => `
+    <div class="resource-stat-card">
+      <span>稀有｜${escapeHtml(item.resource_name || "资源")}</span>
+      <strong>${escapeHtml(formatResourceAmount(item.total_amount, item.unit))}</strong>
+      <small>${escapeHtml(resourceBasisLabel(item.basis))}｜${escapeHtml(formatNumber(item.event_count))} 次</small>
+    </div>
+  `));
   for (const item of eventSummary.slice(0, 4)) {
+    if (cards.length >= 6) break;
     const successRate = formatSuccessRate(item.success_rate);
     const main = item.source_type === "wild_training"
       ? `${formatNumber(item.success || 0)} 成 / ${formatNumber(item.failed || 0)} 败`
@@ -876,40 +909,11 @@ function renderResourceStatsSummary(rows, eventSummary) {
       </div>
     `);
   }
-  const totals = new Map();
-  for (const row of rows) {
-    const key = `${row.resource_name || ""}|${row.unit || ""}|${row.basis || ""}`;
-    const prev = totals.get(key) || {
-      resource_name: row.resource_name || "",
-      unit: row.unit || "",
-      basis: row.basis || "",
-      total_amount: 0,
-      event_count: 0,
-    };
-    prev.total_amount += Number(row.total_amount || 0);
-    prev.event_count += Number(row.event_count || 0);
-    totals.set(key, prev);
-  }
-  const top = Array.from(totals.values())
-    .sort((a, b) => {
-      const ar = a.resource_name === "修为" ? 0 : a.resource_name === "灵石" ? 1 : 2;
-      const br = b.resource_name === "修为" ? 0 : b.resource_name === "灵石" ? 1 : 2;
-      if (ar !== br) return ar - br;
-      return b.total_amount - a.total_amount;
-    })
-    .slice(0, Math.max(0, 6 - cards.length));
-  cards.push(...top.map((item) => `
-    <div class="resource-stat-card">
-      <span>${escapeHtml(item.resource_name || "资源")}</span>
-      <strong>${escapeHtml(formatResourceAmount(item.total_amount, item.unit))}</strong>
-      <small>${escapeHtml(resourceBasisLabel(item.basis))}｜${escapeHtml(formatNumber(item.event_count))} 次</small>
-    </div>
-  `));
   return cards.join("");
 }
 
 function resourceSourceLabel(sourceType, sourceName) {
-  if (sourceType === "wild_training") return "野外历练";
+  if (sourceType === "wild_training") return sourceName || "野外历练";
   if (sourceType === "dungeon") return sourceName ? `副本 · ${sourceName}` : "副本结算";
   return sourceName || sourceType || "未知";
 }
