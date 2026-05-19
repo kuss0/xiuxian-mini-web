@@ -2258,6 +2258,13 @@ pre {
   border-radius: 8px;
 }
 
+.resource-stats-subtitle {
+  padding: 10px 10px 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .resource-stats-table {
   width: 100%;
   min-width: 720px;
@@ -2289,6 +2296,10 @@ pre {
 .resource-stats-table td.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.resource-stats-table td.negative {
+  color: var(--risk);
 }
 
 .resource-stats-notes {

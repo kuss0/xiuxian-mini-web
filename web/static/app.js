@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: resource-stats-status-fix 2026-05-19T11:12
-console.log("[mini-web] build: resource-stats-status-fix 2026-05-19T11:12 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: resource-stats-events 2026-05-19T12:05
+console.log("[mini-web] build: resource-stats-events 2026-05-19T12:05 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -663,8 +663,8 @@ async function openResourceStatsModal() {
     title: "资源统计",
     body: `
       <section class="modal-section">
-        <h4>全服收益流水</h4>
-        <p class="muted">当前只统计消息箱采集到的「野外历练」和「非血色副本战利品结算」。副本结算按每位队员的人均收益记录,不按未知队伍人数放大。</p>
+        <h4>全服资源统计</h4>
+        <p class="muted">当前只统计消息箱采集到的「野外历练」和「非血色副本战利品结算」。野外会记录成功、失败、冷却；副本按单次结算文案记录，不做人均放大。</p>
         <div class="form-grid resource-stats-controls">
           <label>
             <span>周期</span>
@@ -729,7 +729,7 @@ async function refreshResourceStats(dialog) {
     const params = new URLSearchParams({ period, source_type: sourceType, limit: "200" });
     const payload = await fetchJson(`/api/resource-stats?${params.toString()}`);
     renderResourceStats(dialog, payload);
-    const count = (payload.rows || []).length;
+    const count = (payload.rows || []).length + (payload.events || []).length;
     setResourceStatsStatus(dialog, "ok", `已加载 ${count} 行。血色副本结算不会进入这里。`);
   } catch (error) {
     if (table) {
@@ -761,17 +761,64 @@ function setResourceStatsStatus(dialog, kind, text) {
 
 function renderResourceStats(dialog, payload) {
   const rows = payload.rows || [];
+  const events = payload.events || [];
+  const eventSummary = payload.event_summary || [];
   const summary = dialog.querySelector("#resourceStatsSummary");
   const table = dialog.querySelector("#resourceStatsTable");
   if (summary) {
-    summary.innerHTML = renderResourceStatsSummary(rows);
+    summary.innerHTML = renderResourceStatsSummary(rows, eventSummary);
   }
   if (!table) return;
-  if (!rows.length) {
+  if (!rows.length && !events.length) {
     table.innerHTML = '<p class="empty inline">暂无统计数据。只有 listener 采到对应结算文案后才会出现。</p>';
     return;
   }
   table.innerHTML = `
+    ${renderResourceEventTable(eventSummary)}
+    ${renderResourceDeltaTable(rows)}
+    ${Array.isArray(payload.notes) && payload.notes.length
+      ? `<div class="resource-stats-notes">${payload.notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>`
+      : ""}
+  `;
+}
+
+function renderResourceEventTable(summaryRows) {
+  if (!summaryRows.length) return "";
+  return groupResourceRowsBySource(summaryRows).map((group) => `
+    <div class="resource-stats-subtitle">执行结果 · ${escapeHtml(group.label)}</div>
+    <table class="resource-stats-table">
+      <thead>
+        <tr>
+          <th>周期</th>
+          <th>来源</th>
+          <th>成功/额外</th>
+          <th>失败/基础</th>
+          <th>冷却</th>
+          <th>结算</th>
+          <th>成功率</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${group.rows.map((row) => `
+          <tr>
+            <td>${escapeHtml(row.period || "")}</td>
+            <td>${escapeHtml(resourceSourceLabel(row.source_type, row.source_name))}</td>
+            <td class="num">${escapeHtml(formatNumber((row.success || 0) + (row.extra_success || 0)))}</td>
+            <td class="num">${escapeHtml(formatNumber((row.failed || 0) + (row.basic_only || 0)))}</td>
+            <td class="num">${escapeHtml(formatNumber(row.cooldown || 0))}</td>
+            <td class="num">${escapeHtml(formatNumber(row.settled || 0))}</td>
+            <td class="num">${escapeHtml(formatSuccessRate(row.success_rate))}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `).join("");
+}
+
+function renderResourceDeltaTable(rows) {
+  if (!rows.length) return "";
+  return groupResourceRowsBySource(rows).map((group) => `
+    <div class="resource-stats-subtitle">资源成果 · ${escapeHtml(group.label)}</div>
     <table class="resource-stats-table">
       <thead>
         <tr>
@@ -779,31 +826,56 @@ function renderResourceStats(dialog, payload) {
           <th>来源</th>
           <th>资源</th>
           <th>合计</th>
-          <th>次数</th>
+          <th>单数</th>
           <th>口径</th>
         </tr>
       </thead>
       <tbody>
-        ${rows.map((row) => `
+        ${group.rows.map((row) => `
           <tr>
             <td>${escapeHtml(row.period || "")}</td>
             <td>${escapeHtml(resourceSourceLabel(row.source_type, row.source_name))}</td>
             <td>${escapeHtml(row.resource_name || "")}</td>
-            <td class="num">${escapeHtml(formatResourceAmount(row.total_amount, row.unit))}</td>
+            <td class="num ${Number(row.total_amount || 0) < 0 ? "negative" : ""}">${escapeHtml(formatResourceAmount(row.total_amount, row.unit))}</td>
             <td class="num">${escapeHtml(formatNumber(row.event_count || 0))}</td>
             <td>${escapeHtml(resourceBasisLabel(row.basis))}</td>
           </tr>
         `).join("")}
       </tbody>
     </table>
-    ${Array.isArray(payload.notes) && payload.notes.length
-      ? `<div class="resource-stats-notes">${payload.notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>`
-      : ""}
-  `;
+  `).join("");
 }
 
-function renderResourceStatsSummary(rows) {
-  if (!rows.length) return "";
+function groupResourceRowsBySource(rows) {
+  const grouped = new Map();
+  for (const row of rows) {
+    const label = resourceSourceLabel(row.source_type, row.source_name);
+    const key = `${row.source_type || ""}|${row.source_name || ""}`;
+    if (!grouped.has(key)) grouped.set(key, { label, rows: [] });
+    grouped.get(key).rows.push(row);
+  }
+  return Array.from(grouped.values());
+}
+
+function renderResourceStatsSummary(rows, eventSummary) {
+  if (!rows.length && !eventSummary.length) return "";
+  const cards = [];
+  for (const item of eventSummary.slice(0, 4)) {
+    const successRate = formatSuccessRate(item.success_rate);
+    const main = item.source_type === "wild_training"
+      ? `${formatNumber(item.success || 0)} 成 / ${formatNumber(item.failed || 0)} 败`
+      : `${formatNumber((item.settled || 0) + (item.basic_only || 0) + (item.extra_success || 0))} 次`;
+    const sub = item.source_type === "wild_training"
+      ? `CD ${formatNumber(item.cooldown || 0)}｜成功率 ${successRate}`
+      : `额外 ${formatNumber(item.extra_success || 0)}｜基础 ${formatNumber(item.basic_only || 0)}`;
+    cards.push(`
+      <div class="resource-stat-card">
+        <span>${escapeHtml(resourceSourceLabel(item.source_type, item.source_name))}｜${escapeHtml(item.period || "")}</span>
+        <strong>${escapeHtml(main)}</strong>
+        <small>${escapeHtml(sub)}</small>
+      </div>
+    `);
+  }
   const totals = new Map();
   for (const row of rows) {
     const key = `${row.resource_name || ""}|${row.unit || ""}|${row.basis || ""}`;
@@ -825,14 +897,15 @@ function renderResourceStatsSummary(rows) {
       if (ar !== br) return ar - br;
       return b.total_amount - a.total_amount;
     })
-    .slice(0, 6);
-  return top.map((item) => `
+    .slice(0, Math.max(0, 6 - cards.length));
+  cards.push(...top.map((item) => `
     <div class="resource-stat-card">
       <span>${escapeHtml(item.resource_name || "资源")}</span>
       <strong>${escapeHtml(formatResourceAmount(item.total_amount, item.unit))}</strong>
       <small>${escapeHtml(resourceBasisLabel(item.basis))}｜${escapeHtml(formatNumber(item.event_count))} 次</small>
     </div>
-  `).join("");
+  `));
+  return cards.join("");
 }
 
 function resourceSourceLabel(sourceType, sourceName) {
@@ -842,9 +915,16 @@ function resourceSourceLabel(sourceType, sourceName) {
 }
 
 function resourceBasisLabel(value) {
-  if (value === "per_member") return "人均";
-  if (value === "player") return "玩家";
+  if (value === "run") return "单次";
+  if (value === "player") return "单人";
   return value || "事件";
+}
+
+function formatSuccessRate(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return `${n.toFixed(n % 1 === 0 ? 0 : 1)}%`;
 }
 
 function formatResourceAmount(value, unit) {

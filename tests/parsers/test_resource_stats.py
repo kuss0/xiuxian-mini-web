@@ -17,6 +17,9 @@ def test_extracts_wild_training_resource_deltas():
     assert all(delta.source_name == "野外历练" for delta in output.resource_deltas)
     assert all(delta.player == "salt9527" for delta in output.resource_deltas)
     assert all(delta.basis == "player" for delta in output.resource_deltas)
+    assert [(event.result, event.outcome) for event in output.resource_events] == [
+        ("success", "灵机暗藏")
+    ]
 
 
 def test_wild_training_does_not_parse_username_with_x_digits_as_resource():
@@ -31,9 +34,34 @@ def test_wild_training_does_not_parse_username_with_x_digits_as_resource():
         ("修为", 8000),
         ("二级妖丹", 1),
     }
+    assert output.resource_events[0].result == "success"
 
 
-def test_extracts_dungeon_loot_per_member_deltas():
+def test_extracts_wild_training_failed_event_and_loss():
+    event = make_event(
+        """【野外历练 · 负伤而归】
+@snpao002 遭遇 玄水妖蟒，一时判断失误。
+战力对比: 你 2107240 / 妖兽 1935703，胜算 53%。
+你强行脱身，修为折损 -2522。
+此为 NPC 历练失败，不计入斗法记录。"""
+    )
+    output = ResourceStatsParser().parse(event)
+    assert output is not None
+    assert [(delta.resource_name, delta.amount) for delta in output.resource_deltas] == [
+        ("修为", -2522)
+    ]
+    assert output.resource_events[0].result == "failed"
+
+
+def test_extracts_wild_training_cooldown_event_without_delta():
+    event = make_event("【野外历练】\n山中灵机未复，请在 19分钟7秒 后再来。")
+    output = ResourceStatsParser().parse(event)
+    assert output is not None
+    assert output.resource_deltas == ()
+    assert output.resource_events[0].result == "cooldown"
+
+
+def test_extracts_dungeon_loot_run_deltas():
     event = make_event(
         """【战利品结算·夺鼎】
 你们逆着鼎火冲入核心，试图在宝光消散前强夺最后一缕机缘。
@@ -47,7 +75,29 @@ def test_extracts_dungeon_loot_per_member_deltas():
     assert deltas == {("修为", 5000), ("贡献", 500), ("养魂木", 1)}
     assert all(delta.source_type == "dungeon" for delta in output.resource_deltas)
     assert all(delta.source_name == "虚天殿" for delta in output.resource_deltas)
-    assert all(delta.basis == "per_member" for delta in output.resource_deltas)
+    assert all(delta.basis == "run" for delta in output.resource_deltas)
+    assert output.resource_events[0].result == "basic_only"
+
+
+def test_extracts_dungeon_explicit_lucky_item_without_amount_as_one():
+    event = make_event(
+        """【战利品结算·求稳】
+所有队员均获得 5000修为 和 500贡献！
+天命所归，幸运道友 @snpao3 额外获得了 【第二元神残篇】！
+焚炎秘径：每位队员获得 三级妖丹x1
+@snpao3 额外获得了 【二级妖丹】x2"""
+    )
+    output = ResourceStatsParser().parse(event)
+    assert output is not None
+    assert {(delta.player, delta.resource_name, delta.amount) for delta in output.resource_deltas} == {
+        ("", "修为", 5000),
+        ("", "贡献", 500),
+        ("", "三级妖丹", 1),
+        ("snpao3", "第二元神残篇", 1),
+        ("snpao3", "二级妖丹", 2),
+    }
+    assert output.resource_events[0].result == "extra_success"
+    assert output.resource_events[0].meta["lucky_drop"] is True
 
 
 def test_skips_blood_trial_dungeon_loot():

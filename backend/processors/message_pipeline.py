@@ -90,6 +90,7 @@ class MessagePipeline:
                 ),
                 state_patches=output.state_patches,
                 resource_deltas=output.resource_deltas,
+                resource_events=output.resource_events,
             )
             enriched = self._enrich(fallback_output, event)
 
@@ -225,6 +226,7 @@ class MessagePipeline:
             cards=enriched,
             state_patches=output.state_patches,
             resource_deltas=output.resource_deltas,
+            resource_events=output.resource_events,
         )
 
     def _enrich_one_card(

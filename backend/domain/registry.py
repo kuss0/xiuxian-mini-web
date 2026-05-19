@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from .models import ParsedCard, RawMessageEvent, ResourceDelta, StatePatch
+from .models import ParsedCard, RawMessageEvent, ResourceDelta, ResourceEvent, StatePatch
 
 
 @dataclass(frozen=True)
@@ -11,6 +11,7 @@ class ParserOutput:
     cards: tuple[ParsedCard, ...] = ()
     state_patches: tuple[StatePatch, ...] = ()
     resource_deltas: tuple[ResourceDelta, ...] = ()
+    resource_events: tuple[ResourceEvent, ...] = ()
 
 
 class Parser(Protocol):
@@ -31,6 +32,7 @@ class ParserRegistry:
         cards: list[ParsedCard] = []
         state_patches: list[StatePatch] = []
         resource_deltas: list[ResourceDelta] = []
+        resource_events: list[ResourceEvent] = []
         for parser in self.parsers:
             output = parser.parse(event)
             if output is None:
@@ -38,8 +40,10 @@ class ParserRegistry:
             cards.extend(output.cards)
             state_patches.extend(output.state_patches)
             resource_deltas.extend(output.resource_deltas)
+            resource_events.extend(output.resource_events)
         return ParserOutput(
             cards=tuple(cards),
             state_patches=tuple(state_patches),
             resource_deltas=tuple(resource_deltas),
+            resource_events=tuple(resource_events),
         )

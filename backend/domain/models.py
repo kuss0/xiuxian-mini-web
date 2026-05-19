@@ -215,6 +215,34 @@ class ResourceDelta:
 
 
 @dataclass(frozen=True)
+class ResourceEvent:
+    raw_message_id: str
+    source_type: str
+    result: str
+    event_time: str
+    source_name: str = ""
+    player: str = ""
+    outcome: str = ""
+    chat_id: int = 0
+    msg_id: int = 0
+    meta: dict[str, Any] = field(default_factory=dict)
+
+    def to_api(self) -> dict[str, Any]:
+        return {
+            "raw_message_id": self.raw_message_id,
+            "source_type": self.source_type,
+            "source_name": self.source_name,
+            "player": self.player,
+            "result": self.result,
+            "outcome": self.outcome,
+            "event_time": self.event_time,
+            "chat_id": self.chat_id,
+            "msg_id": self.msg_id,
+            "meta": self.meta,
+        }
+
+
+@dataclass(frozen=True)
 class ParsedCard:
     id: str
     channels: tuple[str, ...]

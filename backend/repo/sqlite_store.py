@@ -14,6 +14,7 @@ from backend.domain.models import (
     ParsedCard,
     RawMessageEvent,
     ResourceDelta,
+    ResourceEvent,
     StatePatch,
     utc_now_iso,
 )
@@ -280,16 +281,19 @@ class SQLiteStore:
             count += 1
         return count
 
-    def backfill_resource_deltas_if_empty(self) -> int:
-        """资源流水表首次启用时,从历史消息箱补一次。
+    def backfill_resource_records_if_needed(self) -> dict[str, int]:
+        """资源统计表首次启用/升级时,从历史消息箱补一次。
 
-        只跑 parser registry 提取 resource_deltas,不走 ingest_event,避免重建卡片、
-        observe 状态机或触发通知。
+        只跑 parser registry 提取 resource_events/resource_deltas,不走
+        ingest_event,避免重建卡片、observe 状态机或触发通知。
         """
         with self._connect() as conn:
-            existing = conn.execute("SELECT COUNT(*) FROM resource_deltas").fetchone()[0]
-            if existing:
-                return 0
+            existing_events = conn.execute("SELECT COUNT(*) FROM resource_events").fetchone()[0]
+            legacy_per_member = conn.execute(
+                "SELECT COUNT(*) FROM resource_deltas WHERE basis='per_member'"
+            ).fetchone()[0]
+            if existing_events and not legacy_per_member:
+                return {"events": 0, "deltas": 0}
             rows = conn.execute(
                 """
                 SELECT id, chat_id, msg_id, text, source, date, sender_id,
@@ -301,10 +305,15 @@ class SQLiteStore:
                 """
             ).fetchall()
         if not rows:
-            return 0
+            return {"events": 0, "deltas": 0}
         registry = build_parser_registry()
-        count = 0
+        event_count = 0
+        delta_count = 0
         with self._connect() as conn:
+            # resource_events 是新表。首次升级时顺手重建 resource_deltas,
+            # 把旧的副本 per_member 口径改成 run 口径。
+            conn.execute("DELETE FROM resource_deltas")
+            conn.execute("DELETE FROM resource_events")
             for row in rows:
                 event = RawMessageEvent(
                     id=row[0],
@@ -324,11 +333,21 @@ class SQLiteStore:
                     media_meta=(json.loads(row[14]) if row[14] else None),
                 )
                 output = registry.parse(event)
-                if not output.resource_deltas:
+                if not output.resource_deltas and not output.resource_events:
                     continue
-                self._replace_resource_deltas(conn, event, output.resource_deltas)
-                count += len(output.resource_deltas)
-        return count
+                self._replace_resource_records(
+                    conn,
+                    event,
+                    output.resource_deltas,
+                    output.resource_events,
+                )
+                event_count += len(output.resource_events)
+                delta_count += len(output.resource_deltas)
+        return {"events": event_count, "deltas": delta_count}
+
+    def backfill_resource_deltas_if_empty(self) -> int:
+        """兼容旧调用名。返回本次写入的 resource_deltas 数量。"""
+        return self.backfill_resource_records_if_needed()["deltas"]
 
     def rebuild_parsed_cards_if_legacy(self) -> int:
         """如果 parsed_cards 有任何「老结构」就全量重建。两种 legacy 情况:
@@ -652,7 +671,12 @@ class SQLiteStore:
                         json.dumps(card.to_api(), ensure_ascii=False),
                     ),
                 )
-            self._replace_resource_deltas(conn, event, output.resource_deltas)
+            self._replace_resource_records(
+                conn,
+                event,
+                output.resource_deltas,
+                output.resource_events,
+            )
             for patch in output.state_patches:
                 # 解析 send_as_id:patch 自己有就用;没有就回退到本条 event sender,
                 # 如果本条是「游戏 bot 回复」(根据 settings.game_bot_ids 判断,不是
@@ -728,6 +752,44 @@ class SQLiteStore:
         # 重新分流,否则「bot 回复我」会停留在 archive,首页重点流看不到。
         self._reclassify_direct_reply_children(event)
         return cards
+
+    def _replace_resource_records(
+        self,
+        conn,
+        event: RawMessageEvent,
+        deltas: Iterable[ResourceDelta],
+        events: Iterable[ResourceEvent],
+    ) -> None:
+        conn.execute("DELETE FROM resource_events WHERE raw_message_id=?", (event.id,))
+        self._replace_resource_deltas(conn, event, deltas)
+        for resource_event in events:
+            event_time = resource_event.event_time or event.date or utc_now_iso()
+            day_key, week_key, month_key = _resource_period_keys(event_time)
+            conn.execute(
+                """
+                INSERT INTO resource_events(
+                    raw_message_id, source_type, source_name, player,
+                    result, outcome, event_time, day_key, week_key, month_key,
+                    chat_id, msg_id, meta_json
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    resource_event.raw_message_id or event.id,
+                    resource_event.source_type,
+                    resource_event.source_name,
+                    resource_event.player,
+                    resource_event.result,
+                    resource_event.outcome,
+                    event_time,
+                    day_key,
+                    week_key,
+                    month_key,
+                    int(resource_event.chat_id or event.chat_id or 0),
+                    int(resource_event.msg_id or event.msg_id or 0),
+                    json.dumps(resource_event.meta or {}, ensure_ascii=False),
+                ),
+            )
 
     def _replace_resource_deltas(self, conn, event: RawMessageEvent, deltas: Iterable[ResourceDelta]) -> None:
         conn.execute("DELETE FROM resource_deltas WHERE raw_message_id=?", (event.id,))
@@ -1256,6 +1318,27 @@ class SQLiteStore:
             ).fetchall()
         return [_resource_delta_row_to_api(row) for row in rows]
 
+    def list_resource_events(self, raw_message_id: str = "") -> list[dict]:
+        where = []
+        params: list = []
+        if raw_message_id:
+            where.append("raw_message_id=?")
+            params.append(str(raw_message_id))
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT raw_message_id, source_type, source_name, player,
+                       result, outcome, event_time, day_key, week_key, month_key,
+                       chat_id, msg_id, meta_json
+                FROM resource_events
+                {where_sql}
+                ORDER BY event_time DESC, id DESC
+                """,
+                params,
+            ).fetchall()
+        return [_resource_event_row_to_api(row) for row in rows]
+
     def resource_stats(self, *, period: str = "day", source_type: str = "", limit: int = 120) -> dict:
         period = str(period or "day").strip().lower()
         period_col = {
@@ -1276,25 +1359,56 @@ class SQLiteStore:
             where.append("source_type=?")
             params.append(source_type)
         where_sql = ("WHERE " + " AND ".join(where)) if where else ""
-        params.append(limit)
+        event_params = list(params)
+        event_params.append(limit)
+        delta_params = list(params)
+        delta_params.append(limit)
         with self._connect() as conn:
+            event_rows = conn.execute(
+                f"""
+                SELECT {period_col} AS period_key, source_type, source_name,
+                       result, outcome, COUNT(*) AS event_count,
+                       MIN(event_time), MAX(event_time)
+                FROM resource_events
+                {where_sql}
+                GROUP BY {period_col}, source_type, source_name, result, outcome
+                ORDER BY {period_col} DESC, source_type ASC, source_name ASC, result ASC, outcome ASC
+                LIMIT ?
+                """,
+                event_params,
+            ).fetchall()
             rows = conn.execute(
                 f"""
                 SELECT {period_col} AS period_key, source_type, source_name,
                        resource_name, unit, basis, SUM(amount) AS total_amount,
-                       COUNT(*) AS event_count, MIN(event_time), MAX(event_time)
+                       COUNT(DISTINCT raw_message_id) AS event_count, MIN(event_time), MAX(event_time)
                 FROM resource_deltas
                 {where_sql}
                 GROUP BY {period_col}, source_type, source_name, resource_name, unit, basis
                 ORDER BY {period_col} DESC, source_type ASC, source_name ASC, resource_name ASC
                 LIMIT ?
                 """,
-                params,
+                delta_params,
             ).fetchall()
+        events = [
+            {
+                "period": row[0],
+                "source_type": row[1],
+                "source_name": row[2],
+                "result": row[3],
+                "outcome": row[4],
+                "event_count": int(row[5] or 0),
+                "first_event_time": row[6],
+                "last_event_time": row[7],
+            }
+            for row in event_rows
+        ]
         return {
             "ok": True,
             "period": period,
             "source_type": source_type or "all",
+            "events": events,
+            "event_summary": _resource_event_summary(events),
             "rows": [
                 {
                     "period": row[0],
@@ -1311,7 +1425,8 @@ class SQLiteStore:
                 for row in rows
             ],
             "notes": [
-                "副本结算当前按每位队员人均收益记录,不按未知队伍人数放大。",
+                "野外历练单独统计成功、失败和冷却;成功率不把冷却计入分母。",
+                "副本结算按单次结算文案记录,不按队伍人数放大;幸运掉落按文案归属记录。",
                 "血色试炼结算已排除。",
             ],
         }
@@ -1846,6 +1961,31 @@ class SQLiteStore:
                 CREATE INDEX IF NOT EXISTS idx_resource_deltas_resource
                     ON resource_deltas(resource_name);
 
+                CREATE TABLE IF NOT EXISTS resource_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    raw_message_id TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    source_name TEXT NOT NULL DEFAULT '',
+                    player TEXT NOT NULL DEFAULT '',
+                    result TEXT NOT NULL,
+                    outcome TEXT NOT NULL DEFAULT '',
+                    event_time TEXT NOT NULL,
+                    day_key TEXT NOT NULL,
+                    week_key TEXT NOT NULL,
+                    month_key TEXT NOT NULL,
+                    chat_id INTEGER NOT NULL DEFAULT 0,
+                    msg_id INTEGER NOT NULL DEFAULT 0,
+                    meta_json TEXT NOT NULL DEFAULT '{}',
+                    FOREIGN KEY(raw_message_id) REFERENCES raw_messages(id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_resource_events_period
+                    ON resource_events(day_key, week_key, month_key);
+                CREATE INDEX IF NOT EXISTS idx_resource_events_source
+                    ON resource_events(source_type, source_name);
+                CREATE INDEX IF NOT EXISTS idx_resource_events_result
+                    ON resource_events(result);
+
                 CREATE TABLE IF NOT EXISTS state_patches (
                     scope TEXT NOT NULL,
                     send_as_id INTEGER NOT NULL DEFAULT 0,
@@ -2211,6 +2351,77 @@ def _resource_delta_row_to_api(row) -> dict:
         "week": row[10],
         "month": row[11],
     }
+
+
+def _resource_event_row_to_api(row) -> dict:
+    meta = {}
+    try:
+        meta = json.loads(row[12] or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        meta = {}
+    return ResourceEvent(
+        raw_message_id=row[0],
+        source_type=row[1],
+        source_name=row[2],
+        player=row[3],
+        result=row[4],
+        outcome=row[5],
+        event_time=row[6] or "",
+        chat_id=int(row[10] or 0),
+        msg_id=int(row[11] or 0),
+        meta=meta,
+    ).to_api() | {
+        "day": row[7],
+        "week": row[8],
+        "month": row[9],
+    }
+
+
+def _resource_event_summary(events: list[dict]) -> list[dict]:
+    grouped: dict[tuple[str, str, str], dict] = {}
+    for row in events:
+        key = (
+            str(row.get("period") or ""),
+            str(row.get("source_type") or ""),
+            str(row.get("source_name") or ""),
+        )
+        item = grouped.setdefault(
+            key,
+            {
+                "period": key[0],
+                "source_type": key[1],
+                "source_name": key[2],
+                "success": 0,
+                "failed": 0,
+                "cooldown": 0,
+                "settled": 0,
+                "basic_only": 0,
+                "extra_success": 0,
+                "total": 0,
+                "success_rate": None,
+            },
+        )
+        result = str(row.get("result") or "")
+        count = int(row.get("event_count") or 0)
+        item["total"] += count
+        if result in item:
+            item[result] += count
+        else:
+            item.setdefault("other", 0)
+            item["other"] += count
+    for item in grouped.values():
+        attempts = int(item.get("success") or 0) + int(item.get("failed") or 0)
+        if attempts:
+            item["success_rate"] = round(int(item.get("success") or 0) * 100 / attempts, 1)
+    return sorted(
+        grouped.values(),
+        key=lambda item: (
+            str(item.get("period") or ""),
+            str(item.get("source_type") or ""),
+            str(item.get("source_name") or ""),
+        ),
+        reverse=True,
+    )
 
 
 def _safe_int(value: object) -> int:

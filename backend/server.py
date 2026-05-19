@@ -133,9 +133,13 @@ class MiniWebServer:
             backfilled = sqlite_store.backfill_module_states_if_empty()
             if backfilled:
                 print(f"[mini-web] 状态机历史 backfill: 重放 {backfilled} 条 raw_messages")
-            resource_backfilled = sqlite_store.backfill_resource_deltas_if_empty()
-            if resource_backfilled:
-                print(f"[mini-web] 资源统计历史 backfill: 写入 {resource_backfilled} 条 resource_deltas")
+            resource_backfilled = sqlite_store.backfill_resource_records_if_needed()
+            if resource_backfilled.get("events") or resource_backfilled.get("deltas"):
+                print(
+                    "[mini-web] 资源统计历史 backfill: "
+                    f"写入 {resource_backfilled.get('events', 0)} 条 resource_events, "
+                    f"{resource_backfilled.get('deltas', 0)} 条 resource_deltas"
+                )
             store = sqlite_store
         self._store = store
         self._outbox = OutboxPlanner(self._store)
