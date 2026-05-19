@@ -61,28 +61,28 @@ class Skill:
 # 再加一个新「查询」组放纯只读不消耗的命令。
 DEFAULT_SKILLS: tuple[Skill, ...] = (
     # ---------- 日常 ----------
-    Skill("wild_training", "日常", "野外历练", ".野外历练", icon="⚔️"),
-    Skill("checkin", "日常", "宗门点卯", ".宗门点卯", icon="📋"),
+    Skill("wild_training", "日常", "野外历练", ".野外历练", cd_module="wild_training", icon="⚔️"),
+    Skill("checkin", "日常", "宗门点卯", ".宗门点卯", cd_module="checkin", icon="📋"),
     Skill("sect_teach", "日常", "宗门传功", ".宗门传功", icon="📖"),
-    Skill("tower", "日常", "闯塔", ".闯塔", icon="🗼"),
+    Skill("tower", "日常", "闯塔", ".闯塔", cd_module="tower", icon="🗼"),
     Skill("deep_retreat", "日常", "深度闭关", ".深度闭关", cd_module="deep_retreat", icon="📿"),
     Skill("retreat_shallow", "日常", "闭关修炼", ".闭关修炼", icon="🧘"),
-    Skill("yuanying", "日常", "元婴出窍", ".元婴出窍", icon="👻", realm_min="元婴初期"),
+    Skill("yuanying", "日常", "元婴出窍", ".元婴出窍", cd_module="yuanying", icon="👻", realm_min="元婴初期"),
 
     # ---------- 法宝 ----------
     Skill("pet_touch", "法宝", "抚摸法宝", ".抚摸法宝", cd_module="pet_touch", icon="🖐️"),
     Skill("pet_warm", "法宝", "温养器灵", ".温养器灵", cd_module="pet_warm", icon="♨️"),
-    Skill("pet_trial", "法宝", "器灵试炼", ".器灵试炼", icon="🥊"),
+    Skill("pet_trial", "法宝", "器灵试炼", ".器灵试炼", cd_module="pet_trial", icon="🥊"),
 
     # ---------- 侍妾 ----------
-    Skill("concubine_dream", "侍妾", "入梦寻图", ".入梦寻图", icon="💭"),
+    Skill("concubine_dream", "侍妾", "入梦寻图", ".入梦寻图", cd_module="concubine_dream", icon="💭"),
     Skill("concubine_fragment", "侍妾", "残图", ".残图", icon="🧩",
           note="拼图前先看残图"),
     Skill("concubine_puzzle", "侍妾", "拼图", ".拼图", icon="🖼️"),
     Skill("concubine_sect_marry", "侍妾", "宗门赐婚", ".宗门赐婚", icon="💍"),
     Skill("concubine_romance", "侍妾", "红尘寻缘", ".红尘寻缘", icon="🌹"),
-    Skill("concubine_tianji", "侍妾", "天机代卜", ".天机代卜", icon="🔮"),
-    Skill("concubine_heart", "侍妾", "共历心劫", ".共历心劫", icon="💔"),
+    Skill("concubine_tianji", "侍妾", "天机代卜", ".天机代卜", cd_module="concubine_tianji", icon="🔮"),
+    Skill("concubine_heart", "侍妾", "共历心劫", ".共历心劫", cd_module="concubine_heart", icon="💔"),
     Skill("concubine_heart_steady", "侍妾", "稳", ".稳",
           reply_mode="required",
           note="心劫提示出现后,回复 bot 的提示消息发出"),
@@ -117,19 +117,19 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
     Skill("tree_harvest", "玩法", "采摘灵果", ".采摘灵果", icon="🍎", sect="落云宗"),
     # 观星台 / 观星 = 星宫
     Skill("stargazer_panel", "玩法", "观星台", ".观星台", icon="🔭", sect="星宫"),
-    Skill("stargazer_guide", "玩法", "牵引星辰", ".牵引星辰", icon="🌟", sect="星宫"),
-    Skill("stargazer_soothe", "玩法", "安抚星辰", ".安抚星辰", icon="✨", sect="星宫"),
-    Skill("stargazer_collect", "玩法", "收集精华", ".收集精华", icon="💎", sect="星宫"),
+    Skill("stargazer_guide", "玩法", "牵引星辰", ".牵引星辰", cd_module="stargazer_guide", icon="🌟", sect="星宫"),
+    Skill("stargazer_soothe", "玩法", "安抚星辰", ".安抚星辰", cd_module="stargazer_soothe", icon="✨", sect="星宫"),
+    Skill("stargazer_collect", "玩法", "收集精华", ".收集精华", cd_module="stargazer_collect", icon="💎", sect="星宫"),
     Skill("guanxing", "玩法", "观星", ".观星", icon="🔮", sect="星宫"),
     Skill("guanxing_shift", "玩法", "改换星移", ".改换星移", icon="🌌", sect="星宫"),
     # 登天阶 = 凌霄宫
-    Skill("tianti_climb", "玩法", "登天阶", ".登天阶", icon="🪜", sect="凌霄宫"),
-    Skill("tianti_wenxin", "玩法", "问心台", ".问心台", icon="🧠", sect="凌霄宫"),
-    Skill("tianti_gangfeng", "玩法", "引九天罡风", ".引九天罡风", icon="🌬️", sect="凌霄宫"),
+    Skill("tianti_climb", "玩法", "登天阶", ".登天阶", cd_module="tianti_climb", icon="🪜", sect="凌霄宫"),
+    Skill("tianti_wenxin", "玩法", "问心台", ".问心台", cd_module="tianti_wenxin", icon="🧠", sect="凌霄宫"),
+    Skill("tianti_gangfeng", "玩法", "引九天罡风", ".引九天罡风", cd_module="tianti_gangfeng", icon="🌬️", sect="凌霄宫"),
     # 太一 = 太一门
     Skill("taiyi", "玩法", "太一", ".太一", icon="☯️", sect="太一门"),
     # 放养 = 万灵宗
-    Skill("ranch", "玩法", "一键放养", ".一键放养", icon="🌾", sect="万灵宗"),
+    Skill("ranch", "玩法", "一键放养", ".一键放养", cd_module="ranch", icon="🌾", sect="万灵宗"),
     # 小世界 = realm ≥ 化神初期
     Skill("small_world", "玩法", "小世界", ".小世界", icon="🌐", realm_min="化神初期",
           note="进入小世界面板,查询不消耗"),
@@ -138,7 +138,7 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
     Skill("sw_refine", "玩法", "神识淬炼", ".神识淬炼", icon="🧠", realm_min="化神初期"),
     Skill("sw_preach", "玩法", "神迹 布道", ".神迹 布道", icon="📜", realm_min="化神初期"),
     # 第二元神 / 元神修炼 — 无 sect 限制,通用
-    Skill("second_soul_train", "玩法", "元神修炼", ".元神修炼", icon="🪞"),
+    Skill("second_soul_train", "玩法", "元神修炼", ".元神修炼", cd_module="second_soul", icon="🪞"),
     Skill("second_soul_choice_break", "玩法", "抉择 强行突破", ".抉择 强行突破",
           reply_mode="required",
           note="第二元神 prompt 出现时,回复 bot 提示"),
@@ -146,9 +146,9 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
           reply_mode="required",
           note="第二元神 prompt 出现时,回复 bot 提示"),
     # 引道 — 全角色都能用(节点/星移辅助)
-    Skill("yindao", "玩法", "引道", ".引道", icon="🌠"),
+    Skill("yindao", "玩法", "引道", ".引道", cd_module="taiyi_cycle", icon="🌠"),
     Skill("node_search", "玩法", "搜寻节点", ".搜寻节点", icon="🔎",
-          note="搜寻可定星节点(老脚本 CMD_NODE_SEARCH)"),
+          cd_module="taiyi_cycle", note="搜寻可定星节点(老脚本 CMD_NODE_SEARCH)"),
     Skill("node_define", "玩法", "定星", ".定星", icon="⭐",
           note="把节点钉成星(老脚本 CMD_NODE_DEFINE)"),
 

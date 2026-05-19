@@ -223,8 +223,9 @@ class ModuleRegistry:
 
 
 def build_default_registry() -> ModuleRegistry:
-    """默认 3 个模块:深度闭关 / 抚摸法宝 / 温养器灵。后续添加在这里挂。"""
+    """默认状态模块。复杂玩法独立实现,普通 CD 由 cooldown specs 覆盖。"""
     from backend.identity_state.deep_retreat import DeepRetreatModule
+    from backend.identity_state.cooldown import build_cooldown_modules
     from backend.identity_state.pet_touch import PetTouchModule
     from backend.identity_state.pet_warm import PetWarmModule
 
@@ -232,6 +233,8 @@ def build_default_registry() -> ModuleRegistry:
     reg.register(DeepRetreatModule())
     reg.register(PetTouchModule())
     reg.register(PetWarmModule())
+    for module in build_cooldown_modules():
+        reg.register(module)
     return reg
 
 

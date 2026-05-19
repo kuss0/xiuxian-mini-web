@@ -3469,11 +3469,26 @@ function tickCultivationModules() {
   if (needRerender) renderCultivationModules();
 }
 
-const MODULE_ICONS = { deep_retreat: "📿", pet_touch: "🖐️", pet_warm: "🔥", pet_trial: "⚔️" };
+const MODULE_ICONS = {
+  deep_retreat: "📿",
+  yuanying: "👻",
+  second_soul: "🪞",
+  pet_touch: "🖐️",
+  pet_warm: "🔥",
+  pet_trial: "🥊",
+};
+const SIDEBAR_MODULE_KEYS = new Set(Object.keys(MODULE_ICONS));
 
 function moduleStartTs(state) {
   if (!state) return 0;
-  return Number(state.entered_at || state.last_touched_at || state.last_warmed_at || 0) || 0;
+  return Number(
+    state.entered_at ||
+    state.last_touched_at ||
+    state.last_warmed_at ||
+    state.last_success_at ||
+    state.last_observed_at ||
+    0
+  ) || 0;
 }
 
 function fmtCountdown(secondsLeft) {
@@ -3489,7 +3504,8 @@ function fmtCountdown(secondsLeft) {
 }
 
 function renderIdentityModulesLine(sendAsId) {
-  const items = state.identityModuleStates.get(Number(sendAsId)) || [];
+  const items = (state.identityModuleStates.get(Number(sendAsId)) || [])
+    .filter((item) => SIDEBAR_MODULE_KEYS.has(item.module_key));
   if (!items.length) return "";
   const nowSec = Date.now() / 1000;
   const parts = items.map((item) => {

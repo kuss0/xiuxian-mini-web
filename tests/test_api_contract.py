@@ -1723,6 +1723,78 @@ def test_pet_warm_module_respects_cd_reply_wait():
     assert state["cooldown_until"] == ctx.now + 5 * 3600 + 57 * 60 + 31
 
 
+def test_generic_cooldown_module_records_pet_trial_cd():
+    from backend.identity_state.cooldown import DEFAULT_COOLDOWN_SPECS, CooldownModule
+    spec = next(item for item in DEFAULT_COOLDOWN_SPECS if item.key == "pet_trial")
+    module = CooldownModule(spec)
+    parent = _evt(id="p", msg_id=310, text=".器灵试炼 青竹蜂云剑", sender_id=12345)
+    event = _evt(
+        id="e",
+        msg_id=311,
+        text="【器灵试炼·灵潮】\n器灵试炼归来，法宝灵光更盛。",
+        sender_id=-1003983937918,
+        reply_to_msg_id=310,
+    )
+    ctx = _fake_ctx(parent=parent, sender_kind="bot")
+    state = module.observe(event, ctx, dict(module.default_state))
+    assert state["pet_name"] == "青竹蜂云剑"
+    assert state["cooldown_until"] == ctx.now + 8 * 3600
+    assert state["last_status"] == "success"
+
+
+def test_generic_cooldown_module_uses_real_wait_text():
+    from backend.identity_state.cooldown import DEFAULT_COOLDOWN_SPECS, CooldownModule
+    spec = next(item for item in DEFAULT_COOLDOWN_SPECS if item.key == "taiyi_cycle")
+    module = CooldownModule(spec)
+    parent = _evt(id="p", msg_id=320, text=".搜寻节点", sender_id=12345)
+    event = _evt(
+        id="e",
+        msg_id=321,
+        text="你的神识尚在恢复中，请在 11小时59分钟32秒 后再行搜寻。",
+        sender_id=-1003983937918,
+        reply_to_msg_id=320,
+    )
+    ctx = _fake_ctx(parent=parent, sender_kind="bot")
+    state = module.observe(event, ctx, dict(module.default_state))
+    assert state["cooldown_until"] == ctx.now + 11 * 3600 + 59 * 60 + 32
+    assert state["last_status"] == "cooldown"
+
+
+def test_second_soul_cooldown_module_marks_ready_from_panel():
+    from backend.identity_state.cooldown import DEFAULT_COOLDOWN_SPECS, CooldownModule
+    spec = next(item for item in DEFAULT_COOLDOWN_SPECS if item.key == "second_soul")
+    module = CooldownModule(spec)
+    parent = _evt(id="p", msg_id=330, text=".第二元神", sender_id=12345)
+    event = _evt(
+        id="e",
+        msg_id=331,
+        text="【你的第二元神：玄微】\n状态：窍中温养",
+        sender_id=-1003983937918,
+        reply_to_msg_id=330,
+    )
+    ctx = _fake_ctx(parent=parent, sender_kind="bot")
+    state = module.observe(event, ctx, dict(module.default_state))
+    assert state["cooldown_until"] == ctx.now
+    assert module.status_summary(state, now=ctx.now)["ready"] is True
+
+
+def test_second_soul_cooldown_module_uses_short_recheck_when_no_remaining_time():
+    from backend.identity_state.cooldown import DEFAULT_COOLDOWN_SPECS, CooldownModule
+    spec = next(item for item in DEFAULT_COOLDOWN_SPECS if item.key == "second_soul")
+    module = CooldownModule(spec)
+    parent = _evt(id="p", msg_id=340, text=".元神修炼", sender_id=12345)
+    event = _evt(
+        id="e",
+        msg_id=341,
+        text="你的第二元神尚无法分心修炼（修炼中）。",
+        sender_id=-1003983937918,
+        reply_to_msg_id=340,
+    )
+    ctx = _fake_ctx(parent=parent, sender_kind="bot")
+    state = module.observe(event, ctx, dict(module.default_state))
+    assert state["cooldown_until"] == ctx.now + 3600
+
+
 def test_module_registry_observe_only_writes_when_state_changes():
     from backend.identity_state import build_default_registry
     reg = build_default_registry()
@@ -1780,7 +1852,9 @@ def test_identity_state_payload_groups_by_send_as(tmp_path):
     server = MiniWebServer(store=store)
     payload = server.identity_state_payload("")
     assert payload["ok"] is True
-    assert {m["key"] for m in payload["modules"]} == {"deep_retreat", "pet_touch", "pet_warm"}
+    module_keys = {m["key"] for m in payload["modules"]}
+    assert {"deep_retreat", "pet_touch", "pet_warm"} <= module_keys
+    assert {"wild_training", "tianti_climb", "taiyi_cycle"} <= module_keys
     by_identity = payload["by_identity"]
     assert any(entry["send_as_id"] == 12345 for entry in by_identity)
     me_items = next(entry for entry in by_identity if entry["send_as_id"] == 12345)["items"]
@@ -2394,6 +2468,10 @@ def test_skills_payload_exposes_default_layout():
     assert "deep_retreat" in by_key
     assert by_key["deep_retreat"]["reply_mode"] == "none"
     assert by_key["deep_retreat"]["cd_module"] == "deep_retreat"
+    assert by_key["wild_training"]["cd_module"] == "wild_training"
+    assert by_key["pet_trial"]["cd_module"] == "pet_trial"
+    assert by_key["tianti_gangfeng"]["cd_module"] == "tianti_gangfeng"
+    assert by_key["node_search"]["cd_module"] == "taiyi_cycle"
     # 回复类必须显式标记
     assert by_key["quiz_answer"]["reply_mode"] == "required"
     assert by_key["dungeon_join"]["reply_mode"] == "required"
