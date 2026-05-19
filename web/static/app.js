@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: cooldown-autorefresh 2026-05-19T02:42
-console.log("[mini-web] build: cooldown-autorefresh 2026-05-19T02:42 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: resource-stats-ui 2026-05-19T10:50
+console.log("[mini-web] build: resource-stats-ui 2026-05-19T10:50 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -83,6 +83,7 @@ const openCultivationButton = document.querySelector("#openCultivationButton");
 const outboxButton = document.querySelector("#outboxButton");
 const scheduleButton = document.querySelector("#scheduleButton");
 const logsButton = document.querySelector("#logsButton");
+const resourceStatsButton = document.querySelector("#resourceStatsButton");
 const loginAccountButton = document.querySelector("#loginAccountButton");
 const addIdentityButton = document.querySelector("#addIdentityButton");
 const logoutAccountButton = document.querySelector("#logoutAccountButton");
@@ -653,6 +654,189 @@ function bindGameBotsModal(dialog) {
       }
     });
   }
+}
+
+// ---------- 资源统计 ----------
+
+async function openResourceStatsModal() {
+  const dialog = openModal({
+    title: "资源统计",
+    body: `
+      <section class="modal-section">
+        <h4>全服收益流水</h4>
+        <p class="muted">当前只统计消息箱采集到的「野外历练」和「非血色副本战利品结算」。副本结算按每位队员的人均收益记录,不按未知队伍人数放大。</p>
+        <div class="form-grid resource-stats-controls">
+          <label>
+            <span>周期</span>
+            <select id="resourceStatsPeriod">
+              <option value="day">按天</option>
+              <option value="week">按周</option>
+              <option value="month">按月</option>
+            </select>
+          </label>
+          <label>
+            <span>来源</span>
+            <select id="resourceStatsSource">
+              <option value="all">全部</option>
+              <option value="wild_training">野外历练</option>
+              <option value="dungeon">副本结算</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="button" id="resourceStatsRefresh">刷新统计</button>
+        </div>
+        <p class="modal-status-line info" id="resourceStatsStatus" hidden></p>
+      </section>
+
+      <section class="modal-section">
+        <div id="resourceStatsSummary" class="resource-stats-summary"></div>
+        <div id="resourceStatsTable" class="resource-stats-table-wrap">
+          <p class="empty inline">加载中…</p>
+        </div>
+      </section>
+    `,
+    footer: `<button type="button" data-modal-close>关闭</button>`,
+  });
+  if (!dialog) return;
+  bindResourceStatsModal(dialog);
+  await refreshResourceStats(dialog);
+}
+
+function bindResourceStatsModal(dialog) {
+  dialog.querySelector("#resourceStatsRefresh")?.addEventListener("click", () => {
+    refreshResourceStats(dialog).catch((error) => {
+      setResourceStatsStatus(dialog, "error", error.message || "刷新失败");
+    });
+  });
+  dialog.querySelector("#resourceStatsPeriod")?.addEventListener("change", () => {
+    refreshResourceStats(dialog).catch((error) => {
+      setResourceStatsStatus(dialog, "error", error.message || "刷新失败");
+    });
+  });
+  dialog.querySelector("#resourceStatsSource")?.addEventListener("change", () => {
+    refreshResourceStats(dialog).catch((error) => {
+      setResourceStatsStatus(dialog, "error", error.message || "刷新失败");
+    });
+  });
+}
+
+async function refreshResourceStats(dialog) {
+  const period = dialog.querySelector("#resourceStatsPeriod")?.value || "day";
+  const sourceType = dialog.querySelector("#resourceStatsSource")?.value || "all";
+  const table = dialog.querySelector("#resourceStatsTable");
+  const refreshButton = dialog.querySelector("#resourceStatsRefresh");
+  if (table) table.innerHTML = '<p class="empty inline">加载中…</p>';
+  if (refreshButton) refreshButton.disabled = true;
+  setResourceStatsStatus(dialog, "info", "正在读取统计…");
+  try {
+    const params = new URLSearchParams({ period, source_type: sourceType, limit: "200" });
+    const payload = await fetchJson(`/api/resource-stats?${params.toString()}`);
+    renderResourceStats(dialog, payload);
+    const count = (payload.rows || []).length;
+    setResourceStatsStatus(dialog, "ok", `已加载 ${count} 行。血色副本结算不会进入这里。`);
+  } finally {
+    if (refreshButton) refreshButton.disabled = false;
+  }
+}
+
+function renderResourceStats(dialog, payload) {
+  const rows = payload.rows || [];
+  const summary = dialog.querySelector("#resourceStatsSummary");
+  const table = dialog.querySelector("#resourceStatsTable");
+  if (summary) {
+    summary.innerHTML = renderResourceStatsSummary(rows);
+  }
+  if (!table) return;
+  if (!rows.length) {
+    table.innerHTML = '<p class="empty inline">暂无统计数据。只有 listener 采到对应结算文案后才会出现。</p>';
+    return;
+  }
+  table.innerHTML = `
+    <table class="resource-stats-table">
+      <thead>
+        <tr>
+          <th>周期</th>
+          <th>来源</th>
+          <th>资源</th>
+          <th>合计</th>
+          <th>次数</th>
+          <th>口径</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((row) => `
+          <tr>
+            <td>${escapeHtml(row.period || "")}</td>
+            <td>${escapeHtml(resourceSourceLabel(row.source_type, row.source_name))}</td>
+            <td>${escapeHtml(row.resource_name || "")}</td>
+            <td class="num">${escapeHtml(formatResourceAmount(row.total_amount, row.unit))}</td>
+            <td class="num">${escapeHtml(formatNumber(row.event_count || 0))}</td>
+            <td>${escapeHtml(resourceBasisLabel(row.basis))}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+    ${Array.isArray(payload.notes) && payload.notes.length
+      ? `<div class="resource-stats-notes">${payload.notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>`
+      : ""}
+  `;
+}
+
+function renderResourceStatsSummary(rows) {
+  if (!rows.length) return "";
+  const totals = new Map();
+  for (const row of rows) {
+    const key = `${row.resource_name || ""}|${row.unit || ""}|${row.basis || ""}`;
+    const prev = totals.get(key) || {
+      resource_name: row.resource_name || "",
+      unit: row.unit || "",
+      basis: row.basis || "",
+      total_amount: 0,
+      event_count: 0,
+    };
+    prev.total_amount += Number(row.total_amount || 0);
+    prev.event_count += Number(row.event_count || 0);
+    totals.set(key, prev);
+  }
+  const top = Array.from(totals.values())
+    .sort((a, b) => {
+      const ar = a.resource_name === "修为" ? 0 : a.resource_name === "灵石" ? 1 : 2;
+      const br = b.resource_name === "修为" ? 0 : b.resource_name === "灵石" ? 1 : 2;
+      if (ar !== br) return ar - br;
+      return b.total_amount - a.total_amount;
+    })
+    .slice(0, 6);
+  return top.map((item) => `
+    <div class="resource-stat-card">
+      <span>${escapeHtml(item.resource_name || "资源")}</span>
+      <strong>${escapeHtml(formatResourceAmount(item.total_amount, item.unit))}</strong>
+      <small>${escapeHtml(resourceBasisLabel(item.basis))}｜${escapeHtml(formatNumber(item.event_count))} 次</small>
+    </div>
+  `).join("");
+}
+
+function resourceSourceLabel(sourceType, sourceName) {
+  if (sourceType === "wild_training") return "野外历练";
+  if (sourceType === "dungeon") return sourceName ? `副本 · ${sourceName}` : "副本结算";
+  return sourceName || sourceType || "未知";
+}
+
+function resourceBasisLabel(value) {
+  if (value === "per_member") return "人均";
+  if (value === "player") return "玩家";
+  return value || "事件";
+}
+
+function formatResourceAmount(value, unit) {
+  const text = formatNumber(value);
+  return unit ? `${text} ${unit}` : text;
+}
+
+function formatNumber(value) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n)) return String(value || 0);
+  return new Intl.NumberFormat("zh-CN").format(n);
 }
 
 // ---------- 通知设置 modal ----------
@@ -6073,6 +6257,16 @@ scheduleButton.addEventListener("click", async () => {
     showError(error);
   }
 });
+
+if (resourceStatsButton) {
+  resourceStatsButton.addEventListener("click", async () => {
+    try {
+      await openResourceStatsModal();
+    } catch (error) {
+      showError(error);
+    }
+  });
+}
 
 if (loginAccountButton) {
   loginAccountButton.addEventListener("click", async () => {
