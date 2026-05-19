@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: resource-stats-ui 2026-05-19T10:50
-console.log("[mini-web] build: resource-stats-ui 2026-05-19T10:50 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: resource-stats-manual 2026-05-19T11:00
+console.log("[mini-web] build: resource-stats-manual 2026-05-19T11:00 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -692,7 +692,7 @@ async function openResourceStatsModal() {
       <section class="modal-section">
         <div id="resourceStatsSummary" class="resource-stats-summary"></div>
         <div id="resourceStatsTable" class="resource-stats-table-wrap">
-          <p class="empty inline">加载中…</p>
+          <p class="empty inline">选择周期和来源后，点击「刷新统计」读取数据。打开面板不会自动统计。</p>
         </div>
       </section>
     `,
@@ -700,7 +700,7 @@ async function openResourceStatsModal() {
   });
   if (!dialog) return;
   bindResourceStatsModal(dialog);
-  await refreshResourceStats(dialog);
+  setResourceStatsStatus(dialog, "info", "未自动统计。需要时点「刷新统计」。");
 }
 
 function bindResourceStatsModal(dialog) {
@@ -710,14 +710,10 @@ function bindResourceStatsModal(dialog) {
     });
   });
   dialog.querySelector("#resourceStatsPeriod")?.addEventListener("change", () => {
-    refreshResourceStats(dialog).catch((error) => {
-      setResourceStatsStatus(dialog, "error", error.message || "刷新失败");
-    });
+    resetResourceStatsPlaceholder(dialog);
   });
   dialog.querySelector("#resourceStatsSource")?.addEventListener("change", () => {
-    refreshResourceStats(dialog).catch((error) => {
-      setResourceStatsStatus(dialog, "error", error.message || "刷新失败");
-    });
+    resetResourceStatsPlaceholder(dialog);
   });
 }
 
@@ -735,9 +731,24 @@ async function refreshResourceStats(dialog) {
     renderResourceStats(dialog, payload);
     const count = (payload.rows || []).length;
     setResourceStatsStatus(dialog, "ok", `已加载 ${count} 行。血色副本结算不会进入这里。`);
+  } catch (error) {
+    if (table) {
+      table.innerHTML = `<p class="empty inline">统计读取失败：${escapeHtml(error.message || "未知错误")}</p>`;
+    }
+    throw error;
   } finally {
     if (refreshButton) refreshButton.disabled = false;
   }
+}
+
+function resetResourceStatsPlaceholder(dialog) {
+  const summary = dialog.querySelector("#resourceStatsSummary");
+  const table = dialog.querySelector("#resourceStatsTable");
+  if (summary) summary.innerHTML = "";
+  if (table) {
+    table.innerHTML = '<p class="empty inline">筛选条件已改变，点击「刷新统计」重新读取。</p>';
+  }
+  setResourceStatsStatus(dialog, "info", "未自动刷新，避免打开或切换时重复扫统计。");
 }
 
 function renderResourceStats(dialog, payload) {
