@@ -14,7 +14,7 @@ PLAYER_RE = re.compile(r"@(?P<user>[A-Za-z0-9_]+)")
 RESOURCE_PLUS_RE = re.compile(r"(?P<name>修为|贡献|灵石)\s*[+＋]\s*(?P<amount>\d+)")
 AMOUNT_BEFORE_RESOURCE_RE = re.compile(r"(?P<amount>\d+)\s*(?P<name>修为|贡献|灵石)")
 RESOURCE_X_RE = re.compile(
-    r"(?:【(?P<bracket>[^】]+)】|(?P<name>[\u4e00-\u9fffA-Za-z0-9_]+))\s*[xX×*]\s*(?P<amount>\d+)"
+    r"(?:【(?P<bracket>[^】]+)】|(?P<name>[\u4e00-\u9fff][\u4e00-\u9fff0-9]*))\s*[xX×*]\s*(?P<amount>\d+)"
 )
 
 NON_BLOOD_DUNGEONS = ("虚天殿", "黄龙山", "昆吾山", "坠魔谷")

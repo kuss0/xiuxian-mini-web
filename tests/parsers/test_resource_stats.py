@@ -19,6 +19,20 @@ def test_extracts_wild_training_resource_deltas():
     assert all(delta.basis == "player" for delta in output.resource_deltas)
 
 
+def test_wild_training_does_not_parse_username_with_x_digits_as_resource():
+    event = make_event(
+        """【野外历练 · 妖兽遭遇】
+@Xoxox006 在山道遭遇妖兽，负伤而归。
+获得修为 +8000，获得 【二级妖丹】x1。"""
+    )
+    output = ResourceStatsParser().parse(event)
+    assert output is not None
+    assert {(delta.resource_name, delta.amount) for delta in output.resource_deltas} == {
+        ("修为", 8000),
+        ("二级妖丹", 1),
+    }
+
+
 def test_extracts_dungeon_loot_per_member_deltas():
     event = make_event(
         """【战利品结算·夺鼎】
