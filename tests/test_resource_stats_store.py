@@ -1,6 +1,6 @@
 from backend.app import GET_ROUTES
 from backend.domain.models import RawMessageEvent
-from backend.repo.sqlite_store import SQLiteStore
+from backend.repo.sqlite_store import RESOURCE_STATS_SCHEMA_VERSION, SQLiteStore
 from backend.server import MiniWebServer
 
 
@@ -254,6 +254,59 @@ def test_resource_backfill_reads_existing_raw_messages_without_reingest(tmp_path
     }
     assert {item["source_name"] for item in store.list_resource_deltas()} == {"野外历练·未知"}
     assert [item["result"] for item in store.list_resource_events()] == ["success"]
+
+
+def test_resource_backfill_rebuilds_current_version_legacy_source_names(tmp_path):
+    store = SQLiteStore(tmp_path / "state.db")
+    with store._connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO raw_messages(
+                id, chat_id, msg_id, text, source, date, mentions_json, sender_is_bot
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "tg:-1:500",
+                -1,
+                500,
+                """【野外历练 · 妖兽遭遇】
+@salt9527 获得修为 +12000，获得 【灵石】x399。""",
+                "韩天尊",
+                "2026-05-15T12:00:00+00:00",
+                "[]",
+                1,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO resource_events(
+                raw_message_id, source_type, source_name, result, event_time,
+                day_key, week_key, month_key
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "tg:-1:500",
+                "wild_training",
+                "野外历练",
+                "success",
+                "2026-05-15T12:00:00+00:00",
+                "2026-05-15",
+                "2026-W20",
+                "2026-05",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO settings(key, value_json)
+            VALUES('resource_stats_schema_version', ?)
+            """,
+            (str(RESOURCE_STATS_SCHEMA_VERSION),),
+        )
+
+    assert store.backfill_resource_records_if_needed() == {"events": 1, "deltas": 2}
+    assert {item["source_name"] for item in store.list_resource_events()} == {"野外历练·未知"}
 
 
 def test_resource_stats_route_is_registered():

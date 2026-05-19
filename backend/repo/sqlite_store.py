@@ -294,6 +294,14 @@ class SQLiteStore:
             legacy_per_member = conn.execute(
                 "SELECT COUNT(*) FROM resource_deltas WHERE basis='per_member'"
             ).fetchone()[0]
+            legacy_unsplit_source = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM resource_events
+                WHERE (source_type='wild_training' AND source_name='野外历练')
+                   OR (source_type='dungeon' AND source_name='虚天殿')
+                """
+            ).fetchone()[0]
             stored_version_row = conn.execute(
                 "SELECT value_json FROM settings WHERE key='resource_stats_schema_version'"
             ).fetchone()
@@ -304,6 +312,7 @@ class SQLiteStore:
             if (
                 existing_events
                 and not legacy_per_member
+                and not legacy_unsplit_source
                 and stored_version >= RESOURCE_STATS_SCHEMA_VERSION
             ):
                 return {"events": 0, "deltas": 0}
