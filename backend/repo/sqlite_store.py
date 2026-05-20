@@ -1637,6 +1637,7 @@ class SQLiteStore:
             "notify_tg_bot_token": "",
             "notify_tg_chat_id": "",
             "notify_card_titles": [],
+            "schedule_saved_templates": [],
         }
         with self._connect() as conn:
             rows = conn.execute("SELECT key, value_json FROM settings").fetchall()
@@ -2340,6 +2341,178 @@ class SQLiteStore:
             messages_changed = cur2.rowcount
         return {"batch": batch_changed, "messages": messages_changed}
 
+    def list_schedule_templates(self) -> list[dict]:
+        settings = self.get_settings()
+        raw_templates = settings.get("schedule_saved_templates") or []
+        templates = []
+        for item in raw_templates:
+            if not isinstance(item, dict):
+                continue
+            template_id = str(item.get("id") or "").strip()
+            if not template_id:
+                continue
+            templates.append(
+                {
+                    "id": template_id,
+                    "name": str(item.get("name") or template_id).strip(),
+                    "payload": dict(item.get("payload") or {}),
+                    "updated_at": float(item.get("updated_at") or 0),
+                }
+            )
+        templates.sort(key=lambda item: (item.get("updated_at") or 0, item.get("name") or ""), reverse=True)
+        return templates
+
+    def save_schedule_templates(self, templates: list[dict]) -> list[dict]:
+        normalized = _normalize_schedule_saved_templates(templates)
+        self.save_settings({"schedule_saved_templates": normalized})
+        return self.list_schedule_templates()
+
+    def replace_dungeon_rooms(self, rooms: list[dict]) -> int:
+        import time
+        now = time.time()
+        rows = []
+        for room in rooms or []:
+            key = str(room.get("key") or "").strip()
+            if not key:
+                continue
+            rows.append(
+                (
+                    key,
+                    str(room.get("dungeon_id") or "").strip(),
+                    str(room.get("dungeon_name") or "").strip(),
+                    str(room.get("status") or "").strip(),
+                    str(room.get("status_kind") or "").strip(),
+                    int(room.get("latest_seq") or 0),
+                    str(room.get("latest_message_id") or "").strip(),
+                    str(room.get("latest_time") or "").strip(),
+                    json.dumps(room, ensure_ascii=False),
+                    now,
+                )
+            )
+        with self._connect() as conn:
+            conn.execute("DELETE FROM dungeon_rooms")
+            if rows:
+                conn.executemany(
+                    """
+                    INSERT INTO dungeon_rooms(
+                        key, dungeon_id, dungeon_name, status, status_kind,
+                        latest_seq, latest_message_id, latest_time, payload_json, updated_at
+                    )
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    rows,
+                )
+        return len(rows)
+
+    def list_dungeon_rooms(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT key, dungeon_id, dungeon_name, status, status_kind,
+                       latest_seq, latest_message_id, latest_time, payload_json, updated_at
+                FROM dungeon_rooms
+                ORDER BY latest_seq DESC, updated_at DESC
+                """
+            ).fetchall()
+        return [
+            {
+                "key": row[0] or "",
+                "dungeon_id": row[1] or "",
+                "dungeon_name": row[2] or "",
+                "status": row[3] or "",
+                "status_kind": row[4] or "",
+                "latest_seq": int(row[5] or 0),
+                "latest_message_id": row[6] or "",
+                "latest_time": row[7] or "",
+                "payload": json.loads(row[8] or "{}"),
+                "updated_at": float(row[9] or 0),
+            }
+            for row in rows
+        ]
+
+    def resource_coverage(self, *, limit: int = 5000) -> dict:
+        try:
+            limit = int(limit or 5000)
+        except (TypeError, ValueError):
+            limit = 5000
+        limit = max(1, min(limit, 10000))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT rm.id, rm.text, rm.source, rm.date, rm.chat_id, rm.msg_id
+                FROM raw_messages rm
+                WHERE (
+                    rm.text LIKE '%【野外历练%'
+                    OR (rm.text LIKE '%【战利品结算%' AND rm.text NOT LIKE '%血色试炼%')
+                    OR rm.text LIKE '%【黄龙山大战%'
+                    OR rm.text LIKE '%【登顶昆吾山%'
+                    OR rm.text LIKE '%【坠魔谷%'
+                    OR rm.text LIKE '%【逆天之举%'
+                    OR rm.text LIKE '%【深度闭关总结%'
+                    OR rm.text LIKE '%【闭关成功%'
+                    OR rm.text LIKE '%【灵果入腹%'
+                    OR rm.text LIKE '%【温养器灵%'
+                    OR rm.text LIKE '%【抚摸法宝%'
+                )
+                ORDER BY rowid DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            candidate_ids = {str(row[0]) for row in rows}
+            existing_ids = {
+                str(row[0])
+                for row in conn.execute("SELECT raw_message_id FROM resource_events").fetchall()
+                if str(row[0]) in candidate_ids
+            } if candidate_ids else set()
+        summary: dict[str, dict[str, object]] = {}
+        missing_samples: list[dict] = []
+        scanned = 0
+        parsed = 0
+        for row in rows:
+            kind = _resource_coverage_kind(str(row[1] or ""))
+            if not kind:
+                continue
+            scanned += 1
+            is_parsed = str(row[0]) in existing_ids
+            if is_parsed:
+                parsed += 1
+            bucket = summary.setdefault(
+                kind,
+                {"kind": kind, "total": 0, "parsed": 0, "missing": 0},
+            )
+            bucket["total"] = int(bucket["total"]) + 1
+            if is_parsed:
+                bucket["parsed"] = int(bucket["parsed"]) + 1
+            else:
+                bucket["missing"] = int(bucket["missing"]) + 1
+                if len(missing_samples) < 12:
+                    missing_samples.append(
+                        {
+                            "id": row[0],
+                            "kind": kind,
+                            "source": row[2] or "",
+                            "time": row[3] or "",
+                            "chat_id": int(row[4] or 0),
+                            "msg_id": int(row[5] or 0),
+                            "text": str(row[1] or "")[:220],
+                        }
+                    )
+        coverage_rows = sorted(summary.values(), key=lambda item: (int(item.get("missing") or 0), int(item.get("total") or 0), str(item.get("kind") or "")), reverse=True)
+        return {
+            "ok": True,
+            "limit": limit,
+            "scanned": scanned,
+            "parsed": parsed,
+            "missing": scanned - parsed,
+            "rows": coverage_rows,
+            "missing_samples": missing_samples,
+            "notes": [
+                "这里只扫最近一段疑似资源结算文案,用于发现漏解析样本。",
+                "血色试炼会被刻意排除,不算资源统计目标。",
+            ],
+        }
+
     # ---------- identity_module_state(给玩法状态机用) ----------
 
     def get_module_state(self, send_as_id: int, module_key: str) -> dict | None:
@@ -2622,6 +2795,24 @@ class SQLiteStore:
                 CREATE INDEX IF NOT EXISTS idx_official_scheduled_messages_identity
                     ON official_scheduled_messages(send_as_id, schedule_at);
 
+                CREATE TABLE IF NOT EXISTS dungeon_rooms (
+                    key TEXT PRIMARY KEY,
+                    dungeon_id TEXT NOT NULL DEFAULT '',
+                    dungeon_name TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT '',
+                    status_kind TEXT NOT NULL DEFAULT '',
+                    latest_seq INTEGER NOT NULL DEFAULT 0,
+                    latest_message_id TEXT NOT NULL DEFAULT '',
+                    latest_time TEXT NOT NULL DEFAULT '',
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    updated_at REAL NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_dungeon_rooms_status
+                    ON dungeon_rooms(status_kind, latest_seq DESC);
+                CREATE INDEX IF NOT EXISTS idx_dungeon_rooms_latest
+                    ON dungeon_rooms(latest_seq DESC);
+
                 CREATE TABLE IF NOT EXISTS identity_module_state (
                     send_as_id INTEGER NOT NULL,
                     module_key TEXT NOT NULL,
@@ -2750,6 +2941,9 @@ def _normalize_settings(payload: dict) -> dict:
         {str(t).strip() for t in raw_titles if str(t or "").strip()}
     )
 
+    raw_templates = payload.get("schedule_saved_templates") or []
+    schedule_saved_templates = _normalize_schedule_saved_templates(raw_templates)
+
     def str_list(key: str, default: list[str] | None = None) -> list[str]:
         raw = payload.get(key)
         if raw is None:
@@ -2803,6 +2997,7 @@ def _normalize_settings(payload: dict) -> dict:
         "notify_tg_bot_token": text("notify_tg_bot_token"),
         "notify_tg_chat_id": text("notify_tg_chat_id"),
         "notify_card_titles": notify_card_titles,
+        "schedule_saved_templates": schedule_saved_templates,
     }
 
 
@@ -3011,6 +3206,95 @@ def _resource_event_summary(events: list[dict]) -> list[dict]:
         ),
         reverse=True,
     )
+
+
+def _resource_coverage_kind(text: str) -> str:
+    text = str(text or "")
+    if "【野外历练" in text:
+        return "野外历练"
+    if "【战利品结算" in text and "血色试炼" not in text:
+        if "夺鼎" in text:
+            return "虚天殿·夺鼎"
+        if "求稳" in text:
+            return "虚天殿·求稳"
+        return "副本战利品"
+    if "【黄龙山大战" in text:
+        return "黄龙山"
+    if "【登顶昆吾山" in text:
+        return "昆吾山"
+    if "【坠魔谷" in text and "获得" in text:
+        return "坠魔谷"
+    if "【逆天之举" in text and "风希" in text and "【战利品】" in text:
+        return "风希"
+    if "【深度闭关总结" in text:
+        return "深度闭关"
+    if "【闭关成功" in text:
+        return "闭关修炼"
+    if "【灵果入腹" in text:
+        return "灵树采摘"
+    if "【温养器灵" in text:
+        return "温养器灵"
+    if "【抚摸法宝" in text:
+        return "抚摸法宝"
+    return ""
+
+
+def _normalize_schedule_saved_templates(raw: object) -> list[dict]:
+    items = raw if isinstance(raw, list) else ([] if raw is None else [raw])
+    normalized: list[dict] = []
+    seen: set[str] = set()
+    import time as _time
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        payload = item.get("payload") or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        template_id = str(item.get("id") or "").strip()
+        if not template_id:
+            template_id = str(item.get("key") or "").strip()
+        if not template_id:
+            template_id = f"tpl-{int(_time.time() * 1000)}"
+        if template_id in seen:
+            continue
+        seen.add(template_id)
+        normalized.append(
+            {
+                "id": template_id,
+                "name": name or template_id,
+                "payload": _normalize_schedule_template_payload(payload),
+                "updated_at": float(item.get("updated_at") or _time.time()),
+            }
+        )
+    normalized.sort(key=lambda item: (item.get("updated_at") or 0, item.get("name") or ""), reverse=True)
+    return normalized
+
+
+def _normalize_schedule_template_payload(payload: dict) -> dict:
+    data = dict(payload or {})
+    for key in ("anchor_at", "anchor_at_text"):
+        data.pop(key, None)
+    if "send_as_ids" in data:
+        raw_ids = data.get("send_as_ids") or []
+        if isinstance(raw_ids, str):
+            raw_ids = raw_ids.replace("\n", ",").split(",")
+        ids = []
+        for item in raw_ids:
+            try:
+                sid = int(str(item).strip())
+            except (TypeError, ValueError):
+                continue
+            if sid and sid not in ids:
+                ids.append(sid)
+        data["send_as_ids"] = ids
+    if "send_as_id" in data:
+        try:
+            data["send_as_id"] = int(data.get("send_as_id") or 0)
+        except (TypeError, ValueError):
+            data["send_as_id"] = 0
+    return data
 
 
 def _safe_int(value: object) -> int:

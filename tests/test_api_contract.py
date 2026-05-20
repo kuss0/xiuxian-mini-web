@@ -1889,14 +1889,45 @@ def test_schedule_delete_marks_batch_and_messages_deleted(tmp_path):
     assert server.schedule_list_payload()["batches"] == []
 
 
+def test_schedule_templates_roundtrip(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+
+    saved = server.schedule_template_save_payload({
+        "name": "深闭三天",
+        "payload": {
+            "preset_key": "deep_retreat",
+            "horizon_days": 3,
+            "trigger_command": "查看闭关",
+            "anchor_at": 1999999999,
+        },
+    })
+
+    assert saved["ok"] is True
+    template = saved["templates"][0]
+    assert template["name"] == "深闭三天"
+    assert template["payload"]["preset_key"] == "deep_retreat"
+    assert "anchor_at" not in template["payload"]
+
+    listed = server.schedule_templates_payload()
+    assert listed["templates"][0]["id"] == template["id"]
+
+    deleted = server.schedule_template_delete_payload({"id": template["id"]})
+    assert deleted["ok"] is True
+    assert deleted["templates"] == []
+
+
 def test_schedule_routes_are_wired():
     from backend.app import GET_ROUTES, POST_ROUTES
     assert "/api/schedule/presets" in GET_ROUTES
+    assert "/api/schedule/templates" in GET_ROUTES
     assert "/api/schedule" in GET_ROUTES
     assert "/api/schedule/sync" in GET_ROUTES
     assert "/api/schedule/preview" in POST_ROUTES
     assert "/api/schedule/create" in POST_ROUTES
     assert "/api/schedule/delete" in POST_ROUTES
+    assert "/api/schedule/templates/save" in POST_ROUTES
+    assert "/api/schedule/templates/delete" in POST_ROUTES
 
 
 def test_schedule_sync_without_listener_returns_error(tmp_path):
@@ -2674,6 +2705,9 @@ def test_dungeon_status_payload_distinguishes_request_from_success(tmp_path):
     open_summary = next(item for item in before["summaries"] if item["dungeon_id"] == "394")
     assert open_summary["status_kind"] == "open"
     assert open_summary["join_success"] == []
+    cached = store.list_dungeon_rooms()
+    assert cached[0]["dungeon_id"] == "394"
+    assert cached[0]["payload"]["status_kind"] == "open"
 
     store.ingest_event(RawMessageEvent(
         id="joined",
@@ -2693,6 +2727,31 @@ def test_dungeon_status_payload_distinguishes_request_from_success(tmp_path):
 def test_dungeon_status_route_is_wired():
     from backend.app import GET_ROUTES
     assert "/api/dungeon-status" in GET_ROUTES
+
+
+def test_filter_diagnostics_payload_counts_recent_reasons(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_settings({"focus_keywords": ["虚天殿"], "focus_include_player_plain": True})
+    store.ingest_event(RawMessageEvent(
+        id="plain",
+        chat_id=-1,
+        msg_id=20,
+        text="今晚虚天殿有人吗",
+        source="玩家A",
+        date="2026-05-15T00:01:00+00:00",
+        sender_id=222,
+    ))
+
+    payload = MiniWebServer(store=store).filter_diagnostics_payload(limit=20)
+
+    assert payload["ok"] is True
+    assert payload["focus_count"] >= 1
+    assert any("关键词" in row["reason"] or "普通玩家" in row["reason"] for row in payload["reason_rows"])
+
+
+def test_filter_diagnostics_route_is_wired():
+    from backend.app import GET_ROUTES
+    assert "/api/filter/diagnostics" in GET_ROUTES
 
 
 def test_list_schedule_batches_returns_sending_and_completed(tmp_path):

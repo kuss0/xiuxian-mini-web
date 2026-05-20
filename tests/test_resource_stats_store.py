@@ -34,6 +34,44 @@ def test_resource_deltas_are_persisted_idempotently(tmp_path):
     assert events[0]["result"] == "success"
 
 
+def test_resource_coverage_reports_parsed_and_missing_candidates(tmp_path):
+    store = SQLiteStore(tmp_path / "state.db")
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:100",
+            chat_id=-1,
+            msg_id=100,
+            text="""【野外历练 · 灵机暗藏】
+@salt9527 在山涧残阵旁避开妖兽踪迹，采得一份机缘。
+获得修为 +12000，获得 【灵石】x399。""",
+            source="韩天尊",
+            date="2026-05-15T12:00:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:101",
+            chat_id=-1,
+            msg_id=101,
+            text="【战利品结算·求稳】\n队伍刚进入结算界面，但还没有获得行。",
+            source="韩天尊",
+            date="2026-05-15T12:01:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
+
+    payload = MiniWebServer(store=store).resource_coverage_payload(limit=50)
+
+    assert payload["ok"] is True
+    assert payload["scanned"] == 2
+    assert payload["parsed"] == 1
+    assert payload["missing"] == 1
+    assert payload["missing_samples"][0]["kind"] == "虚天殿·求稳"
+
+
 def test_ingest_coalesces_same_chat_message_with_different_local_ids(tmp_path):
     store = SQLiteStore(tmp_path / "state.db")
     base = {
@@ -165,6 +203,10 @@ def test_resource_stats_api_groups_by_period_and_excludes_blood_trial(tmp_path):
     assert summary["source_name"] == "虚天殿·夺鼎"
     assert summary["settled"] == 1
     assert "血色试炼结算已排除。" in payload["notes"]
+
+
+def test_resource_coverage_route_is_wired():
+    assert "/api/resource-coverage" in GET_ROUTES
 
 
 def test_resource_stats_api_can_filter_by_exact_source_name(tmp_path):

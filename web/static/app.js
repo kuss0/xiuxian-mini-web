@@ -1,5 +1,5 @@
-// MINIWEB-BUILD: dungeon-status-filter-tools 2026-05-20T03:20
-console.log("[mini-web] build: dungeon-status-filter-tools 2026-05-20T03:20 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: coverage-dungeon-template-filter 2026-05-20T04:10
+console.log("[mini-web] build: coverage-dungeon-template-filter 2026-05-20T04:10 — 如看到此行,说明新 JS 已加载");
 
 const state = {
   channels: [],
@@ -514,6 +514,12 @@ function openFilterSettingsModal() {
             </div>
             <div id="filterRulePreview" class="focus-preview-box"></div>
           </div>
+          <div class="filter-rule-helper">
+            <div class="filter-helper-row">
+              <button type="button" id="filterDiagnosticsButton">查看最近入流原因</button>
+            </div>
+            <div id="filterDiagnosticsBox" class="focus-preview-box"></div>
+          </div>
           <label class="toggle-row">
             <input type="checkbox" name="focus_include_player_plain" ${settings.focus_include_player_plain === false ? "" : "checked"} />
             <span>不带点的玩家消息进入重点流</span>
@@ -542,6 +548,7 @@ function openFilterSettingsModal() {
   const excludeTextarea = form?.querySelector('[name="focus_exclude_patterns"]');
   const excludeDraft = dialog.querySelector("#filterExcludeDraft");
   const previewBox = dialog.querySelector("#filterRulePreview");
+  const diagnosticsBox = dialog.querySelector("#filterDiagnosticsBox");
   const setStatus = (kind, text) => {
     if (!status) return;
     status.hidden = !text;
@@ -594,6 +601,23 @@ function openFilterSettingsModal() {
       append: true,
       setStatus,
     });
+  });
+  dialog.querySelector("#filterDiagnosticsButton")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    setStatus("info", "正在统计最近消息归类原因…");
+    if (diagnosticsBox) diagnosticsBox.innerHTML = '<p class="empty inline">统计中…</p>';
+    try {
+      const payload = await fetchJson("/api/filter/diagnostics?limit=1000");
+      if (!payload.ok) throw new Error(payload.error || "诊断失败");
+      if (diagnosticsBox) diagnosticsBox.innerHTML = renderFilterDiagnostics(payload);
+      setStatus("ok", `最近 ${payload.scanned || 0} 条：重点 ${payload.focus_count || 0}｜归档 ${payload.archive_count || 0}｜会长 ${payload.leader_count || 0}`);
+    } catch (error) {
+      if (diagnosticsBox) diagnosticsBox.innerHTML = "";
+      setStatus("error", error.message || "诊断失败");
+    } finally {
+      button.disabled = false;
+    }
   });
   dialog.querySelector("#filterSettingsSave")?.addEventListener("click", async () => {
     const data = new FormData(form);
@@ -683,6 +707,40 @@ async function previewAndMaybeAppendFilterRule({ mode, input, target, previewBox
     setStatus?.("error", error.message || "预览失败");
     return null;
   }
+}
+
+function renderFilterDiagnostics(payload) {
+  const reasons = payload.reason_rows || [];
+  const senders = payload.focus_sender_rows || [];
+  const samples = payload.samples || [];
+  return `
+    <div class="filter-diagnostics-grid">
+      <div>
+        <strong>入流原因 Top</strong>
+        <ul class="send-as-result-list">
+          ${reasons.slice(0, 8).map((item) => `<li class="ok"><span>${escapeHtml(item.reason || "")}</span><small>${escapeHtml(formatNumber(item.count || 0))} 条</small></li>`).join("") || "<li>(空)</li>"}
+        </ul>
+      </div>
+      <div>
+        <strong>重点发送者 Top</strong>
+        <ul class="send-as-result-list">
+          ${senders.slice(0, 8).map((item) => `<li><span>${escapeHtml(item.sender || "")}</span><small>${escapeHtml(formatNumber(item.count || 0))} 条</small></li>`).join("") || "<li>(空)</li>"}
+        </ul>
+      </div>
+    </div>
+    ${samples.length ? `
+      <div class="filter-diagnostics-samples">
+        <strong>最近样本</strong>
+        ${samples.slice(0, 6).map((item) => `
+          <p>
+            <b>#${escapeHtml(String(item.seq || ""))} ${escapeHtml(item.source || "")}</b>
+            <small>${escapeHtml((item.channels || []).join("/"))}｜${escapeHtml((item.reasons || []).join("、") || "无理由")}</small>
+            <span>${escapeHtml(clipGraphemes(item.summary || item.title || "", 70))}</span>
+          </p>
+        `).join("")}
+      </div>
+    ` : ""}
+  `;
 }
 
 function renderGameBotsDiscoveredList(dialog) {
@@ -827,12 +885,14 @@ async function openResourceStatsModal() {
         </div>
         <div class="form-actions">
           <button type="button" id="resourceStatsRefresh">刷新统计</button>
+          <button type="button" id="resourceCoverageRefresh">覆盖诊断</button>
         </div>
         <p class="modal-status-line info" id="resourceStatsStatus" hidden></p>
       </section>
 
       <section class="modal-section">
         <div id="resourceStatsSummary" class="resource-stats-summary"></div>
+        <div id="resourceCoverageBox" class="resource-stats-table-wrap" hidden></div>
         <div id="resourceStatsTable" class="resource-stats-table-wrap">
           <p class="empty inline">选择周期和来源后，点击「刷新统计」读取数据。打开面板不会自动统计。</p>
         </div>
@@ -851,12 +911,40 @@ function bindResourceStatsModal(dialog) {
       setResourceStatsStatus(dialog, "error", error.message || "刷新失败");
     });
   });
+  dialog.querySelector("#resourceCoverageRefresh")?.addEventListener("click", () => {
+    refreshResourceCoverage(dialog).catch((error) => {
+      setResourceStatsStatus(dialog, "error", error.message || "覆盖诊断失败");
+    });
+  });
   dialog.querySelector("#resourceStatsPeriod")?.addEventListener("change", () => {
     resetResourceStatsPlaceholder(dialog);
   });
   dialog.querySelector("#resourceStatsSource")?.addEventListener("change", () => {
     resetResourceStatsPlaceholder(dialog);
   });
+}
+
+async function refreshResourceCoverage(dialog) {
+  const box = dialog.querySelector("#resourceCoverageBox");
+  const button = dialog.querySelector("#resourceCoverageRefresh");
+  if (box) {
+    box.hidden = false;
+    box.innerHTML = '<p class="empty inline">覆盖诊断中…</p>';
+  }
+  if (button) button.disabled = true;
+  setResourceStatsStatus(dialog, "info", "正在扫描最近疑似资源文案…");
+  try {
+    const payload = await fetchJson("/api/resource-coverage?limit=5000");
+    if (!payload.ok) throw new Error(payload.error || "覆盖诊断失败");
+    if (box) box.innerHTML = renderResourceCoverage(payload);
+    setResourceStatsStatus(
+      dialog,
+      payload.missing ? "warn" : "ok",
+      `覆盖诊断：扫描 ${payload.scanned || 0} 条，已解析 ${payload.parsed || 0} 条，疑似漏 ${payload.missing || 0} 条。`
+    );
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 async function refreshResourceStats(dialog) {
@@ -887,7 +975,12 @@ async function refreshResourceStats(dialog) {
 function resetResourceStatsPlaceholder(dialog) {
   const summary = dialog.querySelector("#resourceStatsSummary");
   const table = dialog.querySelector("#resourceStatsTable");
+  const coverage = dialog.querySelector("#resourceCoverageBox");
   if (summary) summary.innerHTML = "";
+  if (coverage) {
+    coverage.hidden = true;
+    coverage.innerHTML = "";
+  }
   if (table) {
     table.innerHTML = '<p class="empty inline">筛选条件已改变，点击「刷新统计」重新读取。</p>';
   }
@@ -922,6 +1015,50 @@ function renderResourceStats(dialog, payload) {
     ${Array.isArray(payload.notes) && payload.notes.length
       ? `<div class="resource-stats-notes">${payload.notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>`
       : ""}
+  `;
+}
+
+function renderResourceCoverage(payload) {
+  const rows = payload.rows || [];
+  const samples = payload.missing_samples || [];
+  if (!rows.length) {
+    return '<p class="empty inline">最近没有命中资源统计候选文案。</p>';
+  }
+  return `
+    <div class="resource-stats-subtitle">覆盖诊断 · 最近 ${escapeHtml(formatNumber(payload.scanned || 0))} 条候选</div>
+    <table class="resource-stats-table">
+      <thead>
+        <tr>
+          <th>文案类型</th>
+          <th>候选</th>
+          <th>已解析</th>
+          <th>疑似漏</th>
+          <th>覆盖率</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((row) => {
+          const total = Number(row.total || 0);
+          const parsed = Number(row.parsed || 0);
+          const rate = total ? `${Math.round((parsed * 1000) / total) / 10}%` : "—";
+          return `
+            <tr>
+              <td>${escapeHtml(row.kind || "")}</td>
+              <td class="num">${escapeHtml(formatNumber(total))}</td>
+              <td class="num">${escapeHtml(formatNumber(parsed))}</td>
+              <td class="num ${Number(row.missing || 0) ? "negative" : ""}">${escapeHtml(formatNumber(row.missing || 0))}</td>
+              <td class="num">${escapeHtml(rate)}</td>
+            </tr>
+          `;
+        }).join("")}
+      </tbody>
+    </table>
+    ${samples.length ? `
+      <div class="resource-stats-notes">
+        ${samples.slice(0, 8).map((item) => `<span>${escapeHtml(item.kind || "")}｜#${escapeHtml(String(item.msg_id || ""))}｜${escapeHtml(clipGraphemes(item.text || "", 72))}</span>`).join("")}
+      </div>
+    ` : ""}
+    ${Array.isArray(payload.notes) && payload.notes.length ? `<div class="resource-stats-notes">${payload.notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>` : ""}
   `;
 }
 
@@ -5021,12 +5158,14 @@ function bindAddIdentityModal(dialog) {
 // ---------- 官方定时 ----------
 
 async function openScheduleModal() {
-  const [presetsPayload, batchesPayload] = await Promise.all([
+  const [presetsPayload, batchesPayload, templatesPayload] = await Promise.all([
     fetchJson("/api/schedule/presets"),
     fetchJson("/api/schedule"),
+    fetchJson("/api/schedule/templates"),
   ]);
   const presets = presetsPayload.presets || [];
   const batches = batchesPayload.batches || [];
+  const templates = templatesPayload.templates || [];
   const identityOptions = state.identities
     .map((id) => {
       const label = `${id.label || id.username || id.send_as_id}｜send_as ${id.send_as_id}`;
@@ -5039,6 +5178,30 @@ async function openScheduleModal() {
   const dialog = openModal({
     title: "官方定时排班",
     body: `
+      <section class="modal-section">
+        <h4>模板复用</h4>
+        <p class="muted">把常用排班参数存成模板，后续一键套用后再微调即可。模板只存参数，不存具体锚点时间。</p>
+        <div class="form-grid">
+          <label class="span-2">
+            <span>模板名称</span>
+            <input id="scheduleTemplateName" placeholder="例如 深闭三天循环" />
+          </label>
+          <label class="span-2">
+            <span>已保存模板</span>
+            <select id="scheduleTemplateSelect">
+              <option value="">新建模板</option>
+              ${renderScheduleTemplateOptions(templates)}
+            </select>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="button" id="scheduleTemplateLoadButton">套用模板</button>
+          <button type="button" id="scheduleTemplateSaveButton">保存当前为模板</button>
+          <button type="button" id="scheduleTemplateDeleteButton">删除模板</button>
+        </div>
+        <p class="modal-status-line info" id="scheduleTemplateStatus" hidden></p>
+      </section>
+
       <section class="modal-section">
         <h4>新建排班</h4>
         <p class="muted">核心用法是填命令、间隔和次数,一次排进 Telegram 官方定时;预设只是快速填常用玩法。这里不会根据回复自动补发或追链。多选身份会一次为每个身份各起一批,按「错峰偏移 + 阶梯」自动错开。</p>
@@ -5132,7 +5295,13 @@ async function openScheduleModal() {
     footer: `<button type="button" data-modal-close>关闭</button>`,
   });
   if (!dialog) return;
-  bindScheduleModal(dialog, presets, batches);
+  bindScheduleModal(dialog, presets, batches, templates);
+}
+
+function renderScheduleTemplateOptions(templates) {
+  return (templates || [])
+    .map((template) => `<option value="${escapeAttr(template.id)}">${escapeHtml(template.name || template.id)}</option>`)
+    .join("");
 }
 
 function renderScheduleBatches(batches) {
@@ -5213,7 +5382,7 @@ function scheduleStatusPill(statusKey) {
   return "";
 }
 
-function bindScheduleModal(dialog, presets, _initialBatches) {
+function bindScheduleModal(dialog, presets, _initialBatches, initialTemplates) {
   const form = dialog.querySelector("#scheduleForm");
   const status = dialog.querySelector("#scheduleStatus");
   const preview = dialog.querySelector("#schedulePreview");
@@ -5222,8 +5391,15 @@ function bindScheduleModal(dialog, presets, _initialBatches) {
   const syncSelect = dialog.querySelector("#scheduleSyncSelect");
   const syncStatus = dialog.querySelector("#scheduleSyncStatus");
   const syncResult = dialog.querySelector("#scheduleSyncResult");
+  const templateSelect = dialog.querySelector("#scheduleTemplateSelect");
+  const templateName = dialog.querySelector("#scheduleTemplateName");
+  const templateStatus = dialog.querySelector("#scheduleTemplateStatus");
+  const templateLoadButton = dialog.querySelector("#scheduleTemplateLoadButton");
+  const templateSaveButton = dialog.querySelector("#scheduleTemplateSaveButton");
+  const templateDeleteButton = dialog.querySelector("#scheduleTemplateDeleteButton");
   if (!form) return;
   const presetMap = new Map(presets.map((p) => [p.key, p]));
+  let templates = Array.isArray(initialTemplates) ? [...initialTemplates] : [];
   const setStatus = (kind, text) => {
     if (!status) return;
     status.hidden = !text;
@@ -5279,6 +5455,78 @@ function bindScheduleModal(dialog, presets, _initialBatches) {
     return payload;
   };
 
+  const setTemplateStatus = (kind, text) => {
+    if (!templateStatus) return;
+    templateStatus.hidden = !text;
+    templateStatus.className = `modal-status-line ${kind}`;
+    templateStatus.textContent = text || "";
+  };
+
+  const refreshTemplateSelect = () => {
+    if (!templateSelect) return;
+    const current = templateSelect.value;
+    templateSelect.innerHTML = `<option value="">新建模板</option>${templates
+      .map((template) => `<option value="${escapeAttr(template.id)}">${escapeHtml(template.name || template.id)}</option>`)
+      .join("")}`;
+    if (templates.some((template) => template.id === current)) {
+      templateSelect.value = current;
+    }
+    if (templateDeleteButton) {
+      templateDeleteButton.disabled = !templateSelect.value;
+    }
+  };
+
+  const fillFormFromPayload = (payload) => {
+    if (!payload) return;
+    const sendAsSelect = dialog.querySelector("#scheduleSendAsSelect");
+    if (sendAsSelect) {
+      const selectedIds = new Set(
+        (Array.isArray(payload.send_as_ids) ? payload.send_as_ids : [payload.send_as_id])
+          .map((value) => Number(value))
+          .filter(Boolean)
+      );
+      Array.from(sendAsSelect.options).forEach((option) => {
+        option.selected = selectedIds.has(Number(option.value));
+      });
+      const count = dialog.querySelector("#scheduleSendAsCount");
+      if (count) count.textContent = String(Array.from(sendAsSelect.selectedOptions).length);
+    }
+    for (const [key, value] of Object.entries(payload)) {
+      const field = form.querySelector(`[name="${CSS.escape(key)}"]`);
+      if (!field || key === "send_as_ids" || key === "send_as_id") continue;
+      if (field.type === "checkbox") {
+        field.checked = Boolean(value);
+      } else {
+        field.value = Array.isArray(value) ? value.join(",") : String(value ?? "");
+      }
+    }
+    const anchor = form.querySelector('[name="anchor_at_text"]');
+    if (anchor) anchor.value = "";
+    updateFieldVisibility();
+  };
+
+  const saveTemplateFromForm = async () => {
+    const name = String(templateName?.value || "").trim();
+    if (!name) throw new Error("请输入模板名称");
+    const payload = collectPayload();
+    delete payload.anchor_at;
+    delete payload.anchor_at_text;
+    const result = await postJson("/api/schedule/templates/save", {
+      id: templateSelect?.value || "",
+      name,
+      payload,
+    });
+    if (!result.ok) throw new Error(result.error || "保存模板失败");
+    templates = result.templates || [];
+    refreshTemplateSelect();
+    const saved = templates.find((item) => item.name === name);
+    if (templateSelect && saved) {
+      templateSelect.value = saved.id;
+      if (templateDeleteButton) templateDeleteButton.disabled = false;
+    }
+    setTemplateStatus("ok", `已保存模板：${name}`);
+  };
+
   // 多选 select 选中数量同步显示
   const sendAsSelect = dialog.querySelector("#scheduleSendAsSelect");
   const sendAsCount = dialog.querySelector("#scheduleSendAsCount");
@@ -5288,6 +5536,64 @@ function bindScheduleModal(dialog, presets, _initialBatches) {
     };
     sendAsSelect.addEventListener("change", refreshCount);
     refreshCount();
+  }
+
+  refreshTemplateSelect();
+  if (templateSelect) {
+    templateSelect.addEventListener("change", () => {
+      const current = templates.find((item) => item.id === templateSelect.value);
+      if (templateName) templateName.value = current?.name || "";
+      if (templateDeleteButton) templateDeleteButton.disabled = !templateSelect.value;
+    });
+  }
+  if (templateLoadButton) {
+    templateLoadButton.addEventListener("click", () => {
+      const current = templates.find((item) => item.id === templateSelect?.value);
+      if (!current) {
+        setTemplateStatus("warn", "先选择一个模板。");
+        return;
+      }
+      const payload = current.payload || {};
+      fillFormFromPayload(payload);
+      if (templateName) templateName.value = current.name || "";
+      setTemplateStatus("ok", `已套用模板：${current.name || current.id}`);
+    });
+  }
+  if (templateSaveButton) {
+    templateSaveButton.addEventListener("click", async () => {
+      templateSaveButton.disabled = true;
+      setTemplateStatus("info", "保存模板中…");
+      try {
+        await saveTemplateFromForm();
+      } catch (error) {
+        setTemplateStatus("error", error.message || "保存模板失败");
+      } finally {
+        templateSaveButton.disabled = false;
+      }
+    });
+  }
+  if (templateDeleteButton) {
+    templateDeleteButton.addEventListener("click", async () => {
+      const currentId = templateSelect?.value || "";
+      if (!currentId) {
+        setTemplateStatus("warn", "先选一个模板再删。");
+        return;
+      }
+      if (!window.confirm("删除这个模板？")) return;
+      templateDeleteButton.disabled = true;
+      setTemplateStatus("info", "删除模板中…");
+      try {
+        const result = await postJson("/api/schedule/templates/delete", { id: currentId });
+        if (!result.ok) throw new Error(result.error || "删除模板失败");
+        templates = result.templates || [];
+        refreshTemplateSelect();
+        setTemplateStatus("ok", "模板已删除。");
+      } catch (error) {
+        setTemplateStatus("error", error.message || "删除模板失败");
+      } finally {
+        templateDeleteButton.disabled = false;
+      }
+    });
   }
 
   dialog.querySelectorAll("[data-schedule-action]").forEach((btn) => {

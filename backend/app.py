@@ -277,6 +277,14 @@ def _get_resource_stats(request: MiniWebHandler, query: dict) -> dict:
     )
 
 
+def _get_resource_coverage(request: MiniWebHandler, query: dict) -> dict:
+    try:
+        limit = int((query.get("limit") or ["5000"])[0])
+    except (TypeError, ValueError):
+        limit = 5000
+    return _app(request).resource_coverage_payload(limit=limit)
+
+
 def _get_dungeon_status(request: MiniWebHandler, query: dict) -> dict:
     try:
         limit = int((query.get("limit") or ["500"])[0])
@@ -493,6 +501,10 @@ def _get_schedule_presets(request: MiniWebHandler, query: dict) -> dict:
     return _app(request).schedule_presets_payload()
 
 
+def _get_schedule_templates(request: MiniWebHandler, query: dict) -> dict:
+    return _app(request).schedule_templates_payload()
+
+
 def _get_schedule(request: MiniWebHandler, query: dict) -> dict:
     return _app(request).schedule_list_payload()
 
@@ -512,6 +524,14 @@ def _post_schedule_create(request: MiniWebHandler, payload: dict) -> dict:
 
 def _post_schedule_delete(request: MiniWebHandler, payload: dict) -> dict:
     return _app(request).schedule_delete_payload(payload)
+
+
+def _post_schedule_template_save(request: MiniWebHandler, payload: dict) -> dict:
+    return _app(request).schedule_template_save_payload(payload)
+
+
+def _post_schedule_template_delete(request: MiniWebHandler, payload: dict) -> dict:
+    return _app(request).schedule_template_delete_payload(payload)
 
 
 def _post_schedule_cancel(request: MiniWebHandler, payload: dict) -> dict:
@@ -544,6 +564,14 @@ def _get_notify_card_titles(request: MiniWebHandler, query: dict) -> dict:
     return _app(request).notify_card_titles_payload()
 
 
+def _get_filter_diagnostics(request: MiniWebHandler, query: dict) -> dict:
+    try:
+        limit = int((query.get("limit") or ["1000"])[0])
+    except (TypeError, ValueError):
+        limit = 1000
+    return _app(request).filter_diagnostics_payload(limit=limit)
+
+
 GET_ROUTES = {
     "/api/health": _get_health,
     "/api/channels": _get_channels,
@@ -554,6 +582,7 @@ GET_ROUTES = {
     "/api/settings": _get_settings,
     "/api/state-patches": _get_state_patches,
     "/api/resource-stats": _get_resource_stats,
+    "/api/resource-coverage": _get_resource_coverage,
     "/api/dungeon-status": _get_dungeon_status,
     "/api/inventory": _get_inventory,
     "/api/discovered-bots": _get_discovered_bots,
@@ -567,10 +596,12 @@ GET_ROUTES = {
     "/api/accounts/dialogs": _get_account_dialogs,
     "/api/accounts/topics": _get_account_topics,
     "/api/schedule/presets": _get_schedule_presets,
+    "/api/schedule/templates": _get_schedule_templates,
     "/api/schedule": _get_schedule,
     "/api/schedule/sync": _get_schedule_sync,
     "/api/skills": _get_skills,
     "/api/notify/card-titles": _get_notify_card_titles,
+    "/api/filter/diagnostics": _get_filter_diagnostics,
 }
 
 
@@ -601,6 +632,8 @@ POST_ROUTES = {
     "/api/schedule/preview": PostRoute(_post_schedule_preview, needs_payload=True),
     "/api/schedule/create": PostRoute(_post_schedule_create, needs_payload=True),
     "/api/schedule/delete": PostRoute(_post_schedule_delete, needs_payload=True),
+    "/api/schedule/templates/save": PostRoute(_post_schedule_template_save, needs_payload=True),
+    "/api/schedule/templates/delete": PostRoute(_post_schedule_template_delete, needs_payload=True),
     "/api/schedule/cancel": PostRoute(_post_schedule_cancel, needs_payload=True),
     "/api/skills/send": PostRoute(_post_skill_send, needs_payload=True),
     "/api/notify/test": PostRoute(_post_notify_test, needs_payload=True),

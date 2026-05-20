@@ -3071,6 +3071,39 @@ pre {
   padding: 10px;
 }
 
+.filter-diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.filter-diagnostics-grid strong,
+.filter-diagnostics-samples strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.filter-diagnostics-samples {
+  display: grid;
+  gap: 6px;
+}
+
+.filter-diagnostics-samples p {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 7px 8px;
+  font-size: 12px;
+}
+
+.filter-diagnostics-samples small {
+  color: var(--muted);
+}
+
 .login-verify {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;

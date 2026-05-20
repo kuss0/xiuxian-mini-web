@@ -462,6 +462,23 @@ class MiniWebServer:
             limit=limit,
         )
 
+    def resource_coverage_payload(self, *, limit: int = 5000) -> dict:
+        if not hasattr(self._store, "resource_coverage"):
+            return {"ok": False, "error": "store does not support resource coverage", "rows": []}
+        return self._store.resource_coverage(limit=limit)
+
+    def _dungeon_status_rows(self, *, limit: int = 500) -> list[tuple[int, ParsedCard]]:
+        try:
+            limit = int(limit or 500)
+        except (TypeError, ValueError):
+            limit = 500
+        limit = max(1, min(limit, 2000))
+        if hasattr(self._store, "list_card_page"):
+            page = self._store.list_card_page(channel="dungeon", limit=limit)
+            return [(int(seq), card) for seq, card in page]
+        cards = self._store.list_cards("dungeon")
+        return [(idx + 1, card) for idx, card in enumerate(reversed(cards[-limit:]))]
+
     def dungeon_status_payload(self, *, limit: int = 500) -> dict:
         """从消息箱副本卡片派生当前副本状态。
 
@@ -474,13 +491,13 @@ class MiniWebServer:
         except (TypeError, ValueError):
             limit = 500
         limit = max(1, min(limit, 2000))
-        if hasattr(self._store, "list_card_page"):
-            page = self._store.list_card_page(channel="dungeon", limit=limit)
-            rows = [(int(seq), card) for seq, card in page]
-        else:
-            cards = self._store.list_cards("dungeon")
-            rows = [(idx + 1, card) for idx, card in enumerate(reversed(cards))]
+        rows = self._dungeon_status_rows(limit=limit)
         summaries = _aggregate_dungeon_status_rows(rows)
+        if hasattr(self._store, "replace_dungeon_rooms"):
+            try:
+                self._store.replace_dungeon_rooms(summaries)
+            except Exception as exc:
+                print(f"[mini-web] dungeon room cache refresh failed: {exc}")
         return {
             "ok": True,
             "source": "derived_from_messages",
@@ -588,6 +605,46 @@ class MiniWebServer:
                 rebuilt = int(reclassify() or 0)
         return {"ok": True, "settings": public_settings(saved), "rebuilt_messages": rebuilt}
 
+    def schedule_templates_payload(self) -> dict:
+        if not hasattr(self._store, "list_schedule_templates"):
+            return {"ok": False, "error": "store does not support schedule templates", "templates": []}
+        return {"ok": True, "templates": self._store.list_schedule_templates()}
+
+    def schedule_template_save_payload(self, payload: dict) -> dict:
+        if not hasattr(self._store, "save_schedule_templates"):
+            return {"ok": False, "error": "store does not support schedule templates"}
+        template = payload.get("template") if isinstance(payload.get("template"), dict) else payload
+        name = str(template.get("name") or "").strip()
+        if not name:
+            return {"ok": False, "error": "请输入模板名称"}
+        template_id = str(template.get("id") or "").strip()
+        if not template_id:
+            import time as _time
+            template_id = f"tpl-{int(_time.time() * 1000)}"
+        payload_data = dict(template.get("payload") or template)
+        for key in ("name", "id", "template", "updated_at"):
+            payload_data.pop(key, None)
+        import time as _time
+        existing = {item["id"]: item for item in self._store.list_schedule_templates()}
+        existing[template_id] = {
+            "id": template_id,
+            "name": name,
+            "payload": payload_data,
+            "updated_at": _time.time(),
+        }
+        templates = self._store.save_schedule_templates(list(existing.values()))
+        return {"ok": True, "templates": templates}
+
+    def schedule_template_delete_payload(self, payload: dict) -> dict:
+        if not hasattr(self._store, "save_schedule_templates"):
+            return {"ok": False, "error": "store does not support schedule templates"}
+        template_id = str(payload.get("id") or payload.get("template_id") or "").strip()
+        if not template_id:
+            return {"ok": False, "error": "请提供模板 id"}
+        templates = [item for item in self._store.list_schedule_templates() if item["id"] != template_id]
+        saved = self._store.save_schedule_templates(templates)
+        return {"ok": True, "templates": saved}
+
     def focus_exclude_preview_payload(self, payload: dict) -> dict:
         mode = str(payload.get("mode") or "exact").strip().lower()
         raw_text = str(payload.get("text") or payload.get("phrase") or payload.get("pattern") or "").strip()
@@ -607,6 +664,90 @@ class MiniWebServer:
             **preview,
             "mode": mode,
             "label": label,
+        }
+
+    def filter_diagnostics_payload(self, *, limit: int = 1000) -> dict:
+        try:
+            limit = int(limit or 1000)
+        except (TypeError, ValueError):
+            limit = 1000
+        limit = max(1, min(limit, 5000))
+        settings = self._store.get_settings()
+        focus_keywords = [str(item).strip() for item in settings.get("focus_keywords") or [] if str(item or "").strip()]
+        own_aliases = [str(item).strip().lstrip("@") for item in settings.get("own_aliases") or [] if str(item or "").strip()]
+        leader_ids = {int(x) for x in settings.get("leader_sender_ids") or [] if str(x).strip()}
+        leader_names = {str(x).strip() for x in settings.get("leader_source_names") or [] if str(x).strip()}
+
+        if hasattr(self._store, "list_card_page"):
+            rows = self._store.list_card_page(limit=limit)
+        else:
+            rows = list(enumerate(self._store.list_cards(), start=1))[:limit]
+
+        scanned = 0
+        focus = 0
+        archive = 0
+        leader = 0
+        reason_counter: dict[str, int] = {}
+        focus_sender_counter: dict[str, int] = {}
+        samples: list[dict] = []
+
+        for seq, card in rows:
+            scanned += 1
+            reasons = list(card.filter_reasons or ()) or _fallback_filter_reasons(card)
+            channels = set(card.channels or ())
+            tags = set(card.tags or ())
+            sender_id = int(card.sender_id or 0)
+            source = str(card.source or "")
+            if "focus" in channels:
+                focus += 1
+            if "archive" in channels:
+                archive += 1
+            if "leader" in channels:
+                leader += 1
+            for reason in reasons:
+                reason_counter[reason] = reason_counter.get(reason, 0) + 1
+            if "focus" in channels and source:
+                key = f"{source}｜{sender_id or 'unknown'}"
+                focus_sender_counter[key] = focus_sender_counter.get(key, 0) + 1
+            if len(samples) < 12 and ("focus" in channels or "archive" in channels or "leader" in channels):
+                samples.append(
+                    {
+                        "seq": int(seq),
+                        "id": card.id,
+                        "title": card.title,
+                        "source": source,
+                        "sender_id": sender_id,
+                        "channels": list(card.channels or ()),
+                        "tags": list(tags),
+                        "reasons": reasons,
+                        "summary": card.summary,
+                    }
+                )
+
+        return {
+            "ok": True,
+            "limit": limit,
+            "scanned": scanned,
+            "focus_count": focus,
+            "archive_count": archive,
+            "leader_count": leader,
+            "focus_keyword_count": len(focus_keywords),
+            "own_alias_count": len(own_aliases),
+            "leader_sender_count": len(leader_ids),
+            "leader_name_count": len(leader_names),
+            "reason_rows": [
+                {"reason": reason, "count": count}
+                for reason, count in sorted(reason_counter.items(), key=lambda item: (-item[1], item[0]))
+            ],
+            "focus_sender_rows": [
+                {"sender": sender, "count": count}
+                for sender, count in sorted(focus_sender_counter.items(), key=lambda item: (-item[1], item[0]))
+            ],
+            "samples": samples,
+            "notes": [
+                "重点流的判定依赖 filter_reasons 和频道标签,这里展示最近样本的归类理由。",
+                "会长频道只按 sender_id 判定,用户名备注只用于展示。",
+            ],
         }
 
     def accounts_payload(self) -> dict:
@@ -2154,6 +2295,56 @@ def _dungeon_status_rank(kind: object) -> int:
 def _first_username(text: str) -> str:
     match = re.search(r"@(?P<user>[A-Za-z0-9_]+)", text or "")
     return match.group("user") if match else ""
+
+
+def _fallback_filter_reasons(card: ParsedCard) -> list[str]:
+    channels = set(card.channels or ())
+    tags = set(card.tags or ())
+    reasons: list[str] = []
+
+    def add(reason: str) -> None:
+        if reason and reason not in reasons:
+            reasons.append(reason)
+
+    if "我发出" in tags or "mine" in channels:
+        add("我的发送")
+    if "回复我" in tags:
+        add("天尊回复我")
+    if "回复别人" in tags:
+        add("天尊回复别人")
+    if "提到别人" in tags:
+        add("天尊提到别人")
+    if "被@" in tags:
+        add("提到我")
+    if "会长" in tags or "leader" in channels:
+        add("会长/情报源普通发言")
+    for tag in tags:
+        text = str(tag or "")
+        if text.startswith("关键词:"):
+            add(text)
+        elif text.startswith("重点排除:"):
+            add(text)
+        elif text.startswith("重点静音:"):
+            add(text)
+    if card.severity == "risk" or "risk" in channels:
+        add("风险消息")
+    if card.actions:
+        add("有可操作按钮")
+    if "dungeon" in channels:
+        add("副本消息")
+    if "resource" in channels:
+        add("资源/背包消息")
+    if "training" in channels:
+        add("修炼状态消息")
+    if "home" in channels:
+        add("洞府/家园消息")
+    if "archive" in channels:
+        add("归档")
+    if "focus" in channels and not reasons:
+        add("重点流")
+    if not reasons:
+        add("未命中重点规则")
+    return reasons
 
 
 def build_inventory_transfer_plan(payload: dict) -> dict:
