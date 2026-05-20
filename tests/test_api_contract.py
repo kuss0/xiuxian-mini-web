@@ -2877,6 +2877,58 @@ def test_dungeon_status_payload_can_limit_visible_summaries(tmp_path):
     assert len(payload["summaries"]) == 2
 
 
+def test_dungeon_status_recent_order_prefers_latest_room(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(RawMessageEvent(
+        id="open-900",
+        chat_id=-1,
+        msg_id=900,
+        text="""【虚天殿已开启】
+@old 消耗了【虚天残图】，开启了前往虚天殿的传送门！
+副本ID: 900
+其他道友可使用 .加入副本 900 加入队伍！(5人满)""",
+        source="韩天尊",
+        date="2026-05-15T00:00:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="choice-900",
+        chat_id=-1,
+        msg_id=901,
+        text="【鼎前抉择】\n队伍已进入虚天殿。\n使用 .争鼎 求稳 / .争鼎 夺鼎 继续。",
+        source="韩天尊",
+        date="2026-05-15T00:10:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="open-901",
+        chat_id=-1,
+        msg_id=910,
+        text="""【虚天殿已开启】
+@new 消耗了【虚天残图】，开启了前往虚天殿的传送门！
+副本ID: 901
+其他道友可使用 .加入副本 901 加入队伍！(5人满)""",
+        source="韩天尊",
+        date="2026-05-15T01:00:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="active-901",
+        chat_id=-1,
+        msg_id=911,
+        text="你们选定了 【焚炎秘径】。\n当前阵策：稳。",
+        source="韩天尊",
+        date="2026-05-15T01:10:00+00:00",
+        sender_id=7900199668,
+    ))
+
+    priority = MiniWebServer(store=store).dungeon_status_payload(limit=10, summary_limit=1)
+    recent = MiniWebServer(store=store).dungeon_status_payload(limit=10, summary_limit=1, order="recent")
+
+    assert priority["summaries"][0]["dungeon_id"] == "900"
+    assert recent["summaries"][0]["dungeon_id"] == "901"
+
+
 def test_dungeon_status_route_is_wired():
     from backend.app import GET_ROUTES
     assert "/api/dungeon-status" in GET_ROUTES

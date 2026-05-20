@@ -490,7 +490,7 @@ class MiniWebServer:
         cards = self._store.list_cards("dungeon")
         return [(idx + 1, card) for idx, card in enumerate(reversed(cards[-limit:]))]
 
-    def dungeon_status_payload(self, *, limit: int = 500, summary_limit: int = 80) -> dict:
+    def dungeon_status_payload(self, *, limit: int = 500, summary_limit: int = 80, order: str = "priority") -> dict:
         """从消息箱副本卡片派生当前副本状态。
 
         这仍然不是自动状态机,但聚合逻辑放在后端,避免前端每次临时推断且
@@ -507,8 +507,9 @@ class MiniWebServer:
         except (TypeError, ValueError):
             summary_limit = 80
         summary_limit = max(1, min(summary_limit, 200))
+        order = "recent" if str(order or "").strip() == "recent" else "priority"
         rows = self._dungeon_status_rows(limit=limit)
-        summaries = _aggregate_dungeon_status_rows(rows, context_finder=self._find_latest_dungeon_open_context)
+        summaries = _aggregate_dungeon_status_rows(rows, context_finder=self._find_latest_dungeon_open_context, order=order)
         self._hydrate_dungeon_summaries(summaries)
         if hasattr(self._store, "replace_dungeon_rooms"):
             try:
@@ -522,6 +523,7 @@ class MiniWebServer:
             "source": "derived_from_messages",
             "raw_count": len(rows),
             "summary_limit": summary_limit,
+            "order": order,
             "total_summaries": total_summaries,
             "summaries": visible_summaries,
             "notes": [
@@ -2196,7 +2198,7 @@ def normalize_channel_filters(
     return result
 
 
-def _aggregate_dungeon_status_rows(rows: list[tuple[int, ParsedCard]], *, context_finder=None) -> list[dict]:
+def _aggregate_dungeon_status_rows(rows: list[tuple[int, ParsedCard]], *, context_finder=None, order: str = "priority") -> list[dict]:
     grouped: dict[str, dict] = {}
     context_by_name: dict[tuple[int, str], dict] = {}
     context_by_id: dict[str, dict] = {}
@@ -2223,7 +2225,10 @@ def _aggregate_dungeon_status_rows(rows: list[tuple[int, ParsedCard]], *, contex
         _update_dungeon_summary(summary, seq, card)
         _remember_dungeon_context(context_by_name, context_by_id, key, seq, card)
     result = list(grouped.values())
-    result.sort(key=lambda item: (_dungeon_status_rank(item.get("status_kind")), -float(item.get("_latest_order") or item.get("latest_seq") or 0)))
+    if order == "recent":
+        result.sort(key=lambda item: -float(item.get("_latest_order") or item.get("latest_seq") or 0))
+    else:
+        result.sort(key=lambda item: (_dungeon_status_rank(item.get("status_kind")), -float(item.get("_latest_order") or item.get("latest_seq") or 0)))
     for item in result:
         item.pop("_status_seq", None)
         item.pop("_status_order", None)

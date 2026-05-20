@@ -1404,10 +1404,15 @@ async function openDungeonStatusModal() {
       <section class="modal-section">
         <h4>近期副本汇总</h4>
         <div class="quick-filters dungeon-status-filters">
-          <button type="button" class="quick-filter-chip all" data-dungeon-status-filter="all">全部</button>
-          <button type="button" class="quick-filter-chip active" data-dungeon-status-filter="live">活跃</button>
+          <button type="button" class="quick-filter-chip active all" data-dungeon-status-filter="all">全部</button>
+          <button type="button" class="quick-filter-chip" data-dungeon-status-filter="live">活跃</button>
           <button type="button" class="quick-filter-chip" data-dungeon-status-filter="open">可加入</button>
           <button type="button" class="quick-filter-chip" data-dungeon-status-filter="done">结束</button>
+        </div>
+        <div class="quick-filters dungeon-status-filters">
+          <button type="button" class="quick-filter-chip active" data-dungeon-summary-limit="3">最近3次</button>
+          <button type="button" class="quick-filter-chip" data-dungeon-summary-limit="20">最近20次</button>
+          <button type="button" class="quick-filter-chip" data-dungeon-summary-limit="80">更多</button>
         </div>
         <p class="modal-status-line info" id="dungeonStatusLine">正在读取最近副本消息…</p>
       </section>
@@ -1442,6 +1447,16 @@ function bindDungeonStatusModal(dialog) {
       renderDungeonStatusModal(dialog, dialog._dungeonSummaries || [], dialog._dungeonRawCount || 0, dialog._dungeonTotalCount || 0);
     });
   });
+  dialog.querySelectorAll("[data-dungeon-summary-limit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      dialog.querySelectorAll("[data-dungeon-summary-limit]").forEach((item) => item.classList.remove("active"));
+      button.classList.add("active");
+      dialog._dungeonSummaryLimit = Number(button.dataset.dungeonSummaryLimit || 3) || 3;
+      refreshDungeonStatusModal(dialog).catch((error) => {
+        setDungeonStatusLine(dialog, "error", error.message || "刷新失败");
+      });
+    });
+  });
 }
 
 async function refreshDungeonStatusModal(dialog) {
@@ -1453,7 +1468,9 @@ async function refreshDungeonStatusModal(dialog) {
   if (summary) summary.innerHTML = "";
   setDungeonStatusLine(dialog, "info", "正在读取最近副本消息…");
   try {
-    const payload = await fetchJson("/api/dungeon-status?limit=300&summary_limit=80");
+    const summaryLimit = Number(dialog._dungeonSummaryLimit || 3) || 3;
+    const scanLimit = summaryLimit <= 3 ? 90 : 300;
+    const payload = await fetchJson(`/api/dungeon-status?limit=${scanLimit}&summary_limit=${encodeURIComponent(summaryLimit)}&order=recent`);
     const summaries = (payload.summaries || []).map(normalizeDungeonStatusSummary);
     dialog._dungeonSummaries = summaries;
     dialog._dungeonRawCount = payload.raw_count || 0;

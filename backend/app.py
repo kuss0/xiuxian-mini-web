@@ -298,7 +298,8 @@ def _get_dungeon_status(request: MiniWebHandler, query: dict) -> dict:
         summary_limit = int((query.get("summary_limit") or ["80"])[0])
     except (TypeError, ValueError):
         summary_limit = 80
-    return _app(request).dungeon_status_payload(limit=limit, summary_limit=summary_limit)
+    order = (query.get("order") or ["priority"])[0]
+    return _app(request).dungeon_status_payload(limit=limit, summary_limit=summary_limit, order=order)
 
 
 def _get_inventory(request: MiniWebHandler, query: dict) -> dict:
