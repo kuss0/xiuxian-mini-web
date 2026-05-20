@@ -2926,7 +2926,9 @@ def test_dungeon_status_recent_order_prefers_latest_room(tmp_path):
     recent = MiniWebServer(store=store).dungeon_status_payload(limit=10, summary_limit=1, order="recent")
 
     assert priority["summaries"][0]["dungeon_id"] == "900"
+    assert priority["context_mode"] == "full_lookup"
     assert recent["summaries"][0]["dungeon_id"] == "901"
+    assert recent["context_mode"] == "fast_window"
 
 
 def test_dungeon_status_exposes_xutian_verdict_and_advice(tmp_path):

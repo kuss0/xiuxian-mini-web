@@ -509,7 +509,8 @@ class MiniWebServer:
         summary_limit = max(1, min(summary_limit, 200))
         order = "recent" if str(order or "").strip() == "recent" else "priority"
         rows = self._dungeon_status_rows(limit=limit)
-        context_finder = None if order == "recent" and summary_limit <= 3 else self._find_latest_dungeon_open_context
+        fast_window = order == "recent" and summary_limit <= 3
+        context_finder = None if fast_window else self._find_latest_dungeon_open_context
         summaries = _aggregate_dungeon_status_rows(rows, context_finder=context_finder, order=order)
         self._hydrate_dungeon_summaries(summaries)
         if hasattr(self._store, "replace_dungeon_rooms"):
@@ -525,11 +526,13 @@ class MiniWebServer:
             "raw_count": len(rows),
             "summary_limit": summary_limit,
             "order": order,
+            "context_mode": "fast_window" if fast_window else "full_lookup",
             "total_summaries": total_summaries,
             "summaries": visible_summaries,
             "notes": [
                 "副本状态只从消息箱派生,不自动加入。",
                 ".加入副本 只算请求/动作,必须等天尊回复成功或失败后才更新状态。",
+                "最近3次默认走快速窗口;展开更多时会做完整历史关联。",
             ],
         }
 

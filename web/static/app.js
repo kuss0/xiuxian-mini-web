@@ -1444,7 +1444,7 @@ function bindDungeonStatusModal(dialog) {
     button.addEventListener("click", () => {
       dialog.querySelectorAll("[data-dungeon-status-filter]").forEach((item) => item.classList.remove("active"));
       button.classList.add("active");
-      renderDungeonStatusModal(dialog, dialog._dungeonSummaries || [], dialog._dungeonRawCount || 0, dialog._dungeonTotalCount || 0);
+      renderDungeonStatusModal(dialog, dialog._dungeonSummaries || [], dialog._dungeonRawCount || 0, dialog._dungeonTotalCount || 0, dialog._dungeonContextMode || "");
     });
   });
   dialog.querySelectorAll("[data-dungeon-summary-limit]").forEach((button) => {
@@ -1475,7 +1475,8 @@ async function refreshDungeonStatusModal(dialog) {
     dialog._dungeonSummaries = summaries;
     dialog._dungeonRawCount = payload.raw_count || 0;
     dialog._dungeonTotalCount = payload.total_summaries || summaries.length;
-    renderDungeonStatusModal(dialog, summaries, payload.raw_count || 0, payload.total_summaries || summaries.length);
+    dialog._dungeonContextMode = payload.context_mode || "";
+    renderDungeonStatusModal(dialog, summaries, payload.raw_count || 0, payload.total_summaries || summaries.length, payload.context_mode || "");
   } finally {
     if (refreshButton) refreshButton.disabled = false;
   }
@@ -1521,14 +1522,14 @@ function normalizeDungeonStatusSummary(item) {
   };
 }
 
-function renderDungeonStatusModal(dialog, summaries, rawCount, totalCount = summaries.length) {
+function renderDungeonStatusModal(dialog, summaries, rawCount, totalCount = summaries.length, contextMode = "") {
   const list = dialog.querySelector("#dungeonStatusList");
   const summary = dialog.querySelector("#dungeonStatusSummary");
   const filter = dialog.querySelector("[data-dungeon-status-filter].active")?.dataset.dungeonStatusFilter || "all";
   const visible = filterDungeonStatusSummaries(summaries, filter);
   const liveCount = summaries.filter((item) => ["open", "choice", "active"].includes(item.statusKind)).length;
-  const closedCount = summaries.filter((item) => item.statusKind === "closed" || item.statusKind === "failed").length;
   const actionCount = summaries.reduce((total, item) => total + item.actions.length, 0);
+  const modeText = contextMode === "fast_window" ? "快速窗口" : "完整关联";
   if (summary) {
     summary.innerHTML = `
       <div class="resource-stat-card">
@@ -1547,9 +1548,9 @@ function renderDungeonStatusModal(dialog, summaries, rawCount, totalCount = summ
         <small>只复制或跳转，不自动发送</small>
       </div>
       <div class="resource-stat-card">
-        <span>结束/失败</span>
-        <strong>${escapeHtml(formatNumber(closedCount))}</strong>
-        <small>解散或加入失败</small>
+        <span>模式</span>
+        <strong>${escapeHtml(modeText)}</strong>
+        <small>${contextMode === "fast_window" ? "最近3次默认加速" : "含历史关联回填"}</small>
       </div>
     `;
   }
@@ -1741,20 +1742,13 @@ function renderDungeonStatusCard(summary) {
     ["阶段", summary.latestStage],
     ["开门人", summary.openedBy],
     ["人数", summary.capacity],
-    ["卦象", summary.oracle],
-    ["顺逆", verdictText],
-    ["建议", summary.advice],
-    ["依据", summary.adviceBasis],
-    ["置信", summary.adviceConfidence],
-    ["队伍契合", summary.teamFit],
     ["路线", summary.route],
     ["阵策", summary.strategy],
-    ["顺例", summary.positiveExamples.slice(0, 2).join("；")],
-    ["反例", summary.negativeExamples.slice(0, 2).join("；")],
     ["静场令", summary.silenceOrder],
     ["关联", contextText],
     ["消息", summary.messageCount > summary.messages.length ? `${summary.messages.length}/${summary.messageCount}` : ""],
   ].filter(([, value]) => value);
+  const oracleRows = dungeonOracleRows(summary, verdictText);
   const latestId = summary.latestMessage?.id || "";
   const joins = summary.joinSuccess.length ? summary.joinSuccess.map((user) => `@${user}`).join("、") : "";
   return `
@@ -1767,6 +1761,7 @@ function renderDungeonStatusCard(summary) {
         <small>${escapeHtml(formatChatTime(summary.latestMessage?.time) || summary.latestMessage?.time || "")}</small>
       </div>
       ${chips.length ? `<div class="dungeon-status-meta">${chips.map(([key, value]) => `<span><b>${escapeHtml(key)}</b>${escapeHtml(value)}</span>`).join("")}</div>` : ""}
+      ${oracleRows.length ? `<div class="dungeon-oracle-panel">${oracleRows.map(([key, value]) => `<div><b>${escapeHtml(key)}</b><span>${escapeHtml(value)}</span></div>`).join("")}</div>` : ""}
       ${joins ? `<p class="dungeon-status-note ok">已成功加入：${escapeHtml(joins)}</p>` : ""}
       ${summary.failures.length ? `<p class="dungeon-status-note warn">失败：${escapeHtml(summary.failures.slice(0, 2).join("；"))}</p>` : ""}
       ${summary.actions.length ? `
@@ -1788,6 +1783,19 @@ function renderDungeonStatusCard(summary) {
       ${latestId ? `<button type="button" class="dungeon-status-open" data-dungeon-jump="${escapeAttr(latestId)}">查看最新消息</button>` : ""}
     </article>
   `;
+}
+
+function dungeonOracleRows(summary, verdictText) {
+  return [
+    ["卦象", summary.oracle],
+    ["顺逆", verdictText],
+    ["队伍契合", summary.teamFit],
+    ["建议", summary.advice],
+    ["依据", summary.adviceBasis],
+    ["置信", summary.adviceConfidence],
+    ["顺例", summary.positiveExamples.slice(0, 2).join("；")],
+    ["反例", summary.negativeExamples.slice(0, 2).join("；")],
+  ].filter(([, value]) => value);
 }
 
 function dungeonRouteVerdictLabel(summary) {

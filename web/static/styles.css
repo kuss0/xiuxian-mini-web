@@ -2324,6 +2324,34 @@ pre {
   font-weight: 600;
 }
 
+.dungeon-oracle-panel {
+  display: grid;
+  gap: 6px;
+  border: 1px solid rgba(245, 158, 11, 0.26);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.08);
+  padding: 8px 10px;
+}
+
+.dungeon-oracle-panel div {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  font-size: 12px;
+}
+
+.dungeon-oracle-panel b {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.dungeon-oracle-panel span {
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
 .dungeon-status-note {
   margin: 0;
   border-radius: 6px;
