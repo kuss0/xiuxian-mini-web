@@ -203,6 +203,29 @@ def _get_health(request: MiniWebHandler, query: dict) -> dict:
     return _app(request).health_payload()
 
 
+def _get_message_audit(request: MiniWebHandler, query: dict) -> dict:
+    try:
+        since_hours = int((query.get("since_hours") or ["24"])[0])
+    except (TypeError, ValueError):
+        since_hours = 24
+    try:
+        min_gap_seconds = int((query.get("min_gap_seconds") or ["300"])[0])
+    except (TypeError, ValueError):
+        min_gap_seconds = 300
+    try:
+        limit = int((query.get("limit") or ["12"])[0])
+    except (TypeError, ValueError):
+        limit = 12
+    deep_raw = str((query.get("deep") or ["0"])[0]).lower()
+    deep = deep_raw in {"1", "true", "yes"}
+    return _app(request).message_audit_payload(
+        since_hours=since_hours,
+        min_gap_seconds=min_gap_seconds,
+        limit=limit,
+        deep=deep,
+    )
+
+
 def _get_channels(request: MiniWebHandler, query: dict) -> dict:
     return _app(request).channels_payload()
 
@@ -590,6 +613,7 @@ def _get_filter_diagnostics(request: MiniWebHandler, query: dict) -> dict:
 
 GET_ROUTES = {
     "/api/health": _get_health,
+    "/api/message-audit": _get_message_audit,
     "/api/channels": _get_channels,
     "/api/messages": _get_messages,
     "/api/messages/export": _get_messages_export,

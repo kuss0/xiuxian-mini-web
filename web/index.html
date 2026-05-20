@@ -42,6 +42,7 @@
         <header class="topbar">
           <div class="topbar-actions">
             <button id="refreshButton" type="button">刷新</button>
+            <button id="healthButton" type="button" title="查看监听、消息水位和断层审计">健康</button>
             <button id="logsButton" type="button" title="按日期 / 类型筛选浏览全部采集到的消息">日志</button>
             <button id="dungeonStatusButton" type="button" title="按副本 ID 汇总最近开房、加入、失败、解散和推进消息">副本状态</button>
             <button id="resourceStatsButton" type="button" title="野外历练和非血色副本的全服收益统计">资源统计</button>
@@ -60,6 +61,7 @@
               <span id="messageCount" class="message-count-pill">0 条</span>
             </div>
             <div id="characterHud" class="character-hud" hidden></div>
+            <div id="healthHud" class="health-hud" hidden></div>
             <div id="messageList" class="message-list"></div>
             <button id="jumpToLatest" class="jump-to-latest" type="button" hidden>↑ 回到最新</button>
           </section>

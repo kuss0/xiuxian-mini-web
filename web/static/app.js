@@ -1,4 +1,4 @@
-// MINIWEB-BUILD: infra-health-polling 2026-05-21T00:35
+// MINIWEB-BUILD: audit-dungeon-resource-ui 2026-05-21T02:10
 
 const state = {
   channels: [],
@@ -16,6 +16,7 @@ const state = {
   accountLimit: 0,
   identityLimit: 0,
   listenerSummary: null,
+  messageAudit: null,
   telegramDialogs: [],
   telegramTopics: [],
   settingsNotice: "",
@@ -67,6 +68,7 @@ const detailPanel = document.querySelector("#detailPanel");
 const detailState = document.querySelector("#detailState");
 const identitySnapshot = document.querySelector("#identitySnapshot");
 const refreshButton = document.querySelector("#refreshButton");
+const healthButton = document.querySelector("#healthButton");
 const manualSendButton = document.querySelector("#manualSendButton");
 const directSendComposer = document.querySelector("#directSendComposer");
 const directSendIdentityLine = document.querySelector("#directSendIdentityLine");
@@ -93,6 +95,7 @@ const skillBarChips = document.querySelector("#skillBarChips");
 const skillBarIdentity = document.querySelector("#skillBarIdentity");
 const skillToast = document.querySelector("#skillToast");
 const characterHud = document.querySelector("#characterHud");
+const healthHud = document.querySelector("#healthHud");
 const cultivationModules = document.querySelector("#cultivationModules");
 const sidebarIdentityList = document.querySelector("#identityList");
 const currentAccountLine = document.querySelector("#currentAccountLine");
@@ -154,6 +157,21 @@ async function fetchJson(url) {
     throw new Error(`请求失败：${response.status}`);
   }
   return response.json();
+}
+
+async function loadMessageAudit({ silent = false, deep = false } = {}) {
+  void silent;
+  const params = new URLSearchParams({
+    since_hours: "24",
+    min_gap_seconds: "300",
+    limit: "12",
+  });
+  if (deep) params.set("deep", "1");
+  const payload = await fetchJson(`/api/message-audit?${params.toString()}`);
+  state.messageAudit = payload;
+  renderHealthHud();
+  updateGlobalBanner();
+  return payload;
 }
 
 async function apiFetch(url, options = {}, allowRetry = true) {
@@ -407,6 +425,17 @@ function currentGameBotIds() {
 function updateGlobalBanner() {
   if (!globalBanner) return;
   const ids = currentGameBotIds();
+  const audit = state.messageAudit || {};
+  if (audit.status && audit.status !== "ok") {
+    const gapText = audit.gap_count ? `发现 ${audit.gap_count} 段近期断层` : "监听状态异常";
+    globalBanner.hidden = false;
+    globalBanner.innerHTML = `
+      <span><strong>消息箱需要留意</strong> — ${escapeHtml(gapText)}，资源/副本统计可能受影响。</span>
+      <button type="button" id="bannerOpenHealth">查看健康</button>
+    `;
+    globalBanner.querySelector("#bannerOpenHealth")?.addEventListener("click", () => openHealthModal());
+    return;
+  }
   if (ids.size === 0) {
     globalBanner.hidden = false;
     globalBanner.innerHTML = `
@@ -418,6 +447,350 @@ function updateGlobalBanner() {
     globalBanner.hidden = true;
     globalBanner.innerHTML = "";
   }
+}
+
+function renderHealthHud() {
+  if (!healthHud) return;
+  const audit = state.messageAudit || {};
+  const messages = audit.messages || {};
+  const listener = audit.listener || {};
+  const running = listener.running || {};
+  const runningCount = Object.keys(running).length;
+  const status = audit.status || (runningCount ? "ok" : "warn");
+  const latestMsg = audit.latest_target_msg_id || messages.latest_msg_id || 0;
+  const latestTime = auditTimeLabel(messages.latest_message_time || audit.time || "");
+  const gapCount = Number(audit.gap_count || 0);
+  const invalidDates = Number(messages.invalid_date_total || 0);
+  const resourceEvents = Number(messages.resource_events || 0);
+  const latestLabel = latestMsg ? `#${formatNumber(latestMsg)}` : "未配置";
+  healthHud.hidden = false;
+  healthHud.className = `health-hud ${status}`;
+  healthHud.innerHTML = `
+    <button type="button" class="health-chip main" id="healthHudOpen" title="查看消息箱健康审计">
+      <span class="health-dot" aria-hidden="true"></span>
+      <strong>${escapeHtml(healthStatusLabel(status))}</strong>
+      <small>${escapeHtml(listenerStatusText(listener, runningCount))}</small>
+    </button>
+    <div class="health-chip">
+      <span>水位</span>
+      <strong>${escapeHtml(latestLabel)}</strong>
+      <small>${escapeHtml(latestTime || "暂无时间")}</small>
+    </div>
+    <div class="health-chip ${gapCount ? "warn" : ""}">
+      <span>断层</span>
+      <strong>${escapeHtml(formatNumber(gapCount))}</strong>
+      <small>近 24 小时</small>
+    </div>
+    <div class="health-chip ${invalidDates ? "warn" : ""}">
+      <span>资源事件</span>
+      <strong>${escapeHtml(formatNumber(resourceEvents))}</strong>
+      <small>${invalidDates ? `异常日期 ${invalidDates}` : "日期正常"}</small>
+    </div>
+  `;
+  healthHud.querySelector("#healthHudOpen")?.addEventListener("click", () => openHealthModal());
+}
+
+function healthStatusLabel(status) {
+  if (status === "error") return "采集异常";
+  if (status === "warn") return "需要关注";
+  return "采集正常";
+}
+
+function listenerStatusText(listener, runningCount) {
+  const running = listener?.running || {};
+  const first = Object.values(running)[0] || {};
+  if (first.message) return first.message;
+  if (runningCount) return `${runningCount} 个监听运行中`;
+  return "没有运行中的监听";
+}
+
+function auditTimeLabel(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return text.replace("T", " ").replace(/\+.+$/, "");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mi = String(date.getMinutes()).padStart(2, "0");
+  return `${mm}-${dd} ${hh}:${mi}`;
+}
+
+async function openHealthModal() {
+  const dialog = openModal({
+    title: "运行健康",
+    body: `
+      <section class="modal-section">
+        <h4>消息箱审计</h4>
+        <p class="muted">这里直接读取消息箱水位、监听状态和近期 msg_id 断层。资源统计和副本页都以消息箱为事实来源。</p>
+        <div id="healthAuditBody" class="health-audit-body">
+          ${renderHealthAuditBody(state.messageAudit)}
+        </div>
+      </section>
+    `,
+    footer: `
+      <button type="button" id="healthAuditRefresh">刷新审计</button>
+      <button type="button" data-modal-close>关闭</button>
+    `,
+  });
+  if (!dialog) return;
+  const refresh = dialog.querySelector("#healthAuditRefresh");
+  const body = dialog.querySelector("#healthAuditBody");
+  const refreshAudit = async () => {
+    if (!refresh || !body) return;
+    refresh.disabled = true;
+    body.innerHTML = '<p class="empty inline">深度审计中…</p>';
+    try {
+      const payload = await loadMessageAudit({ silent: true, deep: true });
+      body.innerHTML = renderHealthAuditBody(payload);
+      updateGlobalBanner();
+    } catch (error) {
+      body.innerHTML = `<p class="empty inline">审计失败：${escapeHtml(error.message || "未知错误")}</p>`;
+    } finally {
+      refresh.disabled = false;
+    }
+  };
+  refresh?.addEventListener("click", refreshAudit);
+  if (!state.messageAudit?.deep) {
+    refreshAudit();
+  }
+}
+
+function renderHealthAuditBody(audit) {
+  if (!audit) {
+    return '<p class="empty inline">尚未读取健康审计。</p>';
+  }
+  const messages = audit.messages || {};
+  const listener = audit.listener || {};
+  const running = listener.running || {};
+  const runningRows = Object.entries(running).map(([key, value]) => ({
+    key,
+    status: value?.status || "",
+    message: value?.message || "",
+  }));
+  const gaps = audit.gaps || [];
+  const advice = healthAuditAdvice(audit, runningRows);
+  const target = audit.target_chat
+    ? `${audit.target_chat}${audit.target_topic_id ? ` / topic ${audit.target_topic_id}` : ""}`
+    : "未配置";
+  return `
+    <div class="resource-stats-summary health-summary">
+      <div class="resource-stat-card">
+        <span>状态</span>
+        <strong>${escapeHtml(healthStatusLabel(audit.status || "ok"))}</strong>
+        <small>${escapeHtml(listenerStatusText(listener, runningRows.length))}</small>
+      </div>
+      <div class="resource-stat-card">
+        <span>目标</span>
+        <strong>${escapeHtml(target)}</strong>
+        <small>监听群 / 话题</small>
+      </div>
+      <div class="resource-stat-card">
+        <span>最新水位</span>
+        <strong>#${escapeHtml(formatNumber(audit.latest_target_msg_id || messages.latest_msg_id || 0))}</strong>
+        <small>${escapeHtml(auditTimeLabel(messages.latest_message_time || ""))}</small>
+      </div>
+      <div class="resource-stat-card ${Number(audit.gap_count || 0) ? "warn" : ""}">
+        <span>近期断层</span>
+        <strong>${escapeHtml(formatNumber(audit.gap_count || 0))}</strong>
+        <small>近 ${escapeHtml(String(audit.since_hours || 24))} 小时 / ${escapeHtml(String(audit.min_gap_seconds || 300))} 秒阈值</small>
+      </div>
+      <div class="resource-stat-card">
+        <span>消息/卡片</span>
+        <strong>${escapeHtml(formatNumber(messages.real_raw_total || messages.raw_total || 0))}</strong>
+        <small>卡片 ${escapeHtml(formatNumber(messages.parsed_cards || 0))}｜资源 ${escapeHtml(formatNumber(messages.resource_events || 0))}</small>
+      </div>
+    </div>
+    ${advice.length ? `
+      <div class="health-advice">
+        <strong>建议检查</strong>
+        ${advice.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+      </div>
+    ` : ""}
+    ${runningRows.length ? `
+      <div class="resource-stats-subtitle">监听</div>
+      <div class="health-list">
+        ${runningRows.map((row) => `
+          <div>
+            <strong>${escapeHtml(row.key)}</strong>
+            <span>${escapeHtml(row.status || "unknown")}</span>
+            <small>${escapeHtml(row.message || "")}</small>
+          </div>
+        `).join("")}
+      </div>
+    ` : '<p class="modal-status-line error">没有运行中的只读监听。</p>'}
+    ${gaps.length ? `
+      <div class="resource-stats-subtitle">近期断层</div>
+      <table class="resource-stats-table health-gap-table">
+        <thead>
+          <tr>
+            <th>起点</th>
+            <th>终点</th>
+            <th>缺失 msg_id</th>
+            <th>间隔</th>
+            <th>时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${gaps.map((gap) => gap.error ? `
+            <tr><td colspan="5">${escapeHtml(gap.error)}</td></tr>
+          ` : `
+            <tr>
+              <td>#${escapeHtml(formatNumber(gap.after_msg_id || 0))}</td>
+              <td>#${escapeHtml(formatNumber(gap.before_msg_id || 0))}</td>
+              <td class="num">${escapeHtml(formatNumber(gap.missing_msg_ids || 0))}</td>
+              <td class="num">${escapeHtml(formatDurationShort(gap.gap_seconds || 0))}</td>
+              <td>${escapeHtml(auditTimeLabel(gap.after_date || ""))} → ${escapeHtml(auditTimeLabel(gap.before_date || ""))}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    ` : '<p class="modal-status-line ok">近期没有命中明显断层。</p>'}
+    ${Array.isArray(audit.notes) && audit.notes.length ? `<div class="resource-stats-notes">${audit.notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>` : ""}
+    ${audit.deep ? renderHealthDeepSections(audit) : ""}
+  `;
+}
+
+function renderHealthDeepSections(audit) {
+  const resourceCoverage = audit.resource_coverage || {};
+  const filterDiagnostics = audit.filter_diagnostics || {};
+  const dungeonAudit = audit.dungeon_audit || {};
+  const deepNotes = audit.deep_notes || [];
+  return `
+    <section class="health-deep-section">
+      <div class="resource-stats-subtitle">深度复盘</div>
+      <div class="health-deep-grid">
+        <div class="health-deep-block">
+          <strong>资源覆盖</strong>
+          ${renderHealthResourceCoverage(resourceCoverage)}
+        </div>
+        <div class="health-deep-block">
+          <strong>过滤分流</strong>
+          ${renderHealthFilterDiagnostics(filterDiagnostics)}
+        </div>
+        <div class="health-deep-block">
+          <strong>副本跳号</strong>
+          ${renderHealthDungeonAudit(dungeonAudit)}
+        </div>
+      </div>
+      ${deepNotes.length ? `
+        <div class="health-deep-notes">
+          ${deepNotes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
+function renderHealthResourceCoverage(payload) {
+  if (!payload || !payload.ok) {
+    return '<p class="empty inline">资源覆盖数据不可用。</p>';
+  }
+  const rows = payload.rows || [];
+  return `
+    <div class="health-mini-summary">
+      <span>候选 ${escapeHtml(formatNumber(payload.candidate_rows || 0))}</span>
+      <span>已扫 ${escapeHtml(formatNumber(payload.scanned || 0))}</span>
+      <span>已解析 ${escapeHtml(formatNumber(payload.parsed || 0))}</span>
+      <span>漏样 ${escapeHtml(formatNumber(payload.missing || 0))}</span>
+    </div>
+    ${renderResourceCoverage(payload)}
+    ${rows.length ? `<p class="health-deep-hint">资源统计页遇到漏样时，先看覆盖诊断，再决定是否补解析。</p>` : ""}
+  `;
+}
+
+function renderHealthFilterDiagnostics(payload) {
+  if (!payload || !payload.ok) {
+    return '<p class="empty inline">过滤分流数据不可用。</p>';
+  }
+  const reasons = payload.reason_rows || [];
+  const senders = payload.focus_sender_rows || [];
+  const samples = payload.samples || [];
+  return `
+    <div class="health-mini-summary">
+      <span>重点 ${escapeHtml(formatNumber(payload.focus_count || 0))}</span>
+      <span>归档 ${escapeHtml(formatNumber(payload.archive_count || 0))}</span>
+      <span>会长 ${escapeHtml(formatNumber(payload.leader_count || 0))}</span>
+    </div>
+    <div class="health-inline-columns">
+      <div>
+        <small>入流原因</small>
+        <ul class="health-mini-list">
+          ${reasons.slice(0, 6).map((item) => `<li><span>${escapeHtml(item.reason || "")}</span><small>${escapeHtml(formatNumber(item.count || 0))}</small></li>`).join("") || "<li><span>暂无</span><small>0</small></li>"}
+        </ul>
+      </div>
+      <div>
+        <small>重点发送者</small>
+        <ul class="health-mini-list">
+          ${senders.slice(0, 6).map((item) => `<li><span>${escapeHtml(item.sender || "")}</span><small>${escapeHtml(formatNumber(item.count || 0))}</small></li>`).join("") || "<li><span>暂无</span><small>0</small></li>"}
+        </ul>
+      </div>
+    </div>
+    ${samples.length ? `
+      <div class="health-deep-samples">
+        ${samples.slice(0, 4).map((item) => `
+          <p>
+            <b>#${escapeHtml(String(item.seq || ""))}</b>
+            <span>${escapeHtml((item.channels || []).join("/"))}</span>
+            <small>${escapeHtml((item.reasons || []).join("、") || "无理由")}</small>
+          </p>
+        `).join("")}
+      </div>
+    ` : ""}
+  `;
+}
+
+function renderHealthDungeonAudit(payload) {
+  if (!payload || !payload.ok) {
+    return '<p class="empty inline">副本状态数据不可用。</p>';
+  }
+  const summaries = payload.summaries || [];
+  const gaps = payload.gap_notes || [];
+  return `
+    <div class="health-mini-summary">
+      <span>总计 ${escapeHtml(formatNumber(payload.total_summaries || 0))}</span>
+      <span>可见 ${escapeHtml(formatNumber(summaries.length || 0))}</span>
+      <span>${escapeHtml(String(payload.context_mode || ""))}</span>
+    </div>
+    ${gaps.length ? `<div class="health-deep-notes">${gaps.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>` : '<p class="health-deep-hint">最近没有明显副本跳号。</p>'}
+    <div class="health-dungeon-preview">
+      ${summaries.slice(0, 3).map((summary) => `
+        <article class="health-dungeon-card">
+          <strong>${escapeHtml(summary.dungeon_name || "副本")} #${escapeHtml(summary.dungeon_id || "—")}</strong>
+          <small>${escapeHtml(summary.status || summary.status_kind || "")}</small>
+          <span>${escapeHtml(formatChatTime(summary.latest_time || summary.latestMessage?.time || "") || summary.latest_time || "")}</span>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function healthAuditAdvice(audit, runningRows) {
+  const messages = audit.messages || {};
+  const advice = [];
+  if (!audit.target_chat) {
+    advice.push("监听目标群未配置，消息箱不会有稳定水位。");
+  }
+  if (!runningRows.length || audit.status === "error") {
+    advice.push("没有运行中的监听，先在接入配置里恢复只读采集。");
+  }
+  if (Number(audit.gap_count || 0) > 0) {
+    advice.push("近期存在 msg_id 断层，副本和资源统计需要先看覆盖诊断。");
+  }
+  if (Number(messages.invalid_date_total || 0) > 0) {
+    advice.push("存在异常日期消息，可能影响按天/周/月统计。");
+  }
+  if (!Number(messages.resource_events || 0)) {
+    advice.push("资源事件为 0，资源统计页应先跑覆盖诊断。");
+  }
+  return advice;
+}
+
+function formatDurationShort(seconds) {
+  const n = Math.max(0, Number(seconds || 0));
+  if (n >= 3600) return `${Math.round(n / 360) / 10}h`;
+  if (n >= 60) return `${Math.round(n / 60)}m`;
+  return `${Math.round(n)}s`;
 }
 
 function openGameBotsModal() {
@@ -1082,7 +1455,7 @@ function renderResourceStats(dialog, payload) {
   const summary = dialog.querySelector("#resourceStatsSummary");
   const table = dialog.querySelector("#resourceStatsTable");
   if (summary) {
-    summary.innerHTML = renderResourceStatsSummary(rows, eventSummary, payload);
+    summary.innerHTML = renderResourceTrustCards(payload) + renderResourceStatsSummary(rows, eventSummary, payload);
   }
   if (!table) return;
   if (!rows.length && !events.length) {
@@ -1090,13 +1463,27 @@ function renderResourceStats(dialog, payload) {
     return;
   }
   table.innerHTML = `
-    ${renderResourceDeltaTable(rows)}
-    ${renderResourceEventTable(eventSummary)}
-    ${renderResourceDiagnostics(payload.diagnostics || {})}
-    ${Array.isArray(payload.notes) && payload.notes.length
-      ? `<div class="resource-stats-notes">${payload.notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>`
-      : ""}
+    <div class="resource-stats-detail-head">
+      <span>明细默认收起，避免大表拖慢弹窗。</span>
+      <button type="button" id="resourceStatsToggleDetails">展开明细</button>
+    </div>
+    <div id="resourceStatsDetailBody" hidden>
+      ${renderResourceDeltaTable(rows)}
+      ${renderResourceEventTable(eventSummary)}
+      ${renderResourceDiagnostics(payload.diagnostics || {})}
+      ${Array.isArray(payload.notes) && payload.notes.length
+        ? `<div class="resource-stats-notes">${payload.notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>`
+        : ""}
+    </div>
   `;
+  const toggle = table.querySelector("#resourceStatsToggleDetails");
+  const detail = table.querySelector("#resourceStatsDetailBody");
+  toggle?.addEventListener("click", () => {
+    if (!detail) return;
+    const hidden = detail.hidden;
+    detail.hidden = !hidden;
+    toggle.textContent = hidden ? "收起明细" : "展开明细";
+  });
 }
 
 function renderResourceDiagnostics(diagnostics) {
@@ -1116,6 +1503,36 @@ function renderResourceDiagnostics(diagnostics) {
       ${samples.map((item) => `<span>${escapeHtml(item.source || "")}｜${escapeHtml(formatNumber(item.count || 0))}</span>`).join("")}
     </div>
   `;
+}
+
+function renderResourceTrustCards(payload) {
+  const audit = state.messageAudit || {};
+  const gapCount = Number(audit.gap_count || 0);
+  const rows = payload.rows || [];
+  const events = payload.events || [];
+  const cards = [];
+  cards.push(`
+    <div class="resource-stat-card ${gapCount ? "warn" : ""}">
+      <span>统计可信度</span>
+      <strong>${escapeHtml(gapCount ? "需复核" : "正常")}</strong>
+      <small>${gapCount ? `消息箱近24小时 ${formatNumber(gapCount)} 段断层` : "消息箱近期无明显断层"}</small>
+    </div>
+  `);
+  cards.push(`
+    <div class="resource-stat-card">
+      <span>当前口径</span>
+      <strong>${escapeHtml(resourceStatsScopeLabel(payload))}</strong>
+      <small>${escapeHtml((payload.period || "day") === "week" ? "按周" : (payload.period || "day") === "month" ? "按月" : "按天")}｜${escapeHtml(formatNumber(events.length))} 事件行 / ${escapeHtml(formatNumber(rows.length))} 资源行</small>
+    </div>
+  `);
+  return cards.join("");
+}
+
+function resourceStatsScopeLabel(payload) {
+  const type = payload.source_type || "all";
+  const name = payload.source_name || "";
+  if (!type || type === "all") return "全部来源";
+  return resourceSourceLabel(type, name);
 }
 
 function renderResourceCoverage(payload) {
@@ -1672,6 +2089,7 @@ function renderDungeonStatusModal(dialog, summaries, rawCount, totalCount = summ
   const liveCount = summaries.filter((item) => ["open", "choice", "active"].includes(item.statusKind)).length;
   const actionCount = summaries.reduce((total, item) => total + item.actions.length, 0);
   const modeText = contextMode === "fast_window" ? "快速窗口" : "完整关联";
+  const idGapNotes = dungeonIdGapNotes(visible);
   if (summary) {
     summary.innerHTML = `
       <div class="resource-stat-card">
@@ -1706,9 +2124,21 @@ function renderDungeonStatusModal(dialog, summaries, rawCount, totalCount = summ
     setDungeonStatusLine(dialog, "ok", `已汇总 ${summaries.length}/${totalCount} 个近期副本线索。`);
     return;
   }
-  list.innerHTML = visible.map(renderDungeonStatusCard).join("");
+  list.innerHTML = `
+    ${idGapNotes.length ? `
+      <div class="dungeon-id-gap-note">
+        <strong>副本 ID 跳号</strong>
+        ${idGapNotes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}
+      </div>
+    ` : ""}
+    ${visible.map(renderDungeonStatusCard).join("")}
+  `;
   bindDungeonStatusCards(list, visible);
-  setDungeonStatusLine(dialog, "ok", `已显示 ${visible.length} 个，接口返回 ${summaries.length}/${totalCount} 个近期副本线索。`);
+  setDungeonStatusLine(
+    dialog,
+    idGapNotes.length ? "warn" : "ok",
+    `已显示 ${visible.length} 个，接口返回 ${summaries.length}/${totalCount} 个近期副本线索。${idGapNotes.length ? "存在跳号，可能是中间副本未采到或被过滤。" : ""}`
+  );
 }
 
 function filterDungeonStatusSummaries(summaries, filter) {
@@ -1716,6 +2146,23 @@ function filterDungeonStatusSummaries(summaries, filter) {
   if (filter === "open") return summaries.filter((item) => item.statusKind === "open");
   if (filter === "done") return summaries.filter((item) => ["closed", "failed"].includes(item.statusKind));
   return summaries;
+}
+
+function dungeonIdGapNotes(summaries) {
+  const ids = [...new Set((summaries || [])
+    .map((item) => Number(String(item.dungeonId || "").replace(/[^\d]/g, "")))
+    .filter((id) => Number.isInteger(id) && id > 0))]
+    .sort((a, b) => b - a);
+  const notes = [];
+  for (let i = 0; i < ids.length - 1; i += 1) {
+    const current = ids[i];
+    const next = ids[i + 1];
+    if (current - next > 1) {
+      notes.push(`#${next} → #${current} 缺 ${formatNumber(current - next - 1)} 个编号`);
+    }
+    if (notes.length >= 3) break;
+  }
+  return notes;
 }
 
 function renderDungeonStatusCard(summary) {
@@ -7655,6 +8102,16 @@ if (manualSendButton) {
   });
 }
 
+if (healthButton) {
+  healthButton.addEventListener("click", async () => {
+    try {
+      await openHealthModal();
+    } catch (error) {
+      showError(error);
+    }
+  });
+}
+
 if (directSendIdentitySelect) {
   directSendIdentitySelect.addEventListener("change", () => {
     state.directSendIdentityId = Number(directSendIdentitySelect.value || 0) || null;
@@ -8041,6 +8498,7 @@ loadChannels()
   .then(loadDiscoveredBots)
   .then(loadSkills)
   .then(loadMessages)
+  .then(() => loadMessageAudit({ silent: true }))
   .catch(showError);
 
 // ---------- 技能盘(底栏)----------
@@ -8267,11 +8725,13 @@ const POLL_INTERVAL_MS = 5000;
 const ACCOUNT_POLL_INTERVAL_MS = 30000;
 const BOT_DISCOVERY_POLL_INTERVAL_MS = 60000;
 const IDENTITY_STATE_POLL_INTERVAL_MS = 30000;
+const HEALTH_POLL_INTERVAL_MS = 60000;
 let pollTimer = null;
 let pollInflight = false;
 let nextAccountsPollAt = 0;
 let nextBotDiscoveryPollAt = 0;
 let nextIdentityStatePollAt = 0;
+let nextHealthPollAt = 0;
 
 async function pollTick() {
   if (pollInflight) return;
@@ -8290,6 +8750,10 @@ async function pollTick() {
     if (now >= nextBotDiscoveryPollAt) {
       nextBotDiscoveryPollAt = now + BOT_DISCOVERY_POLL_INTERVAL_MS;
       tasks.push(loadDiscoveredBots().catch((err) => console.warn("[mini-web] bot discovery poll failed:", err)));
+    }
+    if (now >= nextHealthPollAt) {
+      nextHealthPollAt = now + HEALTH_POLL_INTERVAL_MS;
+      tasks.push(loadMessageAudit({ silent: true }).catch((err) => console.warn("[mini-web] health poll failed:", err)));
     }
     const [messageResult] = await Promise.all(tasks);
     if ((messageResult && messageResult.changed) || now >= nextIdentityStatePollAt) {

@@ -225,6 +225,157 @@ class MiniWebServer:
             "messages": messages,
         }
 
+    def message_audit_payload(
+        self,
+        *,
+        since_hours: int = 24,
+        min_gap_seconds: int = 300,
+        limit: int = 12,
+        deep: bool = False,
+    ) -> dict:
+        """面向 UI 的消息箱可信度审计。
+
+        health 只说明服务是否活着;这里补上目标群/话题水位、近期 msg_id
+        断层和 listener 补采状态,让用户不用 SSH 也能判断统计是否可信。
+        """
+        self._ensure_collector_running()
+        settings = self._store.get_settings()
+        target_chat = str(settings.get("target_chat") or "").strip()
+        target_topic = str(settings.get("target_topic_id") or "").strip()
+        try:
+            chat_id = int(target_chat) if target_chat.lstrip("-").isdigit() else 0
+        except (TypeError, ValueError):
+            chat_id = 0
+        try:
+            topic_id = int(target_topic or 0)
+        except (TypeError, ValueError):
+            topic_id = 0
+
+        message_summary = {}
+        summary = getattr(self._store, "message_health_summary", None)
+        if callable(summary):
+            try:
+                message_summary = summary()
+            except Exception as exc:
+                message_summary = {"error": str(exc)}
+
+        gaps: list[dict] = []
+        latest_target_msg_id = 0
+        if chat_id:
+            gap_finder = getattr(self._store, "message_id_gaps", None)
+            if callable(gap_finder):
+                try:
+                    gaps = gap_finder(
+                        chat_id,
+                        topic_id,
+                        since_hours=since_hours,
+                        min_gap_seconds=min_gap_seconds,
+                        limit=limit,
+                    )
+                except Exception as exc:
+                    gaps = [{"error": str(exc)}]
+            latest_finder = getattr(self._store, "latest_message_id", None)
+            if callable(latest_finder):
+                try:
+                    latest_target_msg_id = int(latest_finder(chat_id, topic_id) or 0)
+                except Exception:
+                    latest_target_msg_id = 0
+
+        listener = self._listeners.status()
+        running = listener.get("running") if isinstance(listener, dict) else {}
+        running_count = len(running or {})
+        gap_count = len([item for item in gaps if not item.get("error")])
+        invalid_dates = int(message_summary.get("invalid_date_total") or 0) if isinstance(message_summary, dict) else 0
+        status = "ok"
+        if invalid_dates or any(item.get("error") for item in gaps):
+            status = "warn"
+        if gap_count:
+            status = "warn"
+        if not chat_id:
+            status = "warn"
+        if running_count <= 0:
+            status = "error"
+
+        payload = {
+            "ok": True,
+            "status": status,
+            "time": utc_now_iso(),
+            "target_chat": target_chat,
+            "target_topic_id": topic_id,
+            "latest_target_msg_id": latest_target_msg_id,
+            "since_hours": since_hours,
+            "min_gap_seconds": min_gap_seconds,
+            "listener": listener,
+            "messages": message_summary,
+            "gaps": gaps,
+            "gap_count": gap_count,
+            "notes": [
+                "断层只表示 msg_id 和时间同时出现明显间隔,并不等同于一定漏采。",
+                "资源统计和副本统计都以消息箱为事实来源;这里有断层时,统计结论需要看覆盖诊断。",
+            ],
+        }
+        if deep:
+            payload.update(self._message_audit_deep_sections(limit=limit))
+        return payload
+
+    def _message_audit_deep_sections(self, *, limit: int = 12) -> dict:
+        deep_limit = max(1, int(limit or 12))
+        resource_limit = max(500, min(5000, deep_limit * 150))
+        filter_limit = max(100, min(1000, deep_limit * 20))
+        dungeon_limit = max(150, min(1500, deep_limit * 30))
+        resource_coverage = self.resource_coverage_payload(limit=resource_limit)
+        filter_diagnostics = self.filter_diagnostics_payload(limit=filter_limit)
+        dungeon_audit = self.dungeon_status_payload(limit=dungeon_limit, summary_limit=min(8, max(3, deep_limit // 2 or 3)), order="recent")
+        dungeon_gap_notes = self._dungeon_gap_notes(dungeon_audit.get("summaries") or [])
+        deep_notes = [
+            "深度审计只在手动打开健康面板时计算，不参与后台轮询。",
+            "资源覆盖和过滤分流的结论来自消息箱，不会反向改写状态。",
+        ]
+        if resource_coverage.get("missing"):
+            deep_notes.append(f"资源覆盖有 {resource_coverage.get('missing')} 条候选未解析。")
+        if filter_diagnostics.get("archive_count"):
+            deep_notes.append(
+                f"过滤分流当前重点 {filter_diagnostics.get('focus_count', 0)} / 归档 {filter_diagnostics.get('archive_count', 0)} / 会长 {filter_diagnostics.get('leader_count', 0)}。"
+            )
+        if dungeon_gap_notes:
+            deep_notes.append("副本编号存在跳号：" + "；".join(dungeon_gap_notes))
+        return {
+            "deep": True,
+            "resource_coverage": resource_coverage,
+            "filter_diagnostics": filter_diagnostics,
+            "dungeon_audit": {
+                "ok": bool(dungeon_audit.get("ok", True)),
+                "source": dungeon_audit.get("source", ""),
+                "raw_count": dungeon_audit.get("raw_count", 0),
+                "summary_limit": dungeon_audit.get("summary_limit", 0),
+                "order": dungeon_audit.get("order", ""),
+                "context_mode": dungeon_audit.get("context_mode", ""),
+                "total_summaries": dungeon_audit.get("total_summaries", 0),
+                "summaries": dungeon_audit.get("summaries", [])[:8],
+                "gap_notes": dungeon_gap_notes,
+                "notes": dungeon_audit.get("notes", []),
+            },
+            "deep_notes": deep_notes,
+        }
+
+    def _dungeon_gap_notes(self, summaries: list[dict]) -> list[str]:
+        ids = []
+        for item in summaries or []:
+            raw = str(item.get("dungeon_id") or "").strip()
+            if not raw.isdigit():
+                continue
+            value = int(raw)
+            if value > 0 and value not in ids:
+                ids.append(value)
+        ids.sort(reverse=True)
+        notes = []
+        for current, next_id in zip(ids, ids[1:]):
+            if current - next_id > 1:
+                notes.append(f"#{next_id} → #{current} 缺 {current - next_id - 1} 个编号")
+            if len(notes) >= 3:
+                break
+        return notes
+
     def channels_payload(self) -> dict:
         return {"channels": [channel.to_api() for channel in CHANNELS]}
 

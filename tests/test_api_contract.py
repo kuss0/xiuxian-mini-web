@@ -3254,6 +3254,49 @@ def test_filter_diagnostics_route_is_wired():
     assert "/api/filter/diagnostics" in GET_ROUTES
 
 
+def test_message_audit_payload_includes_deep_sections(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_settings({
+        "target_chat": "-1001680975844",
+        "target_topic_id": 7310786,
+    })
+    store.ingest_event(RawMessageEvent(
+        id="audit-resource",
+        chat_id=-1001680975844,
+        msg_id=1,
+        text="""【野外历练 · 灵机暗藏】
+@salt9527 在山涧残阵旁避开妖兽踪迹，采得一份机缘。
+获得修为 +12000，获得 【灵石】x399。""",
+        source="韩天尊",
+        date="2026-05-15T12:00:00+00:00",
+        sender_id=7900199668,
+        sender_is_bot=True,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="audit-focus",
+        chat_id=-1001680975844,
+        msg_id=2,
+        text="今晚虚天殿有人吗",
+        source="玩家A",
+        date="2026-05-15T12:01:00+00:00",
+        sender_id=222,
+    ))
+
+    payload = MiniWebServer(store=store).message_audit_payload(deep=True)
+
+    assert payload["deep"] is True
+    assert "resource_coverage" in payload
+    assert "filter_diagnostics" in payload
+    assert "dungeon_audit" in payload
+    assert payload["resource_coverage"]["ok"] is True
+    assert payload["filter_diagnostics"]["ok"] is True
+
+
+def test_message_audit_route_is_wired():
+    from backend.app import GET_ROUTES
+    assert "/api/message-audit" in GET_ROUTES
+
+
 def test_list_schedule_batches_returns_sending_and_completed(tmp_path):
     """新生命周期(sending/completed/cancelled/partial_failed)默认要可见,
     UI 才能显示进度 pill 和取消按钮。只有 deleted 默认隐藏。"""
