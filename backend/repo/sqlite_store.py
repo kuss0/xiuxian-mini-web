@@ -165,6 +165,29 @@ class SQLiteStore:
         except Exception:
             return None
 
+    def has_message(self, chat_id: int, msg_id: int, topic_id: int = 0) -> bool:
+        """消息箱是否已经有这条 Telegram 消息。
+
+        listener 补拉 reply 父消息前会先问这里,避免每条 reply 都打 TG API。
+        msg_id 在同一个 chat 内唯一;topic_id 只作为额外保护,防止配置错话题时误判。
+        """
+        if not chat_id or not msg_id:
+            return False
+        params: list = [int(chat_id), int(msg_id)]
+        where = "chat_id=? AND msg_id=?"
+        if topic_id:
+            where += " AND (top_msg_id=? OR top_msg_id IS NULL OR top_msg_id=0)"
+            params.append(int(topic_id))
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    f"SELECT 1 FROM raw_messages WHERE {where} LIMIT 1",
+                    params,
+                ).fetchone()
+        except Exception:
+            return False
+        return row is not None
+
     def _collect_my_identities(self) -> list[int]:
         """所有已登记身份的 send_as_id。"""
         ids: set[int] = set()
@@ -821,6 +844,7 @@ class SQLiteStore:
             self.ingest_event(event)
 
     def ingest_event(self, event: RawMessageEvent) -> tuple[ParsedCard, ...]:
+        event = self._coalesce_event_identity(event)
         output = self._pipeline.process(event)
         # 把编辑/删除/媒体字段从 event 透传到 card,UI 渲染需要(灰字「(已编辑)」、
         # 删除线、「[图片]」占位等)
@@ -986,6 +1010,41 @@ class SQLiteStore:
         # 重新分流,否则「bot 回复我」会停留在 archive,首页重点流看不到。
         self._reclassify_direct_reply_children(event)
         return cards
+
+    def _coalesce_event_identity(self, event: RawMessageEvent) -> RawMessageEvent:
+        """按 Telegram 事实键合并同一条消息的不同本地 id。
+
+        历史版本里 miniweb 主动发送的 outgoing 可能带过额外后缀,而 listener
+        回调又会用 canonical `tg:{chat}:{msg}` 入库。同一个 chat/msg 如果落两
+        行,资源统计和回复链都会重复。这里在 parser 之前把新事件改写到已存在
+        的 raw id 上,让后续 ON CONFLICT(id) 走更新而不是新增。
+        """
+        if not event.chat_id or not event.msg_id:
+            return event
+        canonical_id = f"tg:{int(event.chat_id)}:{int(event.msg_id)}"
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    """
+                    SELECT id
+                    FROM raw_messages
+                    WHERE chat_id=? AND msg_id=?
+                    ORDER BY
+                        CASE
+                            WHEN id=? THEN 0
+                            WHEN id=? THEN 1
+                            ELSE 2
+                        END,
+                        rowid DESC
+                    LIMIT 1
+                    """,
+                    (int(event.chat_id), int(event.msg_id), str(event.id), canonical_id),
+                ).fetchone()
+        except Exception:
+            return event
+        if not row or not row[0] or str(row[0]) == str(event.id):
+            return event
+        return replace(event, id=str(row[0]))
 
     def _replace_resource_records(
         self,

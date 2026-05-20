@@ -21,6 +21,9 @@ class EventSink(Protocol):
     def message_id_gaps(self, chat_id: int, topic_id: int = 0, **kwargs) -> list[dict]:
         ...
 
+    def has_message(self, chat_id: int, msg_id: int, topic_id: int = 0) -> bool:
+        ...
+
 
 class TelegramReadOnlyListener:
     # 自愈参数:断线后退避重连,1s 起、每次翻倍、封顶 60s。
@@ -167,7 +170,13 @@ class TelegramReadOnlyListener:
                     display_name = await _resolve_sender_display_name(event)
                     if display_name:
                         raw_event = replace(raw_event, source=display_name)
-                    await self._ingest_event_with_retry(raw_event)
+                    await self._ingest_event_and_parent(
+                        client,
+                        target_chat,
+                        raw_event,
+                        chat_id=int(getattr(event, "chat_id", 0) or 0),
+                        topic_id=topic_id,
+                    )
 
                 @client.on(telethon.events.MessageEdited(chats=target_chat, incoming=True, outgoing=True))
                 async def _on_message_edited(event):
@@ -190,7 +199,13 @@ class TelegramReadOnlyListener:
                             raw_event,
                             edited_at=edit_date.astimezone(timezone.utc).isoformat(),
                         )
-                    await self._ingest_event_with_retry(raw_event)
+                    await self._ingest_event_and_parent(
+                        client,
+                        target_chat,
+                        raw_event,
+                        chat_id=int(getattr(event, "chat_id", 0) or 0),
+                        topic_id=topic_id,
+                    )
 
                 self._set_status("running", "历史补采中")
                 backfill_message = await self._backfill_history(client, target_chat, topic_id)
@@ -276,7 +291,13 @@ class TelegramReadOnlyListener:
                         chat_id=chat_id,
                         account_key=self._account_key,
                     )
-                    if await self._ingest_event_with_retry(raw_event):
+                    if await self._ingest_event_and_parent(
+                        client,
+                        entity,
+                        raw_event,
+                        chat_id=chat_id,
+                        topic_id=topic_id,
+                    ):
                         ingested += 1
                 gap_ranges, gap_scanned, gap_ingested = await self._backfill_known_gaps(
                     client,
@@ -303,7 +324,13 @@ class TelegramReadOnlyListener:
                         chat_id=chat_id,
                         account_key=self._account_key,
                     )
-                    if await self._ingest_event_with_retry(raw_event):
+                    if await self._ingest_event_and_parent(
+                        client,
+                        entity,
+                        raw_event,
+                        chat_id=chat_id,
+                        topic_id=topic_id,
+                    ):
                         ingested += 1
         except Exception as exc:
             print(f"[mini-web] history backfill failed: {exc}")
@@ -357,7 +384,13 @@ class TelegramReadOnlyListener:
                         chat_id=chat_id,
                         account_key=self._account_key,
                     )
-                    if await self._ingest_event_with_retry(raw_event):
+                    if await self._ingest_event_and_parent(
+                        client,
+                        entity,
+                        raw_event,
+                        chat_id=chat_id,
+                        topic_id=topic_id,
+                    ):
                         ingested += 1
                 if self._stop_flag.is_set() or last_scanned_id <= after_id:
                     break
@@ -392,6 +425,62 @@ class TelegramReadOnlyListener:
         except Exception as exc:
             print(f"[mini-web] message_id_gaps failed: {exc}")
             return []
+
+    def _has_ingested_message(self, chat_id: int, msg_id: int, topic_id: int) -> bool:
+        checker = getattr(self._sink, "has_message", None)
+        if not callable(checker):
+            return False
+        try:
+            return bool(checker(int(chat_id), int(msg_id), int(topic_id or 0)))
+        except Exception as exc:
+            print(f"[mini-web] has_message failed: {exc}")
+            return False
+
+    async def _ingest_event_and_parent(
+        self,
+        client,
+        entity,
+        raw_event: RawMessageEvent,
+        *,
+        chat_id: int,
+        topic_id: int,
+    ) -> bool:
+        await self._maybe_backfill_reply_parent(client, entity, raw_event, chat_id, topic_id)
+        return await self._ingest_event_with_retry(raw_event)
+
+    async def _maybe_backfill_reply_parent(
+        self,
+        client,
+        entity,
+        raw_event: RawMessageEvent,
+        chat_id: int,
+        topic_id: int,
+    ) -> bool:
+        reply_id = int(raw_event.reply_to_msg_id or 0)
+        if reply_id <= 0 or reply_id == int(raw_event.msg_id or 0):
+            return False
+        storage_chat_id = int(chat_id or raw_event.chat_id or 0)
+        if not storage_chat_id:
+            return False
+        if self._has_ingested_message(storage_chat_id, reply_id, topic_id):
+            return False
+        try:
+            parent = await client.get_messages(entity, ids=reply_id)
+        except Exception as exc:
+            print(f"[mini-web] reply parent backfill skipped: {reply_id}: {exc}")
+            return False
+        if parent is None:
+            return False
+        if topic_id and _message_topic_id(parent) != topic_id:
+            return False
+        parent_event = await _raw_event_from_message(
+            parent,
+            chat_id=storage_chat_id,
+            account_key=self._account_key,
+        )
+        if int(parent_event.msg_id or 0) == int(raw_event.msg_id or 0):
+            return False
+        return await self._ingest_event_with_retry(parent_event)
 
     async def _ingest_event_with_retry(self, raw_event: RawMessageEvent) -> bool:
         for index in range(self._INGEST_BUSY_ATTEMPTS):

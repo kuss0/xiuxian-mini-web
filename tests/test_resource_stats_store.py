@@ -34,6 +34,41 @@ def test_resource_deltas_are_persisted_idempotently(tmp_path):
     assert events[0]["result"] == "success"
 
 
+def test_ingest_coalesces_same_chat_message_with_different_local_ids(tmp_path):
+    store = SQLiteStore(tmp_path / "state.db")
+    base = {
+        "chat_id": -1,
+        "msg_id": 100,
+        "text": """【野外历练 · 妖兽遭遇】
+@TrickPlayer 遭遇 变异碧眼金蟾。
+战力对比: 你 1378174928 / 妖兽 1848017514，胜算 31%。
+一番斗法后，妖兽伏诛。
+获得修为 +45000，获得 【阴凝之晶】x2。
+此战只结算 NPC 历练收益，不触发玩家仇怨。""",
+        "source": "韩天尊",
+        "date": "2026-05-15T12:00:00+00:00",
+        "sender_id": 7900199668,
+        "sender_is_bot": True,
+    }
+
+    store.ingest_event(RawMessageEvent(id="tg:-1:100:legacy", **base))
+    store.ingest_event(RawMessageEvent(id="tg:-1:100", **base))
+
+    with store._connect() as conn:
+        raw_count = conn.execute(
+            "SELECT COUNT(*) FROM raw_messages WHERE chat_id=-1 AND msg_id=100"
+        ).fetchone()[0]
+    deltas = store.list_resource_deltas("tg:-1:100:legacy")
+    events = store.list_resource_events("tg:-1:100:legacy")
+
+    assert raw_count == 1
+    assert {(item["resource_name"], item["amount"]) for item in deltas} == {
+        ("修为", 45000),
+        ("阴凝之晶", 2),
+    }
+    assert len(events) == 1
+
+
 def test_inventory_snapshots_are_persisted_idempotently(tmp_path):
     store = SQLiteStore(tmp_path / "state.db")
     event = RawMessageEvent(
