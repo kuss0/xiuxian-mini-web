@@ -1,4 +1,4 @@
-// MINIWEB-BUILD: audit-dungeon-resource-ui 2026-05-21T02:10
+// MINIWEB-BUILD: chat-client-shell 2026-05-21T04:42
 
 const state = {
   channels: [],
@@ -6,6 +6,7 @@ const state = {
   messages: [],
   selectedMessageId: null,
   expandedMessages: new Set(),
+  messageSearch: "",
   settings: null,
   accounts: [],
   identities: [],
@@ -28,6 +29,8 @@ const state = {
   activeIdentityId: null,
   discoveredBots: [],
   lastMessageSeq: 0,
+  channelSummaryMessages: [],
+  channelSummarySeq: 0,
   viewMode: "focus",
   sendAs: {
     peers: [],
@@ -43,10 +46,12 @@ const state = {
   skillBarBusyKeys: new Set(),  // 正在发送中的 key,临时禁用
   directSendIdentityId: null,
   directSendLastActiveId: null,
+  directSendReply: null,
 };
 
 const MESSAGE_PREVIEW_CHAR_LIMIT = 480;
 const MESSAGE_PREVIEW_LINE_LIMIT = 8;
+const CHANNEL_SUMMARY_LIMIT = 260;
 const NUMERIC_SOURCE_RE = /^-?\d{4,}$/;
 const EMOJI_PALETTE = [
   "😀", "😂", "🤣", "😅", "🥹", "😎", "🙃", "😭",
@@ -63,19 +68,26 @@ const channelFilters = document.querySelector("#channelFilters");
 const selectAllChannels = document.querySelector("#selectAllChannels");
 const messageList = document.querySelector("#messageList");
 const messageCount = document.querySelector("#messageCount");
+const messageSearchInput = document.querySelector("#messageSearchInput");
 const activeChannelText = document.querySelector("#activeChannelText");
+const streamActiveChannelText = document.querySelector("#streamActiveChannelText");
+const layoutGrid = document.querySelector(".layout-grid");
+const detailBackdrop = document.querySelector("#detailBackdrop");
 const detailPanel = document.querySelector("#detailPanel");
 const detailState = document.querySelector("#detailState");
+const closeDetailButton = document.querySelector("#closeDetailButton");
 const identitySnapshot = document.querySelector("#identitySnapshot");
 const refreshButton = document.querySelector("#refreshButton");
 const healthButton = document.querySelector("#healthButton");
-const manualSendButton = document.querySelector("#manualSendButton");
 const directSendComposer = document.querySelector("#directSendComposer");
 const directSendIdentityLine = document.querySelector("#directSendIdentityLine");
 const directSendIdentitySelect = document.querySelector("#directSendIdentitySelect");
 const directSendInput = document.querySelector("#directSendInput");
 const directSendSubmit = document.querySelector("#directSendSubmit");
 const directSendStatus = document.querySelector("#directSendStatus");
+const directSendReplyContext = document.querySelector("#directSendReplyContext");
+const directSendSelectionContext = document.querySelector("#directSendSelectionContext");
+const directSendActionHints = document.querySelector("#directSendActionHints");
 const emojiPickerButton = document.querySelector("#emojiPickerButton");
 const directSendEmojiPalette = document.querySelector("#directSendEmojiPalette");
 const directSendSkillPanel = document.querySelector("#directSendSkillPanel");
@@ -87,6 +99,7 @@ const logsButton = document.querySelector("#logsButton");
 const dungeonStatusButton = document.querySelector("#dungeonStatusButton");
 const resourceStatsButton = document.querySelector("#resourceStatsButton");
 const inventoryButton = document.querySelector("#inventoryButton");
+const settingsButton = document.querySelector("#settingsButton");
 const loginAccountButton = document.querySelector("#loginAccountButton");
 const addIdentityButton = document.querySelector("#addIdentityButton");
 const logoutAccountButton = document.querySelector("#logoutAccountButton");
@@ -94,9 +107,10 @@ const skillBarTabs = document.querySelector("#skillBarTabs");
 const skillBarChips = document.querySelector("#skillBarChips");
 const skillBarIdentity = document.querySelector("#skillBarIdentity");
 const skillToast = document.querySelector("#skillToast");
-const characterHud = document.querySelector("#characterHud");
-const healthHud = document.querySelector("#healthHud");
-const cultivationModules = document.querySelector("#cultivationModules");
+const gameCockpit = document.querySelector("#gameCockpit");
+const cockpitIdentity = document.querySelector("#cockpitIdentity");
+const cockpitModules = document.querySelector("#cockpitModules");
+const cockpitInbox = document.querySelector("#cockpitInbox");
 const sidebarIdentityList = document.querySelector("#identityList");
 const currentAccountLine = document.querySelector("#currentAccountLine");
 const gameBotsButton = document.querySelector("#gameBotsButton");
@@ -169,7 +183,7 @@ async function loadMessageAudit({ silent = false, deep = false } = {}) {
   if (deep) params.set("deep", "1");
   const payload = await fetchJson(`/api/message-audit?${params.toString()}`);
   state.messageAudit = payload;
-  renderHealthHud();
+  renderGameCockpit();
   updateGlobalBanner();
   return payload;
 }
@@ -209,6 +223,48 @@ async function loadChannels() {
     : new Set(state.channels.map((channel) => channel.key));
   renderChannelFilters();
   renderQuickFilters();
+  renderGameCockpit();
+}
+
+async function loadChannelSummary({ incremental = false } = {}) {
+  if (!state.channels.length) return { changed: false, count: 0 };
+  const params = new URLSearchParams({ channel: "all", compact: "1" });
+  if (incremental && state.channelSummarySeq > 0) {
+    params.set("since_seq", String(state.channelSummarySeq));
+  } else {
+    params.set("limit", String(CHANNEL_SUMMARY_LIMIT));
+  }
+  const payload = await fetchJson(`/api/messages?${params.toString()}`);
+  const incoming = payload.messages || [];
+  const serverMax = Number(payload.max_seq || 0);
+  if (incremental && incoming.length === 0) {
+    state.channelSummarySeq = Math.max(state.channelSummarySeq, serverMax);
+    return { changed: false, count: 0 };
+  }
+  const byId = new Map((incremental ? state.channelSummaryMessages : []).map((m) => [m.id, m]));
+  for (const card of incoming) {
+    byId.set(card.id, card);
+  }
+  state.channelSummaryMessages = Array.from(byId.values())
+    .sort((a, b) => (b.seq || 0) - (a.seq || 0))
+    .slice(0, CHANNEL_SUMMARY_LIMIT);
+  state.channelSummarySeq = incremental ? Math.max(state.channelSummarySeq, serverMax) : serverMax;
+  renderChannelFilters();
+  return { changed: incoming.length > 0, count: incoming.length };
+}
+
+async function refreshChatViewport({ incremental = false } = {}) {
+  const [summaryResult, messageResult] = await Promise.all([
+    loadChannelSummary({ incremental }).catch((err) => {
+      console.warn("[mini-web] channel summary refresh failed:", err);
+      return { changed: false, count: 0 };
+    }),
+    loadMessages({ incremental }),
+  ]);
+  return {
+    changed: Boolean(summaryResult?.changed || messageResult?.changed),
+    count: Number(summaryResult?.count || 0) + Number(messageResult?.count || 0),
+  };
 }
 
 async function loadMessages({ incremental = false } = {}) {
@@ -222,8 +278,13 @@ async function loadMessages({ incremental = false } = {}) {
       state.selectedMessageId = null;
       renderChannelFilters();
       renderQuickFilters();
+      renderGameCockpit();
       renderMessages();
-      if (state.detailMode === "message") renderDetail();
+      renderDirectSendComposer();
+      if (state.detailMode === "message") {
+        setWorkspacePanelOpen(false);
+        renderDetail();
+      }
     }
     return { changed: false, count: 0 };
   }
@@ -267,12 +328,17 @@ async function loadMessages({ incremental = false } = {}) {
   }
   state.lastMessageSeq = incremental ? Math.max(state.lastMessageSeq, serverMax) : serverMax;
 
-  if (!visibleMessages().some((message) => message.id === state.selectedMessageId)) {
-    state.selectedMessageId = visibleMessages()[0]?.id ?? null;
+  if (state.selectedMessageId && !visibleMessages().some((message) => message.id === state.selectedMessageId)) {
+    state.selectedMessageId = null;
+    if (state.detailMode === "message") {
+      setWorkspacePanelOpen(false);
+    }
   }
   renderChannelFilters();
   renderQuickFilters();
+  renderGameCockpit();
   renderMessages();
+  renderDirectSendComposer();
   // 轮询走的增量更新不要碰右侧详情面板 — 用户可能正在看某条消息的详情,
   // 重渲会让按钮和滚动闪一下。初始化 / 手动刷新才重渲详情。
   if (!incremental && state.detailMode === "message") {
@@ -300,6 +366,7 @@ async function loadAccounts() {
   state.listenerSummary = payload.listener || null;
   renderSidebarIdentityList();
   renderDirectSendComposer();
+  renderGameCockpit();
   updateCurrentAccountLine();
   updateAccountActionGuards();
   return payload;
@@ -315,7 +382,7 @@ async function loadIdentities() {
   renderSidebarIdentityList();
   renderSkillViews();
   renderDirectSendComposer();
-  renderCharacterHud();
+  renderGameCockpit();
   if (activeChanged && previousActiveId !== null) {
     loadIdentityPatches({ reset: true }).catch((err) => console.warn("[mini-web] reload patches after identity refresh failed:", err));
   }
@@ -336,6 +403,7 @@ async function loadIdentityModuleStates() {
     renderCultivationModules();
     renderDirectSendComposer();
     renderSkillViews();
+    renderGameCockpit();
   } catch (err) {
     console.warn("[mini-web] loadIdentityModuleStates:", err);
   }
@@ -351,7 +419,7 @@ function activeIdentityPatches() {
 
 function renderIdentityProfileViews() {
   renderIdentitySnapshot();
-  renderCharacterHud();
+  renderGameCockpit();
   renderSkillViews();
   renderDirectSendComposer();
   renderSidebarIdentityList();  // profile chips 也跟着重画
@@ -449,45 +517,415 @@ function updateGlobalBanner() {
   }
 }
 
-function renderHealthHud() {
-  if (!healthHud) return;
+function renderGameCockpit() {
+  if (!gameCockpit) return;
+  renderCockpitIdentity();
+  renderCockpitModules();
+  renderCockpitInbox();
+}
+
+function renderCockpitIdentity() {
+  if (!cockpitIdentity) return;
+  const activeId = Number(state.activeIdentityId || 0) || null;
+  const identity = activeId ? identityById(activeId) : null;
+  const account = identity ? accountForIdentity(identity) : null;
+  const patchMap = new Map(activeIdentityPatches().map((item) => [item.key, item.value]));
+  if (!identity) {
+    cockpitIdentity.innerHTML = `
+      <div class="cockpit-empty">
+        <strong>未选择身份</strong>
+        <span>左侧选身份后，下方发送栏会自动跟随。</span>
+      </div>
+    `;
+    return;
+  }
+
+  const name =
+    patchMap.get("角色名") ||
+    patchMap.get("道号") ||
+    identity.label ||
+    identity.username ||
+    String(identity.send_as_id || "未命名");
+  const subtitleParts = [
+    patchMap.get("境界"),
+    String(patchMap.get("宗门") || "").replace(/^【|】$/g, ""),
+    patchMap.get("灵根"),
+  ].filter(Boolean);
+  const cultivation = String(patchMap.get("修为") || "");
+  const power = String(patchMap.get("综合战力") || "");
+  const title = String(patchMap.get("称号") || "").replace(/^【|】$/g, "");
+  const canSend = identityCanSend(identity);
+  const statusClass = !account ? "warn" : canSend ? "ok" : "warn";
+  const statusText = !account ? "未绑定账号" : canSend ? "可直接发送" : "只能观察";
+  const metricRows = [
+    ["战力", power || "未读"],
+    ["修为", cultivation || "未读"],
+    ["称号", title || "未读"],
+  ].filter(([, value]) => value);
+
+  cockpitIdentity.innerHTML = `
+    <div class="cockpit-identity-main">
+      <div class="cockpit-avatar">${escapeHtml(sourceInitial(name, "player"))}</div>
+      <div class="cockpit-identity-title">
+        <strong>${escapeHtml(name)}</strong>
+        <span>${escapeHtml(subtitleParts.join("｜") || "等待消息箱补全角色资料")}</span>
+      </div>
+      <span class="cockpit-status ${statusClass}">${escapeHtml(statusText)}</span>
+    </div>
+    <div class="cockpit-player-meta">
+      ${metricRows.map(([label, value]) => cockpitMetric(label, value)).join("")}
+    </div>
+  `;
+}
+
+function cockpitMetric(label, value) {
+  return `
+    <span class="cockpit-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(String(value || "—"))}</strong>
+    </span>
+  `;
+}
+
+function renderCockpitModules() {
+  if (!cockpitModules) return;
+  const activeId = Number(state.activeIdentityId || 0) || null;
+  if (!activeId) {
+    cockpitModules.innerHTML = '<p class="cockpit-muted">选中身份后显示关键 CD。</p>';
+    return;
+  }
+  const moduleStates = state.identityModuleStates.get(activeId) || [];
+  const byKey = new Map(moduleStates.map((item) => [item.module_key, item]));
+  const now = Date.now() / 1000;
+  const specs = [
+    { key: "deep_retreat", icon: "📿", label: "深闭" },
+    { key: "yuanying", icon: "🔮", label: "元婴" },
+    { key: "second_soul", icon: "🪞", label: "元神" },
+    { key: "pet_touch", icon: "🖐️", label: "抚摸器灵" },
+    { key: "pet_warm", icon: "🔥", label: "温养器灵" },
+  ];
+  const rows = specs.map((spec) => {
+    const item = byKey.get(spec.key);
+    const summary = item?.summary || {};
+    const st = item?.state || {};
+    const nextAt = Number(summary.next_at || st.cooldown_until || 0) || 0;
+    const startAt = moduleStartTs(st);
+    const label = item?.label || spec.label;
+    const ready = item ? (summary.ready === true || nextAt === 0 || (nextAt > 0 && nextAt <= now)) : false;
+    if (!item) {
+      return cockpitModuleChip({ icon: spec.icon, label, text: "未知", cls: "unknown" });
+    }
+    if (ready) {
+      return cockpitModuleChip({ icon: spec.icon, label, text: "已就绪", cls: "ready" });
+    }
+    const remaining = Math.max(0, nextAt - now);
+    const total = Math.max(1, nextAt - startAt);
+    const pct = Math.min(100, Math.max(0, ((total - remaining) / total) * 100));
+    return cockpitModuleChip({
+      icon: spec.icon,
+      label,
+      text: `剩 ${fmtCountdown(remaining)}`,
+      cls: "cooling",
+      nextAt,
+      startAt,
+      pct,
+    });
+  });
+  cockpitModules.innerHTML = rows.join("");
+}
+
+function cockpitModuleChip({ icon, label, text, cls, nextAt = 0, startAt = 0, pct = 0 }) {
+  const liveAttrs = nextAt
+    ? ` data-cockpit-timer="1" data-next-at="${nextAt}" data-start-at="${startAt}"`
+    : "";
+  return `
+    <div class="cockpit-module ${escapeAttr(cls || "")}"${liveAttrs}>
+      <span class="cockpit-module-icon">${escapeHtml(icon || "•")}</span>
+      <span class="cockpit-module-label">${escapeHtml(label || "")}</span>
+      <strong class="cockpit-module-time">${escapeHtml(text || "—")}</strong>
+      <span class="cockpit-module-bar"><span style="width:${Number(pct || 0).toFixed(1)}%"></span></span>
+    </div>
+  `;
+}
+
+function renderCockpitInbox() {
+  if (!cockpitInbox) return;
   const audit = state.messageAudit || {};
   const messages = audit.messages || {};
-  const listener = audit.listener || {};
+  const listener = audit.listener || state.listenerSummary || {};
   const running = listener.running || {};
   const runningCount = Object.keys(running).length;
   const status = audit.status || (runningCount ? "ok" : "warn");
   const latestMsg = audit.latest_target_msg_id || messages.latest_msg_id || 0;
   const latestTime = auditTimeLabel(messages.latest_message_time || audit.time || "");
   const gapCount = Number(audit.gap_count || 0);
-  const invalidDates = Number(messages.invalid_date_total || 0);
-  const resourceEvents = Number(messages.resource_events || 0);
-  const latestLabel = latestMsg ? `#${formatNumber(latestMsg)}` : "未配置";
-  healthHud.hidden = false;
-  healthHud.className = `health-hud ${status}`;
-  healthHud.innerHTML = `
-    <button type="button" class="health-chip main" id="healthHudOpen" title="查看消息箱健康审计">
+  const counts = channelMessageCounts();
+  cockpitInbox.innerHTML = `
+    <button type="button" class="cockpit-inbox-status ${escapeAttr(status)}" data-cockpit-action="health">
       <span class="health-dot" aria-hidden="true"></span>
       <strong>${escapeHtml(healthStatusLabel(status))}</strong>
       <small>${escapeHtml(listenerStatusText(listener, runningCount))}</small>
     </button>
-    <div class="health-chip">
-      <span>水位</span>
-      <strong>${escapeHtml(latestLabel)}</strong>
-      <small>${escapeHtml(latestTime || "暂无时间")}</small>
-    </div>
-    <div class="health-chip ${gapCount ? "warn" : ""}">
-      <span>断层</span>
-      <strong>${escapeHtml(formatNumber(gapCount))}</strong>
-      <small>近 24 小时</small>
-    </div>
-    <div class="health-chip ${invalidDates ? "warn" : ""}">
-      <span>资源事件</span>
-      <strong>${escapeHtml(formatNumber(resourceEvents))}</strong>
-      <small>${invalidDates ? `异常日期 ${invalidDates}` : "日期正常"}</small>
+    <div class="cockpit-inbox-line">
+      ${cockpitMetric("水位", latestMsg ? `#${formatNumber(latestMsg)}` : "未配置")}
+      ${cockpitMetric("断层", `${formatNumber(gapCount)} 段`)}
+      ${cockpitMetric("重点", `${formatNumber(counts.get("focus") || 0)} 条`)}
+      ${cockpitMetric("最近", latestTime || "暂无")}
     </div>
   `;
-  healthHud.querySelector("#healthHudOpen")?.addEventListener("click", () => openHealthModal());
+  cockpitInbox.querySelector('[data-cockpit-action="health"]')?.addEventListener("click", () => openHealthModal());
+}
+
+function directReplyContextFromMessage(message) {
+  if (!message) return null;
+  const chatId = Number(message.chat_id || 0);
+  const msgId = Number(message.msg_id || 0);
+  if (!chatId || !msgId) return null;
+  return {
+    messageId: message.id || `tg:${chatId}:${msgId}`,
+    chatId,
+    replyToMsgId: msgId,
+    topMsgId: Number(message.top_msg_id || 0) || null,
+    source: displaySource(message.source),
+    preview: manualMessagePreview(message),
+  };
+}
+
+function directReplyContextFromAction(action, fallbackMessage = null) {
+  if (!action) return null;
+  const chatId = Number(action.chat_id || fallbackMessage?.chat_id || 0);
+  const replyToMsgId = Number(action.reply_to_msg_id || 0);
+  if (!chatId || !replyToMsgId) return null;
+  const parent =
+    state.messages.find(
+      (message) =>
+        Number(message.chat_id || 0) === chatId &&
+        Number(message.msg_id || 0) === replyToMsgId
+    ) || fallbackMessage;
+  return {
+    messageId: parent?.id || `tg:${chatId}:${replyToMsgId}`,
+    chatId,
+    replyToMsgId,
+    topMsgId: Number(action.top_msg_id || parent?.top_msg_id || 0) || null,
+    source: parent ? displaySource(parent.source) : "Telegram 消息",
+    preview: parent ? manualMessagePreview(parent) : `回复消息 #${replyToMsgId}`,
+  };
+}
+
+function setDirectSendReply(replyContext) {
+  state.directSendReply = replyContext || null;
+  renderDirectSendReplyContext();
+}
+
+function clearDirectSendReply() {
+  setDirectSendReply(null);
+}
+
+function renderDirectSendReplyContext() {
+  if (!directSendReplyContext) return;
+  const reply = state.directSendReply;
+  if (!reply) {
+    directSendReplyContext.hidden = true;
+    directSendReplyContext.innerHTML = "";
+    return;
+  }
+  const preview = reply.preview || `${reply.source || "Telegram 消息"} #${reply.replyToMsgId || ""}`;
+  directSendReplyContext.hidden = false;
+  directSendReplyContext.innerHTML = `
+    <div class="direct-send-reply-main">
+      <span>回复</span>
+      <strong>${escapeHtml(preview)}</strong>
+      <small>群 ${escapeHtml(String(reply.chatId || ""))}｜消息 #${escapeHtml(String(reply.replyToMsgId || ""))}</small>
+    </div>
+    <button type="button" data-direct-reply-clear>取消回复</button>
+  `;
+  directSendReplyContext.querySelector("[data-direct-reply-clear]")?.addEventListener("click", () => {
+    clearDirectSendReply();
+    directSendInput?.focus();
+  });
+}
+
+function setWorkspaceSelectedMessage(message, { rerenderList = true } = {}) {
+  if (!message) return;
+  state.detailMode = "message";
+  state.selectedMessageId = message.id;
+  setWorkspacePanelOpen(true);
+  if (rerenderList) renderMessages();
+  renderDirectSendComposer();
+  renderDetail().catch((error) => console.warn("[mini-web] render selected detail failed:", error));
+}
+
+function selectMessageForComposer(message, { rerenderList = true } = {}) {
+  if (!message) return;
+  state.detailMode = "message";
+  state.selectedMessageId = message.id;
+  if (rerenderList) renderMessages();
+  renderDirectSendComposer();
+  if (layoutGrid?.classList.contains("detail-open")) {
+    renderDetail().catch((error) => console.warn("[mini-web] refresh open detail failed:", error));
+  }
+}
+
+function selectedVisibleMessage() {
+  const id = state.selectedMessageId;
+  if (!id) return null;
+  const message = state.messages.find((item) => item.id === id) || null;
+  if (!message) return null;
+  return visibleMessages().some((item) => item.id === id) ? message : null;
+}
+
+function setWorkspacePanelOpen(open) {
+  if (!layoutGrid) return;
+  layoutGrid.classList.toggle("detail-open", Boolean(open));
+  layoutGrid.classList.toggle("detail-closed", !open);
+  if (detailBackdrop) {
+    detailBackdrop.hidden = !open;
+  }
+}
+
+function closeWorkspacePanel({ rerenderList = true, clearSelection = true } = {}) {
+  if (clearSelection) {
+    state.selectedMessageId = null;
+  }
+  state.detailMode = "message";
+  setWorkspacePanelOpen(false);
+  if (rerenderList) renderMessages();
+  renderDirectSendComposer();
+  renderDetail().catch((error) => console.warn("[mini-web] close detail failed:", error));
+}
+
+function renderDirectSendSelectionContext() {
+  if (!directSendSelectionContext) return;
+  const message = selectedVisibleMessage();
+  if (!message) {
+    directSendSelectionContext.hidden = true;
+    directSendSelectionContext.innerHTML = "";
+    return;
+  }
+  const channels = (message.channels || [message.channel])
+    .map((channel) => channelLabel(channel))
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(" / ");
+  const title = String(message.title || "").trim();
+  const raw = String(message.summary || message.raw || "").trim().replace(/\s+/g, " ");
+  const preview = clipGraphemes(raw || title || "（空消息）", 120);
+  const canReply = Number(message.chat_id || 0) !== 0 && Number(message.msg_id || 0) > 0;
+  const kind = messageKind(message);
+  const source = displaySource(message.source);
+  directSendSelectionContext.hidden = false;
+  directSendSelectionContext.innerHTML = `
+    <div class="direct-selection-main kind-${escapeAttr(kind)}">
+      <span>当前消息</span>
+      <strong>${escapeHtml(source)}${title ? `｜${escapeHtml(title)}` : ""}</strong>
+      <small>${escapeHtml(formatChatTime(message.time) || message.time || "")}${channels ? `｜${escapeHtml(channels)}` : ""}${message.msg_id ? `｜#${escapeHtml(String(message.msg_id))}` : ""}</small>
+      <p>${escapeHtml(preview)}</p>
+    </div>
+    <div class="direct-selection-actions">
+      <button type="button" class="primary" data-direct-selected-action="reply" ${canReply ? "" : "disabled"}>回复</button>
+      <button type="button" data-direct-selected-action="quote">填入原文</button>
+      <button type="button" data-direct-selected-action="copy">复制</button>
+      <button type="button" data-direct-selected-action="clear">清除</button>
+    </div>
+  `;
+  directSendSelectionContext.querySelector('[data-direct-selected-action="reply"]')?.addEventListener("click", () => {
+    setDirectSendReplyFromMessage(message);
+  });
+  directSendSelectionContext.querySelector('[data-direct-selected-action="quote"]')?.addEventListener("click", () => {
+    const text = String(message.raw || message.summary || message.title || "").trim();
+    fillDirectSendComposer(text, {
+      replyContext: null,
+      statusText: "已把当前消息原文填入发送框，请确认后发送。",
+      statusKind: "info",
+    });
+  });
+  directSendSelectionContext.querySelector('[data-direct-selected-action="copy"]')?.addEventListener("click", async (event) => {
+    const text = String(message.raw || message.summary || message.title || "").trim();
+    await copyCommandToClipboard(text, event.currentTarget);
+  });
+  directSendSelectionContext.querySelector('[data-direct-selected-action="clear"]')?.addEventListener("click", () => {
+    state.selectedMessageId = null;
+    setWorkspacePanelOpen(false);
+    renderMessages();
+    renderDirectSendComposer();
+  });
+}
+
+function renderDirectSendActionHints() {
+  if (!directSendActionHints) return;
+  const message = selectedVisibleMessage();
+  const actions = (message?.actions || []).filter((action) => String(action.command || "").trim());
+  if (!message || !actions.length) {
+    directSendActionHints.hidden = true;
+    directSendActionHints.innerHTML = "";
+    return;
+  }
+  directSendActionHints.hidden = false;
+  directSendActionHints.innerHTML = `
+    <span class="direct-action-hints-label">候选动作</span>
+    <div class="direct-action-hints-list">
+    ${actions.slice(0, 6).map((action, index) => {
+      const command = String(action.command || "").trim();
+      return `
+        <button type="button" data-direct-action-hint="${index}" title="${escapeAttr(command)}">
+          <strong>${escapeHtml(quickActionLabel(action))}</strong>
+          <small>${escapeHtml(clipGraphemes(command, 42))}</small>
+        </button>
+      `;
+    }).join("")}
+    ${actions.length > 6 ? `<span class="direct-action-hints-more">+${actions.length - 6}</span>` : ""}
+    </div>
+  `;
+  directSendActionHints.querySelectorAll("[data-direct-action-hint]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = actions[Number(button.dataset.directActionHint || 0)];
+      if (!action) return;
+      fillDirectSendComposer(action.command, {
+        identityId: action.identity_id,
+        replyContext: directReplyContextFromAction(action, message),
+        statusText: quickActionNeedsManualReview(action)
+          ? "已填入候选动作，请补全内容后发送。"
+          : "已填入候选动作，请确认后发送。",
+        statusKind: "info",
+      });
+    });
+  });
+}
+
+function fillDirectSendComposer(command, opts = {}) {
+  const text = String(command || "").trim();
+  if (opts.identityId) {
+    state.directSendIdentityId = Number(opts.identityId || 0) || state.directSendIdentityId;
+  }
+  if (opts.replyContext !== undefined) {
+    setDirectSendReply(opts.replyContext);
+  }
+  renderDirectSendComposer();
+  if (directSendInput && text) {
+    directSendInput.value = text;
+  }
+  if (opts.statusText) {
+    setDirectSendStatus(opts.statusText, opts.statusKind || "info");
+  }
+  if (opts.focus !== false) {
+    window.setTimeout(() => {
+      directSendInput?.focus();
+      directSendInput?.setSelectionRange(directSendInput.value.length, directSendInput.value.length);
+    }, 0);
+  }
+}
+
+function setDirectSendReplyFromMessage(message) {
+  const reply = directReplyContextFromMessage(message);
+  if (!reply) {
+    showSkillToast("这条消息缺少 Telegram chat_id/msg_id，不能回复", "err");
+    return;
+  }
+  fillDirectSendComposer("", {
+    replyContext: reply,
+    statusText: `已锁定回复对象：${reply.preview}`,
+    statusKind: "info",
+  });
 }
 
 function healthStatusLabel(status) {
@@ -2793,8 +3231,30 @@ function visibleMessages() {
   // 「日志」modal 是另一条单独的全量数据流,不走这里。
   return state.messages.filter((message) => {
     const channels = message.channels || [message.channel];
-    return channels.some((channel) => state.selectedChannels.has(channel));
+    if (!channels.some((channel) => state.selectedChannels.has(channel))) {
+      return false;
+    }
+    return messageMatchesSearch(message);
   });
+}
+
+function messageMatchesSearch(message) {
+  const query = String(state.messageSearch || "").trim().toLowerCase();
+  if (!query) return true;
+  const haystack = [
+    message.title,
+    message.summary,
+    message.raw,
+    message.source,
+    message.channel,
+    ...(message.channels || []),
+    ...Object.entries(message.fields || {}).map(([key, value]) => `${key} ${formatFieldValue(value)}`),
+    ...(message.tags || []),
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+  return haystack.includes(query);
 }
 
 function myIdSet() {
@@ -2870,14 +3330,16 @@ async function applyChannelSelection(nextChannels) {
   state.messages = [];
   state.selectedMessageId = null;
   state.detailMode = "message";
+  setWorkspacePanelOpen(false);
   renderQuickFilters();
   renderChannelFilters();
   renderMessages();
+  renderDirectSendComposer();
   renderDetail();
   if (filtered.length === 0) {
     return { changed: false, count: 0 };
   }
-  await loadMessages({ incremental: false });
+  await refreshChatViewport({ incremental: false });
 }
 
 function parentMessageOf(card) {
@@ -2921,7 +3383,10 @@ function jumpToMessage(target) {
   }
 
   renderMessages();
-  renderDetail();
+  renderDirectSendComposer();
+  if (layoutGrid?.classList.contains("detail-open")) {
+    renderDetail();
+  }
 
   // DOM 重建完才去找节点;requestAnimationFrame 一下确保浏览器 layout 完
   window.requestAnimationFrame(() => {
@@ -2981,26 +3446,42 @@ async function ensureFullMessage(message) {
 
 function renderChannelFilters() {
   const counts = channelMessageCounts();
+  const latestByChannel = latestMessagesByChannel();
   channelFilters.replaceChildren(
-    ...state.channels.map((channel) => {
+    ...orderedChannelsForConversationList(latestByChannel).map((channel) => {
       const button = document.createElement("button");
       button.type = "button";
       const isActive = state.selectedChannels.has(channel.key);
       button.className = "channel-chip" + (isActive ? " active" : "");
-      button.title = channel.description || channel.label;
+      const latest = latestByChannel.get(channel.key) || null;
+      button.title = channelTooltip(channel, latest);
       button.dataset.channelKey = channel.key;
+      button.setAttribute("aria-pressed", isActive ? "true" : "false");
       const count = counts.get(channel.key) || 0;
+      const preview = channelPreviewText(latest, channel);
+      const time = latest ? formatChatTime(latest.time) : "";
       button.innerHTML = `
-        <span class="channel-chip-dot" aria-hidden="true"></span>
-        <span class="channel-chip-label">${escapeHtml(channel.label)}</span>
-        <span class="channel-chip-count">${count}</span>
+        <span class="channel-chip-icon" aria-hidden="true">${escapeHtml(channelIcon(channel.key, channel.label))}</span>
+        <span class="channel-chip-main">
+          <span class="channel-chip-top">
+            <span class="channel-chip-label">${escapeHtml(channel.label)}</span>
+            <span class="channel-chip-time">${escapeHtml(time)}</span>
+          </span>
+          <span class="channel-chip-preview">${escapeHtml(preview)}</span>
+        </span>
+        <span class="channel-chip-count">${count ? escapeHtml(String(count)) : ""}</span>
       `;
-      button.addEventListener("click", () => {
-        const next = new Set(state.selectedChannels);
-        if (state.selectedChannels.has(channel.key)) {
-          next.delete(channel.key);
+      button.addEventListener("click", (event) => {
+        let next;
+        if (event.ctrlKey || event.metaKey || event.shiftKey) {
+          next = new Set(state.selectedChannels);
+          if (state.selectedChannels.has(channel.key)) {
+            next.delete(channel.key);
+          } else {
+            next.add(channel.key);
+          }
         } else {
-          next.add(channel.key);
+          next = new Set([channel.key]);
         }
         applyChannelSelection(next).catch((error) => {
           console.warn("[mini-web] channel selection failed:", error);
@@ -3012,8 +3493,82 @@ function renderChannelFilters() {
   );
 
   selectAllChannels.textContent =
-    state.selectedChannels.size === state.channels.length ? "清空" : "全选";
+    state.selectedChannels.size === state.channels.length ? "重点" : "全部";
   renderActiveChannelText();
+}
+
+function orderedChannelsForConversationList(latestByChannel = null) {
+  const latestMap = latestByChannel || latestMessagesByChannel();
+  const originalIndex = new Map(state.channels.map((channel, index) => [channel.key, index]));
+  return [...state.channels].sort((a, b) => {
+    const aLatest = latestMap.get(a.key);
+    const bLatest = latestMap.get(b.key);
+    const aSeq = Number(aLatest?.seq || 0);
+    const bSeq = Number(bLatest?.seq || 0);
+    if (aSeq !== bSeq) return bSeq - aSeq;
+    const aTime = Date.parse(aLatest?.time || "") || 0;
+    const bTime = Date.parse(bLatest?.time || "") || 0;
+    if (aTime !== bTime) return bTime - aTime;
+    return (originalIndex.get(a.key) || 0) - (originalIndex.get(b.key) || 0);
+  });
+}
+
+function channelTooltip(channel, latest) {
+  const parts = [channel.label || channel.key];
+  if (channel.description) parts.push(channel.description);
+  if (latest) {
+    const source = displaySource(latest.source);
+    const body = String(latest.summary || latest.raw || latest.title || "").replace(/\s+/g, " ").trim();
+    parts.push(`${formatChatTime(latest.time) || ""} ${source}: ${clipGraphemes(body, 90)}`.trim());
+  }
+  return parts.filter(Boolean).join("\n");
+}
+
+function latestMessagesByChannel() {
+  const candidates = state.channelSummaryMessages.length ? state.channelSummaryMessages : state.messages;
+  const latest = new Map();
+  for (const message of candidates) {
+    const keys = message.channels && message.channels.length ? message.channels : [message.channel];
+    for (const key of keys) {
+      if (key && !latest.has(key)) {
+        latest.set(key, message);
+      }
+    }
+  }
+  return latest;
+}
+
+function latestMessageForChannel(channelKey) {
+  return latestMessagesByChannel().get(channelKey) || null;
+}
+
+function channelPreviewText(message, channel) {
+  if (!message) {
+    return channel.description || "等待消息";
+  }
+  const source = displaySource(message.source);
+  const body = String(message.summary || message.raw || message.title || "").replace(/\s+/g, " ").trim();
+  const limit = 56;
+  const preview = clipGraphemes(body || "（空消息）", limit);
+  return `${source}: ${preview}${countGraphemes(body) > limit ? "…" : ""}`;
+}
+
+function channelIcon(key, label) {
+  const icons = {
+    focus: "重",
+    mine: "我",
+    leader: "会",
+    risk: "险",
+    dungeon: "副",
+    resource: "资",
+    archive: "档",
+    console: "台",
+    training: "修",
+    home: "府",
+    world: "聊",
+    system: "系",
+  };
+  return icons[key] || firstGrapheme(label || key || "?");
 }
 
 // 快速滤镜:修仙频道标题旁的 3-4 个游戏化 chip。
@@ -3064,7 +3619,10 @@ function renderQuickFilters() {
     })
     .join("");
   container.querySelectorAll("[data-quick-filter]").forEach((btn) => {
-    btn.addEventListener("click", () => applyQuickFilter(btn.dataset.quickFilter));
+    btn.addEventListener("click", () => {
+      btn.closest("details")?.removeAttribute("open");
+      applyQuickFilter(btn.dataset.quickFilter);
+    });
   });
 }
 
@@ -3085,7 +3643,10 @@ function channelMessageCounts() {
   for (const channel of state.channels) {
     counts.set(channel.key, 0);
   }
-  for (const message of state.messages) {
+  const sourceMessages = state.channelSummaryMessages.length
+    ? state.channelSummaryMessages
+    : state.messages;
+  for (const message of sourceMessages) {
     const keys = message.channels && message.channels.length ? message.channels : [message.channel];
     for (const key of keys) {
       if (counts.has(key)) {
@@ -3154,92 +3715,6 @@ function renderIdentitySnapshot() {
   `;
 }
 
-// 角色 HUD —— 消息流顶部一行,瘦身后只展示:@username | #角色ID | 战力 | 修为进度。
-// 角色名/道号/灵根/境界/宗门 已经放在侧栏的身份行(避免顶部太挤),称号没拿到就别造。
-function renderCharacterHud() {
-  if (!characterHud) return;
-  const patchMap = new Map(activeIdentityPatches().map((p) => [p.key, p.value]));
-  const activeId = state.activeIdentityId;
-  const identity = activeId ? identityById(activeId) : null;
-  const account = identity ? (state.accounts || []).find((a) => a.local_id === identity.account_local_id) : null;
-
-  const accountId = account?.account_id || (identity ? identity.send_as_id : "");
-  const username = patchMap.get("username") || identity?.username || "";
-  const power = patchMap.get("综合战力") || "";
-  const cultivation = patchMap.get("修为") || "";
-
-  const chips = [];
-  if (username) {
-    chips.push(_hudChip({ cls: "user", k: "@", v: username, title: "Telegram username" }));
-  }
-  if (accountId) {
-    chips.push(_hudChip({ cls: "id", k: "#", v: String(accountId), title: "角色ID(== Telegram account_id)" }));
-  }
-  if (state.identityPatchesLoading && patchMap.size === 0) {
-    chips.push(_hudChip({
-      cls: "loading",
-      k: "…",
-      v: "资料加载中",
-      title: "正在读取当前身份的消息箱画像",
-      empty: true,
-    }));
-  }
-  chips.push(_hudChip({
-    cls: "power",
-    k: "⚔️",
-    v: power || "—",
-    title: power ? "综合战力" : "发 .战力 抓取战力",
-    empty: !power,
-  }));
-  // 修为带进度条
-  chips.push(_hudCultivationChip(cultivation));
-
-  characterHud.innerHTML = chips.join("");
-  characterHud.hidden = chips.length === 0 || !activeId;
-
-  // 点击复制
-  characterHud.querySelectorAll(".hud-chip").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      const txt = chip.dataset.copy || chip.textContent.trim();
-      copyToClipboardSilent(txt);
-    });
-  });
-}
-
-function _hudChip({ cls, k, v, title, empty }) {
-  const cn = ["hud-chip", cls || "", empty ? "empty" : ""].filter(Boolean).join(" ");
-  return `
-    <span class="${cn}" title="${escapeAttr(title || "")}" data-copy="${escapeAttr(v || "")}">
-      <span class="hud-chip-k">${k}</span>
-      <span class="hud-chip-v">${escapeHtml(v || "")}</span>
-    </span>
-  `;
-}
-
-function _hudCultivationChip(text) {
-  const m = String(text || "").match(/(\d+)\s*\/\s*(\d+)/);
-  if (!m) {
-    return _hudChip({
-      cls: "cultivation",
-      k: "📊",
-      v: "修为 —",
-      title: "发 .我的灵根 / .查看闭关 抓取修为",
-      empty: true,
-    });
-  }
-  const cur = parseInt(m[1], 10);
-  const mx = parseInt(m[2], 10);
-  const pct = mx > 0 ? Math.min(100, Math.max(0, (cur / mx) * 100)) : 0;
-  return `
-    <span class="hud-chip cultivation" title="修为 (当前 / 上限)" data-copy="${escapeAttr(`${cur} / ${mx}`)}">
-      <span class="hud-chip-k">📊</span>
-      <span class="hud-chip-v">${cur.toLocaleString()} / ${mx.toLocaleString()}</span>
-      <span class="hud-cultivation-bar"><span class="hud-cultivation-fill" style="width:${pct.toFixed(1)}%"></span></span>
-      <span class="hud-cultivation-pct">${pct.toFixed(0)}%</span>
-    </span>
-  `;
-}
-
 function copyToClipboardSilent(text) {
   if (!text) return;
   try {
@@ -3283,39 +3758,49 @@ function insertTextAtCursor(textarea, text) {
 }
 
 function renderActiveChannelText() {
+  let text = "";
   if (state.selectedChannels.size === 0) {
-    activeChannelText.textContent = "未选择频道";
-    return;
+    text = "未选择频道";
+  } else if (state.selectedChannels.size === state.channels.length) {
+    text = "全部频道";
+  } else {
+    const labels = state.channels
+      .filter((channel) => state.selectedChannels.has(channel.key))
+      .map((channel) => channel.label);
+    text = labels.join(" / ");
   }
-  if (state.selectedChannels.size === state.channels.length) {
-    activeChannelText.textContent = "全部频道";
-    return;
+  const query = String(state.messageSearch || "").trim();
+  if (query) {
+    text = `${text}｜搜索「${query}」`;
   }
-  const labels = state.channels
-    .filter((channel) => state.selectedChannels.has(channel.key))
-    .map((channel) => channel.label);
-  activeChannelText.textContent = labels.join(" / ");
+  if (activeChannelText) activeChannelText.textContent = text;
+  if (streamActiveChannelText) streamActiveChannelText.textContent = text;
 }
 
 function renderMessages() {
   const messages = visibleMessages();
   const collectorStatus = collectorLiveStatus();
-  messageCount.textContent = `${messages.length} 条${collectorStatus ? `｜${collectorStatus}` : ""}`;
+  const searchSuffix = state.messageSearch ? "｜搜索中" : "";
+  messageCount.textContent = `${messages.length} 条${searchSuffix}${collectorStatus ? `｜${collectorStatus}` : ""}`;
   renderActiveChannelText();
 
   if (messages.length === 0) {
     messageList.innerHTML = `<div class="chat-empty">${escapeHtml(emptyMessageHint())}</div>`;
+    if (jumpToLatestButton) {
+      jumpToLatestButton.hidden = true;
+    }
     return;
   }
 
-  // 保住滚动位置,polling 重建 DOM 后不再「自己动」:
-  // - 用户在顶部(看最新) → 重建后还在顶部
-  // - 用户滚下去看旧消息 → 用 scrollHeight 差值补偿,视觉上看到的内容不动
+  // 聊天客户端顺序:旧消息在上,最新消息在底部发送栏上方。
+  // 重建 DOM 时保住用户正在看的位置;只有用户本来就在最新位置时才自动贴底。
   const prevScrollTop = messageList.scrollTop;
   const prevScrollHeight = messageList.scrollHeight;
-  const nearTop = prevScrollTop <= 64;
+  const prevClientHeight = messageList.clientHeight;
+  const distanceFromBottom = Math.max(0, prevScrollHeight - prevScrollTop - prevClientHeight);
+  const nearLatest = prevScrollHeight === 0 || distanceFromBottom <= 96;
 
-  const groups = groupMessagesByDate(messages);
+  const groups = groupMessagesByDate([...messages].reverse());
   const fragment = document.createDocumentFragment();
   groups.forEach((group) => {
     const divider = document.createElement("div");
@@ -3328,15 +3813,22 @@ function renderMessages() {
   });
   messageList.replaceChildren(fragment);
 
-  if (nearTop) {
-    messageList.scrollTop = 0;
+  if (nearLatest) {
+    messageList.scrollTop = messageList.scrollHeight;
   } else {
-    const heightDelta = messageList.scrollHeight - prevScrollHeight;
-    messageList.scrollTop = prevScrollTop + (heightDelta > 0 ? heightDelta : 0);
+    messageList.scrollTop = Math.max(0, messageList.scrollHeight - prevClientHeight - distanceFromBottom);
+  }
+  if (jumpToLatestButton) {
+    jumpToLatestButton.hidden =
+      messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight <= 120;
   }
 }
 
 function emptyMessageHint() {
+  const query = String(state.messageSearch || "").trim();
+  if (query) {
+    return `当前频道里没有匹配「${query}」的消息。按 Esc 或清空搜索框恢复。`;
+  }
   if (state.channels.length === 0) {
     return "还没有从 Telegram 收到消息。先在「配置 Telegram 接入」里完成登录,然后让监听账号开始采集。";
   }
@@ -3377,18 +3869,7 @@ function renderChatMessageNode(message) {
     .join(" ");
   row.dataset.messageId = message.id;
 
-  const channels = (message.channels || [message.channel])
-    .map((channel) => `<span class="chat-channel-pill">${escapeHtml(channelLabel(channel))}</span>`)
-    .join("");
-  const tags = (message.tags || []).map((tag) => `<span class="chat-tag">${escapeHtml(tag)}</span>`).join("");
-  const actionCount = (message.actions || []).length;
-  const enhanceItems = [
-    message.title ? `<span class="chat-title-pill">${escapeHtml(message.title)}</span>` : "",
-    tags,
-    actionCount ? `<span class="chat-action-pill">${actionCount} 个动作草稿</span>` : "",
-  ]
-    .filter(Boolean)
-    .join("");
+  const contextHtml = renderChatContextMeta(message);
 
   const { html: textHtml, truncated } = renderChatBodyText(message, isExpanded);
   const riskBadge =
@@ -3401,7 +3882,7 @@ function renderChatMessageNode(message) {
 
   const canReply = Number(message.chat_id || 0) !== 0 && Number(message.msg_id || 0) > 0;
   row.innerHTML = `
-    <button type="button" class="chat-avatar-btn" data-chat-action="select" aria-label="查看消息详情">
+    <button type="button" class="chat-avatar-btn" data-chat-action="detail" aria-label="查看消息详情">
       <span class="chat-avatar" aria-hidden="true">${escapeHtml(sourceInitial(message.source, kind))}</span>
     </button>
     <div class="chat-body">
@@ -3409,19 +3890,21 @@ function renderChatMessageNode(message) {
         <button type="button" class="chat-head" data-chat-action="select">
           <strong class="${sourceClass}">${escapeHtml(sourceText)}</strong>
           <span class="chat-time">${escapeHtml(formatChatTime(message.time))}</span>
-          <span class="chat-channels">${channels}</span>
           ${riskBadge}
         </button>
         <div class="chat-message-actions">
+          <button type="button" class="chat-detail-button" data-chat-action="detail" aria-label="查看消息详情"
+                  title="查看原文、字段和候选动作">详</button>
           <button type="button" class="chat-reply-button" data-chat-action="reply" ${canReply ? "" : "disabled"}
-                  title="${canReply ? "回复这条 Telegram 消息" : "这条卡片缺少 Telegram msg_id,不能回复"}">回复</button>
+                  aria-label="回复这条消息"
+                  title="${canReply ? "回复这条 Telegram 消息" : "这条卡片缺少 Telegram msg_id,不能回复"}">回</button>
         </div>
       </div>
       ${replyContext}
       <div class="chat-text" data-chat-action="select">${textHtml}</div>
       ${truncated ? `<button type="button" class="chat-toggle" data-chat-action="toggle">${isExpanded ? "收起全文" : "展开全文"}</button>` : ""}
       ${renderChatQuickActions(message)}
-      ${enhanceItems ? `<div class="chat-enhance">${enhanceItems}</div>` : ""}
+      ${contextHtml}
     </div>
   `;
 
@@ -3429,15 +3912,23 @@ function renderChatMessageNode(message) {
     const quickAction = event.target.closest('[data-chat-action="quick-action"]');
     if (quickAction) {
       event.stopPropagation();
+      selectMessageForComposer(message, { rerenderList: true });
       const index = Number(quickAction.dataset.actionIndex || 0);
       await handleChatQuickAction(message, index, quickAction);
+      return;
+    }
+    const detail = event.target.closest('[data-chat-action="detail"]');
+    if (detail) {
+      event.stopPropagation();
+      setWorkspaceSelectedMessage(message, { rerenderList: true });
       return;
     }
     const reply = event.target.closest('[data-chat-action="reply"]');
     if (reply) {
       event.stopPropagation();
       if (!reply.disabled) {
-        openManualSendModal(message);
+        selectMessageForComposer(message, { rerenderList: true });
+        setDirectSendReplyFromMessage(message);
       }
       return;
     }
@@ -3470,12 +3961,40 @@ function renderChatMessageNode(message) {
       jumpToMessage(parent);
       return;
     }
-    state.detailMode = "message";
-    state.selectedMessageId = message.id;
-    renderMessages();
-    await renderDetail();
+    selectMessageForComposer(message, { rerenderList: true });
   });
   return row;
+}
+
+function renderChatContextMeta(message) {
+  const badges = visibleMessageBadges(message);
+  const actionCount = (message.actions || []).length;
+  const items = [
+    message.title ? `<span class="chat-title-pill">${escapeHtml(message.title)}</span>` : "",
+    ...badges.map((tag) => `<span class="chat-tag">${escapeHtml(tag)}</span>`),
+    actionCount ? `<span class="chat-action-pill">${actionCount} 个候选</span>` : "",
+  ].filter(Boolean);
+  return items.length ? `<div class="chat-enhance">${items.join("")}</div>` : "";
+}
+
+function visibleMessageBadges(message) {
+  const tags = (message.tags || []).map((tag) => String(tag || "").trim()).filter(Boolean);
+  const channels = message.channels || [message.channel];
+  const important = new Set();
+  if (message.severity === "risk" || channels.includes("risk")) {
+    important.add("风险");
+  }
+  if (channels.includes("mine")) {
+    important.add("我的");
+  }
+  for (const tag of tags) {
+    if (["被@", "回复我", "会长", "我发出", "失败", "解散", "可加入", "加入", "风险"].includes(tag)) {
+      important.add(tag === "我发出" ? "我的" : tag);
+    } else if (tag.startsWith("关键词:")) {
+      important.add(tag);
+    }
+  }
+  return Array.from(important).slice(0, 3);
 }
 
 function renderChatQuickActions(message) {
@@ -3519,25 +4038,19 @@ function quickActionNeedsManualReview(action) {
 async function handleChatQuickAction(message, index, button) {
   const action = (message.actions || [])[index];
   if (!action) return;
-  const skillKey = findSkillKeyForCommand(action.command);
-  if (!skillKey || quickActionNeedsManualReview(action)) {
-    openManualSendModal(message, {
-      initialCommand: action.command,
-      chatId: action.chat_id,
-      replyToMsgId: action.reply_to_msg_id,
-      title: "快捷回复",
-    });
-    return;
-  }
-  button.disabled = true;
-  try {
-    await sendSkill(skillKey, {
-      command_override: action.command,
-      reply_to_msg_id: action.reply_to_msg_id || undefined,
-      chat_id: action.chat_id || undefined,
-    });
-  } finally {
-    button.disabled = false;
+  fillDirectSendComposer(action.command, {
+    replyContext: directReplyContextFromAction(action, message),
+    statusText: quickActionNeedsManualReview(action)
+      ? "已填入快捷动作，请补全内容后发送。"
+      : "已填入快捷动作，请确认后发送。",
+    statusKind: "info",
+  });
+  if (button) {
+    const originalText = button.textContent;
+    button.textContent = "已填入";
+    window.setTimeout(() => {
+      button.textContent = originalText;
+    }, 1200);
   }
 }
 
@@ -3668,15 +4181,29 @@ function sourceInitial(source, kind) {
 }
 
 async function renderDetail() {
+  if (state.detailMode !== "message") {
+    return;
+  }
   const message = state.messages.find((item) => item.id === state.selectedMessageId);
   if (!message || !visibleMessages().some((item) => item.id === message.id)) {
+    setWorkspacePanelOpen(false);
     detailState.textContent = "未选择";
-    detailPanel.innerHTML = '<p class="empty">从左边选择一条消息，可以看到 Telegram 原文与可用动作草稿。</p>';
+    detailPanel.innerHTML = `
+      <div class="detail-empty-state">
+        <strong>未选中消息</strong>
+        <p>从消息流选一条消息。</p>
+        <div>
+          <span>原文</span>
+          <span>候选</span>
+          <span>回复</span>
+        </div>
+      </div>
+    `;
     return;
   }
   if (message.compact) {
     detailState.textContent = "载入中";
-    detailPanel.innerHTML = '<p class="empty">正在载入 Telegram 原文…</p>';
+    detailPanel.innerHTML = '<div class="detail-empty-state loading"><strong>正在载入原文</strong><p>从消息箱补齐 Telegram 原文和结构化字段。</p></div>';
     const fullMessage = await ensureFullMessage(message);
     if (fullMessage && !fullMessage.compact) {
       await renderDetail();
@@ -3685,50 +4212,60 @@ async function renderDetail() {
   }
 
   const isRisk = message.severity === "risk";
-  detailState.textContent = isRisk ? "风险" : "已选择";
-  const channelPills = (message.channels || [message.channel])
-    .map((channel) => `<span class="channel-pill">${escapeHtml(channelLabel(channel))}</span>`)
-    .join("");
-  const tagPills = (message.tags || [])
-    .map((tag) => `<span>${escapeHtml(tag)}</span>`)
-    .join("");
+  detailState.textContent = isRisk ? "风险" : actionCountLabel(message);
   const enhancedHtml = renderEnhancedBlock(message);
   const actionsHtml = renderDetailActions(message);
   const focusInsightHtml = renderFocusInsight(message);
   const heading = String(message.title || "").trim() || "Telegram 消息";
   const summary = String(message.summary || "").trim();
+  const rawText = String(message.raw || "").trim();
+  const rawPreview = clipGraphemes((rawText || summary || heading).replace(/\s+/g, " "), 180);
+  const actionCount = (message.actions || []).length;
+  const canReply = Number(message.chat_id || 0) !== 0 && Number(message.msg_id || 0) > 0;
 
   detailPanel.innerHTML = `
-    <div class="detail-block detail-summary ${isRisk ? "risk" : ""}">
-      <div class="detail-summary-head">
-        <h4>${escapeHtml(heading)}</h4>
-        <span class="detail-time">${escapeHtml(message.time || "时间未知")}</span>
+    <section class="detail-selected-message ${isRisk ? "risk" : ""}">
+      <div class="detail-selected-meta">
+        <strong>${escapeHtml(displaySource(message.source))}</strong>
+        <span>${escapeHtml(formatChatTime(message.time) || message.time || "时间未知")}</span>
       </div>
-      <div class="detail-source">
-        <span>${escapeHtml(displaySource(message.source))}</span>
-        <div class="detail-channels">${channelPills}</div>
+      <p>${escapeHtml(rawPreview || "（空消息）")}</p>
+    </section>
+
+    <div class="detail-action-console">
+      <button type="button" class="action-primary" data-detail-message-action="reply" ${canReply ? "" : "disabled"}>回复这条</button>
+      <button type="button" class="action-secondary" data-detail-message-action="fill-source">引用原文</button>
+      <button type="button" class="action-tertiary" data-detail-message-action="copy-text">复制原文</button>
+    </div>
+
+    ${isRisk ? `<p class="detail-risk-hint">风险消息只做提醒和草稿，不自动发送。请看原文后在底部发送栏确认。</p>` : ""}
+
+    <section class="detail-action-stage ${actionCount ? "" : "empty"}">
+      <div class="detail-stage-head">
+        <div>
+          <strong>可执行候选</strong>
+          <span>点击只填入底部输入栏，不会自动发送</span>
+        </div>
+        <em>${escapeHtml(actionCount ? `${actionCount} 个` : "无")}</em>
       </div>
-      ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
-      ${tagPills ? `<div class="tag-row">${tagPills}</div>` : ""}
-      ${focusInsightHtml}
-      ${isRisk ? `<p class="detail-risk-hint">这是一条风险类消息，请人工查看原文后再决定如何回应。</p>` : ""}
-    </div>
-
-    <div class="detail-block">
-      <h5>Telegram 原文</h5>
-      <pre class="raw-text">${renderTelegramTextHtml(message.raw || "（未抓取到原文）", message)}</pre>
-    </div>
-
-    <div class="detail-block">
-      <h5>增强字段</h5>
-      ${enhancedHtml}
-    </div>
-
-    <div class="detail-block">
-      <h5>动作草稿</h5>
       ${actionsHtml}
       <div id="outboxPlanPanel" class="outbox-plan-wrap"></div>
-    </div>
+    </section>
+
+    <details class="detail-fold">
+      <summary>结构化信息</summary>
+      <div class="detail-fold-body">${enhancedHtml}</div>
+    </details>
+
+    <details class="detail-fold ${isRisk ? "risk-open" : ""}" ${isRisk ? "open" : ""}>
+      <summary>Telegram 原文</summary>
+      <pre class="raw-text">${renderTelegramTextHtml(rawText || "（未抓取到原文）", message)}</pre>
+    </details>
+
+    <details class="detail-fold detail-focus-fold">
+      <summary>分流原因 / 降噪</summary>
+      <div class="detail-fold-body">${focusInsightHtml}</div>
+    </details>
   `;
 
   bindDetailActions(message);
@@ -3747,6 +4284,11 @@ function renderFocusInsight(message) {
       ${toolsHtml}
     </div>
   `;
+}
+
+function actionCountLabel(message) {
+  const count = (message?.actions || []).length;
+  return count ? `${count} 个候选` : "上下文";
 }
 
 function renderFocusTools(message) {
@@ -4142,31 +4684,32 @@ function formatFieldValue(value) {
 function renderDetailActions(message) {
   const actions = message.actions || [];
   if (actions.length === 0) {
-    return '<p class="empty inline">这条消息没有解析出可复制 / 可入队的命令草稿。如果你想自己拼命令,可以参考 Telegram 原文。</p>';
+    return '<p class="empty inline">这条消息没有解析出候选回复。需要操作时，直接在底部发送栏输入。</p>';
   }
   const cards = actions
     .map((action, index) => {
       const context = renderActionContextLine(action);
       const notice = state.draftNoticeByMessageId.get(`${message.id}:${index}`);
-      const skillKey = findSkillKeyForCommand(action.command);
-      const sendLabel = action.reply_to_msg_id ? "确认回复发送" : "确认发送";
-      const sendTitle = skillKey
-        ? `通过 /api/skills/send 真的发到 Telegram (skill=${skillKey})`
-        : "找不到对应技能注册项 — 请到 backend/skills/__init__.py 添加";
+      const command = String(action.command || "").trim();
       return `
         <div class="action-draft" data-action-index="${index}">
           <div class="action-draft-head">
-            <strong>${escapeHtml(action.label || "动作")}</strong>
+            <strong>${escapeHtml(quickActionLabel(action) || action.label || "动作")}</strong>
             ${context ? `<small>${escapeHtml(context)}</small>` : ""}
           </div>
-          <code class="action-draft-command">${escapeHtml(action.command)}</code>
+          <button type="button" class="action-draft-command" data-action-button="compose"
+                  data-action-index="${index}" title="填到底部输入栏确认发送">${escapeHtml(command)}</button>
           <div class="action-draft-buttons">
-            <button type="button" class="action-primary" data-action-button="send"
-                    data-action-index="${index}" data-skill-key="${escapeAttr(skillKey || "")}"
-                    ${skillKey ? "" : "disabled"} title="${escapeAttr(sendTitle)}">${sendLabel}</button>
-            <button type="button" class="action-secondary" data-action-button="copy" data-action-index="${index}">复制命令</button>
-            <button type="button" class="action-tertiary" data-action-button="enqueue" data-action-index="${index}">入草稿箱</button>
-            <button type="button" class="action-tertiary" data-action-button="plan" data-action-index="${index}">查看发送计划</button>
+            <button type="button" class="action-primary" data-action-button="compose"
+                    data-action-index="${index}">填入发送栏</button>
+            <button type="button" class="action-secondary" data-action-button="copy" data-action-index="${index}">复制</button>
+            <details class="action-draft-more">
+              <summary>更多</summary>
+              <div>
+                <button type="button" class="action-tertiary" data-action-button="enqueue" data-action-index="${index}">入草稿箱</button>
+                <button type="button" class="action-tertiary" data-action-button="plan" data-action-index="${index}">发送计划</button>
+              </div>
+            </details>
           </div>
           ${notice ? `<p class="action-draft-notice ${notice.kind}">${escapeHtml(notice.text)}</p>` : ""}
         </div>
@@ -4174,16 +4717,6 @@ function renderDetailActions(message) {
     })
     .join("");
   return `<div class="action-list">${cards}</div>`;
-}
-
-function findSkillKeyForCommand(command) {
-  const text = String(command || "").trim();
-  if (!text) return null;
-  for (const skill of state.skills || []) {
-    if (text === skill.command) return skill.key;
-    if (text.startsWith(skill.command + " ")) return skill.key;
-  }
-  return null;
 }
 
 function renderActionContextLine(action) {
@@ -4205,6 +4738,29 @@ function renderActionContextLine(action) {
 
 function bindDetailActions(message) {
   const actions = message.actions || [];
+  detailPanel.querySelector('[data-detail-message-action="reply"]')?.addEventListener("click", () => {
+    setDirectSendReplyFromMessage(message);
+  });
+  detailPanel.querySelector('[data-detail-message-action="copy-text"]')?.addEventListener("click", async (event) => {
+    const text = String(message.raw || message.summary || message.title || "").trim();
+    if (!text) {
+      showSkillToast("这条消息没有可复制文本", "err");
+      return;
+    }
+    await copyCommandToClipboard(text, event.currentTarget);
+  });
+  detailPanel.querySelector('[data-detail-message-action="fill-source"]')?.addEventListener("click", () => {
+    const text = String(message.raw || "").trim();
+    if (!text) {
+      showSkillToast("这条消息没有原文", "err");
+      return;
+    }
+    fillDirectSendComposer(text, {
+      replyContext: null,
+      statusText: "已把原文填入发送框，请确认后发送。",
+      statusKind: "info",
+    });
+  });
   detailPanel.querySelector('[data-detail-action="focus-archive-exact"]')?.addEventListener("click", () => {
     openFocusArchiveModal(message, "exact");
   });
@@ -4239,23 +4795,17 @@ function bindDetailActions(message) {
       const planPanel = detailPanel.querySelector("#outboxPlanPanel");
       const noticeKey = `${message.id}:${index}`;
       try {
-        if (kind === "copy") {
-          await copyCommandToClipboard(action.command, button);
+        if (kind === "compose") {
+          fillDirectSendComposer(action.command, {
+            identityId: action.identity_id,
+            replyContext: directReplyContextFromAction(action, message),
+            statusText: "已填入输入框，请确认内容后发送。",
+            statusKind: "info",
+          });
           return;
         }
-        if (kind === "send") {
-          const skillKey = button.dataset.skillKey;
-          if (!skillKey) {
-            showSkillToast("没找到对应技能 — 请到 backend/skills/__init__.py 添加这条命令", "err");
-            return;
-          }
-          button.disabled = true;
-          await sendSkill(skillKey, {
-            command_override: action.command,
-            reply_to_msg_id: action.reply_to_msg_id || undefined,
-            chat_id: action.chat_id || undefined,
-          });
-          button.disabled = false;
+        if (kind === "copy") {
+          await copyCommandToClipboard(action.command, button);
           return;
         }
         if (kind === "plan") {
@@ -4486,13 +5036,18 @@ async function deleteOutboxDraft(draftId) {
 }
 
 async function renderOutboxDraftsView() {
-  state.detailMode = "drafts";
-  detailState.textContent = "草稿箱";
-  detailPanel.innerHTML = '<p class="empty">正在读取草稿箱…</p>';
+  state.detailMode = "message";
+  closeWorkspacePanel({ clearSelection: false });
+  const dialog = openModal({
+    title: "草稿箱",
+    body: '<p class="empty">正在读取草稿箱...</p>',
+  });
+  if (!dialog) return;
+  const root = dialog.querySelector(".modal-body") || dialog;
   await loadOutboxDrafts();
   const drafts = state.outboxDrafts || [];
   if (drafts.length === 0) {
-    detailPanel.innerHTML = `
+    root.innerHTML = `
       <div class="detail-block">
         <h4>草稿箱</h4>
         <p>当前没有等待人工确认的动作草稿。可以在某条消息的「动作草稿」区里点「确认入队」,把命令放进这里。</p>
@@ -4530,7 +5085,7 @@ async function renderOutboxDraftsView() {
       `;
     })
     .join("");
-  detailPanel.innerHTML = `
+  root.innerHTML = `
     <div class="detail-block">
       <div class="draft-head-row">
         <h4>草稿箱</h4>
@@ -4540,11 +5095,11 @@ async function renderOutboxDraftsView() {
       <div class="draft-list">${items}</div>
     </div>
   `;
-  bindOutboxDraftButtons();
+  bindOutboxDraftButtons(root);
 }
 
-function bindOutboxDraftButtons() {
-  detailPanel.querySelectorAll(".draft-item").forEach((article) => {
+function bindOutboxDraftButtons(root = document) {
+  root.querySelectorAll(".draft-item").forEach((article) => {
     const draftId = article.dataset.draftId;
     article.querySelectorAll("[data-draft-action]").forEach((button) => {
       button.addEventListener("click", async () => {
@@ -4562,11 +5117,13 @@ function bindOutboxDraftButtons() {
           if (!sourceId) {
             return;
           }
-          if (state.messages.some((message) => message.id === sourceId)) {
-            state.detailMode = "message";
-            state.selectedMessageId = sourceId;
-            renderMessages();
-            renderDetail();
+          let message = state.messages.find((item) => item.id === sourceId);
+          if (!message) {
+            message = await fetchMessageById(sourceId);
+          }
+          if (message) {
+            closeModal();
+            setWorkspaceSelectedMessage(message, { rerenderList: true });
           }
           return;
         }
@@ -4770,8 +5327,9 @@ function planAccountLabel(plan) {
 }
 
 function showError(error) {
-  detailState.textContent = "错误";
-  detailPanel.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+  const message = error?.message || String(error || "操作失败");
+  showSkillToast(message, "err");
+  console.error("[mini-web]", error);
 }
 
 function escapeHtml(value) {
@@ -4854,7 +5412,7 @@ function renderTelegramTextHtml(value, message) {
 }
 
 function renderSettings(settings) {
-  detailState.textContent = "接入配置";
+  state.detailMode = "message";
   const botIds = (settings.game_bot_ids || []).join("\n");
   const savedSecrets = settings.saved_secrets || {};
   const dialogOptions = renderDialogOptions(settings.target_chat);
@@ -4863,7 +5421,9 @@ function renderSettings(settings) {
   const accountLimit = state.accountLimit || 0;
   const identityCount = state.identities.length;
   const identityLimit = state.identityLimit || 0;
-  detailPanel.innerHTML = `
+  const dialog = openModal({
+    title: "接入配置",
+    body: `
     <form id="settingsForm" class="settings-form">
       <div class="detail-block">
         <h4>Telegram 接入</h4>
@@ -5023,11 +5583,15 @@ function renderSettings(settings) {
         ${renderAccountList()}
       </div>
     </div>
-  `;
+    `,
+    footer: `<button type="button" data-modal-close>关闭</button>`,
+  });
+  if (!dialog) return;
+  const root = dialog.querySelector(".modal-body") || dialog;
 
   loadListenerStatus()
     .then((listener) => {
-      const target = document.querySelector("#listenerStatusText");
+      const target = root.querySelector("#listenerStatusText");
       if (target) {
         target.textContent = `监听状态：${listener.status} ${listener.message || ""}`;
       }
@@ -5035,23 +5599,23 @@ function renderSettings(settings) {
     .catch(() => {});
 
   // 加载通知事件列表 + 绑测试按钮
-  _hydrateNotifySection(settings);
+  _hydrateNotifySection(settings, root);
 
-  document.querySelector("#settingsForm").addEventListener("submit", async (event) => {
+  root.querySelector("#settingsForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
       const saved = await saveCurrentSettingsFromForm(event.currentTarget);
       state.settingsNotice = "配置已保存";
       renderSettings(saved);
-      detailState.textContent = "已保存";
+      showSkillToast("接入配置已保存", "ok");
     } catch (error) {
       showError(error);
     }
   });
 
-  detailPanel.querySelectorAll("[data-select-target]").forEach((select) => {
+  root.querySelectorAll("[data-select-target]").forEach((select) => {
     select.addEventListener("change", () => {
-      const form = document.querySelector("#settingsForm");
+      const form = root.querySelector("#settingsForm");
       const input = form.querySelector(`[name="${select.dataset.selectTarget}"]`);
       if (input) {
         input.value = select.value;
@@ -5068,9 +5632,9 @@ function renderSettings(settings) {
     });
   });
 
-  detailPanel.querySelectorAll("[data-telegram-action]").forEach((button) => {
+  root.querySelectorAll("[data-telegram-action]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const form = document.querySelector("#settingsForm");
+      const form = root.querySelector("#settingsForm");
       button.disabled = true;
       try {
         await saveCurrentSettingsFromForm(form);
@@ -5101,9 +5665,9 @@ function renderSettings(settings) {
     });
   });
 
-  detailPanel.querySelectorAll("[data-login-action]").forEach((button) => {
+  root.querySelectorAll("[data-login-action]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const form = document.querySelector("#settingsForm");
+      const form = root.querySelector("#settingsForm");
       try {
         if (button.dataset.loginAction === "start") {
           await saveCurrentSettingsFromForm(form);
@@ -5133,7 +5697,7 @@ function renderSettings(settings) {
     });
   });
 
-  bindAccountControls();
+  bindAccountControls(root);
 }
 
 function renderAccountList() {
@@ -5315,8 +5879,8 @@ const CULTIVATION_MODULE_SPECS = [
 ];
 
 function renderCultivationModules() {
-  renderCultivationModulesInto(cultivationModules);
   renderCultivationModal();
+  renderGameCockpit();
 }
 
 function renderCultivationModulesInto(container) {
@@ -5355,10 +5919,10 @@ function renderCultivationModulesInto(container) {
     return _cultivationCardHtml(spec, timerText, timerCls, 0, 0, 0);
   }).join("");
   container.querySelectorAll("[data-cult-fire]").forEach((btn) => {
-    btn.addEventListener("click", () => sendSkill(btn.dataset.cultFire));
+    btn.addEventListener("click", () => fillSkillIntoComposer(btn.dataset.cultFire, btn));
   });
   container.querySelectorAll("[data-cult-query]").forEach((btn) => {
-    btn.addEventListener("click", () => sendSkill(btn.dataset.cultQuery));
+    btn.addEventListener("click", () => fillSkillIntoComposer(btn.dataset.cultQuery, btn));
   });
 }
 
@@ -5504,6 +6068,7 @@ function tickIdentityModuleChips() {
   // state 已更新但按钮不会重画,用户要再点一次才看见灰态。
   tickSkillBarChips();
   tickCultivationModules();
+  tickCockpitModuleChips();
   if (!sidebarIdentityList) return;
   const chips = sidebarIdentityList.querySelectorAll('[data-module-chip="1"]');
   if (!chips.length) return;
@@ -5528,6 +6093,32 @@ function tickIdentityModuleChips() {
     if (timeEl) timeEl.textContent = `剩 ${fmtCountdown(remaining)}`;
     if (fillEl) fillEl.style.width = `${pct.toFixed(1)}%`;
   });
+}
+
+function tickCockpitModuleChips() {
+  if (!cockpitModules) return;
+  const chips = cockpitModules.querySelectorAll('[data-cockpit-timer="1"]');
+  if (!chips.length) return;
+  const nowSec = Date.now() / 1000;
+  let shouldRerender = false;
+  chips.forEach((chip) => {
+    const nextAt = Number(chip.dataset.nextAt || 0);
+    const startAt = Number(chip.dataset.startAt || 0);
+    const remaining = nextAt - nowSec;
+    if (remaining <= 0) {
+      shouldRerender = true;
+      return;
+    }
+    const total = Math.max(1, nextAt - startAt);
+    const pct = Math.min(100, Math.max(0, ((total - remaining) / total) * 100));
+    const timeEl = chip.querySelector(".cockpit-module-time");
+    const fillEl = chip.querySelector(".cockpit-module-bar span");
+    if (timeEl) timeEl.textContent = `剩 ${fmtCountdown(remaining)}`;
+    if (fillEl) fillEl.style.width = `${pct.toFixed(1)}%`;
+  });
+  if (shouldRerender) {
+    renderCockpitModules();
+  }
 }
 
 function tickSkillBarChips() {
@@ -6602,8 +7193,8 @@ function renderIdentityForm() {
   `;
 }
 
-function bindAccountControls() {
-  detailPanel.querySelectorAll("[data-account-action]").forEach((button) => {
+function bindAccountControls(root = document) {
+  root.querySelectorAll("[data-account-action]").forEach((button) => {
     const action = button.dataset.accountAction;
     if (action === "open-new") {
       button.addEventListener("click", () => openAccountModal(null));
@@ -7116,12 +7707,12 @@ function dialogKindLabel(kind) {
   return "会话";
 }
 
-function bindIdentityControls() {
-  const identityForm = document.querySelector("#identityForm");
+function bindIdentityControls(root = document) {
+  const identityForm = root.querySelector("#identityForm");
   if (!identityForm) {
     return;
   }
-  const sendAsSection = document.querySelector(".send-as-section");
+  const sendAsSection = root.querySelector(".send-as-section");
 
   identityForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -7144,7 +7735,7 @@ function bindIdentityControls() {
         return;
       }
       if (action === "hydrate") {
-        await hydrateIdentityForm(identityForm, button);
+        await hydrateIdentityForm(identityForm, button, root);
         return;
       }
     });
@@ -7174,7 +7765,7 @@ function bindIdentityControls() {
     });
   }
 
-  detailPanel.querySelectorAll("[data-identity-action]").forEach((button) => {
+  root.querySelectorAll("[data-identity-action]").forEach((button) => {
     button.addEventListener("click", async () => {
       const sendAsId = Number(button.dataset.identityId || 0);
       const identity = state.identities.find((item) => Number(item.send_as_id) === sendAsId);
@@ -7183,7 +7774,7 @@ function bindIdentityControls() {
       }
       try {
         if (button.dataset.identityAction === "fill") {
-          fillIdentityForm(identity);
+          fillIdentityForm(identity, root);
           identityForm.scrollIntoView({ block: "nearest" });
           return;
         }
@@ -7271,6 +7862,10 @@ function rerenderSendAsList(rootEl) {
   const list = rootEl.querySelector("[data-send-as-list]");
   const bulkBar = rootEl.querySelector(".send-as-bulk-bar");
   const summary = rootEl.querySelector("[data-send-as-summary]");
+  const scope =
+    rootEl.closest?.(".modal-body, .modal-dialog") ||
+    rootEl.parentElement ||
+    rootEl;
   const peers = state.sendAs.peers || [];
   if (!peers.length) {
     if (list) list.innerHTML = "";
@@ -7297,8 +7892,7 @@ function rerenderSendAsList(rootEl) {
         const id = button.dataset.sendAsFill;
         const peer = peers.find((item) => String(item.send_as_id) === id);
         if (!peer) return;
-        const form = rootEl.parentElement?.querySelector("#identityForm")
-          || document.querySelector("#identityForm");
+        const form = scope.querySelector("#identityForm");
         if (!form) return;
         const set = (name, value) => {
           const field = form.querySelector(`[name="${name}"]`);
@@ -7455,11 +8049,15 @@ function renderBatchSaveResult(container, response, peers) {
   `;
 }
 
-async function hydrateIdentityForm(identityForm, button) {
-  const status = document.querySelector("[data-send-as-status]");
+async function hydrateIdentityForm(identityForm, button, root = document) {
+  const scope =
+    root ||
+    identityForm.closest?.(".modal-body, .modal-dialog") ||
+    document;
+  const status = scope.querySelector("[data-send-as-status]");
   const sendAsValue = identityForm.querySelector('[name="send_as_id"]').value.trim();
   const localId = identityForm.querySelector('[name="account_local_id"]').value
-    || document.querySelector('[data-send-as-field="account"]')?.value
+    || scope.querySelector('[data-send-as-field="account"]')?.value
     || "";
   if (!sendAsValue || !localId) {
     if (status) status.textContent = "解析需要先填 send_as_id 并选账号";
@@ -7499,8 +8097,8 @@ function identityPayloadFromForm(form) {
   };
 }
 
-function fillIdentityForm(identity) {
-  const form = document.querySelector("#identityForm");
+function fillIdentityForm(identity, root = document) {
+  const form = root.querySelector("#identityForm");
   if (!form) {
     return;
   }
@@ -7600,8 +8198,8 @@ async function saveCurrentSettingsFromForm(form) {
 }
 
 // 通知设置 — 拉所有可选卡片标题作 checkbox,绑「发测试通知」按钮
-async function _hydrateNotifySection(settings) {
-  const grid = document.querySelector("#notifyEventGrid");
+async function _hydrateNotifySection(settings, root = document) {
+  const grid = root.querySelector("#notifyEventGrid");
   if (!grid) return;
   const enabled = new Set(settings.notify_card_titles || []);
   try {
@@ -7639,9 +8237,9 @@ async function _hydrateNotifySection(settings) {
     grid.innerHTML = `<p class="muted">事件列表加载失败:${escapeHtml(String(err))}</p>`;
   }
 
-  document.querySelectorAll('[data-notify-action="test"]').forEach((btn) => {
+  root.querySelectorAll('[data-notify-action="test"]').forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const resultEl = document.querySelector("#notifyTestResult");
+      const resultEl = root.querySelector("#notifyTestResult");
       btn.disabled = true;
       if (resultEl) resultEl.textContent = "正在发送测试...";
       try {
@@ -7763,6 +8361,9 @@ function directSendSelectedIdentityId() {
 
 function renderDirectSendComposer() {
   if (!directSendComposer || !directSendIdentitySelect || !directSendSubmit) return;
+  renderDirectSendReplyContext();
+  renderDirectSendSelectionContext();
+  renderDirectSendActionHints();
   if (!state.identities.length) {
     directSendIdentitySelect.innerHTML = '<option value="">先登录账号</option>';
     directSendIdentitySelect.disabled = true;
@@ -7820,17 +8421,23 @@ async function sendDirectComposerMessage() {
 
   directSendSubmit.disabled = true;
   setDirectSendStatus("正在发送...", "info");
+  const reply = state.directSendReply;
+  const payload = {
+    skill_key: "manual_send",
+    identity_id: identityId,
+    command_override: command,
+  };
+  if (reply?.chatId) payload.chat_id = reply.chatId;
+  if (reply?.replyToMsgId) payload.reply_to_msg_id = reply.replyToMsgId;
+  if (reply?.topMsgId) payload.top_msg_id = reply.topMsgId;
   try {
-    const result = await postJson("/api/skills/send", {
-      skill_key: "manual_send",
-      identity_id: identityId,
-      command_override: command,
-    });
+    const result = await postJson("/api/skills/send", payload);
     if (result.ok) {
       setDirectSendStatus(sentStatusText(result, { skillKey: "manual_send", command }), "ok");
       showSkillToast(sentToastText(result, { skillKey: "manual_send", command }), "ok");
       directSendInput.value = "";
-      await loadMessages().catch((err) => console.warn("[direct-send] refresh failed:", err));
+      clearDirectSendReply();
+      await refreshChatViewport().catch((err) => console.warn("[direct-send] refresh failed:", err));
     } else {
       setDirectSendStatus(result.error || "发送失败", "error");
       showSkillToast(`❌ ${result.error || "发送失败"}`, "err");
@@ -7853,193 +8460,22 @@ function manualMessagePreview(message) {
   return `${source} ${msgId}${compact ? `：${compact}` : ""}`;
 }
 
-function openManualSendModal(replyMessage = null, opts = {}) {
-  opts = opts || {};
-  if (!state.identities.length) {
-    showSkillToast("请先登录账号并生成身份", "err");
-    return;
-  }
-  const selectedId = defaultManualIdentityId();
-  const identity = identityById(selectedId);
-  const account = accountForIdentity(identity);
-  const replyTo = Number(opts.replyToMsgId || replyMessage?.msg_id || 0);
-  const replyChat = Number(replyMessage?.chat_id || 0);
-  const initialChat = opts.chatId || replyChat || account?.target_chat || "";
-  const initialTopic = opts.topMsgId || account?.target_topic_id || "";
-  const initialCommand = String(opts.initialCommand || "").trim();
-  const isReplyMode = Boolean(replyMessage || replyTo);
-  const modalTitle = opts.title || (isReplyMode ? "回复消息" : "直接发送消息");
-  const context = isReplyMode && replyMessage
-    ? `
-      <div class="manual-send-context">
-        <span>回复对象</span>
-        <strong>${escapeHtml(manualMessagePreview(replyMessage))}</strong>
-      </div>
-    `
-    : `
-      <div class="manual-send-context">
-        <span>${isReplyMode ? "回复方式" : "发送方式"}</span>
-        <strong>${isReplyMode ? "确认后作为回复消息发送" : "不绑定具体消息，确认后直接发送到目标群 / 话题"}</strong>
-      </div>
-    `;
-  const replyField = isReplyMode
-    ? `
-      <label>
-        <span>回复消息 ID</span>
-        <input name="reply_to_msg_id" inputmode="numeric" value="${replyTo ? escapeAttr(String(replyTo)) : ""}" placeholder="回复时自动填入" />
-      </label>
-    `
-    : "";
-  const dialog = openModal({
-    title: modalTitle,
-    body: `
-      <section class="modal-section manual-send-modal">
-        ${context}
-        <form id="manualSendForm">
-          <div class="form-grid">
-            <input type="hidden" name="chat_id" value="${escapeAttr(String(initialChat || ""))}" />
-            <input type="hidden" name="top_msg_id" value="${escapeAttr(String(initialTopic || ""))}" />
-            <label class="span-2">
-              <span>发送身份</span>
-              <select name="identity_id">${manualSendIdentityOptions(selectedId)}</select>
-            </label>
-            ${replyField}
-            <label class="span-2 stacked-field">
-              <span>发送内容</span>
-              <textarea name="command" rows="5" placeholder="例如 .查看闭关，或输入任意要发到 Telegram 的文本">${escapeHtml(initialCommand)}</textarea>
-              <div id="manualSendEmojiPalette" class="emoji-palette manual-send-emoji-palette"></div>
-            </label>
-          </div>
-        </form>
-        <p id="manualSendStatus" class="modal-status-line info">只会在你点击「发送」后发出；不会根据消息内容自动触发。</p>
-      </section>
-    `,
-    footer: `
-      <button type="button" data-modal-close>关闭</button>
-      <button type="button" class="primary" id="manualSendConfirm">发送</button>
-    `,
-  });
-  if (!dialog) return;
-  bindManualSendModal(dialog, { replyMessage });
-}
-
-function bindManualSendModal(dialog, { replyMessage = null } = {}) {
-  const form = dialog.querySelector("#manualSendForm");
-  const identitySelect = form?.querySelector('[name="identity_id"]');
-  const chatInput = form?.querySelector('[name="chat_id"]');
-  const topicInput = form?.querySelector('[name="top_msg_id"]');
-  const commandInput = form?.querySelector('[name="command"]');
-  const manualEmojiPalette = dialog.querySelector("#manualSendEmojiPalette");
-  const status = dialog.querySelector("#manualSendStatus");
-  const confirm = dialog.querySelector("#manualSendConfirm");
-  if (!form || !identitySelect || !commandInput || !confirm) return;
-  bindEmojiPalette(manualEmojiPalette, () => commandInput);
-
-  const syncTargetDefaults = (force = false) => {
-    const identity = identityById(identitySelect.value);
-    const account = accountForIdentity(identity);
-    if (!replyMessage && chatInput && (force || !chatInput.value.trim())) {
-      chatInput.value = account?.target_chat || "";
-    }
-    if (topicInput && (force || !topicInput.value.trim())) {
-      topicInput.value = account?.target_topic_id || "";
-    }
-    const canSend = identity && identityCanSend(identity);
-    confirm.disabled = !canSend;
-    if (!canSend && status) {
-      status.className = "modal-status-line warn";
-      status.textContent = "当前身份不是账号本体，暂不能发送。请选择自己身份。";
-    } else if (status && status.classList.contains("warn")) {
-      status.className = "modal-status-line info";
-      status.textContent = "只会在你点击「发送」后发出；不会根据消息内容自动触发。";
-    }
-  };
-
-  identitySelect.addEventListener("change", () => syncTargetDefaults(true));
-  commandInput.addEventListener("keydown", (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-      event.preventDefault();
-      confirm.click();
-    }
-  });
-
-  confirm.addEventListener("click", async () => {
-    const data = new FormData(form);
-    const command = String(data.get("command") || "").trim();
-    const identityId = Number(data.get("identity_id") || 0);
-    if (!identityId) {
-      if (status) {
-        status.className = "modal-status-line error";
-        status.textContent = "请选择发送身份。";
-      }
-      return;
-    }
-    if (!command) {
-      if (status) {
-        status.className = "modal-status-line error";
-        status.textContent = "发送内容不能为空。";
-      }
-      commandInput.focus();
-      return;
-    }
-    const payload = {
-      skill_key: "manual_send",
-      identity_id: identityId,
-      command_override: command,
-    };
-    const chatId = String(data.get("chat_id") || "").trim();
-    const topicId = String(data.get("top_msg_id") || "").trim();
-    const replyTo = String(data.get("reply_to_msg_id") || "").trim();
-    if (chatId) payload.chat_id = chatId;
-    if (topicId) payload.top_msg_id = topicId;
-    if (replyTo) payload.reply_to_msg_id = replyTo;
-
-    confirm.disabled = true;
-    if (status) {
-      status.className = "modal-status-line info";
-      status.textContent = "正在发送...";
-    }
-    try {
-      const result = await postJson("/api/skills/send", payload);
-      if (result.ok) {
-        if (status) {
-          status.className = "modal-status-line ok";
-          status.textContent = sentStatusText(result, { skillKey: "manual_send", command });
-        }
-        showSkillToast(sentToastText(result, { skillKey: "manual_send", command }), "ok");
-        commandInput.value = "";
-        await loadMessages().catch((err) => console.warn("[manual-send] refresh failed:", err));
-      } else {
-        if (status) {
-          status.className = "modal-status-line error";
-          status.textContent = result.error || "发送失败";
-        }
-        showSkillToast(`❌ ${result.error || "发送失败"}`, "err");
-      }
-    } catch (error) {
-      if (status) {
-        status.className = "modal-status-line error";
-        status.textContent = error.message || "发送出错";
-      }
-      showSkillToast(`❌ ${error.message || "发送出错"}`, "err");
-    } finally {
-      syncTargetDefaults(false);
-    }
-  });
-
-  syncTargetDefaults(false);
-  window.setTimeout(() => commandInput.focus(), 0);
-}
-
 selectAllChannels.addEventListener("click", () => {
   const next = state.selectedChannels.size === state.channels.length
-    ? []
+    ? defaultConversationChannels()
     : state.channels.map((channel) => channel.key);
   applyChannelSelection(next).catch((error) => {
     console.warn("[mini-web] select all channels failed:", error);
     showSkillToast(`频道加载失败: ${error.message || error}`, "err");
   });
 });
+
+function defaultConversationChannels() {
+  if (state.channels.some((channel) => channel.key === "focus")) {
+    return ["focus"];
+  }
+  return state.channels[0] ? [state.channels[0].key] : [];
+}
 
 // viewMode 切换在主界面已下线 — 默认 focus,「全部」走顶部「日志」按钮的 modal。
 // setViewMode 留给跳转跨视图等内部调用,但不再绑按钮。
@@ -8048,26 +8484,74 @@ function setViewMode(mode) {
   if (state.viewMode === mode) return;
   state.viewMode = mode;
   state.detailMode = "message";
-  if (!visibleMessages().some((m) => m.id === state.selectedMessageId)) {
-    state.selectedMessageId = visibleMessages()[0]?.id ?? null;
+  if (state.selectedMessageId && !visibleMessages().some((m) => m.id === state.selectedMessageId)) {
+    state.selectedMessageId = null;
+    setWorkspacePanelOpen(false);
   }
   renderMessages();
   renderDetail();
 }
 
 if (jumpToLatestButton && messageList) {
+  const isNearLatest = () =>
+    messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight <= 120;
   const updateJumpButton = () => {
     if (!jumpToLatestButton) return;
-    jumpToLatestButton.hidden = messageList.scrollTop <= 100;
+    jumpToLatestButton.hidden = isNearLatest();
   };
   messageList.addEventListener("scroll", updateJumpButton, { passive: true });
   jumpToLatestButton.addEventListener("click", () => {
-    state.detailMode = "message";
-    state.selectedMessageId = visibleMessages()[0]?.id ?? null;
-    messageList.scrollTo({ top: 0, behavior: "smooth" });
-    renderDetail();
+    messageList.scrollTo({ top: messageList.scrollHeight, behavior: "smooth" });
   });
 }
+
+if (messageSearchInput) {
+  messageSearchInput.addEventListener("input", () => {
+    state.messageSearch = messageSearchInput.value || "";
+    if (state.selectedMessageId && !visibleMessages().some((m) => m.id === state.selectedMessageId)) {
+      state.selectedMessageId = null;
+      setWorkspacePanelOpen(false);
+    }
+    renderMessages();
+    renderDirectSendComposer();
+    renderDetail();
+  });
+  messageSearchInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (!messageSearchInput.value) return;
+    messageSearchInput.value = "";
+    state.messageSearch = "";
+    renderMessages();
+    renderActiveChannelText();
+  });
+}
+
+if (closeDetailButton) {
+  closeDetailButton.addEventListener("click", () => closeWorkspacePanel({ clearSelection: false }));
+}
+
+if (detailBackdrop) {
+  detailBackdrop.addEventListener("click", () => closeWorkspacePanel({ clearSelection: false }));
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (modalRoot && !modalRoot.hidden) return;
+  document.querySelectorAll("details[open]").forEach((node) => node.removeAttribute("open"));
+  if (layoutGrid?.classList.contains("detail-open")) {
+    closeWorkspacePanel({ clearSelection: false });
+  }
+});
+
+document.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  document.querySelectorAll(".workspace-tools-shell[open], .stream-filter-drawer[open], .direct-send-more[open]").forEach((node) => {
+    if (!node.contains(target)) {
+      node.removeAttribute("open");
+    }
+  });
+});
 
 refreshButton.addEventListener("click", async () => {
   if (state.refreshState === "loading") {
@@ -8078,10 +8562,7 @@ refreshButton.addEventListener("click", async () => {
   refreshButton.textContent = "正在刷新…";
   refreshButton.disabled = true;
   try {
-    await Promise.all([loadMessages(), loadIdentityPatches()]);
-    if (state.detailMode === "drafts") {
-      await renderOutboxDraftsView();
-    }
+    await Promise.all([refreshChatViewport(), loadIdentityPatches()]);
   } catch (error) {
     showError(error);
   } finally {
@@ -8090,17 +8571,6 @@ refreshButton.addEventListener("click", async () => {
     refreshButton.disabled = false;
   }
 });
-
-if (manualSendButton) {
-  manualSendButton.addEventListener("click", async () => {
-    try {
-      await Promise.all([loadAccounts(), loadIdentities()]);
-      openManualSendModal();
-    } catch (error) {
-      showError(error);
-    }
-  });
-}
 
 if (healthButton) {
   healthButton.addEventListener("click", async () => {
@@ -8137,6 +8607,7 @@ if (directSendSubmit) {
 if (emojiPickerButton && directSendEmojiPalette) {
   bindEmojiPalette(directSendEmojiPalette, () => directSendInput);
   emojiPickerButton.addEventListener("click", () => {
+    emojiPickerButton.closest("details")?.removeAttribute("open");
     const shouldOpen = directSendEmojiPalette.hidden;
     directSendEmojiPalette.hidden = !shouldOpen;
     emojiPickerButton.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
@@ -8153,6 +8624,7 @@ if (emojiPickerButton && directSendEmojiPalette) {
 if (openSkillMenuButton) {
   openSkillMenuButton.addEventListener("click", async () => {
     try {
+      openSkillMenuButton.closest("details")?.removeAttribute("open");
       if (!directSendSkillPanel) {
         await Promise.all([loadAccounts(), loadIdentities()]);
         if (!state.skills.length) await loadSkills();
@@ -8185,6 +8657,7 @@ if (openSkillMenuButton) {
 if (openCultivationButton) {
   openCultivationButton.addEventListener("click", async () => {
     try {
+      openCultivationButton.closest("details")?.removeAttribute("open");
       await Promise.all([loadAccounts(), loadIdentities(), loadIdentityModuleStates()]);
       openCultivationModal();
     } catch (error) {
@@ -8194,8 +8667,8 @@ if (openCultivationButton) {
 }
 
 outboxButton.addEventListener("click", async () => {
-  state.detailMode = "drafts";
   try {
+    outboxButton.closest("details")?.removeAttribute("open");
     await renderOutboxDraftsView();
   } catch (error) {
     showError(error);
@@ -8204,6 +8677,7 @@ outboxButton.addEventListener("click", async () => {
 
 scheduleButton.addEventListener("click", async () => {
   try {
+    scheduleButton.closest("details")?.removeAttribute("open");
     await Promise.all([loadAccounts(), loadIdentities()]);
     await openScheduleModal();
   } catch (error) {
@@ -8214,6 +8688,7 @@ scheduleButton.addEventListener("click", async () => {
 if (resourceStatsButton) {
   resourceStatsButton.addEventListener("click", async () => {
     try {
+      resourceStatsButton.closest("details")?.removeAttribute("open");
       await openResourceStatsModal();
     } catch (error) {
       showError(error);
@@ -8224,6 +8699,7 @@ if (resourceStatsButton) {
 if (dungeonStatusButton) {
   dungeonStatusButton.addEventListener("click", async () => {
     try {
+      dungeonStatusButton.closest("details")?.removeAttribute("open");
       await openDungeonStatusModal();
     } catch (error) {
       showError(error);
@@ -8234,7 +8710,20 @@ if (dungeonStatusButton) {
 if (inventoryButton) {
   inventoryButton.addEventListener("click", async () => {
     try {
+      inventoryButton.closest("details")?.removeAttribute("open");
       await openInventoryModal();
+    } catch (error) {
+      showError(error);
+    }
+  });
+}
+
+if (settingsButton) {
+  settingsButton.addEventListener("click", async () => {
+    try {
+      settingsButton.closest("details")?.removeAttribute("open");
+      await Promise.all([loadAccounts(), loadIdentities()]);
+      renderSettings(state.settings || (await loadSettings()));
     } catch (error) {
       showError(error);
     }
@@ -8244,6 +8733,7 @@ if (inventoryButton) {
 if (loginAccountButton) {
   loginAccountButton.addEventListener("click", async () => {
     try {
+      loginAccountButton.closest("details")?.removeAttribute("open");
       await loadAccounts();
       openAccountModal(null);
     } catch (error) {
@@ -8258,6 +8748,7 @@ if (loginAccountButton) {
 if (addIdentityButton) {
   addIdentityButton.addEventListener("click", async () => {
     try {
+      addIdentityButton.closest("details")?.removeAttribute("open");
       await Promise.all([loadAccounts(), loadIdentities()]);
       openAddIdentityModal();
     } catch (error) {
@@ -8272,6 +8763,7 @@ if (addIdentityButton) {
 if (logoutAccountButton) {
   logoutAccountButton.addEventListener("click", async () => {
     try {
+      logoutAccountButton.closest("details")?.removeAttribute("open");
       await Promise.all([loadAccounts(), loadIdentities()]);
       openLogoutAccountModal();
     } catch (error) {
@@ -8284,15 +8776,24 @@ if (logoutAccountButton) {
 }
 
 if (gameBotsButton) {
-  gameBotsButton.addEventListener("click", () => openGameBotsModal());
+  gameBotsButton.addEventListener("click", () => {
+    gameBotsButton.closest("details")?.removeAttribute("open");
+    openGameBotsModal();
+  });
 }
 
 if (filterSettingsButton) {
-  filterSettingsButton.addEventListener("click", () => openFilterSettingsModal());
+  filterSettingsButton.addEventListener("click", () => {
+    filterSettingsButton.closest("details")?.removeAttribute("open");
+    openFilterSettingsModal();
+  });
 }
 
 if (notifySettingsButton) {
-  notifySettingsButton.addEventListener("click", () => openNotifySettingsModal());
+  notifySettingsButton.addEventListener("click", () => {
+    notifySettingsButton.closest("details")?.removeAttribute("open");
+    openNotifySettingsModal();
+  });
 }
 
 if (logsButton) {
@@ -8497,7 +8998,7 @@ loadChannels()
   .then(loadIdentityPatches)
   .then(loadDiscoveredBots)
   .then(loadSkills)
-  .then(loadMessages)
+  .then(refreshChatViewport)
   .then(() => loadMessageAudit({ silent: true }))
   .catch(showError);
 
@@ -8640,7 +9141,7 @@ function renderSkillPanel(tabsEl, chipsEl, identityEl, rerender) {
       : 0;
     const cooling = cdUntil > now;
     const busy = state.skillBarBusyKeys.has(skill.key);
-    // reply 类不能从底栏发(没 reply 上下文),只能从消息卡的 action 走 — 这里显示但禁用
+    // reply 类不能从底栏填入(没 reply 上下文),只能从消息卡的 action 走。
     const disabled = !activeId || isReply || busy || cooling;
     const cls = [
       "skill-chip",
@@ -8663,48 +9164,39 @@ function renderSkillPanel(tabsEl, chipsEl, identityEl, rerender) {
     `;
   }).join("");
   chipsEl.querySelectorAll("[data-skill-key]").forEach((btn) => {
-    btn.addEventListener("click", () => sendSkill(btn.dataset.skillKey));
+    btn.addEventListener("click", () => fillSkillIntoComposer(btn.dataset.skillKey, btn));
   });
 }
 
-async function sendSkill(skillKey, opts) {
-  opts = opts || {};
-  const activeId = state.activeIdentityId;
-  if (!activeId) {
-    showSkillToast("请先在左边身份列表里选一个身份", "err");
+function fillSkillIntoComposer(skillKey, button = null) {
+  const skill = (state.skills || []).find((item) => item.key === skillKey);
+  if (!skill) {
+    showSkillToast("找不到快捷指令", "err");
     return;
   }
-  if (state.skillBarBusyKeys.has(skillKey)) return;
-  state.skillBarBusyKeys.add(skillKey);
-  renderSkillViews();
-  try {
-    const payload = { skill_key: skillKey, identity_id: activeId };
-    if (opts.reply_to_msg_id) payload.reply_to_msg_id = opts.reply_to_msg_id;
-    if (opts.command_override) payload.command_override = opts.command_override;
-    if (opts.chat_id) payload.chat_id = opts.chat_id;
-    const result = await postJson("/api/skills/send", payload);
-    if (result.ok) {
-      showSkillToast(sentToastText(result, { skillKey, command: opts.command_override }), "ok");
-      schedulePostSendRefresh();
-    } else {
-      showSkillToast(`❌ ${result.error || "发送失败"}`, "err");
-    }
-  } catch (err) {
-    showSkillToast(`❌ ${(err && err.message) || "发送出错"}`, "err");
-  } finally {
-    state.skillBarBusyKeys.delete(skillKey);
-    renderSkillViews();
+  const command = String(skill.command || "").trim();
+  if (!command) {
+    showSkillToast("这条快捷指令没有命令文本", "err");
+    return;
   }
-}
-
-function schedulePostSendRefresh() {
-  [2500, 6500, 12000].forEach((delay) => {
-    window.setTimeout(() => {
-      if (document.hidden) return;
-      loadMessages({ incremental: true }).catch((err) => console.warn("[mini-web] post-send message refresh failed:", err));
-      loadIdentityModuleStates().catch((err) => console.warn("[mini-web] post-send identity state refresh failed:", err));
-    }, delay);
+  fillDirectSendComposer(command, {
+    identityId: state.activeIdentityId,
+    replyContext: null,
+    statusText: `已填入快捷指令：${skill.label || command}`,
+    statusKind: "info",
   });
+  if (directSendSkillPanel && !directSendSkillPanel.hidden) {
+    directSendSkillPanel.hidden = true;
+    openSkillMenuButton?.setAttribute("aria-expanded", "false");
+  }
+  if (button) {
+    const originalText = button.querySelector(".skill-chip-label")?.textContent || button.textContent;
+    const label = button.querySelector(".skill-chip-label");
+    if (label) label.textContent = "已填入";
+    window.setTimeout(() => {
+      if (label) label.textContent = originalText;
+    }, 1000);
+  }
 }
 
 let _skillToastTimer = null;
@@ -8742,7 +9234,7 @@ async function pollTick() {
     // 即使用户切到草稿箱/官方定时视图,后台也继续把新消息 merge 进 state,
     // 这样切回 chat 时立刻看见最新的。listener 写得很快,前端再不跟就脱节。
     const now = Date.now();
-    const tasks = [loadMessages({ incremental: true })];
+    const tasks = [refreshChatViewport({ incremental: true })];
     if (now >= nextAccountsPollAt) {
       nextAccountsPollAt = now + ACCOUNT_POLL_INTERVAL_MS;
       tasks.push(loadAccounts().catch((err) => console.warn("[mini-web] accounts poll failed:", err)));

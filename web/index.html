@@ -7,27 +7,20 @@
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
-    <div class="app-shell">
-      <aside class="sidebar">
-        <section class="panel identity-panel">
-          <div class="panel-head">
-            <h2>身份列表</h2>
-            <button id="loginAccountButton" type="button">+ 登录账号</button>
-          </div>
-          <p id="currentAccountLine" class="muted-line">当前账号: 未登录</p>
-          <div id="identityList" class="identity-list sidebar-identity-list">
-            <p class="empty">还没有身份。先点上面「+ 登录账号」登一个 Telegram 账号,身份会自动建好。</p>
-          </div>
-          <div class="identity-panel-actions">
-            <button id="addIdentityButton" type="button" disabled title="先登录账号才能新增身份">+ 新增身份</button>
-            <button id="logoutAccountButton" type="button" disabled title="还没登录账号">登出账户</button>
-          </div>
-        </section>
+    <div class="app-shell chat-client-shell">
+      <aside class="sidebar conversation-rail">
+        <div class="sidebar-title">
+          <strong>修仙群聊</strong>
+          <span>Telegram 游戏客户端</span>
+        </div>
 
         <section class="panel channel-panel">
           <div class="panel-head">
-            <h2>频道</h2>
-            <button id="selectAllChannels" type="button">全选</button>
+            <h2>会话列表</h2>
+            <div class="panel-head-actions">
+              <button id="logsButton" type="button" title="按日期 / 类型筛选浏览全部采集到的消息">记录</button>
+              <button id="selectAllChannels" type="button">全部</button>
+            </div>
           </div>
           <p id="activeChannelText" class="muted-line">重点</p>
           <div id="channelFilters" class="channel-filters"></div>
@@ -37,62 +30,134 @@
         <div id="identitySnapshot" hidden></div>
       </aside>
 
-      <main class="main">
+      <main class="main chat-workspace">
         <div id="globalBanner" class="global-banner" hidden></div>
-        <header class="topbar">
-          <div class="topbar-actions">
-            <button id="refreshButton" type="button">刷新</button>
-            <button id="healthButton" type="button" title="查看监听、消息水位和断层审计">健康</button>
-            <button id="logsButton" type="button" title="按日期 / 类型筛选浏览全部采集到的消息">日志</button>
-            <button id="dungeonStatusButton" type="button" title="按副本 ID 汇总最近开房、加入、失败、解散和推进消息">副本状态</button>
-            <button id="resourceStatsButton" type="button" title="野外历练和非血色副本的全服收益统计">资源统计</button>
-            <button id="inventoryButton" type="button" title="查看最近储物袋快照并生成批量转移命令">库存/转移</button>
-            <button id="outboxButton" type="button">草稿箱</button>
-            <button id="filterSettingsButton" type="button">过滤设置</button>
-            <button id="gameBotsButton" type="button">游戏 Bot</button>
-            <button id="notifySettingsButton" type="button" title="配置 Telegram / Bark / 钉钉 等通知通道">🔔 通知</button>
-          </div>
-        </header>
-
-        <section class="layout-grid">
-          <section class="stream">
+        <section class="layout-grid detail-closed">
+          <section class="stream chat-pane">
             <div class="section-head">
-              <div id="quickFilters" class="quick-filters"></div>
-              <span id="messageCount" class="message-count-pill">0 条</span>
+              <div class="stream-title">
+                <strong>群聊</strong>
+                <span id="streamActiveChannelText">重点</span>
+              </div>
+              <div class="stream-channel-tools">
+                <label class="message-search" title="只搜索当前已选频道中的消息">
+                  <span>搜索</span>
+                  <input id="messageSearchInput" type="search" placeholder="当前频道" autocomplete="off" />
+                </label>
+                <details class="stream-filter-drawer">
+                  <summary>频道</summary>
+                  <div id="quickFilters" class="quick-filters"></div>
+                </details>
+                <span id="messageCount" class="message-count-pill">0 条</span>
+                <button id="refreshButton" type="button" class="stream-tool-button">刷新</button>
+                <button id="healthButton" type="button" class="stream-tool-button" title="查看监听、消息水位和断层审计">健康</button>
+                <details class="workspace-tools-shell" aria-label="账号、状态和工具">
+                  <summary class="stream-tool-button workspace-tools-toggle">
+                    <span>工具中心</span>
+                    <small id="currentAccountLine">当前账号: 未登录</small>
+                  </summary>
+                  <div class="workspace-tools-panel">
+                    <section class="panel identity-panel identity-drawer">
+                      <div class="drawer-summary">
+                        <span>身份</span>
+                        <small>发送身份 / 登录</small>
+                      </div>
+                      <div class="identity-drawer-actions">
+                        <button id="loginAccountButton" type="button">+ 登录账号</button>
+                      </div>
+                      <div id="identityList" class="identity-list sidebar-identity-list">
+                        <p class="empty">还没有身份。先点上面「+ 登录账号」登一个 Telegram 账号,身份会自动建好。</p>
+                      </div>
+                      <div class="identity-panel-actions">
+                        <button id="addIdentityButton" type="button" disabled title="先登录账号才能新增身份">+ 新增身份</button>
+                        <button id="logoutAccountButton" type="button" disabled title="还没登录账号">登出账户</button>
+                      </div>
+                    </section>
+
+                    <section class="panel session-drawer">
+                      <div class="drawer-summary">
+                        <span>角色状态</span>
+                        <small>角色 / CD / 消息箱</small>
+                      </div>
+                      <div id="gameCockpit" class="game-cockpit sidebar-cockpit" aria-label="当前游戏会话">
+                        <section class="cockpit-strip cockpit-player-strip" aria-label="当前身份">
+                          <div id="cockpitIdentity" class="cockpit-identity-body"></div>
+                        </section>
+
+                        <section class="cockpit-strip cockpit-module-strip" aria-label="关键冷却">
+                          <div class="cockpit-strip-head">
+                            <span>关键冷却</span>
+                          </div>
+                          <div id="cockpitModules" class="cockpit-modules"></div>
+                        </section>
+
+                        <section class="cockpit-strip cockpit-inbox-strip" aria-label="消息箱健康">
+                          <div id="cockpitInbox" class="cockpit-inbox"></div>
+                        </section>
+                      </div>
+                    </section>
+
+                    <section class="panel tool-panel">
+                      <div class="drawer-summary tool-panel-summary">
+                        <span>工具</span>
+                        <small>副本 / 统计 / 库存 / 设置</small>
+                      </div>
+                      <div class="sidebar-toolbox">
+                        <button id="dungeonStatusButton" type="button" title="按副本 ID 汇总最近开房、加入、失败、解散和推进消息">副本状态</button>
+                        <button id="resourceStatsButton" type="button" title="野外历练和非血色副本的全服收益统计">资源统计</button>
+                        <button id="inventoryButton" type="button" title="查看最近储物袋快照并生成批量转移命令">库存/转移</button>
+                        <button id="outboxButton" type="button">草稿箱</button>
+                        <button id="settingsButton" type="button">接入配置</button>
+                        <button id="filterSettingsButton" type="button">过滤设置</button>
+                        <button id="gameBotsButton" type="button">游戏 Bot</button>
+                        <button id="notifySettingsButton" type="button" title="配置 Telegram / Bark / 钉钉 等通知通道">通知</button>
+                      </div>
+                    </section>
+                  </div>
+                </details>
+              </div>
             </div>
-            <div id="characterHud" class="character-hud" hidden></div>
-            <div id="healthHud" class="health-hud" hidden></div>
             <div id="messageList" class="message-list"></div>
-            <button id="jumpToLatest" class="jump-to-latest" type="button" hidden>↑ 回到最新</button>
+            <button id="jumpToLatest" class="jump-to-latest" type="button" hidden>↓ 回到最新</button>
           </section>
 
+          <button id="detailBackdrop" class="detail-backdrop" type="button" aria-label="关闭消息详情" hidden></button>
           <aside class="detail">
-            <div class="section-head">
+            <div class="section-head detail-section-head">
               <div>
                 <h3>消息详情</h3>
-                <p>原文、增强信息和操作草稿</p>
+                <p>原文 / 回复 / 候选</p>
               </div>
-              <span id="detailState">未选择</span>
+              <div class="detail-head-actions">
+                <span id="detailState">未选择</span>
+                <button id="closeDetailButton" type="button" title="关闭消息详情">关闭</button>
+              </div>
             </div>
             <div id="detailPanel" class="detail-panel">
-              <p class="empty">选择一条消息查看原文与可用操作。</p>
+              <p class="empty">选择一条消息。</p>
             </div>
           </aside>
         </section>
 
-        <footer id="directSendComposer" class="direct-send-composer">
+        <footer id="directSendComposer" class="direct-send-composer chat-composer" aria-label="发送栏">
           <div class="direct-send-head">
             <div class="direct-send-title">
-              <strong>直接发送</strong>
+              <strong>消息</strong>
               <span id="directSendIdentityLine">未选身份</span>
             </div>
-            <div class="direct-send-tools">
-              <button id="emojiPickerButton" type="button" aria-controls="directSendEmojiPalette" aria-expanded="false">表情</button>
-              <button id="openSkillMenuButton" type="button" aria-controls="directSendSkillPanel" aria-expanded="false">快捷指令</button>
-              <button id="openCultivationButton" type="button">修炼状态</button>
-              <button id="scheduleButton" type="button">官方定时</button>
-            </div>
+            <details class="direct-send-more">
+              <summary>工具</summary>
+              <div class="direct-send-tools">
+                <button id="emojiPickerButton" type="button" aria-controls="directSendEmojiPalette" aria-expanded="false">表情</button>
+                <button id="openSkillMenuButton" type="button" aria-controls="directSendSkillPanel" aria-expanded="false">快捷指令</button>
+                <button id="openCultivationButton" type="button">修炼状态</button>
+                <button id="scheduleButton" type="button">官方定时</button>
+              </div>
+            </details>
           </div>
+          <div id="directSendReplyContext" class="direct-send-reply-context" hidden></div>
+          <div id="directSendSelectionContext" class="direct-send-selection-context" hidden></div>
+          <div id="directSendActionHints" class="direct-send-action-hints" hidden></div>
           <div class="direct-send-row">
             <label class="direct-send-identity">
               <span>发送身份</span>
@@ -100,7 +165,7 @@
             </label>
             <label class="direct-send-command">
               <span>发送内容</span>
-              <textarea id="directSendInput" rows="2" placeholder="输入要发到 Telegram 的文本，例如 .查看闭关。Enter 发送，Shift+Enter 换行"></textarea>
+              <textarea id="directSendInput" rows="2" placeholder="输入消息或命令。Enter 发送，Shift+Enter 换行"></textarea>
             </label>
             <button id="directSendSubmit" type="button">发送</button>
           </div>
