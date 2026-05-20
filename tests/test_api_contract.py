@@ -3030,6 +3030,8 @@ def test_dungeon_status_recent_visible_skips_orphan_attempts(tmp_path):
     assert [item["dungeon_id"] for item in payload["summaries"]] == ["729", "728", "727"]
     by_id = {item["dungeon_id"]: item for item in payload["summaries"]}
     assert by_id["729"]["status_kind"] == "closed"
+
+    MiniWebServer(store=store).dungeon_status_payload(limit=20, summary_limit=20, order="recent")
     rooms = {item["dungeon_id"]: item["payload"] for item in store.list_dungeon_rooms() if item["dungeon_id"]}
     assert rooms["737"]["open_seq"] == 0
     assert rooms["737"]["open_message_id"] == ""

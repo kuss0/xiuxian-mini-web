@@ -42,6 +42,7 @@ DEFAULT_TARGET_TOPIC_ID = "7310786"
 ACCOUNT_SECRET_KEYS = {"api_hash", "proxy_password"}
 RESOURCE_STATS_SCHEMA_VERSION = 6
 INVENTORY_SCHEMA_VERSION = 1
+DUNGEON_CONTEXT_SCAN_LIMIT = 2500
 RESOURCE_BASIC_NAMES = ("修为", "贡献", "灵石")
 RESOURCE_RARE_NAMES = (
     "阴凝之晶",
@@ -2430,52 +2431,73 @@ class SQLiteStore:
             for row in rows
         ]
 
-    def find_dungeon_context_by_id(self, dungeon_id: str | int, *, before_seq: int | None = None) -> dict:
-        dungeon_id = str(dungeon_id or "").strip()
-        if not dungeon_id:
-            return {}
-        patterns = [
-            f'%"副本ID": "{dungeon_id}"%',
-            f'%"副本ID":"{dungeon_id}"%',
-            f'%"副本ID": {dungeon_id}%',
-            f'%"副本ID":{dungeon_id}%',
-        ]
-        where_sql = " OR ".join("payload_json LIKE ?" for _ in patterns)
-        params: list[object] = list(patterns)
+    def _recent_dungeon_card_rows(
+        self,
+        *,
+        before_seq: int | None = None,
+        limit: int = DUNGEON_CONTEXT_SCAN_LIMIT,
+    ) -> list[tuple[int, ParsedCard]]:
+        params: list[object] = ['%"dungeon"%']
+        where = ["channels_json LIKE ?"]
         if before_seq is not None:
             try:
                 before_seq_int = int(before_seq)
             except (TypeError, ValueError):
                 before_seq_int = 0
             if before_seq_int > 0:
-                where_sql = f"({where_sql}) AND rowid <= ?"
+                where.append("rowid <= ?")
                 params.append(before_seq_int)
+        try:
+            row_limit = max(1, min(int(limit or DUNGEON_CONTEXT_SCAN_LIMIT), 10000))
+        except (TypeError, ValueError):
+            row_limit = DUNGEON_CONTEXT_SCAN_LIMIT
+        params.append(row_limit)
         with self._connect() as conn:
             rows = conn.execute(
                 f"""
                 SELECT rowid, payload_json
                 FROM parsed_cards
-                WHERE {where_sql}
+                WHERE {" AND ".join(where)}
                 ORDER BY rowid DESC
+                LIMIT ?
                 """,
                 params,
             ).fetchall()
-        best: dict = {}
+        result: list[tuple[int, ParsedCard]] = []
         for rowid, payload in rows:
             try:
-                card = ParsedCard.from_api(json.loads(payload or "{}"))
+                result.append((int(rowid), ParsedCard.from_api(json.loads(payload or "{}"))))
             except Exception:
                 continue
+        return result
+
+    def find_dungeon_contexts_by_ids(
+        self,
+        dungeon_ids: Iterable[str | int],
+        *,
+        before_by_id: dict[str, int] | None = None,
+    ) -> dict[str, dict]:
+        ids = {str(item or "").strip() for item in dungeon_ids}
+        ids.discard("")
+        if not ids:
+            return {}
+        before_by_id = {str(key): int(value or 0) for key, value in (before_by_id or {}).items()}
+        max_before = max((value for value in before_by_id.values() if value > 0), default=0)
+        rows = self._recent_dungeon_card_rows(before_seq=max_before or None)
+        contexts: dict[str, dict] = {}
+        completed: set[str] = set()
+        for rowid, card in rows:
             fields = card.fields or {}
-            name = str(fields.get("副本名") or "").strip()
-            if not name:
-                text = f"{card.title or ''}\n{card.raw or ''}"
-                for candidate in ("虚天殿", "黄龙山", "昆吾山", "坠魔谷", "血色试炼"):
-                    if candidate in text:
-                        name = candidate
-                        break
+            dungeon_id = str(fields.get("副本ID") or "").strip()
+            if dungeon_id not in ids or dungeon_id in completed:
+                continue
+            before_seq = before_by_id.get(dungeon_id, 0)
+            if before_seq > 0 and int(rowid) > before_seq:
+                continue
+            name = _dungeon_context_name(card)
+            best = contexts.get(dungeon_id)
             if not best:
-                best = {
+                best = contexts[dungeon_id] = {
                     "seq": int(rowid),
                     "message_id": card.id,
                     "dungeon_id": dungeon_id,
@@ -2497,8 +2519,20 @@ class SQLiteStore:
             if card.title.endswith("开启") and best.get("dungeon_name"):
                 best["open_seq"] = int(rowid)
                 best["open_message_id"] = card.id
-                break
-        return best
+                completed.add(dungeon_id)
+                if completed == ids:
+                    break
+        return contexts
+
+    def find_dungeon_context_by_id(self, dungeon_id: str | int, *, before_seq: int | None = None) -> dict:
+        dungeon_id = str(dungeon_id or "").strip()
+        if not dungeon_id:
+            return {}
+        contexts = self.find_dungeon_contexts_by_ids(
+            [dungeon_id],
+            before_by_id={dungeon_id: int(before_seq or 0)} if before_seq else None,
+        )
+        return contexts.get(dungeon_id) or {}
 
     def find_latest_dungeon_open_context(
         self,
@@ -2510,38 +2544,8 @@ class SQLiteStore:
         dungeon_name = str(dungeon_name or "").strip()
         if not dungeon_name:
             return {}
-        params: list[object] = [f"%{dungeon_name}%", '%"副本ID"%']
-        where = ["payload_json LIKE ?", "payload_json LIKE ?"]
-        if chat_id is not None:
-            try:
-                where.append("payload_json LIKE ?")
-                params.append(f'%"chat_id": {int(chat_id)}%')
-            except (TypeError, ValueError):
-                pass
-        if before_seq is not None:
-            try:
-                before_seq_int = int(before_seq)
-            except (TypeError, ValueError):
-                before_seq_int = 0
-            if before_seq_int > 0:
-                where.append("rowid <= ?")
-                params.append(before_seq_int)
-        with self._connect() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT rowid, payload_json
-                FROM parsed_cards
-                WHERE {" AND ".join(where)}
-                ORDER BY rowid DESC
-                LIMIT 200
-                """,
-                params,
-            ).fetchall()
-        for rowid, payload in rows:
-            try:
-                card = ParsedCard.from_api(json.loads(payload or "{}"))
-            except Exception:
-                continue
+        rows = self._recent_dungeon_card_rows(before_seq=before_seq)
+        for rowid, card in rows:
             fields = card.fields or {}
             if chat_id is not None and card.chat_id is not None and int(card.chat_id) != int(chat_id):
                 continue
@@ -3656,6 +3660,18 @@ def _normalize_outbox_draft(payload: dict) -> dict:
         if str(item).strip()
     ]
     return draft
+
+
+def _dungeon_context_name(card: ParsedCard) -> str:
+    fields = card.fields or {}
+    name = str(fields.get("副本名") or "").strip()
+    if name:
+        return name
+    text = f"{card.title or ''}\n{card.raw or ''}"
+    for candidate in ("虚天殿", "黄龙山", "昆吾山", "坠魔谷", "血色试炼"):
+        if candidate in text:
+            return candidate
+    return ""
 
 
 def _coerce_positive_int(value: object) -> int:

@@ -516,8 +516,9 @@ class MiniWebServer:
         fast_window = order == "recent" and summary_limit <= 3
         context_finder = None if fast_window else self._find_latest_dungeon_open_context
         summaries = aggregate_dungeon_status_rows(rows, context_finder=context_finder, order=order)
-        self._hydrate_dungeon_summaries(summaries)
-        if hasattr(self._store, "replace_dungeon_rooms"):
+        if not fast_window:
+            self._hydrate_dungeon_summaries(summaries)
+        if not fast_window and hasattr(self._store, "replace_dungeon_rooms"):
             try:
                 self._store.replace_dungeon_rooms(summaries)
             except Exception as exc:
@@ -551,8 +552,10 @@ class MiniWebServer:
 
     def _hydrate_dungeon_summaries(self, summaries: list[dict]) -> None:
         finder = getattr(self._store, "find_dungeon_context_by_id", None)
-        if not callable(finder):
+        batch_finder = getattr(self._store, "find_dungeon_contexts_by_ids", None)
+        if not callable(finder) and not callable(batch_finder):
             return
+        needs: list[dict] = []
         for summary in summaries:
             dungeon_id = str(summary.get("dungeon_id") or "").strip()
             if not dungeon_id:
@@ -563,12 +566,43 @@ class MiniWebServer:
                 and summary.get("capacity")
             ):
                 continue
+            needs.append(summary)
+        if not needs:
+            return
+
+        contexts: dict[str, dict] = {}
+        if callable(batch_finder):
+            ids = [
+                str(summary.get("dungeon_id") or "").strip()
+                for summary in needs
+                if str(summary.get("dungeon_id") or "").strip()
+            ]
+            before_by_id: dict[str, int] = {}
+            for summary in needs:
+                dungeon_id = str(summary.get("dungeon_id") or "").strip()
+                try:
+                    before_seq = int(summary.get("latest_seq") or 0)
+                except (TypeError, ValueError):
+                    before_seq = 0
+                if before_seq > 0:
+                    before_by_id[dungeon_id] = max(before_by_id.get(dungeon_id, 0), before_seq)
             try:
-                context = finder(dungeon_id, before_seq=int(summary.get("latest_seq") or 0))
+                contexts = batch_finder(ids, before_by_id=before_by_id) or {}
             except TypeError:
-                context = finder(dungeon_id)
+                contexts = batch_finder(ids) or {}
             except Exception:
-                context = {}
+                contexts = {}
+
+        for summary in needs:
+            dungeon_id = str(summary.get("dungeon_id") or "").strip()
+            context = contexts.get(dungeon_id) or {}
+            if not context and callable(finder):
+                try:
+                    context = finder(dungeon_id, before_seq=int(summary.get("latest_seq") or 0))
+                except TypeError:
+                    context = finder(dungeon_id)
+                except Exception:
+                    context = {}
             if not context:
                 continue
             if str(summary.get("dungeon_name") or "") in WEAK_DUNGEON_NAMES and context.get("dungeon_name"):
