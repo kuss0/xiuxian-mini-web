@@ -9,6 +9,7 @@ import re
 
 from backend.domain.models import ActionSuggestion, ParsedCard, RawMessageEvent
 from backend.domain.registry import ParserOutput
+from backend.parsers.xutian_oracle import xutian_advice
 
 DUNGEON_NAMES = ("虚天殿", "黄龙山", "昆吾山", "坠魔谷", "血色试炼")
 DUNGEON_ID_RE = re.compile(r"副本ID[:：]\s*(?P<id>\d+)")
@@ -31,63 +32,6 @@ PATH_RE = re.compile(r"^\s*(?P<key>路径\d+)\s*[·.・]\s*(?P<label>[^：:\n]+)
 SILENCE_READY_RE = re.compile(r"为本次【(?P<name>[^】]+)】立下静场令")
 XUTIAN_ROUTE_RESULT_RE = re.compile(r"【(?P<eye>极寒冰魄|焚天烈焰)】的光芒被成功压制")
 XUTIAN_STRATEGY_RE = re.compile(r"阵策【(?P<strategy>[^】]+)】")
-
-EXPLICIT_XUTIAN_LUCK = {
-    "乾天上坤地下 · 三爻争锋": ("火路", "压策", "#528 明示"),
-    "震雷上艮山下 · 五爻乘时": ("火路", "势策", "#529 明示"),
-    "巽风上坤地下 · 二爻守中": ("冰路", "稳策", "#530 明示"),
-    "乾天上巽风下 · 三爻争锋": ("火路", "压策", "#531 明示"),
-    "兑泽上坎水下 · 初爻潜机": ("冰路", "势策", "#532 明示"),
-    "离火上艮山下 · 四爻转阵": ("冰路", "稳策", "#533 明示"),
-    "震雷上乾天下 · 上爻游变": ("火路", "势策", "#534 明示"),
-    "巽风上乾天下 · 二爻守中": ("火路", "势策", "#535 明示"),
-    "坎水上兑泽下 · 上爻游变": ("冰路", "势策", "#536 明示"),
-    "艮山上离火下 · 三爻争锋": ("火路", "压策", "#537 明示"),
-    "坤地上离火下 · 初爻潜机": ("冰路", "稳策", "#538 明示"),
-    "乾天上震雷下 · 二爻守中": ("火路", "压策", "#539 明示"),
-    "兑泽上巽风下 · 初爻潜机": ("冰路", "势策", "#540 明示"),
-    "离火上巽风下 · 三爻争锋": ("火路", "压策", "#541 明示"),
-    "震雷上巽风下 · 三爻争锋": ("火路", "势策", "#542 明示"),
-    "乾天上离火下 · 五爻乘时": ("火路", "压策", "#544 明示"),
-    "坎水上坤地下 · 上爻游变": ("冰路", "稳策", "#546 明示"),
-    "艮山上坤地下 · 三爻争锋": ("冰路", "稳策", "#547 明示"),
-    "坤地上坤地下 · 二爻守中": ("冰路", "稳策", "#548 明示"),
-    "乾天上乾天下 · 初爻潜机": ("火路", "压策", "#549 明示"),
-    "兑泽上乾天下 · 三爻争锋": ("火路", "压策", "#550 明示"),
-    "离火上离火下 · 初爻潜机": ("火路", "压策", "#551 明示"),
-    "巽风上坎水下 · 上爻游变": ("火路", "势策", "#552 明示"),
-    "坎水上巽风下 · 五爻乘时": ("火路", "稳策", "#553 明示"),
-    "坤地上兑泽下 · 初爻潜机": ("冰路", "势策", "#554 明示"),
-}
-
-OBSERVED_XUTIAN_SUCCESS = {
-    "乾天上坤地下 · 上爻游变": (("火路", "稳策", "#561 顺"), ("火路", "势策", "#619 顺")),
-    "坎水上兑泽下 · 二爻守中": (("冰路", "势策", "#566 顺"),),
-    "离火上震雷下 · 二爻守中": (("火路", "稳策", "#578 顺"),),
-    "离火上乾天下 · 二爻守中": (("火路", "稳策", "#606 顺"),),
-    "坎水上坤地下 · 二爻守中": (("冰路", "势策", "#608 顺"), ("冰路", "稳策", "#628 顺")),
-    "兑泽上艮山下 · 三爻争锋": (("冰路", "压策", "#627 顺"),),
-    "兑泽上坎水下 · 三爻争锋": (("冰路", "压策", "#640 顺"),),
-    "震雷上兑泽下 · 初爻潜机": (("冰路", "稳策", "#642 顺"),),
-    "艮山上巽风下 · 初爻潜机": (("冰路", "稳策", "#657 顺"),),
-    "兑泽上离火下 · 四爻转阵": (("冰路", "稳策", "#659 顺"),),
-}
-
-OBSERVED_XUTIAN_FAILURE = {
-    "乾天上巽风下 · 上爻游变": (("冰路", "势策", "#576 逆"),),
-    "乾天上巽风下 · 四爻转阵": (("冰路", "稳策", "#662 逆"),),
-    "震雷上艮山下 · 四爻转阵": (("火路", "稳策", "#579 逆"),),
-    "艮山上震雷下 · 四爻转阵": (("火路", "势策", "#581 逆"),),
-    "离火上离火下 · 三爻争锋": (("冰路", "稳策", "#620 逆"),),
-    "离火上离火下 · 四爻转阵": (("冰路", "势策", "#629 逆"),),
-    "震雷上坤地下 · 三爻争锋": (("冰路", "势策", "#630 逆"),),
-    "乾天上艮山下 · 五爻乘时": (("冰路", "势策", "#632 逆"),),
-    "离火上震雷下 · 四爻转阵": (("冰路", "稳策", "#633 逆"),),
-    "兑泽上震雷下 · 三爻争锋": (("冰路", "势策", "#635 逆"),),
-    "震雷上坤地下 · 二爻守中": (("火路", "稳策", "#648 逆"),),
-    "乾天上离火下 · 三爻争锋": (("冰路", "压策", "#651 逆"),),
-    "兑泽上坎水下 · 初爻潜机": (("火路", "势策", "#654 逆"),),
-}
 
 
 class DungeonParser:
@@ -421,88 +365,10 @@ def _xutian_luck_fields(text: str) -> dict[str, object]:
         return {}
     gua = gua_match.group("gua").strip()
     fields: dict[str, object] = {"卦象": gua}
-    advice = _xutian_advice(gua)
+    advice = xutian_advice(gua)
     if advice:
         fields.update(advice)
     return fields
-
-
-def _xutian_advice(gua: str) -> dict[str, object]:
-    if gua in EXPLICIT_XUTIAN_LUCK:
-        route, strategy, source = EXPLICIT_XUTIAN_LUCK[gua]
-        fields: dict[str, object] = {
-            "行运建议": f"{route} / {strategy}",
-            "建议依据": f"历史明示 {source}",
-            "建议置信": "明示",
-        }
-        _attach_xutian_examples(fields, gua)
-        return fields
-    if gua in OBSERVED_XUTIAN_SUCCESS:
-        examples = OBSERVED_XUTIAN_SUCCESS[gua]
-        fields = {
-            "行运建议": _format_observed_advice(examples),
-            "建议依据": "历史顺合样本",
-            "建议置信": "实测顺合",
-        }
-        _attach_xutian_examples(fields, gua)
-        return fields
-    same_trigram = _same_trigram_explicit(gua)
-    if same_trigram:
-        route, strategy, source, ref_gua = same_trigram
-        fields = {
-            "行运建议": f"{route} / {strategy}",
-            "建议依据": f"同卦系历史明示 {source}: {ref_gua}",
-            "建议置信": "同卦系推断",
-        }
-        _attach_xutian_examples(fields, gua)
-        return fields
-    if gua in OBSERVED_XUTIAN_FAILURE:
-        return {
-            "建议依据": "仅有历史反例，暂不推荐具体路线",
-            "建议置信": "反例",
-            "历史反例": _format_examples(OBSERVED_XUTIAN_FAILURE[gua]),
-        }
-    return {}
-
-
-def _same_trigram_explicit(gua: str) -> tuple[str, str, str, str] | None:
-    prefix = gua.split(" · ", 1)[0].strip()
-    if not prefix:
-        return None
-    for known_gua, (route, strategy, source) in EXPLICIT_XUTIAN_LUCK.items():
-        if known_gua.split(" · ", 1)[0].strip() == prefix:
-            return route, strategy, source, known_gua
-    return None
-
-
-def _attach_xutian_examples(fields: dict[str, object], gua: str) -> None:
-    if gua in OBSERVED_XUTIAN_SUCCESS:
-        fields["历史顺例"] = _format_examples(OBSERVED_XUTIAN_SUCCESS[gua])
-    if gua in OBSERVED_XUTIAN_FAILURE:
-        fields["历史反例"] = _format_examples(OBSERVED_XUTIAN_FAILURE[gua])
-
-
-def _format_observed_advice(examples: tuple[tuple[str, str, str], ...]) -> str:
-    routes = _ordered_unique(route for route, _, _ in examples)
-    strategies = _ordered_unique(strategy for _, strategy, _ in examples)
-    route_text = "/".join(routes)
-    strategy_text = "/".join(strategies)
-    return f"{route_text} / {strategy_text}" if strategy_text else route_text
-
-
-def _format_examples(examples: tuple[tuple[str, str, str], ...]) -> list[str]:
-    return [f"{route} / {strategy} ({source})" for route, strategy, source in examples]
-
-
-def _ordered_unique(values) -> list[str]:
-    seen = set()
-    result = []
-    for value in values:
-        if value in seen:
-            continue
-        seen.add(value)
-        result.append(value)
-    return result
 
 
 def _route_from_result_text(text: str) -> str:

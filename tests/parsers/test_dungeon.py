@@ -1,4 +1,5 @@
 from backend.parsers.dungeon import DungeonParser
+from backend.parsers.xutian_oracle import load_xutian_oracle_cases, xutian_advice
 from tests.parsers import load_fixture, make_event
 
 
@@ -56,6 +57,16 @@ def test_xutian_open_adds_luck_advice_from_same_trigram_history():
     assert card.fields["行运建议"] == "火路 / 压策"
     assert card.fields["建议置信"] == "同卦系推断"
     assert "冰路 / 稳策 (#662 逆)" in card.fields["历史反例"]
+
+
+def test_xutian_oracle_cases_are_loaded_from_data_file():
+    cases = load_xutian_oracle_cases()
+    assert len(cases["explicit"]) >= 20
+    assert len(cases["success"]) >= 5
+    assert len(cases["failure"]) >= 5
+    advice = xutian_advice("兑泽上离火下 · 四爻转阵")
+    assert advice["行运建议"] == "冰路 / 稳策"
+    assert advice["历史顺例"] == ["冰路 / 稳策 (#659 顺)"]
 
 
 def test_xutian_oracle_adds_exact_luck_advice_and_team_fit():
