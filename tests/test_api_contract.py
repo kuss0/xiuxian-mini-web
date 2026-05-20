@@ -2931,6 +2931,110 @@ def test_dungeon_status_recent_order_prefers_latest_room(tmp_path):
     assert recent["context_mode"] == "fast_window"
 
 
+def test_dungeon_status_recent_visible_skips_orphan_attempts(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(RawMessageEvent(
+        id="open-727",
+        chat_id=-1,
+        msg_id=7270,
+        text="""【虚天殿已开启】
+@a 消耗了【虚天残图】，开启了前往虚天殿的传送门！
+副本ID: 727
+其他道友可使用 .加入副本 727 加入队伍！(5人满)""",
+        source="韩天尊",
+        date="2026-05-20T07:00:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="open-728",
+        chat_id=-1,
+        msg_id=7280,
+        text="""【虚天殿已开启】
+@b 消耗了【虚天残图】，开启了前往虚天殿的传送门！
+副本ID: 728
+其他道友可使用 .加入副本 728 加入队伍！(5人满)""",
+        source="韩天尊",
+        date="2026-05-20T09:15:49+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="closed-728",
+        chat_id=-1,
+        msg_id=7281,
+        text="队长 @b 已将副本房间（ID: 728）解散。\n因副本未曾开启，天道已将【虚天残图】归还至你的储物袋中。",
+        source="韩天尊",
+        date="2026-05-20T09:16:35+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="open-729",
+        chat_id=-1,
+        msg_id=7290,
+        text="""【虚天殿已开启】
+@c 消耗了【虚天残图】，开启了前往虚天殿的传送门！
+副本ID: 729
+其他道友可使用 .加入副本 729 加入队伍！(5人满)""",
+        source="韩天尊",
+        date="2026-05-20T09:37:48+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="closed-729",
+        chat_id=-1,
+        msg_id=7291,
+        text="队长 @c 已将副本房间（ID: 729）解散。\n因副本未曾开启，天道已将【虚天残图】归还至你的储物袋中。",
+        source="韩天尊",
+        date="2026-05-20T09:38:20+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="late-join-729",
+        chat_id=-1,
+        msg_id=7292,
+        text="@late 已成功加入副本 729！",
+        source="韩天尊",
+        date="2026-05-20T09:38:20+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="failed-728",
+        chat_id=-1,
+        msg_id=7293,
+        text="找不到此副本房间，可能已解散或ID错误。",
+        source="韩天尊",
+        date="2026-05-20T09:40:52+00:00",
+        sender_id=7900199668,
+        reply_to_msg_id=7292,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="orphan-join-737",
+        chat_id=-1,
+        msg_id=7370,
+        text="@x 已成功加入副本 737！\n当前队伍 (2/5):\n - @opener (破军)\n - @x (影刃)",
+        source="韩天尊",
+        date="2026-05-20T13:42:11+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="orphan-closed-737",
+        chat_id=-1,
+        msg_id=7371,
+        text="队长 @opener 已将副本房间（ID: 737）解散。\n因副本未曾开启，天道已将【虚天残图】归还至你的储物袋中。",
+        source="韩天尊",
+        date="2026-05-20T13:42:20+00:00",
+        sender_id=7900199668,
+    ))
+
+    payload = MiniWebServer(store=store).dungeon_status_payload(limit=20, summary_limit=3, order="recent")
+
+    assert [item["dungeon_id"] for item in payload["summaries"]] == ["729", "728", "727"]
+    by_id = {item["dungeon_id"]: item for item in payload["summaries"]}
+    assert by_id["729"]["status_kind"] == "closed"
+    rooms = {item["dungeon_id"]: item["payload"] for item in store.list_dungeon_rooms() if item["dungeon_id"]}
+    assert rooms["737"]["open_seq"] == 0
+    assert rooms["737"]["open_message_id"] == ""
+
+
 def test_dungeon_status_exposes_xutian_verdict_and_advice(tmp_path):
     store = SQLiteStore(tmp_path / "miniweb.db")
     store.ingest_event(RawMessageEvent(
