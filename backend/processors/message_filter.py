@@ -105,6 +105,7 @@ _UNSET_REPLY = object()
 class FilterResult:
     channels: tuple[str, ...]
     tags: tuple[str, ...]
+    reasons: tuple[str, ...] = ()
 
 
 def enrich_filter_channels(
@@ -125,6 +126,7 @@ def enrich_filter_channels(
     """
     channels = list(card.channels or ())
     tags = list(card.tags or ())
+    reasons: list[str] = []
     text = event.text or card.raw or ""
     sender_id = event.sender_id
     bot_like = bool(event.sender_is_bot) or bool(is_game_bot_sender(sender_id))
@@ -214,25 +216,34 @@ def enrich_filter_channels(
     if leader:
         _append_unique(channels, "leader")
         _append_unique(tags, "会长")
+        _append_unique(reasons, "会长/情报源普通发言")
     if tianzun_plain_leader:
         _append_unique(tags, "会长上号")
     if mine:
         _append_unique(tags, "我发出")
+        _append_unique(reasons, "我的发送")
     if own_mention:
         _append_unique(tags, "被@")
+        _append_unique(reasons, "提到我")
     if bot_reply_to_mine:
         _append_unique(tags, "回复我")
+        _append_unique(reasons, "天尊回复我")
     if bot_reply_to_other:
         _append_unique(tags, "回复别人")
+        _append_unique(reasons, "天尊回复别人")
     if bot_mentions_other:
         _append_unique(tags, "提到别人")
+        _append_unique(reasons, "天尊提到别人")
     for hit in keyword_hits[:3]:
         _append_unique(tags, f"关键词:{hit}")
+        _append_unique(reasons, f"关键词:{hit}")
     for hit in exclude_hits[:1]:
         if excluded_focus:
             _append_unique(tags, f"重点排除:{hit}")
+            _append_unique(reasons, f"重点排除:{hit}")
     if focus_muted and excluded_focus:
         _append_unique(tags, f"重点静音:{event.source or event.sender_id or 'unknown'}")
+        _append_unique(reasons, f"重点静音:{event.source or event.sender_id or 'unknown'}")
 
     archive_dot = bool(settings.get("archive_dot_commands", True))
     archive_bot = bool(settings.get("archive_bot_replies", True))
@@ -245,6 +256,8 @@ def enrich_filter_channels(
     )
     if not suppress_focus and (card_important or plain_player):
         _append_unique(channels, "focus")
+        if plain_player and not card_important:
+            _append_unique(reasons, "普通玩家消息策略")
     if suppress_focus and "focus" in channels:
         channels = [channel for channel in channels if channel != "focus"]
 
@@ -253,10 +266,33 @@ def enrich_filter_channels(
     if (archive_dot and dot_command) or archive_due_other or archive_due_bot or excluded_focus:
         _append_unique(channels, "archive")
         _append_unique(tags, "归档")
+        if archive_dot and dot_command:
+            _append_unique(reasons, "点命令归档")
+        if archive_due_other:
+            _append_unique(reasons, "回复/提到别人归档")
+        if archive_due_bot:
+            _append_unique(reasons, "普通天尊回复归档")
+        if excluded_focus:
+            _append_unique(reasons, "命中排除规则归档")
+
+    if card.severity == "risk" or "risk" in channels:
+        _append_unique(reasons, "风险消息")
+    if card.actions:
+        _append_unique(reasons, "有可操作按钮")
+    if "dungeon" in channels:
+        _append_unique(reasons, "副本消息")
+    if "resource" in channels:
+        _append_unique(reasons, "资源/背包消息")
+    if "training" in channels:
+        _append_unique(reasons, "修炼状态消息")
+    if "home" in channels:
+        _append_unique(reasons, "洞府/家园消息")
 
     if not channels:
         channels.append("world")
-    return FilterResult(channels=tuple(channels), tags=tuple(tags))
+    if "focus" not in channels and not reasons:
+        _append_unique(reasons, "未命中重点规则")
+    return FilterResult(channels=tuple(channels), tags=tuple(tags), reasons=tuple(reasons))
 
 
 def is_dot_command(text: str) -> bool:

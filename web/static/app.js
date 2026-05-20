@@ -1222,14 +1222,44 @@ async function refreshDungeonStatusModal(dialog) {
   if (summary) summary.innerHTML = "";
   setDungeonStatusLine(dialog, "info", "正在读取最近副本消息…");
   try {
-    const params = new URLSearchParams({ channel: "all", channels: "dungeon", limit: "300" });
-    const payload = await fetchJson(`/api/messages?${params.toString()}`);
-    const messages = payload.messages || [];
-    const summaries = aggregateDungeonStatuses(messages);
-    renderDungeonStatusModal(dialog, summaries, messages.length);
+    const payload = await fetchJson("/api/dungeon-status?limit=500");
+    const summaries = (payload.summaries || []).map(normalizeDungeonStatusSummary);
+    renderDungeonStatusModal(dialog, summaries, payload.raw_count || 0);
   } finally {
     if (refreshButton) refreshButton.disabled = false;
   }
+}
+
+function normalizeDungeonStatusSummary(item) {
+  const messages = (item.messages || []).map((message) => ({
+    id: message.id,
+    title: message.title,
+    summary: message.summary,
+    time: message.time,
+    chat_id: message.chat_id,
+    msg_id: message.msg_id,
+    reply_to_msg_id: message.reply_to_msg_id,
+  }));
+  return {
+    key: item.key || "",
+    dungeonId: item.dungeon_id || "",
+    dungeonName: item.dungeon_name || "副本",
+    status: item.status || "副本消息",
+    statusKind: item.status_kind || "info",
+    latestStage: item.latest_stage || "",
+    openedBy: item.opened_by || "",
+    capacity: item.capacity || "",
+    oracle: item.oracle || "",
+    advice: item.advice || "",
+    route: item.route || "",
+    strategy: item.strategy || "",
+    silenceOrder: item.silence_order || "",
+    joinSuccess: item.join_success || [],
+    failures: item.failures || [],
+    actions: item.actions || [],
+    messages,
+    latestMessage: messages[0] || { id: item.latest_message_id || "", time: item.latest_time || "" },
+  };
 }
 
 function renderDungeonStatusModal(dialog, summaries, rawCount) {
@@ -2971,6 +3001,9 @@ function renderFocusTools(message) {
 }
 
 function focusReasonList(message) {
+  if (Array.isArray(message.filter_reasons) && message.filter_reasons.length) {
+    return Array.from(new Set(message.filter_reasons.map((item) => String(item || "").trim()).filter(Boolean)));
+  }
   const reasons = [];
   const channels = message.channels || [message.channel];
   const tags = message.tags || [];
@@ -7456,11 +7489,10 @@ function bindLogsModal(dialog) {
       exportBtn.disabled = true;
       const oldText = exportBtn.textContent;
       exportBtn.textContent = "导出中…";
-      setStatus("拉取全量数据,大批可能要几秒…");
+        setStatus("拉取全量数据,大批可能要几秒…");
       try {
         const url = `/api/messages/export?${params.toString()}`;
-        const headers = {};
-        if (window.MINIWEB_TOKEN) headers["X-Miniweb-Token"] = window.MINIWEB_TOKEN;
+        const headers = authHeaders();
         const res = await fetch(url, { headers });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const blob = await res.blob();

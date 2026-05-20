@@ -265,6 +265,7 @@ class ParsedCard:
     deleted_at: str | None = None
     media_kind: str | None = None
     media_meta: dict[str, Any] | None = None
+    filter_reasons: tuple[str, ...] = ()
 
     @property
     def primary_channel(self) -> str:
@@ -292,6 +293,7 @@ class ParsedCard:
             "deleted_at": self.deleted_at,
             "media_kind": self.media_kind,
             "media_meta": self.media_meta,
+            "filter_reasons": list(self.filter_reasons),
         }
 
     @classmethod
@@ -323,4 +325,5 @@ class ParsedCard:
             deleted_at=(str(payload["deleted_at"]) if payload.get("deleted_at") else None),
             media_kind=(str(payload["media_kind"]) if payload.get("media_kind") else None),
             media_meta=(dict(payload["media_meta"]) if isinstance(payload.get("media_meta"), dict) else None),
+            filter_reasons=tuple(str(item) for item in payload.get("filter_reasons") or ()),
         )

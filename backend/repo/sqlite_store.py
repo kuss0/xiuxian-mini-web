@@ -779,6 +779,7 @@ class SQLiteStore:
                     card,
                     channels=filtered.channels,
                     tags=filtered.tags,
+                    filter_reasons=filtered.reasons,
                     reply_to_msg_id=clean_reply if card.reply_to_msg_id is None else card.reply_to_msg_id,
                 )
                 if updated_card.channels != card.channels or updated_card.tags != card.tags:

@@ -2612,6 +2612,89 @@ def test_messages_export_route_is_wired():
     assert "/api/messages/export" in GET_ROUTES
 
 
+def test_message_payload_includes_structured_filter_reasons(tmp_path):
+    from backend.domain.models import RawMessageEvent
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_settings({"game_bot_ids": [-100], "focus_keywords": []})
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+    store.ingest_event(RawMessageEvent(
+        id="me",
+        chat_id=-1,
+        msg_id=1,
+        text=".宗门战况",
+        source="me",
+        date="",
+        sender_id=12345,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="bot",
+        chat_id=-1,
+        msg_id=2,
+        text="【宗门战况】\n当前无战事。",
+        source="韩天尊",
+        date="",
+        sender_id=-100,
+        reply_to_msg_id=1,
+        sender_is_bot=True,
+    ))
+
+    payload = MiniWebServer(store=store).messages_payload("focus", limit=20)
+    bot = next(item for item in payload["messages"] if item["id"] == "bot")
+    assert "天尊回复我" in bot["filter_reasons"]
+    assert "filter_reasons" not in (bot.get("fields") or {})
+
+
+def test_dungeon_status_payload_distinguishes_request_from_success(tmp_path):
+    from backend.domain.models import RawMessageEvent
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(RawMessageEvent(
+        id="open",
+        chat_id=-1,
+        msg_id=10,
+        text="""【虚天殿已开启】
+@tinghua01 消耗了【虚天残图】，开启了前往虚天殿的传送门！
+副本ID: 394
+其他道友可使用 .加入副本 394 加入队伍！(5人满)""",
+        source="韩天尊",
+        date="2026-05-15T00:00:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="request",
+        chat_id=-1,
+        msg_id=11,
+        text=".加入副本 394",
+        source="me",
+        date="2026-05-15T00:00:01+00:00",
+        sender_id=12345,
+        reply_to_msg_id=10,
+    ))
+
+    before = MiniWebServer(store=store).dungeon_status_payload()
+    open_summary = next(item for item in before["summaries"] if item["dungeon_id"] == "394")
+    assert open_summary["status_kind"] == "open"
+    assert open_summary["join_success"] == []
+
+    store.ingest_event(RawMessageEvent(
+        id="joined",
+        chat_id=-1,
+        msg_id=12,
+        text="@me 已成功加入副本 394",
+        source="韩天尊",
+        date="2026-05-15T00:00:02+00:00",
+        sender_id=7900199668,
+    ))
+    after = MiniWebServer(store=store).dungeon_status_payload()
+    joined = next(item for item in after["summaries"] if item["dungeon_id"] == "394")
+    assert joined["status_kind"] == "joined"
+    assert joined["join_success"] == ["me"]
+
+
+def test_dungeon_status_route_is_wired():
+    from backend.app import GET_ROUTES
+    assert "/api/dungeon-status" in GET_ROUTES
+
+
 def test_list_schedule_batches_returns_sending_and_completed(tmp_path):
     """新生命周期(sending/completed/cancelled/partial_failed)默认要可见,
     UI 才能显示进度 pill 和取消按钮。只有 deleted 默认隐藏。"""

@@ -462,6 +462,36 @@ class MiniWebServer:
             limit=limit,
         )
 
+    def dungeon_status_payload(self, *, limit: int = 500) -> dict:
+        """从消息箱副本卡片派生当前副本状态。
+
+        这仍然不是自动状态机,但聚合逻辑放在后端,避免前端每次临时推断且
+        能被测试覆盖。`.加入副本` 动作只算「可操作」,只有天尊明确回复
+        「加入副本成功/失败」才会改变 joined/failed。
+        """
+        try:
+            limit = int(limit or 500)
+        except (TypeError, ValueError):
+            limit = 500
+        limit = max(1, min(limit, 2000))
+        if hasattr(self._store, "list_card_page"):
+            page = self._store.list_card_page(channel="dungeon", limit=limit)
+            rows = [(int(seq), card) for seq, card in page]
+        else:
+            cards = self._store.list_cards("dungeon")
+            rows = [(idx + 1, card) for idx, card in enumerate(reversed(cards))]
+        summaries = _aggregate_dungeon_status_rows(rows)
+        return {
+            "ok": True,
+            "source": "derived_from_messages",
+            "raw_count": len(rows),
+            "summaries": summaries,
+            "notes": [
+                "副本状态只从消息箱派生,不自动加入。",
+                ".加入副本 只算请求/动作,必须等天尊回复成功或失败后才更新状态。",
+            ],
+        }
+
     def inventory_payload(
         self,
         *,
@@ -1950,6 +1980,180 @@ def normalize_channel_filters(
         seen.add(item)
         result.append(item)
     return result
+
+
+def _aggregate_dungeon_status_rows(rows: list[tuple[int, ParsedCard]]) -> list[dict]:
+    grouped: dict[str, dict] = {}
+    for seq, card in sorted(rows, key=lambda item: item[0]):
+        key = _dungeon_group_key(card)
+        summary = grouped.get(key)
+        if summary is None:
+            summary = _new_dungeon_summary(key, seq, card)
+            grouped[key] = summary
+        _update_dungeon_summary(summary, seq, card)
+    result = list(grouped.values())
+    result.sort(key=lambda item: (_dungeon_status_rank(item.get("status_kind")), -int(item.get("latest_seq") or 0)))
+    return result
+
+
+def _new_dungeon_summary(key: str, seq: int, card: ParsedCard) -> dict:
+    fields = card.fields or {}
+    name = _dungeon_name(card)
+    dungeon_id = str(fields.get("副本ID") or "")
+    if key.startswith("id:"):
+        dungeon_id = key[3:]
+    return {
+        "key": key,
+        "dungeon_id": dungeon_id,
+        "dungeon_name": name or "副本",
+        "status": "副本消息",
+        "status_kind": "info",
+        "latest_seq": int(seq),
+        "latest_message_id": card.id,
+        "latest_time": card.time,
+        "latest_stage": "",
+        "opened_by": "",
+        "capacity": "",
+        "oracle": "",
+        "advice": "",
+        "route": "",
+        "strategy": "",
+        "silence_order": "",
+        "join_success": [],
+        "failures": [],
+        "actions": [],
+        "messages": [],
+    }
+
+
+def _update_dungeon_summary(summary: dict, seq: int, card: ParsedCard) -> None:
+    fields = card.fields or {}
+    tags = list(card.tags or ())
+    title = str(card.title or "")
+    raw = str(card.raw or "")
+    if seq >= int(summary.get("latest_seq") or 0):
+        summary["latest_seq"] = int(seq)
+        summary["latest_message_id"] = card.id
+        summary["latest_time"] = card.time
+    candidate_name = _dungeon_name(card)
+    if candidate_name and (not summary.get("dungeon_name") or summary.get("dungeon_name") == "副本"):
+        summary["dungeon_name"] = candidate_name
+    for target, source in (
+        ("dungeon_id", "副本ID"),
+        ("latest_stage", "阶段"),
+        ("opened_by", "开门人"),
+        ("capacity", "人数上限"),
+        ("oracle", "卦象"),
+        ("advice", "行运建议"),
+        ("route", "路线"),
+        ("strategy", "阵策"),
+        ("silence_order", "静场令"),
+    ):
+        if not summary.get(target) and fields.get(source):
+            summary[target] = str(fields.get(source) or "")
+
+    if title == "加入副本成功" or ("加入" in tags and "失败" not in tags):
+        username = str(fields.get("username") or _first_username(raw) or "").strip().lstrip("@")
+        if username and username not in summary["join_success"]:
+            summary["join_success"].append(username)
+    if title == "加入副本失败" or "失败" in tags:
+        reason = str(fields.get("失败原因") or card.summary or "加入失败").strip()
+        if reason and reason not in summary["failures"]:
+            summary["failures"].append(reason)
+
+    for action in card.actions or ():
+        payload = action.to_api()
+        command = str(payload.get("command") or "").strip()
+        if not command:
+            continue
+        action_key = f"{command}|{payload.get('reply_to_msg_id') or ''}|{payload.get('chat_id') or ''}"
+        if not any(item.get("key") == action_key for item in summary["actions"]):
+            summary["actions"].append({**payload, "key": action_key, "source_message_id": card.id})
+
+    info = _dungeon_status_from_card(card)
+    if info["kind"] != "info" and seq >= int(summary.get("_status_seq") or -1):
+        summary["status"] = info["label"]
+        summary["status_kind"] = info["kind"]
+        summary["_status_seq"] = int(seq)
+    elif summary.get("status_kind") == "info" and info["label"]:
+        summary["status"] = info["label"]
+
+    summary["messages"].append(
+        {
+            "seq": int(seq),
+            "id": card.id,
+            "title": title,
+            "summary": card.summary,
+            "time": card.time,
+            "chat_id": card.chat_id,
+            "msg_id": card.msg_id,
+            "reply_to_msg_id": card.reply_to_msg_id,
+        }
+    )
+    summary["messages"] = sorted(summary["messages"], key=lambda item: int(item.get("seq") or 0), reverse=True)[:8]
+    summary.pop("_status_seq", None)
+
+
+def _dungeon_group_key(card: ParsedCard) -> str:
+    fields = card.fields or {}
+    dungeon_id = str(fields.get("副本ID") or "").strip()
+    if dungeon_id:
+        return f"id:{dungeon_id}"
+    if card.title == "加入副本失败" and card.reply_to_msg_id:
+        return f"join-failed:{card.chat_id or 0}:{card.reply_to_msg_id}"
+    name = _dungeon_name(card) or "副本"
+    return f"name:{name}:{card.chat_id or 0}"
+
+
+def _dungeon_name(card: ParsedCard) -> str:
+    fields = card.fields or {}
+    if fields.get("副本名"):
+        return str(fields.get("副本名") or "").strip()
+    text = f"{card.title or ''}\n{card.raw or ''}"
+    for name in ("虚天殿", "黄龙山", "昆吾山", "坠魔谷", "血色试炼"):
+        if name in text:
+            return name
+    title = str(card.title or "").strip()
+    return title[:-2] if title.endswith("开启") else title
+
+
+def _dungeon_status_from_card(card: ParsedCard) -> dict:
+    fields = card.fields or {}
+    tags = set(card.tags or ())
+    title = str(card.title or "")
+    status = str(fields.get("状态") or "").strip()
+    if title == "副本房间解散" or "解散" in tags:
+        return {"kind": "closed", "label": "已解散"}
+    if title == "加入副本失败" or "失败" in tags:
+        return {"kind": "failed", "label": "加入失败"}
+    if "静场" in status or "静场令" in tags:
+        return {"kind": "choice", "label": status or "静场令"}
+    if "需要抉择" in status or "需要抉择" in tags:
+        return {"kind": "choice", "label": status or "需要抉择"}
+    if "可加入" in status or "可加入" in tags or title.endswith("开启"):
+        return {"kind": "open", "label": status or "可加入"}
+    if "已加入" in status or title == "加入副本成功":
+        return {"kind": "joined", "label": status or "已加入"}
+    if re.search(r"进行中|路线已选|卦象|路策", status) or re.search(r"推进|卦象|路线|路策", title):
+        return {"kind": "active", "label": status or "进行中"}
+    return {"kind": "info", "label": status or title or "副本消息"}
+
+
+def _dungeon_status_rank(kind: object) -> int:
+    return {
+        "choice": 0,
+        "open": 1,
+        "active": 2,
+        "joined": 3,
+        "failed": 4,
+        "closed": 5,
+        "info": 6,
+    }.get(str(kind or "info"), 6)
+
+
+def _first_username(text: str) -> str:
+    match = re.search(r"@(?P<user>[A-Za-z0-9_]+)", text or "")
+    return match.group("user") if match else ""
 
 
 def build_inventory_transfer_plan(payload: dict) -> dict:

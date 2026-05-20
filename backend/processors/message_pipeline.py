@@ -258,4 +258,5 @@ class MessagePipeline:
             reply_to_msg_id=(
                 clean_reply if card.reply_to_msg_id is None else card.reply_to_msg_id
             ),
+            filter_reasons=filtered.reasons,
         )

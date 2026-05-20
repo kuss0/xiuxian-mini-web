@@ -277,6 +277,14 @@ def _get_resource_stats(request: MiniWebHandler, query: dict) -> dict:
     )
 
 
+def _get_dungeon_status(request: MiniWebHandler, query: dict) -> dict:
+    try:
+        limit = int((query.get("limit") or ["500"])[0])
+    except (TypeError, ValueError):
+        limit = 500
+    return _app(request).dungeon_status_payload(limit=limit)
+
+
 def _get_inventory(request: MiniWebHandler, query: dict) -> dict:
     owner = (query.get("owner") or [""])[0]
     latest_raw = str((query.get("latest_only") or ["1"])[0]).lower()
@@ -546,6 +554,7 @@ GET_ROUTES = {
     "/api/settings": _get_settings,
     "/api/state-patches": _get_state_patches,
     "/api/resource-stats": _get_resource_stats,
+    "/api/dungeon-status": _get_dungeon_status,
     "/api/inventory": _get_inventory,
     "/api/discovered-bots": _get_discovered_bots,
     "/api/accounts": _get_accounts,
