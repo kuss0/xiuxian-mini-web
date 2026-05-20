@@ -115,7 +115,8 @@ class MiniWebHandler(BaseHTTPRequestHandler):
             return None
 
     def log_message(self, fmt: str, *args: object) -> None:
-        print(f"[mini-web] {self.address_string()} - {fmt % args}")
+        if os.environ.get("MINIWEB_ACCESS_LOG", "").lower() in {"1", "true", "yes"}:
+            print(f"[mini-web] {self.address_string()} - {fmt % args}")
 
     def _is_authorized_api_request(self) -> bool:
         return is_authorized_api_headers(self.headers, self.access_token)

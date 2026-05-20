@@ -1,5 +1,4 @@
-// MINIWEB-BUILD: coverage-dungeon-template-filter 2026-05-20T04:10
-console.log("[mini-web] build: coverage-dungeon-template-filter 2026-05-20T04:10 — 如看到此行,说明新 JS 已加载");
+// MINIWEB-BUILD: infra-health-polling 2026-05-21T00:35
 
 const state = {
   channels: [],
@@ -1093,9 +1092,29 @@ function renderResourceStats(dialog, payload) {
   table.innerHTML = `
     ${renderResourceDeltaTable(rows)}
     ${renderResourceEventTable(eventSummary)}
+    ${renderResourceDiagnostics(payload.diagnostics || {})}
     ${Array.isArray(payload.notes) && payload.notes.length
       ? `<div class="resource-stats-notes">${payload.notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>`
       : ""}
+  `;
+}
+
+function renderResourceDiagnostics(diagnostics) {
+  const unknown = Number(diagnostics.unknown_source_events || 0);
+  const empty = Number(diagnostics.empty_outcome_events || 0);
+  if (!unknown && !empty) return "";
+  const chips = [];
+  if (unknown) chips.push(`来源未知 ${formatNumber(unknown)} 条`);
+  if (empty) chips.push(`结果细分空 ${formatNumber(empty)} 条`);
+  const samples = [
+    ...(diagnostics.unknown_sources || []).slice(0, 3),
+    ...(diagnostics.empty_outcomes || []).slice(0, 3),
+  ];
+  return `
+    <div class="resource-stats-notes warn">
+      ${chips.map((text) => `<span>${escapeHtml(text)}</span>`).join("")}
+      ${samples.map((item) => `<span>${escapeHtml(item.source || "")}｜${escapeHtml(formatNumber(item.count || 0))}</span>`).join("")}
+    </div>
   `;
 }
 
@@ -7767,12 +7786,9 @@ if (inventoryButton) {
 
 if (loginAccountButton) {
   loginAccountButton.addEventListener("click", async () => {
-    console.log("[mini-web] login button clicked");
     try {
       await loadAccounts();
-      console.log("[mini-web] loadAccounts done, opening modal");
       openAccountModal(null);
-      console.log("[mini-web] openAccountModal returned");
     } catch (error) {
       console.error("[mini-web] login click failed:", error);
       showError(error);
@@ -7784,7 +7800,6 @@ if (loginAccountButton) {
 
 if (addIdentityButton) {
   addIdentityButton.addEventListener("click", async () => {
-    console.log("[mini-web] add-identity clicked");
     try {
       await Promise.all([loadAccounts(), loadIdentities()]);
       openAddIdentityModal();
@@ -7799,7 +7814,6 @@ if (addIdentityButton) {
 
 if (logoutAccountButton) {
   logoutAccountButton.addEventListener("click", async () => {
-    console.log("[mini-web] logout clicked");
     try {
       await Promise.all([loadAccounts(), loadIdentities()]);
       openLogoutAccountModal();
@@ -8250,8 +8264,14 @@ function showSkillToast(text, kind) {
 // 自动轮询消息流(只在 chat 视图 + 页面可见时拉,避免 tab 切走还在打)。
 // listener 持续 ingest 新消息进 SQLite,这里负责把它们端到 UI。
 const POLL_INTERVAL_MS = 5000;
+const ACCOUNT_POLL_INTERVAL_MS = 30000;
+const BOT_DISCOVERY_POLL_INTERVAL_MS = 60000;
+const IDENTITY_STATE_POLL_INTERVAL_MS = 30000;
 let pollTimer = null;
 let pollInflight = false;
+let nextAccountsPollAt = 0;
+let nextBotDiscoveryPollAt = 0;
+let nextIdentityStatePollAt = 0;
 
 async function pollTick() {
   if (pollInflight) return;
@@ -8261,14 +8281,19 @@ async function pollTick() {
   try {
     // 即使用户切到草稿箱/官方定时视图,后台也继续把新消息 merge 进 state,
     // 这样切回 chat 时立刻看见最新的。listener 写得很快,前端再不跟就脱节。
-    const [messageResult] = await Promise.all([
-      loadMessages({ incremental: true }),
-      loadAccounts(),
-      loadDiscoveredBots(),
-    ]);
-    // 有新消息时立刻同步玩法状态;否则每 ~6 个 tick(~30s)保底刷新一次。
-    pollTickCount = (pollTickCount + 1) % 6;
-    if ((messageResult && messageResult.changed) || pollTickCount === 0) {
+    const now = Date.now();
+    const tasks = [loadMessages({ incremental: true })];
+    if (now >= nextAccountsPollAt) {
+      nextAccountsPollAt = now + ACCOUNT_POLL_INTERVAL_MS;
+      tasks.push(loadAccounts().catch((err) => console.warn("[mini-web] accounts poll failed:", err)));
+    }
+    if (now >= nextBotDiscoveryPollAt) {
+      nextBotDiscoveryPollAt = now + BOT_DISCOVERY_POLL_INTERVAL_MS;
+      tasks.push(loadDiscoveredBots().catch((err) => console.warn("[mini-web] bot discovery poll failed:", err)));
+    }
+    const [messageResult] = await Promise.all(tasks);
+    if ((messageResult && messageResult.changed) || now >= nextIdentityStatePollAt) {
+      nextIdentityStatePollAt = now + IDENTITY_STATE_POLL_INTERVAL_MS;
       await loadIdentityModuleStates().catch(() => {});
     }
   } catch (error) {
@@ -8277,7 +8302,6 @@ async function pollTick() {
     pollInflight = false;
   }
 }
-let pollTickCount = 0;
 
 function startPolling() {
   if (pollTimer !== null) return;

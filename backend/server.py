@@ -108,6 +108,18 @@ class CardStore(Protocol):
 SECRET_SETTING_KEYS = {"api_hash", "proxy_password", "notify_tg_bot_token"}
 
 
+def _server_dungeon_status_rank(kind: object) -> int:
+    return {
+        "choice": 0,
+        "open": 1,
+        "active": 2,
+        "joined": 3,
+        "failed": 4,
+        "closed": 5,
+        "info": 6,
+    }.get(str(kind or "info"), 6)
+
+
 def _parse_tg_card_ref(value: str) -> tuple[int, int]:
     """Parse canonical card refs like tg:-1001680975844:9023228.
 
@@ -197,7 +209,21 @@ class MiniWebServer:
             self._store.set_notify_dispatcher(self._notify)
 
     def health_payload(self) -> dict:
-        return {"ok": True, "service": "xiuxian-mini-web", "time": utc_now_iso()}
+        self._ensure_collector_running()
+        messages = {}
+        summary = getattr(self._store, "message_health_summary", None)
+        if callable(summary):
+            try:
+                messages = summary()
+            except Exception as exc:
+                messages = {"error": str(exc)}
+        return {
+            "ok": True,
+            "service": "xiuxian-mini-web",
+            "time": utc_now_iso(),
+            "listener": self._listeners.status(),
+            "messages": messages,
+        }
 
     def channels_payload(self) -> dict:
         return {"channels": [channel.to_api() for channel in CHANNELS]}
@@ -517,6 +543,24 @@ class MiniWebServer:
             summary_limit = 80
         summary_limit = max(1, min(summary_limit, 200))
         order = "recent" if str(order or "").strip() == "recent" else "priority"
+        cached = self._cached_dungeon_summaries(order=order)
+        if cached:
+            visible_cached = select_visible_dungeon_summaries(cached, summary_limit)
+            if len(visible_cached) >= min(summary_limit, len(cached)):
+                return {
+                    "ok": True,
+                    "source": "dungeon_rooms_cache",
+                    "raw_count": 0,
+                    "summary_limit": summary_limit,
+                    "order": order,
+                    "context_mode": "cache",
+                    "total_summaries": len(cached),
+                    "summaries": visible_cached,
+                    "notes": [
+                        "副本状态优先读取持久缓存,缓存落后时才从消息箱重算。",
+                        ".加入副本 只算请求/动作,必须等天尊回复成功或失败后才更新状态。",
+                    ],
+                }
         rows = self._dungeon_status_rows(limit=limit)
         fast_window = order == "recent" and summary_limit <= 3
         context_finder = None if fast_window else self._find_latest_dungeon_open_context
@@ -545,6 +589,46 @@ class MiniWebServer:
                 "最近3次默认走快速窗口;展开更多时会做完整历史关联。",
             ],
         }
+
+    def _cached_dungeon_summaries(self, *, order: str) -> list[dict]:
+        list_rooms = getattr(self._store, "list_dungeon_rooms", None)
+        max_seq = getattr(self._store, "max_dungeon_card_seq", None)
+        if not callable(list_rooms) or not callable(max_seq):
+            return []
+        try:
+            latest_seq = int(max_seq() or 0)
+            rows = list_rooms() or []
+        except Exception:
+            return []
+        if latest_seq <= 0 or not rows:
+            return []
+        cached_max = max((int(item.get("latest_seq") or 0) for item in rows), default=0)
+        if cached_max < latest_seq:
+            return []
+        summaries: list[dict] = []
+        for item in rows:
+            payload = dict(item.get("payload") or {})
+            if not payload:
+                continue
+            payload.setdefault("key", item.get("key") or "")
+            payload.setdefault("dungeon_id", item.get("dungeon_id") or "")
+            payload.setdefault("dungeon_name", item.get("dungeon_name") or "")
+            payload.setdefault("status", item.get("status") or "")
+            payload.setdefault("status_kind", item.get("status_kind") or "info")
+            payload.setdefault("latest_seq", int(item.get("latest_seq") or 0))
+            payload.setdefault("latest_message_id", item.get("latest_message_id") or "")
+            payload.setdefault("latest_time", item.get("latest_time") or "")
+            summaries.append(payload)
+        if order == "recent":
+            summaries.sort(key=lambda item: int(item.get("latest_seq") or 0), reverse=True)
+        else:
+            summaries.sort(
+                key=lambda item: (
+                    _server_dungeon_status_rank(item.get("status_kind")),
+                    -int(item.get("latest_seq") or 0),
+                )
+            )
+        return summaries
 
     def _find_latest_dungeon_open_context(self, card: ParsedCard, seq: int, dungeon_name: str) -> dict:
         finder = getattr(self._store, "find_latest_dungeon_open_context", None)

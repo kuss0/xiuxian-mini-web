@@ -31,7 +31,6 @@ from backend.processors.message_filter import (
     LEGACY_FOCUS_EXCLUDE_PATTERNS,
     enrich_filter_channels,
 )
-from backend.repo.sample_store import SAMPLE_EVENTS
 from backend.tg.client import safe_session_name
 
 
@@ -285,13 +284,109 @@ class SQLiteStore:
         return cls(Path(__file__).resolve().parents[2] / "data" / "miniweb.db")
 
     def seed_samples_if_empty(self) -> None:
+        self.cleanup_seed_samples()
         with self._connect() as conn:
             count = conn.execute("SELECT COUNT(*) FROM raw_messages").fetchone()[0]
         if count:
             self.backfill_state_patches_if_empty()
             self.backfill_module_states_if_empty()
             return
-        self.ingest_many(SAMPLE_EVENTS)
+
+    def cleanup_seed_samples(self) -> int:
+        """Remove old in-database bootstrap samples.
+
+        Samples belong to SampleStore only. Keeping them in the real SQLite store
+        pollutes health checks because their date is display text, not ISO time.
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM raw_messages
+                WHERE chat_id=0
+                  AND id LIKE 'sample-%'
+                """
+            ).fetchone()
+            deleted = int((row or [0])[0] or 0)
+            if not deleted:
+                return 0
+            conn.execute(
+                """
+                DELETE FROM parsed_cards
+                WHERE raw_message_id LIKE 'sample-%'
+                """
+            )
+            conn.execute(
+                """
+                DELETE FROM state_patches
+                WHERE source_message_id LIKE 'sample-%'
+                """
+            )
+            conn.execute(
+                """
+                DELETE FROM resource_events
+                WHERE raw_message_id LIKE 'sample-%'
+                """
+            )
+            conn.execute(
+                """
+                DELETE FROM resource_deltas
+                WHERE raw_message_id LIKE 'sample-%'
+                """
+            )
+            conn.execute(
+                """
+                DELETE FROM inventory_snapshots
+                WHERE raw_message_id LIKE 'sample-%'
+                """
+            )
+            conn.execute(
+                """
+                DELETE FROM raw_messages
+                WHERE chat_id=0
+                  AND id LIKE 'sample-%'
+                """
+            )
+        return deleted
+
+    def message_health_summary(self) -> dict:
+        with self._connect() as conn:
+            total = int(conn.execute("SELECT COUNT(*) FROM raw_messages").fetchone()[0] or 0)
+            real = conn.execute(
+                """
+                SELECT COUNT(*), MIN(date), MAX(date), MIN(msg_id), MAX(msg_id)
+                FROM raw_messages
+                WHERE chat_id != 0
+                  AND (
+                    date LIKE '____-__-__T__:__:__%'
+                    OR date LIKE '____-__-__ __:__:__%'
+                  )
+                """
+            ).fetchone()
+            invalid = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM raw_messages
+                    WHERE date NOT LIKE '____-__-__T__:__:__%'
+                      AND date NOT LIKE '____-__-__ __:__:__%'
+                    """
+                ).fetchone()[0]
+                or 0
+            )
+            cards = int(conn.execute("SELECT COUNT(*) FROM parsed_cards").fetchone()[0] or 0)
+            resources = int(conn.execute("SELECT COUNT(*) FROM resource_events").fetchone()[0] or 0)
+        return {
+            "raw_total": total,
+            "real_raw_total": int((real or [0])[0] or 0),
+            "invalid_date_total": invalid,
+            "parsed_cards": cards,
+            "resource_events": resources,
+            "first_message_time": (real or [None, "", ""])[1] or "",
+            "latest_message_time": (real or [None, "", ""])[2] or "",
+            "first_msg_id": int((real or [None, None, None, 0, 0])[3] or 0),
+            "latest_msg_id": int((real or [None, None, None, 0, 0])[4] or 0),
+        }
 
     def backfill_state_patches_if_empty(self) -> int:
         with self._connect() as conn:
@@ -2137,6 +2232,7 @@ class SQLiteStore:
             "source_name": source_name,
             "events": events,
             "event_summary": _resource_event_summary(events),
+            "diagnostics": _resource_event_diagnostics(events),
             "rows": [
                 {
                     "period": row[0],
@@ -2638,6 +2734,17 @@ class SQLiteStore:
             }
             for row in rows
         ]
+
+    def max_dungeon_card_seq(self) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT MAX(rowid)
+                FROM parsed_cards
+                WHERE channels_json LIKE '%"dungeon"%'
+                """
+            ).fetchone()
+        return int((row or [0])[0] or 0)
 
     def _recent_dungeon_card_rows(
         self,
@@ -3646,14 +3753,21 @@ def _resource_event_summary(events: list[dict]) -> list[dict]:
                 "basic_only": 0,
                 "extra_success": 0,
                 "total": 0,
+                "unknown_result": 0,
+                "empty_outcome": 0,
                 "success_rate": None,
             },
         )
         result = str(row.get("result") or "")
+        outcome = str(row.get("outcome") or "")
         count = int(row.get("event_count") or 0)
         item["total"] += count
+        if not outcome:
+            item["empty_outcome"] += count
         if result in item:
             item[result] += count
+        elif not result:
+            item["unknown_result"] += count
         else:
             item.setdefault("other", 0)
             item["other"] += count
@@ -3670,6 +3784,34 @@ def _resource_event_summary(events: list[dict]) -> list[dict]:
         ),
         reverse=True,
     )
+
+
+def _resource_event_diagnostics(events: list[dict]) -> dict:
+    unknown_sources: dict[str, int] = {}
+    empty_outcomes: dict[str, int] = {}
+    for row in events:
+        count = int(row.get("event_count") or 0)
+        if count <= 0:
+            continue
+        source_name = str(row.get("source_name") or "")
+        source_type = str(row.get("source_type") or "")
+        label = f"{source_type}|{source_name}"
+        if source_name.endswith("未知"):
+            unknown_sources[label] = unknown_sources.get(label, 0) + count
+        if not str(row.get("outcome") or ""):
+            empty_outcomes[label] = empty_outcomes.get(label, 0) + count
+    return {
+        "unknown_source_events": sum(unknown_sources.values()),
+        "empty_outcome_events": sum(empty_outcomes.values()),
+        "unknown_sources": [
+            {"source": key, "count": value}
+            for key, value in sorted(unknown_sources.items(), key=lambda item: (-item[1], item[0]))
+        ],
+        "empty_outcomes": [
+            {"source": key, "count": value}
+            for key, value in sorted(empty_outcomes.items(), key=lambda item: (-item[1], item[0]))
+        ],
+    }
 
 
 def _resource_coverage_kind(text: str) -> str:
