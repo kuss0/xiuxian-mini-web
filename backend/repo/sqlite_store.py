@@ -24,6 +24,7 @@ from backend.parsers.inventory import parse_inventory_snapshot
 from backend.parsers.resource_stats import infer_wild_strategy_from_command
 from backend.processors import MessagePipeline
 from backend.processors.message_filter import (
+    CURRENT_LEADER_MESSAGE_FILTER_VERSION,
     CURRENT_MESSAGE_FILTER_VERSION,
     DEFAULT_FOCUS_EXCLUDE_PATTERNS,
     DEFAULT_FOCUS_KEYWORDS,
@@ -746,6 +747,128 @@ class SQLiteStore:
                 return 0
         return self.reclassify_message_filters()
 
+    def reclassify_configured_leader_messages_if_needed(self) -> int:
+        """补会长 sender 规则历史消息,不触发全库过滤重算。"""
+        stored_version = self._stored_int_setting("leader_message_filter_version")
+        if stored_version >= CURRENT_LEADER_MESSAGE_FILTER_VERSION:
+            return 0
+        updated = self.reclassify_configured_leader_messages()
+        self.save_settings({"leader_message_filter_version": CURRENT_LEADER_MESSAGE_FILTER_VERSION})
+        return updated
+
+    def reclassify_configured_leader_messages(self) -> int:
+        """只重算配置会长 sender 的历史消息过滤频道。"""
+        settings = self.get_settings()
+        leader_ids = []
+        for item in settings.get("leader_sender_ids") or []:
+            try:
+                leader_ids.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        leader_ids = sorted(set(leader_ids))
+        if not leader_ids:
+            self.save_settings({"leader_message_filter_version": CURRENT_LEADER_MESSAGE_FILTER_VERSION})
+            return 0
+        my_identity_ids = self._collect_my_identities()
+        topic_id = self._get_target_topic_id()
+        placeholders = ",".join("?" for _ in leader_ids)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT pc.rowid, pc.payload_json,
+                       rm.id, rm.chat_id, rm.msg_id, rm.text, rm.source, rm.date,
+                       rm.sender_id, rm.reply_to_msg_id, rm.top_msg_id,
+                       rm.mentions_json, rm.sender_is_bot,
+                       rm.edited_at, rm.deleted_at, rm.media_kind, rm.media_meta_json
+                FROM parsed_cards pc
+                JOIN raw_messages rm ON rm.id = pc.raw_message_id
+                WHERE rm.sender_id IN ({placeholders})
+                   OR pc.payload_json LIKE '%"本人上号"%'
+                ORDER BY pc.rowid ASC
+                """,
+                leader_ids,
+            ).fetchall()
+            updates = []
+            for row in rows:
+                rowid = int(row[0])
+                card = ParsedCard.from_api(json.loads(row[1]))
+                event = RawMessageEvent(
+                    id=row[2],
+                    chat_id=int(row[3]),
+                    msg_id=int(row[4]),
+                    text=row[5] or "",
+                    source=row[6] or "",
+                    date=row[7] or "",
+                    sender_id=row[8],
+                    reply_to_msg_id=row[9],
+                    top_msg_id=row[10],
+                    mentions=tuple(json.loads(row[11] or "[]")),
+                    sender_is_bot=bool(row[12]),
+                    edited_at=row[13],
+                    deleted_at=row[14],
+                    media_kind=row[15],
+                    media_meta=(json.loads(row[16]) if row[16] else None),
+                )
+                clean_reply = _clean_reply_to(event, topic_id)
+                parent = self._lookup_parent_event(int(event.chat_id), int(clean_reply)) if clean_reply else None
+                base_card = replace(
+                    card,
+                    channels=tuple(
+                        channel for channel in card.channels
+                        if channel not in {"focus", "leader", "archive"}
+                    ),
+                    tags=tuple(
+                        tag for tag in card.tags
+                        if tag not in {
+                            "会长",
+                            "本人上号",
+                            "会长上号",
+                            "被@",
+                            "归档",
+                            "回复我",
+                            "回复别人",
+                            "提到别人",
+                            "我发出",
+                        }
+                        and not str(tag).startswith("关键词:")
+                        and not str(tag).startswith("重点排除:")
+                        and not str(tag).startswith("重点静音:")
+                    ),
+                )
+                filtered = enrich_filter_channels(
+                    base_card,
+                    event,
+                    settings,
+                    is_game_bot_sender=self._is_game_bot_sender,
+                    parent_event=parent,
+                    clean_reply_to_msg_id=clean_reply,
+                    my_identity_ids=my_identity_ids,
+                )
+                updated_card = replace(
+                    card,
+                    channels=filtered.channels,
+                    tags=filtered.tags,
+                    filter_reasons=filtered.reasons,
+                    reply_to_msg_id=clean_reply if card.reply_to_msg_id is None else card.reply_to_msg_id,
+                )
+                if updated_card.channels != card.channels or updated_card.tags != card.tags:
+                    updates.append((
+                        updated_card.primary_channel,
+                        json.dumps(list(updated_card.channels), ensure_ascii=False),
+                        json.dumps(updated_card.to_api(), ensure_ascii=False),
+                        rowid,
+                    ))
+            if updates:
+                conn.executemany(
+                    """
+                    UPDATE parsed_cards
+                    SET primary_channel=?, channels_json=?, payload_json=?
+                    WHERE rowid=?
+                    """,
+                    updates,
+                )
+        return len(updates)
+
     def reclassify_message_filters(self) -> int:
         """只重算 focus/leader/archive 频道和过滤标签,不重跑 parser/状态机。"""
         settings = self.get_settings()
@@ -799,6 +922,7 @@ class SQLiteStore:
                         tag for tag in card.tags
                         if tag not in {
                             "会长",
+                            "本人上号",
                             "会长上号",
                             "被@",
                             "归档",
@@ -1339,6 +1463,7 @@ class SQLiteStore:
                         tag for tag in card.tags
                         if tag not in {
                             "会长",
+                            "本人上号",
                             "会长上号",
                             "被@",
                             "归档",
@@ -1679,6 +1804,7 @@ class SQLiteStore:
             "archive_dot_commands": True,
             "archive_bot_replies": True,
             "message_filter_version": CURRENT_MESSAGE_FILTER_VERSION,
+            "leader_message_filter_version": CURRENT_LEADER_MESSAGE_FILTER_VERSION,
             "notify_enabled": False,
             "notify_tg_bot_token": "",
             "notify_tg_chat_id": "",
@@ -1699,6 +1825,22 @@ class SQLiteStore:
             defaults.get("focus_exclude_patterns"),
         )
         return defaults
+
+    def _stored_int_setting(self, key: str) -> int:
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT value_json FROM settings WHERE key=?",
+                    (str(key),),
+                ).fetchone()
+        except Exception:
+            return 0
+        if not row:
+            return 0
+        try:
+            return int(json.loads(row[0]))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return 0
 
     def ensure_default_settings(self) -> dict:
         """对照用户的「预设一下群聊/话题/游戏 bot」要求:
@@ -3314,6 +3456,7 @@ def _normalize_settings(payload: dict) -> dict:
         "archive_dot_commands": bool_value("archive_dot_commands"),
         "archive_bot_replies": bool_value("archive_bot_replies"),
         "message_filter_version": CURRENT_MESSAGE_FILTER_VERSION,
+        "leader_message_filter_version": CURRENT_LEADER_MESSAGE_FILTER_VERSION,
         "notify_enabled": bool_value("notify_enabled"),
         "notify_tg_bot_token": text("notify_tg_bot_token"),
         "notify_tg_chat_id": text("notify_tg_chat_id"),

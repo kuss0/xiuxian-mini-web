@@ -153,6 +153,9 @@ class MiniWebServer:
             filter_migrated = sqlite_store.rebuild_parsed_cards_if_filter_outdated()
             if filter_migrated:
                 print(f"[mini-web] 消息过滤频道迁移: 重分流 {filter_migrated} 条历史卡片")
+            leader_migrated = sqlite_store.reclassify_configured_leader_messages_if_needed()
+            if leader_migrated:
+                print(f"[mini-web] 会长频道迁移: 重分流 {leader_migrated} 条历史卡片")
             backfilled = sqlite_store.backfill_module_states_if_empty()
             if backfilled:
                 print(f"[mini-web] 状态机历史 backfill: 重放 {backfilled} 条 raw_messages")

@@ -5,7 +5,7 @@ from .models import Channel
 
 CHANNELS = [
     Channel("focus", "重点", "被 @、会长消息、关键事件和需要人工处理的消息"),
-    Channel("leader", "会长", "会长 sender 与确认天尊 ID 的非回复普通发言"),
+    Channel("leader", "会长", "会长 sender 的非点命令发言与确认天尊 ID 的非回复普通发言"),
     Channel("world", "世界", "普通玩家聊天和公共发言"),
     Channel("system", "系统", "游戏公告、全服事件和 bot 回复"),
     Channel("mine", "我的", "当前角色相关消息"),

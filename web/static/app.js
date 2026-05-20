@@ -466,7 +466,7 @@ function openFilterSettingsModal() {
     body: `
       <section class="modal-section">
         <h4>重点流规则</h4>
-        <p class="muted">首页默认只看重点流。自己的发送一定显示;点命令和格式化天尊回复会进入归档;只有会长 sender ID 与已确认游戏 Bot/天尊 ID 的非回复普通发言会进入会长频道。</p>
+        <p class="muted">首页默认只看重点流。自己的发送一定显示;点命令和格式化天尊回复会进入归档;会长 sender ID 的非点命令发言会全部进入会长频道,已确认游戏 Bot/天尊 ID 仍只收非回复普通发言。</p>
         <form id="filterSettingsForm" class="settings-form">
           <label class="stacked-field">
             <span>我的 @ 名称</span>

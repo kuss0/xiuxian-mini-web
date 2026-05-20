@@ -7,6 +7,7 @@ from typing import Callable, Iterable
 from backend.domain.models import ParsedCard, RawMessageEvent
 
 CURRENT_MESSAGE_FILTER_VERSION = 10
+CURRENT_LEADER_MESSAGE_FILTER_VERSION = 2
 
 
 DEFAULT_FOCUS_KEYWORDS = (
@@ -156,10 +157,7 @@ def enrich_filter_channels(
         leader_sender_ids=_int_list_setting(settings, "leader_sender_ids"),
         leader_source_names=_list_setting(settings, "leader_source_names"),
     )
-    configured_leader = configured_leader_sender and is_plain_leader_message(
-        text,
-        has_real_reply=has_real_reply,
-    )
+    configured_leader = configured_leader_sender and not dot_command
     tianzun_plain_leader = is_plain_tianzun_leader_message(
         event,
         text,
@@ -217,6 +215,8 @@ def enrich_filter_channels(
         _append_unique(channels, "leader")
         _append_unique(tags, "会长")
         _append_unique(reasons, "会长/情报源普通发言")
+    if configured_leader:
+        _append_unique(tags, "本人上号")
     if tianzun_plain_leader:
         _append_unique(tags, "会长上号")
     if mine:

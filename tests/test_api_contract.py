@@ -412,6 +412,45 @@ def test_message_filter_promotes_plain_tianzun_speech_to_leader():
         settings,
         is_game_bot_sender=lambda _sid: False,
     )
+    configured_leader_reply = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="leader1-reply",
+            chat_id=1,
+            msg_id=36,
+            text="这个机制先按我刚才说的来",
+            source="嬴驷",
+            date="",
+            sender_id=2049298748,
+            reply_to_msg_id=35,
+        ),
+        settings,
+        is_game_bot_sender=lambda _sid: False,
+        parent_event=RawMessageEvent(
+            id="leader-parent",
+            chat_id=1,
+            msg_id=35,
+            text="前面那条机制说明",
+            source="普通玩家",
+            date="",
+            sender_id=111,
+        ),
+    )
+    configured_leader_media = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="leader1-media",
+            chat_id=1,
+            msg_id=49,
+            text="",
+            source="嬴驷",
+            date="",
+            sender_id=2049298748,
+            media_kind="photo",
+        ),
+        settings,
+        is_game_bot_sender=lambda _sid: False,
+    )
     configured_leader_command = enrich_filter_channels(
         base,
         RawMessageEvent(
@@ -617,6 +656,12 @@ def test_message_filter_promotes_plain_tianzun_speech_to_leader():
     assert "leader" not in source_spoof_plain.channels
     assert "会长上号" not in source_spoof_plain.tags
     assert "leader" in configured_leader.channels
+    assert "本人上号" in configured_leader.tags
+    assert "leader" in configured_leader_reply.channels
+    assert "focus" in configured_leader_reply.channels
+    assert "本人上号" in configured_leader_reply.tags
+    assert "leader" in configured_leader_media.channels
+    assert "本人上号" in configured_leader_media.tags
     assert "leader" not in configured_leader_command.channels
     assert "archive" in configured_leader_command.channels
     assert "leader" not in source_name_only.channels
