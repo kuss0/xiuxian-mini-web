@@ -69,7 +69,30 @@ def test_resource_coverage_reports_parsed_and_missing_candidates(tmp_path):
     assert payload["scanned"] == 2
     assert payload["parsed"] == 1
     assert payload["missing"] == 1
+    assert payload["ignored"] == 0
     assert payload["missing_samples"][0]["kind"] == "虚天殿·求稳"
+
+
+def test_resource_coverage_ignores_non_settlement_noise(tmp_path):
+    store = SQLiteStore(tmp_path / "state.db")
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:150",
+            chat_id=-1,
+            msg_id=150,
+            text="【野外历练】\n@bakaaoaoao 选择【谨慎】策略，正向荒野深处行去...",
+            source="韩天尊",
+            date="2026-05-15T12:03:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
+
+    payload = MiniWebServer(store=store).resource_coverage_payload(limit=50)
+
+    assert payload["candidate_rows"] == 1
+    assert payload["scanned"] == 0
+    assert payload["ignored"] == 1
 
 
 def test_reparse_missing_resource_records_backfills_candidates(tmp_path):

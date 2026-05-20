@@ -2500,6 +2500,73 @@ class SQLiteStore:
                 break
         return best
 
+    def find_latest_dungeon_open_context(
+        self,
+        dungeon_name: str,
+        *,
+        chat_id: int | None = None,
+        before_seq: int | None = None,
+    ) -> dict:
+        dungeon_name = str(dungeon_name or "").strip()
+        if not dungeon_name:
+            return {}
+        params: list[object] = [f"%{dungeon_name}%", '%"副本ID"%']
+        where = ["payload_json LIKE ?", "payload_json LIKE ?"]
+        if chat_id is not None:
+            try:
+                where.append("payload_json LIKE ?")
+                params.append(f'%"chat_id": {int(chat_id)}%')
+            except (TypeError, ValueError):
+                pass
+        if before_seq is not None:
+            try:
+                before_seq_int = int(before_seq)
+            except (TypeError, ValueError):
+                before_seq_int = 0
+            if before_seq_int > 0:
+                where.append("rowid <= ?")
+                params.append(before_seq_int)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT rowid, payload_json
+                FROM parsed_cards
+                WHERE {" AND ".join(where)}
+                ORDER BY rowid DESC
+                LIMIT 200
+                """,
+                params,
+            ).fetchall()
+        for rowid, payload in rows:
+            try:
+                card = ParsedCard.from_api(json.loads(payload or "{}"))
+            except Exception:
+                continue
+            fields = card.fields or {}
+            if chat_id is not None and card.chat_id is not None and int(card.chat_id) != int(chat_id):
+                continue
+            search_text = f"{card.title or ''}\n{card.raw or ''}"
+            if str(fields.get("副本名") or "").strip() != dungeon_name and dungeon_name not in search_text:
+                continue
+            dungeon_id = str(fields.get("副本ID") or "").strip()
+            if not dungeon_id:
+                continue
+            title = str(card.title or "")
+            status = str(fields.get("状态") or "")
+            if not title.endswith("开启") and "可加入" not in status:
+                continue
+            return {
+                "seq": int(rowid),
+                "message_id": card.id,
+                "dungeon_id": dungeon_id,
+                "dungeon_name": dungeon_name,
+                "opened_by": str(fields.get("开门人") or "").strip(),
+                "capacity": str(fields.get("人数上限") or "").strip(),
+                "oracle": str(fields.get("卦象") or "").strip(),
+                "advice": str(fields.get("行运建议") or "").strip(),
+            }
+        return {}
+
     def resource_coverage(self, *, limit: int = 5000) -> dict:
         try:
             limit = int(limit or 5000)
@@ -2537,6 +2604,7 @@ class SQLiteStore:
             } if candidate_ids else set()
         summary: dict[str, dict[str, object]] = {}
         missing_samples: list[dict] = []
+        candidate_rows = len(rows)
         scanned = 0
         parsed = 0
         for row in rows:
@@ -2572,9 +2640,11 @@ class SQLiteStore:
         return {
             "ok": True,
             "limit": limit,
+            "candidate_rows": candidate_rows,
             "scanned": scanned,
             "parsed": parsed,
             "missing": scanned - parsed,
+            "ignored": candidate_rows - scanned,
             "rows": coverage_rows,
             "missing_samples": missing_samples,
             "notes": [
@@ -2622,8 +2692,17 @@ class SQLiteStore:
                 (limit,),
             ).fetchall()
         if not rows:
-            return {"ok": True, "scanned": 0, "reparsed_events": 0, "reparsed_deltas": 0, "still_missing": 0}
+            return {
+                "ok": True,
+                "candidate_rows": 0,
+                "scanned": 0,
+                "skipped": 0,
+                "reparsed_events": 0,
+                "reparsed_deltas": 0,
+                "still_missing": 0,
+            }
         registry = build_parser_registry()
+        candidate_rows = len(rows)
         scanned = 0
         event_count = 0
         delta_count = 0
@@ -2674,7 +2753,9 @@ class SQLiteStore:
                 delta_count += len(output.resource_deltas)
         return {
             "ok": True,
+            "candidate_rows": candidate_rows,
             "scanned": scanned,
+            "skipped": candidate_rows - scanned,
             "reparsed_events": event_count,
             "reparsed_deltas": delta_count,
             "still_missing": still_missing,

@@ -2768,6 +2768,115 @@ def test_dungeon_status_hydrates_join_only_room_from_open_announcement(tmp_path)
     assert summary["context_source"] == "open_lookup"
 
 
+def test_dungeon_status_links_no_id_progress_to_recent_open_room(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(RawMessageEvent(
+        id="open-701",
+        chat_id=-1,
+        msg_id=10,
+        text="""【虚天殿已开启】
+@a 消耗了【虚天残图】，开启了前往虚天殿的传送门！
+副本ID: 701
+其他道友可使用 .加入副本 701 加入队伍！(5人满)""",
+        source="韩天尊",
+        date="2026-05-15T00:00:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="progress-701",
+        chat_id=-1,
+        msg_id=11,
+        text="队伍已进入虚天殿，前殿禁制隐隐发光。",
+        source="韩天尊",
+        date="2026-05-15T00:01:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="open-702",
+        chat_id=-1,
+        msg_id=20,
+        text="""【虚天殿已开启】
+@b 消耗了【虚天残图】，开启了前往虚天殿的传送门！
+副本ID: 702
+其他道友可使用 .加入副本 702 加入队伍！(5人满)""",
+        source="韩天尊",
+        date="2026-05-15T01:00:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="progress-702",
+        chat_id=-1,
+        msg_id=21,
+        text="队伍已进入虚天殿，鼎前灵压骤然升起。",
+        source="韩天尊",
+        date="2026-05-15T01:01:00+00:00",
+        sender_id=7900199668,
+    ))
+
+    payload = MiniWebServer(store=store).dungeon_status_payload(limit=10)
+    by_id = {item["dungeon_id"]: item for item in payload["summaries"] if item["dungeon_id"]}
+
+    assert {message["id"] for message in by_id["701"]["messages"]} == {"open-701", "progress-701"}
+    assert {message["id"] for message in by_id["702"]["messages"]} == {"open-702", "progress-702"}
+    assert all(not item["key"].startswith("name:虚天殿") for item in payload["summaries"])
+
+
+def test_dungeon_status_lookup_links_progress_when_open_outside_window(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(RawMessageEvent(
+        id="open-703",
+        chat_id=-1,
+        msg_id=30,
+        text="""【虚天殿已开启】
+@c 消耗了【虚天残图】，开启了前往虚天殿的传送门！
+副本ID: 703
+其他道友可使用 .加入副本 703 加入队伍！(5人满)""",
+        source="韩天尊",
+        date="2026-05-15T02:00:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="progress-703",
+        chat_id=-1,
+        msg_id=31,
+        text="队伍已进入虚天殿，卦象验阵正在展开。",
+        source="韩天尊",
+        date="2026-05-15T02:05:00+00:00",
+        sender_id=7900199668,
+    ))
+
+    payload = MiniWebServer(store=store).dungeon_status_payload(limit=1)
+    summary = payload["summaries"][0]
+
+    assert summary["key"] == "id:703"
+    assert summary["dungeon_id"] == "703"
+    assert summary["context_source"] == "open_lookup"
+    assert summary["open_message_id"] == "open-703"
+
+
+def test_dungeon_status_payload_can_limit_visible_summaries(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    for idx in range(3):
+        room_id = 800 + idx
+        store.ingest_event(RawMessageEvent(
+            id=f"open-{room_id}",
+            chat_id=-1,
+            msg_id=room_id,
+            text=f"""【虚天殿已开启】
+@u{idx} 消耗了【虚天残图】，开启了前往虚天殿的传送门！
+副本ID: {room_id}
+其他道友可使用 .加入副本 {room_id} 加入队伍！(5人满)""",
+            source="韩天尊",
+            date=f"2026-05-15T0{idx}:00:00+00:00",
+            sender_id=7900199668,
+        ))
+
+    payload = MiniWebServer(store=store).dungeon_status_payload(limit=10, summary_limit=2)
+
+    assert payload["total_summaries"] == 3
+    assert len(payload["summaries"]) == 2
+
+
 def test_dungeon_status_route_is_wired():
     from backend.app import GET_ROUTES
     assert "/api/dungeon-status" in GET_ROUTES

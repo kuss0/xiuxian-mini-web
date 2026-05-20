@@ -2246,6 +2246,10 @@ pre {
   width: min(920px, 100%);
 }
 
+.dungeon-status-filters {
+  margin-bottom: 8px;
+}
+
 .dungeon-status-card {
   display: grid;
   gap: 10px;

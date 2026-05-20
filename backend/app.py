@@ -294,7 +294,11 @@ def _get_dungeon_status(request: MiniWebHandler, query: dict) -> dict:
         limit = int((query.get("limit") or ["500"])[0])
     except (TypeError, ValueError):
         limit = 500
-    return _app(request).dungeon_status_payload(limit=limit)
+    try:
+        summary_limit = int((query.get("summary_limit") or ["80"])[0])
+    except (TypeError, ValueError):
+        summary_limit = 80
+    return _app(request).dungeon_status_payload(limit=limit, summary_limit=summary_limit)
 
 
 def _get_inventory(request: MiniWebHandler, query: dict) -> dict:

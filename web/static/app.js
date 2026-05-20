@@ -750,6 +750,7 @@ function renderFilterDiagnostics(payload) {
             <small>${escapeHtml((item.channels || []).join("/"))}｜${escapeHtml((item.reasons || []).join("、") || "无理由")}</small>
             <span>${escapeHtml(clipGraphemes(item.summary || item.title || "", 70))}</span>
             <em>
+              ${item.id ? `<button type="button" data-filter-jump-id="${escapeAttr(String(item.id))}">定位</button>` : ""}
               ${Number(item.sender_id || 0) ? `<button type="button" data-filter-mute-sender="${escapeAttr(String(item.sender_id))}">静音 sender</button>` : ""}
               ${(item.summary || item.title) ? `<button type="button" data-filter-exclude-text="${escapeAttr(clipGraphemes(item.summary || item.title || "", 36))}">排除这类短语</button>` : ""}
             </em>
@@ -787,6 +788,18 @@ function bindFilterDiagnosticsActions({ diagnosticsBox, excludeDraft, excludeTex
         append: true,
         setStatus,
       });
+    });
+  });
+  diagnosticsBox.querySelectorAll("[data-filter-jump-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = String(button.dataset.filterJumpId || "");
+      if (!id) return;
+      let target = state.messages.find((message) => message.id === id);
+      if (!target) target = await fetchMessageById(id);
+      if (target) {
+        closeModal();
+        jumpToMessage(target);
+      }
     });
   });
 }
@@ -985,7 +998,7 @@ async function reparseResourceCoverage(dialog) {
   try {
     const payload = await postJson("/api/resource-coverage/reparse", { limit: 5000 });
     if (!payload.ok) throw new Error(payload.error || "补解析失败");
-    const text = `补解析完成：扫描 ${payload.scanned || 0} 条，写入事件 ${payload.reparsed_events || 0}，流水 ${payload.reparsed_deltas || 0}，仍未识别 ${payload.still_missing || 0}`;
+    const text = `补解析完成：有效 ${payload.scanned || 0} 条，跳过噪音 ${payload.skipped || 0} 条，写入事件 ${payload.reparsed_events || 0}，流水 ${payload.reparsed_deltas || 0}，仍未识别 ${payload.still_missing || 0}`;
     setResourceStatsStatus(dialog, payload.still_missing ? "warn" : "ok", text);
     await refreshResourceCoverage(dialog);
   } finally {
@@ -1009,7 +1022,7 @@ async function refreshResourceCoverage(dialog) {
     setResourceStatsStatus(
       dialog,
       payload.missing ? "warn" : "ok",
-      `覆盖诊断：扫描 ${payload.scanned || 0} 条，已解析 ${payload.parsed || 0} 条，疑似漏 ${payload.missing || 0} 条。`
+      `覆盖诊断：有效 ${payload.scanned || 0} 条，已解析 ${payload.parsed || 0} 条，疑似漏 ${payload.missing || 0} 条，已排除噪音 ${payload.ignored || 0} 条。`
     );
   } finally {
     if (button) button.disabled = false;
@@ -1094,7 +1107,7 @@ function renderResourceCoverage(payload) {
     return '<p class="empty inline">最近没有命中资源统计候选文案。</p>';
   }
   return `
-    <div class="resource-stats-subtitle">覆盖诊断 · 最近 ${escapeHtml(formatNumber(payload.scanned || 0))} 条候选</div>
+    <div class="resource-stats-subtitle">覆盖诊断 · 有效 ${escapeHtml(formatNumber(payload.scanned || 0))} 条 / 原始 ${escapeHtml(formatNumber(payload.candidate_rows || payload.scanned || 0))} 条</div>
     <table class="resource-stats-table">
       <thead>
         <tr>
@@ -1390,7 +1403,12 @@ async function openDungeonStatusModal() {
     body: `
       <section class="modal-section">
         <h4>近期副本汇总</h4>
-        <p class="muted">只汇总消息箱里已经采集到的副本卡片，不维护独立状态机，不自动加入。发送 .加入副本 后仍要等天尊回复成功/失败。</p>
+        <div class="quick-filters dungeon-status-filters">
+          <button type="button" class="quick-filter-chip active all" data-dungeon-status-filter="all">全部</button>
+          <button type="button" class="quick-filter-chip" data-dungeon-status-filter="live">活跃</button>
+          <button type="button" class="quick-filter-chip" data-dungeon-status-filter="open">可加入</button>
+          <button type="button" class="quick-filter-chip" data-dungeon-status-filter="done">结束</button>
+        </div>
         <p class="modal-status-line info" id="dungeonStatusLine">正在读取最近副本消息…</p>
       </section>
       <section class="modal-section">
@@ -1417,6 +1435,13 @@ function bindDungeonStatusModal(dialog) {
       setDungeonStatusLine(dialog, "error", error.message || "刷新失败");
     });
   });
+  dialog.querySelectorAll("[data-dungeon-status-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      dialog.querySelectorAll("[data-dungeon-status-filter]").forEach((item) => item.classList.remove("active"));
+      button.classList.add("active");
+      renderDungeonStatusModal(dialog, dialog._dungeonSummaries || [], dialog._dungeonRawCount || 0, dialog._dungeonTotalCount || 0);
+    });
+  });
 }
 
 async function refreshDungeonStatusModal(dialog) {
@@ -1428,9 +1453,12 @@ async function refreshDungeonStatusModal(dialog) {
   if (summary) summary.innerHTML = "";
   setDungeonStatusLine(dialog, "info", "正在读取最近副本消息…");
   try {
-    const payload = await fetchJson("/api/dungeon-status?limit=500");
+    const payload = await fetchJson("/api/dungeon-status?limit=300&summary_limit=80");
     const summaries = (payload.summaries || []).map(normalizeDungeonStatusSummary);
-    renderDungeonStatusModal(dialog, summaries, payload.raw_count || 0);
+    dialog._dungeonSummaries = summaries;
+    dialog._dungeonRawCount = payload.raw_count || 0;
+    dialog._dungeonTotalCount = payload.total_summaries || summaries.length;
+    renderDungeonStatusModal(dialog, summaries, payload.raw_count || 0, payload.total_summaries || summaries.length);
   } finally {
     if (refreshButton) refreshButton.disabled = false;
   }
@@ -1461,6 +1489,7 @@ function normalizeDungeonStatusSummary(item) {
     strategy: item.strategy || "",
     silenceOrder: item.silence_order || "",
     contextSource: item.context_source || "",
+    messageCount: Number(item.message_count || messages.length || 0),
     joinSuccess: item.join_success || [],
     failures: item.failures || [],
     actions: item.actions || [],
@@ -1469,9 +1498,11 @@ function normalizeDungeonStatusSummary(item) {
   };
 }
 
-function renderDungeonStatusModal(dialog, summaries, rawCount) {
+function renderDungeonStatusModal(dialog, summaries, rawCount, totalCount = summaries.length) {
   const list = dialog.querySelector("#dungeonStatusList");
   const summary = dialog.querySelector("#dungeonStatusSummary");
+  const filter = dialog.querySelector("[data-dungeon-status-filter].active")?.dataset.dungeonStatusFilter || "all";
+  const visible = filterDungeonStatusSummaries(summaries, filter);
   const openCount = summaries.filter((item) => item.statusKind === "open" || item.statusKind === "choice").length;
   const closedCount = summaries.filter((item) => item.statusKind === "closed" || item.statusKind === "failed").length;
   const actionCount = summaries.reduce((total, item) => total + item.actions.length, 0);
@@ -1485,7 +1516,7 @@ function renderDungeonStatusModal(dialog, summaries, rawCount) {
       <div class="resource-stat-card">
         <span>活跃副本</span>
         <strong>${escapeHtml(formatNumber(openCount))}</strong>
-        <small>可加入 / 进行中 / 需要抉择</small>
+        <small>可加入 / 需要抉择</small>
       </div>
       <div class="resource-stat-card">
         <span>可用动作</span>
@@ -1504,9 +1535,21 @@ function renderDungeonStatusModal(dialog, summaries, rawCount) {
     list.innerHTML = '<p class="empty inline">最近没有采集到副本消息。先确认 listener 正在采集，或去「日志」里看全部消息。</p>';
     return;
   }
-  list.innerHTML = summaries.map(renderDungeonStatusCard).join("");
-  bindDungeonStatusCards(list, summaries);
-  setDungeonStatusLine(dialog, "ok", `已汇总 ${summaries.length} 个近期副本线索。`);
+  if (!visible.length) {
+    list.innerHTML = '<p class="empty inline">当前筛选下没有副本线索。</p>';
+    setDungeonStatusLine(dialog, "ok", `已汇总 ${summaries.length}/${totalCount} 个近期副本线索。`);
+    return;
+  }
+  list.innerHTML = visible.map(renderDungeonStatusCard).join("");
+  bindDungeonStatusCards(list, visible);
+  setDungeonStatusLine(dialog, "ok", `已显示 ${visible.length} 个，接口返回 ${summaries.length}/${totalCount} 个近期副本线索。`);
+}
+
+function filterDungeonStatusSummaries(summaries, filter) {
+  if (filter === "live") return summaries.filter((item) => ["choice", "active", "open"].includes(item.statusKind));
+  if (filter === "open") return summaries.filter((item) => item.statusKind === "open");
+  if (filter === "done") return summaries.filter((item) => ["closed", "failed"].includes(item.statusKind));
+  return summaries;
 }
 
 function aggregateDungeonStatuses(messages) {
@@ -1656,6 +1699,7 @@ function dungeonStatusRank(kind) {
 }
 
 function renderDungeonStatusCard(summary) {
+  const contextText = dungeonContextLabel(summary.contextSource);
   const chips = [
     ["副本ID", summary.dungeonId ? `#${summary.dungeonId}` : ""],
     ["阶段", summary.latestStage],
@@ -1666,7 +1710,8 @@ function renderDungeonStatusCard(summary) {
     ["路线", summary.route],
     ["阵策", summary.strategy],
     ["静场令", summary.silenceOrder],
-    ["关联", summary.contextSource === "open_lookup" ? "已回查开门公告" : ""],
+    ["关联", contextText],
+    ["消息", summary.messageCount > summary.messages.length ? `${summary.messages.length}/${summary.messageCount}` : ""],
   ].filter(([, value]) => value);
   const latestId = summary.latestMessage?.id || "";
   const joins = summary.joinSuccess.length ? summary.joinSuccess.map((user) => `@${user}`).join("、") : "";
@@ -1705,17 +1750,18 @@ function renderDungeonStatusCard(summary) {
 
 function bindDungeonStatusCards(root, summaries) {
   const byKey = new Map(summaries.map((item) => [item.key, item]));
-  root.querySelectorAll("[data-dungeon-action-index]").forEach((button) => {
-    button.addEventListener("click", async () => {
+  root.onclick = async (event) => {
+    const button = event.target?.closest?.("button");
+    if (!button || !root.contains(button)) return;
+    if (button.dataset.dungeonActionIndex !== undefined) {
       const key = button.dataset.dungeonKey || "";
       const summary = byKey.get(key);
       const action = summary?.actions[Number(button.dataset.dungeonActionIndex || 0)];
       if (!action?.command) return;
       await copyCommandToClipboard(action.command, button);
-    });
-  });
-  root.querySelectorAll("[data-dungeon-jump]").forEach((button) => {
-    button.addEventListener("click", async () => {
+      return;
+    }
+    if (button.dataset.dungeonJump !== undefined) {
       const id = button.dataset.dungeonJump || "";
       if (!id) return;
       let target = state.messages.find((message) => message.id === id);
@@ -1724,8 +1770,16 @@ function bindDungeonStatusCards(root, summaries) {
         closeModal();
         jumpToMessage(target);
       }
-    });
-  });
+    }
+  };
+}
+
+function dungeonContextLabel(source) {
+  if (source === "open_lookup") return "回查开门";
+  if (source === "open_in_window") return "本窗开门";
+  if (source === "id_in_window" || source === "explicit_id") return "副本ID";
+  if (source === "time_segment") return "时间段";
+  return "";
 }
 
 function dungeonStatusPillClass(kind) {
