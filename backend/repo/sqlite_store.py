@@ -1815,6 +1815,9 @@ class SQLiteStore:
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
             snapshots = [_inventory_snapshot_row_to_api(row) for row in rows]
+            if not include_items:
+                for snapshot in snapshots:
+                    snapshot.pop("items", None)
             if include_items and snapshots:
                 ids = [int(item["id"]) for item in snapshots]
                 placeholders = ",".join("?" for _ in ids)

@@ -218,6 +218,7 @@ async function loadMessages({ incremental = false } = {}) {
   } else {
     params.set("limit", "200");
   }
+  params.set("compact", "1");
   const payload = await fetchJson(`/api/messages?${params.toString()}`);
   const incoming = payload.messages || [];
   const serverMax = Number(payload.max_seq || 0);
@@ -1760,8 +1761,12 @@ function bindInventoryModal(dialog) {
   dialog.querySelector("#inventoryRefresh")?.addEventListener("click", () => {
     refreshInventorySnapshots(dialog).catch((error) => setInventoryStatus(dialog, "error", error.message));
   });
-  dialog.querySelector("#inventoryOwnerSelect")?.addEventListener("change", () => renderInventoryItems(dialog));
-  dialog.querySelector("#inventorySearch")?.addEventListener("input", () => renderInventoryItems(dialog));
+  dialog.querySelector("#inventoryOwnerSelect")?.addEventListener("change", () => {
+    renderInventoryItems(dialog).catch((error) => setInventoryStatus(dialog, "error", error.message));
+  });
+  dialog.querySelector("#inventorySearch")?.addEventListener("input", () => {
+    renderInventoryItems(dialog).catch((error) => setInventoryStatus(dialog, "error", error.message));
+  });
   dialog.querySelector("#inventoryPlan")?.addEventListener("click", () => {
     planInventoryTransfer(dialog).catch((error) => setInventoryStatus(dialog, "error", error.message));
   });
@@ -1769,12 +1774,16 @@ function bindInventoryModal(dialog) {
 
 async function refreshInventorySnapshots(dialog) {
   setInventoryStatus(dialog, "info", "读取最近储物袋快照…");
-  const payload = await fetchJson("/api/inventory?latest_only=1&limit=200");
-  dialog._inventorySnapshots = payload.snapshots || [];
+  const payload = await fetchJson("/api/inventory?latest_only=1&limit=200&include_items=0");
+  dialog._inventorySnapshots = (payload.snapshots || []).map((snapshot) => ({
+    ...snapshot,
+    items: [],
+    items_loaded: false,
+  }));
   renderInventoryOwnerSelect(dialog);
-  renderInventoryItems(dialog);
   const count = dialog._inventorySnapshots.length;
   setInventoryStatus(dialog, count ? "ok" : "warn", count ? `已载入 ${count} 个角色的最近快照。` : "还没有储物袋快照。先用 .储物袋 让消息箱采到。");
+  await renderInventoryItems(dialog);
 }
 
 function renderInventoryOwnerSelect(dialog) {
@@ -1791,7 +1800,7 @@ function renderInventoryOwnerSelect(dialog) {
   }
 }
 
-function renderInventoryItems(dialog) {
+async function renderInventoryItems(dialog) {
   const owner = dialog.querySelector("#inventoryOwnerSelect")?.value || "";
   const search = (dialog.querySelector("#inventorySearch")?.value || "").trim();
   const snapshots = dialog._inventorySnapshots || [];
@@ -1807,6 +1816,11 @@ function renderInventoryItems(dialog) {
     if (snapshotBox) snapshotBox.innerHTML = '<p class="empty inline">暂无储物袋快照。</p>';
     if (itemBox) itemBox.innerHTML = "";
     return;
+  }
+  if (!snapshot.items_loaded) {
+    if (itemBox) itemBox.innerHTML = '<p class="empty inline">正在载入该角色物品…</p>';
+    await loadInventorySnapshotItems(dialog, snapshot.owner);
+    return renderInventoryItems(dialog);
   }
   if (snapshotBox) {
     snapshotBox.innerHTML = `
@@ -1857,6 +1871,26 @@ function renderInventoryItems(dialog) {
       if (pick && String(input.value || "").trim()) pick.checked = true;
     });
   });
+}
+
+async function loadInventorySnapshotItems(dialog, owner) {
+  const cleanOwner = String(owner || "").trim();
+  if (!cleanOwner) return null;
+  const params = new URLSearchParams({
+    latest_only: "1",
+    limit: "1",
+    owner: cleanOwner,
+    include_items: "1",
+  });
+  const payload = await fetchJson(`/api/inventory?${params.toString()}`);
+  const loaded = (payload.snapshots || [])[0] || null;
+  if (!loaded) return null;
+  dialog._inventorySnapshots = (dialog._inventorySnapshots || []).map((snapshot) => (
+    snapshot.owner === cleanOwner
+      ? { ...snapshot, ...loaded, items: loaded.items || [], items_loaded: true }
+      : snapshot
+  ));
+  return loaded;
 }
 
 async function planInventoryTransfer(dialog) {
@@ -2350,6 +2384,11 @@ async function fetchMessageById(id) {
     console.warn("[mini-web] fetchMessageById failed:", error);
     return null;
   }
+}
+
+async function ensureFullMessage(message) {
+  if (!message || !message.compact) return message;
+  return fetchMessageById(message.id);
 }
 
 function renderChannelFilters() {
@@ -2846,7 +2885,7 @@ function renderChatMessageNode(message) {
     state.detailMode = "message";
     state.selectedMessageId = message.id;
     renderMessages();
-    renderDetail();
+    await renderDetail();
   });
   return row;
 }
@@ -3040,11 +3079,20 @@ function sourceInitial(source, kind) {
   return firstGrapheme(clean).toUpperCase();
 }
 
-function renderDetail() {
+async function renderDetail() {
   const message = state.messages.find((item) => item.id === state.selectedMessageId);
   if (!message || !visibleMessages().some((item) => item.id === message.id)) {
     detailState.textContent = "未选择";
     detailPanel.innerHTML = '<p class="empty">从左边选择一条消息，可以看到 Telegram 原文与可用动作草稿。</p>';
+    return;
+  }
+  if (message.compact) {
+    detailState.textContent = "载入中";
+    detailPanel.innerHTML = '<p class="empty">正在载入 Telegram 原文…</p>';
+    const fullMessage = await ensureFullMessage(message);
+    if (fullMessage && !fullMessage.compact) {
+      await renderDetail();
+    }
     return;
   }
 

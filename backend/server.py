@@ -208,6 +208,7 @@ class MiniWebServer:
         limit: int = 0,
         target_id: str = "",
         mode: str = "",
+        compact: bool = False,
     ) -> dict:
         """对照 docs/architecture.md inbox 设计:
         - 空 since_seq → 取最近 limit 条(默认 200),前端初始化用
@@ -228,7 +229,7 @@ class MiniWebServer:
             if result is None:
                 return {"messages": [], "source": "sqlite", "max_seq": 0, "incremental": False}
             seq, card = result
-            payload = card.to_api()
+            payload = _message_card_payload(card, compact=False)
             payload["seq"] = seq
             return {
                 "messages": [payload],
@@ -281,7 +282,7 @@ class MiniWebServer:
         messages = []
         max_seq = since_seq
         for seq, card in page:
-            payload = card.to_api()
+            payload = _message_card_payload(card, compact=compact)
             payload["seq"] = seq
             messages.append(payload)
             if seq > max_seq:
@@ -623,6 +624,7 @@ class MiniWebServer:
         *,
         owner: str = "",
         latest_only: bool = True,
+        include_items: bool = True,
         limit: int = 80,
     ) -> dict:
         if not hasattr(self._store, "list_inventory_snapshots"):
@@ -630,7 +632,7 @@ class MiniWebServer:
         snapshots = self._store.list_inventory_snapshots(
             owner=owner,
             latest_only=latest_only,
-            include_items=True,
+            include_items=include_items,
             limit=limit,
         )
         return {
@@ -2237,6 +2239,18 @@ def normalize_channel_filters(
         seen.add(item)
         result.append(item)
     return result
+
+
+def _message_card_payload(card: ParsedCard, *, compact: bool = False) -> dict:
+    payload = card.to_api()
+    if not compact:
+        return payload
+    payload["compact"] = True
+    payload["raw"] = ""
+    payload["fields"] = {}
+    if payload.get("media_meta"):
+        payload["media_meta"] = {}
+    return payload
 
 
 def _fallback_filter_reasons(card: ParsedCard) -> list[str]:

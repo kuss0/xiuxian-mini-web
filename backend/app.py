@@ -214,6 +214,8 @@ def _get_messages(request: MiniWebHandler, query: dict) -> dict:
     limit = (query.get("limit") or ["0"])[0]
     target_id = (query.get("id") or query.get("target_id") or [""])[0]
     mode = (query.get("mode") or [""])[0]
+    compact_raw = str((query.get("compact") or ["0"])[0]).lower()
+    compact = compact_raw in {"1", "true", "yes"}
     return _app(request).messages_payload(
         channel,
         channels=channels,
@@ -222,6 +224,7 @@ def _get_messages(request: MiniWebHandler, query: dict) -> dict:
         limit=limit,
         target_id=target_id,
         mode=mode,
+        compact=compact,
     )
 
 
@@ -306,6 +309,8 @@ def _get_inventory(request: MiniWebHandler, query: dict) -> dict:
     owner = (query.get("owner") or [""])[0]
     latest_raw = str((query.get("latest_only") or ["1"])[0]).lower()
     latest_only = latest_raw not in {"0", "false", "no"}
+    include_items_raw = str((query.get("include_items") or ["1"])[0]).lower()
+    include_items = include_items_raw not in {"0", "false", "no"}
     try:
         limit = int((query.get("limit") or ["80"])[0])
     except (TypeError, ValueError):
@@ -313,6 +318,7 @@ def _get_inventory(request: MiniWebHandler, query: dict) -> dict:
     return _app(request).inventory_payload(
         owner=owner,
         latest_only=latest_only,
+        include_items=include_items,
         limit=limit,
     )
 

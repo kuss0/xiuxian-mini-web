@@ -1429,7 +1429,63 @@ def test_messages_payload_target_id_falls_back_to_chat_msg_for_outgoing_suffix(t
     assert payload["messages"][0]["raw"] == ".闯塔"
 
 
+def test_messages_payload_compact_omits_heavy_fields_but_target_stays_full(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:1",
+            chat_id=-1,
+            msg_id=1,
+            text="【试炼古塔 - 战报】\n" + "很长的战报\n" * 40,
+            source="韩天尊",
+            date="2026-05-15T00:00:00+00:00",
+            sender_is_bot=True,
+        )
+    )
+    server = MiniWebServer(store=store)
 
+    compact = server.messages_payload("all", compact=True, limit=20)["messages"][0]
+    full = server.messages_payload("all", target_id="tg:-1:1", compact=True)["messages"][0]
+
+    assert compact["compact"] is True
+    assert compact["raw"] == ""
+    assert compact["fields"] == {}
+    assert full.get("compact") is not True
+    assert "很长的战报" in full["raw"]
+
+
+def test_inventory_payload_can_omit_items_for_snapshot_list(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:90",
+            chat_id=-1,
+            msg_id=90,
+            text="""@seller 的储物袋
+
+材料:
+- 灵石 x 100
+- 阴凝之晶 x 2""",
+            source="韩天尊",
+            date="2026-05-15T10:00:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
+    server = MiniWebServer(store=store)
+
+    slim = server.inventory_payload(include_items=False)
+    detail = server.inventory_payload(owner="seller", include_items=True, limit=1)
+
+    assert slim["snapshots"][0]["owner"] == "seller"
+    assert "items" not in slim["snapshots"][0]
+    assert {(item["name"], item["amount"]) for item in detail["snapshots"][0]["items"]} == {
+        ("灵石", 100),
+        ("阴凝之晶", 2),
+    }
+
+
+def test_account_routes_are_wired():
     """GetSendAs / resolve-entity / batch identities / accounts delete 路由必须挂上,
     前端身份表单才有得用。"""
     from backend.app import GET_ROUTES, POST_ROUTES
