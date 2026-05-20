@@ -509,7 +509,8 @@ class MiniWebServer:
         summary_limit = max(1, min(summary_limit, 200))
         order = "recent" if str(order or "").strip() == "recent" else "priority"
         rows = self._dungeon_status_rows(limit=limit)
-        summaries = _aggregate_dungeon_status_rows(rows, context_finder=self._find_latest_dungeon_open_context, order=order)
+        context_finder = None if order == "recent" and summary_limit <= 3 else self._find_latest_dungeon_open_context
+        summaries = _aggregate_dungeon_status_rows(rows, context_finder=context_finder, order=order)
         self._hydrate_dungeon_summaries(summaries)
         if hasattr(self._store, "replace_dungeon_rooms"):
             try:
@@ -2258,6 +2259,12 @@ def _new_dungeon_summary(key: str, seq: int, card: ParsedCard) -> dict:
         "capacity": "",
         "oracle": "",
         "advice": "",
+        "route_verdict": "",
+        "advice_basis": "",
+        "advice_confidence": "",
+        "team_fit": "",
+        "positive_examples": [],
+        "negative_examples": [],
         "route": "",
         "strategy": "",
         "silence_order": "",
@@ -2293,12 +2300,29 @@ def _update_dungeon_summary(summary: dict, seq: int, card: ParsedCard) -> None:
         ("capacity", "人数上限"),
         ("oracle", "卦象"),
         ("advice", "行运建议"),
+        ("route_verdict", "路策判定"),
+        ("advice_basis", "建议依据"),
+        ("advice_confidence", "建议置信"),
+        ("team_fit", "队伍契合"),
         ("route", "路线"),
         ("strategy", "阵策"),
         ("silence_order", "静场令"),
     ):
         if not summary.get(target) and fields.get(source):
             summary[target] = str(fields.get(source) or "")
+
+    for target, source in (
+        ("positive_examples", "历史顺例"),
+        ("negative_examples", "历史反例"),
+    ):
+        if summary.get(target) or not fields.get(source):
+            continue
+        value = fields.get(source)
+        if isinstance(value, (list, tuple)):
+            summary[target] = [str(item) for item in value if str(item).strip()]
+        else:
+            text = str(value or "").strip()
+            summary[target] = [text] if text else []
 
     if title == "加入副本成功" or ("加入" in tags and "失败" not in tags):
         username = str(fields.get("username") or _first_username(raw) or "").strip().lstrip("@")

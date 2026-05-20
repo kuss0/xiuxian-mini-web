@@ -1502,6 +1502,12 @@ function normalizeDungeonStatusSummary(item) {
     capacity: item.capacity || "",
     oracle: item.oracle || "",
     advice: item.advice || "",
+    routeVerdict: item.route_verdict || "",
+    adviceBasis: item.advice_basis || "",
+    adviceConfidence: item.advice_confidence || "",
+    teamFit: item.team_fit || "",
+    positiveExamples: Array.isArray(item.positive_examples) ? item.positive_examples : [],
+    negativeExamples: Array.isArray(item.negative_examples) ? item.negative_examples : [],
     route: item.route || "",
     strategy: item.strategy || "",
     silenceOrder: item.silence_order || "",
@@ -1611,6 +1617,12 @@ function makeDungeonSummary(key, message) {
     capacity: "",
     oracle: "",
     advice: "",
+    routeVerdict: "",
+    adviceBasis: "",
+    adviceConfidence: "",
+    teamFit: "",
+    positiveExamples: [],
+    negativeExamples: [],
     route: "",
     strategy: "",
     silenceOrder: "",
@@ -1639,6 +1651,12 @@ function updateDungeonSummary(summary, message) {
   summary.capacity = summary.capacity || cleanText(fields["人数上限"]);
   summary.oracle = summary.oracle || cleanText(fields["卦象"]);
   summary.advice = summary.advice || cleanText(fields["行运建议"]);
+  summary.routeVerdict = summary.routeVerdict || cleanText(fields["路策判定"]);
+  summary.adviceBasis = summary.adviceBasis || cleanText(fields["建议依据"]);
+  summary.adviceConfidence = summary.adviceConfidence || cleanText(fields["建议置信"]);
+  summary.teamFit = summary.teamFit || cleanText(fields["队伍契合"]);
+  if (!summary.positiveExamples.length) summary.positiveExamples = normalizeDungeonExamples(fields["历史顺例"]);
+  if (!summary.negativeExamples.length) summary.negativeExamples = normalizeDungeonExamples(fields["历史反例"]);
   summary.route = summary.route || cleanText(fields["路线"]);
   summary.strategy = summary.strategy || cleanText(fields["阵策"]);
   summary.silenceOrder = summary.silenceOrder || cleanText(fields["静场令"]);
@@ -1717,15 +1735,22 @@ function dungeonStatusRank(kind) {
 
 function renderDungeonStatusCard(summary) {
   const contextText = dungeonContextLabel(summary.contextSource);
+  const verdictText = dungeonRouteVerdictLabel(summary);
   const chips = [
     ["副本ID", summary.dungeonId ? `#${summary.dungeonId}` : ""],
     ["阶段", summary.latestStage],
     ["开门人", summary.openedBy],
     ["人数", summary.capacity],
     ["卦象", summary.oracle],
+    ["顺逆", verdictText],
     ["建议", summary.advice],
+    ["依据", summary.adviceBasis],
+    ["置信", summary.adviceConfidence],
+    ["队伍契合", summary.teamFit],
     ["路线", summary.route],
     ["阵策", summary.strategy],
+    ["顺例", summary.positiveExamples.slice(0, 2).join("；")],
+    ["反例", summary.negativeExamples.slice(0, 2).join("；")],
     ["静场令", summary.silenceOrder],
     ["关联", contextText],
     ["消息", summary.messageCount > summary.messages.length ? `${summary.messages.length}/${summary.messageCount}` : ""],
@@ -1763,6 +1788,19 @@ function renderDungeonStatusCard(summary) {
       ${latestId ? `<button type="button" class="dungeon-status-open" data-dungeon-jump="${escapeAttr(latestId)}">查看最新消息</button>` : ""}
     </article>
   `;
+}
+
+function dungeonRouteVerdictLabel(summary) {
+  const verdict = cleanText(summary.routeVerdict);
+  if (verdict) return verdict;
+  if ((summary.dungeonName === "虚天殿" || summary.oracle) && summary.oracle) return "待验证";
+  return "";
+}
+
+function normalizeDungeonExamples(value) {
+  if (Array.isArray(value)) return value.map((item) => cleanText(item)).filter(Boolean);
+  const text = cleanText(value);
+  return text ? [text] : [];
 }
 
 function bindDungeonStatusCards(root, summaries) {

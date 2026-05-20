@@ -2929,6 +2929,56 @@ def test_dungeon_status_recent_order_prefers_latest_room(tmp_path):
     assert recent["summaries"][0]["dungeon_id"] == "901"
 
 
+def test_dungeon_status_exposes_xutian_verdict_and_advice(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(RawMessageEvent(
+        id="open-777",
+        chat_id=-1,
+        msg_id=777,
+        text="""【虚天殿已开启】
+@boxboxji 消耗了【虚天残图】，开启了前往虚天殿的传送门！
+副本ID: 777
+其他道友可使用 .加入副本 777 加入队伍！(5人满)""",
+        source="韩天尊",
+        date="2026-05-15T00:00:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="oracle-777",
+        chat_id=-1,
+        msg_id=778,
+        text="""【卦象验阵】
+【卦象词条】 兑泽上离火下 · 四爻转阵
+- 行运：后续道路与阵策同样受卦象牵引，但不会直示吉路与吉策。
+- 当前契合：顺卦 (阵骨 已立 | 主锋 2/2)""",
+        source="韩天尊",
+        date="2026-05-15T00:01:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="verdict-777",
+        chat_id=-1,
+        msg_id=779,
+        text="""【极寒冰魄】的光芒被成功压制！冰火炼心阵威力大减，你们通过了第二关的考验。
+阵策【稳扎稳打】额外稳住了队伍心气，第三关再获 +8% 士气。
+你们此轮路策顺合卦意，第三关开局士气额外 +5%。""",
+        source="韩天尊",
+        date="2026-05-15T00:02:00+00:00",
+        sender_id=7900199668,
+    ))
+
+    payload = MiniWebServer(store=store).dungeon_status_payload(limit=10, summary_limit=1, order="recent")
+    summary = payload["summaries"][0]
+
+    assert summary["dungeon_id"] == "777"
+    assert summary["oracle"] == "兑泽上离火下 · 四爻转阵"
+    assert summary["advice"] == "冰路 / 稳策"
+    assert summary["advice_confidence"] == "实测顺合"
+    assert summary["team_fit"].startswith("顺卦")
+    assert summary["route_verdict"] == "顺合"
+    assert summary["positive_examples"]
+
+
 def test_dungeon_status_route_is_wired():
     from backend.app import GET_ROUTES
     assert "/api/dungeon-status" in GET_ROUTES
