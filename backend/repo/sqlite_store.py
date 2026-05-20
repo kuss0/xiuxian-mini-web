@@ -3816,6 +3816,8 @@ def _resource_event_diagnostics(events: list[dict]) -> dict:
 
 def _resource_coverage_kind(text: str) -> str:
     text = str(text or "")
+    if "奖励一览" in text:
+        return ""
     if "【野外历练" in text:
         if "正向荒野深处行去" in text or "选择【" in text:
             return ""
@@ -3831,14 +3833,14 @@ def _resource_coverage_kind(text: str) -> str:
             return "虚天殿·求稳"
         return "副本战利品"
     if "【黄龙山大战" in text:
-        if "指令" in text or "奖励一览" in text or "获得" not in text:
+        if "指令" in text or "获得" not in text:
             return ""
         return "黄龙山"
     if "【登顶昆吾山" in text:
         if "最终收获" not in text:
             return ""
         return "昆吾山"
-    if "【坠魔谷" in text and "获得" in text:
+    if ("【坠魔谷·" in text or "【坠魔谷・" in text) and "获得" in text:
         return "坠魔谷"
     if "【逆天之举" in text and "风希" in text and "【战利品】" in text:
         return "风希"

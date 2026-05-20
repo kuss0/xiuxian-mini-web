@@ -87,12 +87,48 @@ def test_resource_coverage_ignores_non_settlement_noise(tmp_path):
             sender_is_bot=True,
         )
     )
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:151",
+            chat_id=-1,
+            msg_id=151,
+            text="【坠魔谷奖励一览】\n通关后可能获得 修为、贡献、养魂木 等奖励。",
+            source="韩天尊",
+            date="2026-05-15T12:04:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:152",
+            chat_id=-1,
+            msg_id=152,
+            text="【黄龙山大战·奖励一览】\n奖励一览包含若干可能获得的资源，并非本次结算。",
+            source="韩天尊",
+            date="2026-05-15T12:05:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:153",
+            chat_id=-1,
+            msg_id=153,
+            text="【闭关成功】\n你在神游之际误入血黑峡谷，醒来后获得【坠魔谷禁符】x1。",
+            source="韩天尊",
+            date="2026-05-15T12:06:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
 
     payload = MiniWebServer(store=store).resource_coverage_payload(limit=50)
 
-    assert payload["candidate_rows"] == 1
+    assert payload["candidate_rows"] == 4
     assert payload["scanned"] == 0
-    assert payload["ignored"] == 1
+    assert payload["ignored"] == 4
 
 
 def test_reparse_missing_resource_records_backfills_candidates(tmp_path):
