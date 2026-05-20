@@ -55,7 +55,7 @@ def test_resource_coverage_reports_parsed_and_missing_candidates(tmp_path):
             id="tg:-1:101",
             chat_id=-1,
             msg_id=101,
-            text="【战利品结算·求稳】\n队伍刚进入结算界面，但还没有获得行。",
+            text="【战利品结算·求稳】\n所有队员均获得 天道垂青。",
             source="韩天尊",
             date="2026-05-15T12:01:00+00:00",
             sender_id=7900199668,

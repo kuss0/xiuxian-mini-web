@@ -3379,16 +3379,26 @@ def _resource_event_summary(events: list[dict]) -> list[dict]:
 def _resource_coverage_kind(text: str) -> str:
     text = str(text or "")
     if "【野外历练" in text:
+        if "正向荒野深处行去" in text or "选择【" in text:
+            return ""
+        if not any(marker in text for marker in ("获得", "修为折损", "负伤", "NPC 历练失败", "山中灵机未复", "后再来")):
+            return ""
         return "野外历练"
     if "【战利品结算" in text and "血色试炼" not in text:
+        if not any(marker in text for marker in ("均获得", "每位队员获得", "所有队员", "额外获得", "获得 【", "获得了【")):
+            return ""
         if "夺鼎" in text:
             return "虚天殿·夺鼎"
         if "求稳" in text:
             return "虚天殿·求稳"
         return "副本战利品"
     if "【黄龙山大战" in text:
+        if "指令" in text or "奖励一览" in text or "获得" not in text:
+            return ""
         return "黄龙山"
     if "【登顶昆吾山" in text:
+        if "最终收获" not in text:
+            return ""
         return "昆吾山"
     if "【坠魔谷" in text and "获得" in text:
         return "坠魔谷"
@@ -3397,10 +3407,14 @@ def _resource_coverage_kind(text: str) -> str:
     if "【深度闭关总结" in text:
         return "深度闭关"
     if "【闭关成功" in text:
+        if "修为最终增加" not in text and "【奇遇】" not in text:
+            return ""
         return "闭关修炼"
     if "【灵果入腹" in text:
         return "灵树采摘"
     if "【温养器灵" in text:
+        if "消耗" not in text and "提升" not in text:
+            return ""
         return "温养器灵"
     if "【抚摸法宝" in text:
         return "抚摸法宝"
