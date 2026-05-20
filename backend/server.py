@@ -467,6 +467,16 @@ class MiniWebServer:
             return {"ok": False, "error": "store does not support resource coverage", "rows": []}
         return self._store.resource_coverage(limit=limit)
 
+    def resource_reparse_payload(self, payload: dict | None = None) -> dict:
+        payload = payload or {}
+        try:
+            limit = int(payload.get("limit") or 5000)
+        except (TypeError, ValueError):
+            limit = 5000
+        if not hasattr(self._store, "reparse_missing_resource_records"):
+            return {"ok": False, "error": "store does not support resource reparse"}
+        return self._store.reparse_missing_resource_records(limit=limit)
+
     def _dungeon_status_rows(self, *, limit: int = 500) -> list[tuple[int, ParsedCard]]:
         try:
             limit = int(limit or 500)
@@ -493,6 +503,7 @@ class MiniWebServer:
         limit = max(1, min(limit, 2000))
         rows = self._dungeon_status_rows(limit=limit)
         summaries = _aggregate_dungeon_status_rows(rows)
+        self._hydrate_dungeon_summaries(summaries)
         if hasattr(self._store, "replace_dungeon_rooms"):
             try:
                 self._store.replace_dungeon_rooms(summaries)
@@ -508,6 +519,36 @@ class MiniWebServer:
                 ".加入副本 只算请求/动作,必须等天尊回复成功或失败后才更新状态。",
             ],
         }
+
+    def _hydrate_dungeon_summaries(self, summaries: list[dict]) -> None:
+        finder = getattr(self._store, "find_dungeon_context_by_id", None)
+        if not callable(finder):
+            return
+        weak_names = {"", "副本", "加入副本成功", "加入副本失败", "副本房间解散"}
+        for summary in summaries:
+            dungeon_id = str(summary.get("dungeon_id") or "").strip()
+            if not dungeon_id:
+                continue
+            try:
+                context = finder(dungeon_id, before_seq=int(summary.get("latest_seq") or 0))
+            except TypeError:
+                context = finder(dungeon_id)
+            except Exception:
+                context = {}
+            if not context:
+                continue
+            if str(summary.get("dungeon_name") or "") in weak_names and context.get("dungeon_name"):
+                summary["dungeon_name"] = context["dungeon_name"]
+                summary["context_source"] = "open_lookup"
+            for target, source in (
+                ("opened_by", "opened_by"),
+                ("capacity", "capacity"),
+                ("oracle", "oracle"),
+                ("advice", "advice"),
+            ):
+                if not summary.get(target) and context.get(source):
+                    summary[target] = context[source]
+                    summary["context_source"] = "open_lookup"
 
     def inventory_payload(
         self,
@@ -688,7 +729,7 @@ class MiniWebServer:
         archive = 0
         leader = 0
         reason_counter: dict[str, int] = {}
-        focus_sender_counter: dict[str, int] = {}
+        focus_sender_counter: dict[tuple[int, str], dict] = {}
         samples: list[dict] = []
 
         for seq, card in rows:
@@ -707,8 +748,12 @@ class MiniWebServer:
             for reason in reasons:
                 reason_counter[reason] = reason_counter.get(reason, 0) + 1
             if "focus" in channels and source:
-                key = f"{source}｜{sender_id or 'unknown'}"
-                focus_sender_counter[key] = focus_sender_counter.get(key, 0) + 1
+                key = (sender_id, source)
+                sender_row = focus_sender_counter.setdefault(
+                    key,
+                    {"sender_id": sender_id, "source": source, "count": 0},
+                )
+                sender_row["count"] = int(sender_row.get("count") or 0) + 1
             if len(samples) < 12 and ("focus" in channels or "archive" in channels or "leader" in channels):
                 samples.append(
                     {
@@ -740,8 +785,11 @@ class MiniWebServer:
                 for reason, count in sorted(reason_counter.items(), key=lambda item: (-item[1], item[0]))
             ],
             "focus_sender_rows": [
-                {"sender": sender, "count": count}
-                for sender, count in sorted(focus_sender_counter.items(), key=lambda item: (-item[1], item[0]))
+                {**item, "sender": f"{item.get('source') or '(未知)'}｜{item.get('sender_id') or 'unknown'}"}
+                for item in sorted(
+                    focus_sender_counter.values(),
+                    key=lambda row: (-int(row.get("count") or 0), str(row.get("source") or "")),
+                )
             ],
             "samples": samples,
             "notes": [
@@ -2250,6 +2298,8 @@ def _dungeon_name(card: ParsedCard) -> str:
     fields = card.fields or {}
     if fields.get("副本名"):
         return str(fields.get("副本名") or "").strip()
+    if card.title in {"加入副本成功", "加入副本失败", "副本房间解散"}:
+        return "副本"
     text = f"{card.title or ''}\n{card.raw or ''}"
     for name in ("虚天殿", "黄龙山", "昆吾山", "坠魔谷", "血色试炼"):
         if name in text:

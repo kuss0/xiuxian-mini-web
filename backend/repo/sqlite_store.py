@@ -2430,6 +2430,76 @@ class SQLiteStore:
             for row in rows
         ]
 
+    def find_dungeon_context_by_id(self, dungeon_id: str | int, *, before_seq: int | None = None) -> dict:
+        dungeon_id = str(dungeon_id or "").strip()
+        if not dungeon_id:
+            return {}
+        patterns = [
+            f'%"副本ID": "{dungeon_id}"%',
+            f'%"副本ID":"{dungeon_id}"%',
+            f'%"副本ID": {dungeon_id}%',
+            f'%"副本ID":{dungeon_id}%',
+        ]
+        where_sql = " OR ".join("payload_json LIKE ?" for _ in patterns)
+        params: list[object] = list(patterns)
+        if before_seq is not None:
+            try:
+                before_seq_int = int(before_seq)
+            except (TypeError, ValueError):
+                before_seq_int = 0
+            if before_seq_int > 0:
+                where_sql = f"({where_sql}) AND rowid <= ?"
+                params.append(before_seq_int)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT rowid, payload_json
+                FROM parsed_cards
+                WHERE {where_sql}
+                ORDER BY rowid DESC
+                """,
+                params,
+            ).fetchall()
+        best: dict = {}
+        for rowid, payload in rows:
+            try:
+                card = ParsedCard.from_api(json.loads(payload or "{}"))
+            except Exception:
+                continue
+            fields = card.fields or {}
+            name = str(fields.get("副本名") or "").strip()
+            if not name:
+                text = f"{card.title or ''}\n{card.raw or ''}"
+                for candidate in ("虚天殿", "黄龙山", "昆吾山", "坠魔谷", "血色试炼"):
+                    if candidate in text:
+                        name = candidate
+                        break
+            if not best:
+                best = {
+                    "seq": int(rowid),
+                    "message_id": card.id,
+                    "dungeon_id": dungeon_id,
+                    "dungeon_name": name,
+                    "opened_by": str(fields.get("开门人") or "").strip(),
+                    "capacity": str(fields.get("人数上限") or "").strip(),
+                    "oracle": str(fields.get("卦象") or "").strip(),
+                    "advice": str(fields.get("行运建议") or "").strip(),
+                }
+            for key, source in (
+                ("dungeon_name", name),
+                ("opened_by", fields.get("开门人")),
+                ("capacity", fields.get("人数上限")),
+                ("oracle", fields.get("卦象")),
+                ("advice", fields.get("行运建议")),
+            ):
+                if not best.get(key) and source:
+                    best[key] = str(source).strip()
+            if card.title.endswith("开启") and best.get("dungeon_name"):
+                best["open_seq"] = int(rowid)
+                best["open_message_id"] = card.id
+                break
+        return best
+
     def resource_coverage(self, *, limit: int = 5000) -> dict:
         try:
             limit = int(limit or 5000)
@@ -2511,6 +2581,104 @@ class SQLiteStore:
                 "这里只扫最近一段疑似资源结算文案,用于发现漏解析样本。",
                 "血色试炼会被刻意排除,不算资源统计目标。",
             ],
+        }
+
+    def reparse_missing_resource_records(self, *, limit: int = 5000) -> dict:
+        """只重跑资源覆盖诊断里「候选但无 resource_events」的消息。
+
+        这用于上线后补 parser 漏样本,不重建 parsed_cards,也不碰状态机。
+        """
+        try:
+            limit = int(limit or 5000)
+        except (TypeError, ValueError):
+            limit = 5000
+        limit = max(1, min(limit, 10000))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT rm.id, rm.chat_id, rm.msg_id, rm.text, rm.source, rm.date, rm.sender_id,
+                       rm.reply_to_msg_id, rm.top_msg_id, rm.mentions_json, rm.sender_is_bot,
+                       rm.edited_at, rm.deleted_at, rm.media_kind, rm.media_meta_json
+                FROM raw_messages rm
+                WHERE (
+                    rm.text LIKE '%【野外历练%'
+                    OR (rm.text LIKE '%【战利品结算%' AND rm.text NOT LIKE '%血色试炼%')
+                    OR rm.text LIKE '%【黄龙山大战%'
+                    OR rm.text LIKE '%【登顶昆吾山%'
+                    OR rm.text LIKE '%【坠魔谷%'
+                    OR rm.text LIKE '%【逆天之举%'
+                    OR rm.text LIKE '%【深度闭关总结%'
+                    OR rm.text LIKE '%【闭关成功%'
+                    OR rm.text LIKE '%【灵果入腹%'
+                    OR rm.text LIKE '%【温养器灵%'
+                    OR rm.text LIKE '%【抚摸法宝%'
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM resource_events re WHERE re.raw_message_id = rm.id
+                )
+                ORDER BY rm.rowid DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        if not rows:
+            return {"ok": True, "scanned": 0, "reparsed_events": 0, "reparsed_deltas": 0, "still_missing": 0}
+        registry = build_parser_registry()
+        scanned = 0
+        event_count = 0
+        delta_count = 0
+        still_missing = 0
+        samples: list[dict] = []
+        with self._connect() as conn:
+            for row in rows:
+                if not _resource_coverage_kind(str(row[3] or "")):
+                    continue
+                scanned += 1
+                event = RawMessageEvent(
+                    id=row[0],
+                    chat_id=int(row[1]),
+                    msg_id=int(row[2]),
+                    text=row[3],
+                    source=row[4],
+                    date=row[5],
+                    sender_id=row[6],
+                    reply_to_msg_id=row[7],
+                    top_msg_id=row[8],
+                    mentions=tuple(json.loads(row[9] or "[]")),
+                    sender_is_bot=bool(row[10]),
+                    edited_at=row[11],
+                    deleted_at=row[12],
+                    media_kind=row[13],
+                    media_meta=(json.loads(row[14]) if row[14] else None),
+                )
+                output = registry.parse(event)
+                if not output.resource_deltas and not output.resource_events:
+                    still_missing += 1
+                    if len(samples) < 10:
+                        samples.append(
+                            {
+                                "id": row[0],
+                                "msg_id": int(row[2] or 0),
+                                "kind": _resource_coverage_kind(str(row[3] or "")),
+                                "text": str(row[3] or "")[:220],
+                            }
+                        )
+                    continue
+                self._replace_resource_records(
+                    conn,
+                    event,
+                    output.resource_deltas,
+                    output.resource_events,
+                )
+                event_count += len(output.resource_events)
+                delta_count += len(output.resource_deltas)
+        return {
+            "ok": True,
+            "scanned": scanned,
+            "reparsed_events": event_count,
+            "reparsed_deltas": delta_count,
+            "still_missing": still_missing,
+            "missing_samples": samples,
         }
 
     # ---------- identity_module_state(给玩法状态机用) ----------

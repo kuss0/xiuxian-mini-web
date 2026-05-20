@@ -285,6 +285,10 @@ def _get_resource_coverage(request: MiniWebHandler, query: dict) -> dict:
     return _app(request).resource_coverage_payload(limit=limit)
 
 
+def _post_resource_reparse(request: MiniWebHandler, payload: dict) -> dict:
+    return _app(request).resource_reparse_payload(payload)
+
+
 def _get_dungeon_status(request: MiniWebHandler, query: dict) -> dict:
     try:
         limit = int((query.get("limit") or ["500"])[0])
@@ -608,6 +612,7 @@ GET_ROUTES = {
 POST_ROUTES = {
     "/api/settings": PostRoute(_post_settings, needs_payload=True),
     "/api/focus-exclude/preview": PostRoute(_post_focus_exclude_preview, needs_payload=True),
+    "/api/resource-coverage/reparse": PostRoute(_post_resource_reparse, needs_payload=True),
     "/api/inventory/transfer-plan": PostRoute(_post_inventory_transfer_plan, needs_payload=True),
     "/api/accounts": PostRoute(_post_account, needs_payload=True),
     "/api/accounts/delete": PostRoute(_post_account_delete, needs_payload=True),

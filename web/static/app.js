@@ -611,6 +611,13 @@ function openFilterSettingsModal() {
       const payload = await fetchJson("/api/filter/diagnostics?limit=1000");
       if (!payload.ok) throw new Error(payload.error || "诊断失败");
       if (diagnosticsBox) diagnosticsBox.innerHTML = renderFilterDiagnostics(payload);
+      bindFilterDiagnosticsActions({
+        diagnosticsBox,
+        excludeDraft,
+        excludeTextarea,
+        previewBox,
+        setStatus,
+      });
       setStatus("ok", `最近 ${payload.scanned || 0} 条：重点 ${payload.focus_count || 0}｜归档 ${payload.archive_count || 0}｜会长 ${payload.leader_count || 0}`);
     } catch (error) {
       if (diagnosticsBox) diagnosticsBox.innerHTML = "";
@@ -724,7 +731,13 @@ function renderFilterDiagnostics(payload) {
       <div>
         <strong>重点发送者 Top</strong>
         <ul class="send-as-result-list">
-          ${senders.slice(0, 8).map((item) => `<li><span>${escapeHtml(item.sender || "")}</span><small>${escapeHtml(formatNumber(item.count || 0))} 条</small></li>`).join("") || "<li>(空)</li>"}
+          ${senders.slice(0, 8).map((item) => `
+            <li>
+              <span>${escapeHtml(item.sender || "")}</span>
+              <small>${escapeHtml(formatNumber(item.count || 0))} 条</small>
+              ${Number(item.sender_id || 0) ? `<button type="button" data-filter-mute-sender="${escapeAttr(String(item.sender_id))}">静音</button>` : ""}
+            </li>
+          `).join("") || "<li>(空)</li>"}
         </ul>
       </div>
     </div>
@@ -736,11 +749,46 @@ function renderFilterDiagnostics(payload) {
             <b>#${escapeHtml(String(item.seq || ""))} ${escapeHtml(item.source || "")}</b>
             <small>${escapeHtml((item.channels || []).join("/"))}｜${escapeHtml((item.reasons || []).join("、") || "无理由")}</small>
             <span>${escapeHtml(clipGraphemes(item.summary || item.title || "", 70))}</span>
+            <em>
+              ${Number(item.sender_id || 0) ? `<button type="button" data-filter-mute-sender="${escapeAttr(String(item.sender_id))}">静音 sender</button>` : ""}
+              ${(item.summary || item.title) ? `<button type="button" data-filter-exclude-text="${escapeAttr(clipGraphemes(item.summary || item.title || "", 36))}">排除这类短语</button>` : ""}
+            </em>
           </p>
         `).join("")}
       </div>
     ` : ""}
   `;
+}
+
+function bindFilterDiagnosticsActions({ diagnosticsBox, excludeDraft, excludeTextarea, previewBox, setStatus }) {
+  if (!diagnosticsBox) return;
+  diagnosticsBox.querySelectorAll("[data-filter-mute-sender]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const senderId = Number(button.dataset.filterMuteSender || 0);
+      if (!senderId) return;
+      try {
+        await muteFocusSenderId(senderId, button);
+        setStatus?.("ok", `已更新 sender ${senderId} 的重点流静音设置。`);
+      } catch (error) {
+        setStatus?.("error", error.message || "静音失败");
+      }
+    });
+  });
+  diagnosticsBox.querySelectorAll("[data-filter-exclude-text]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const text = String(button.dataset.filterExcludeText || "").trim();
+      if (!text) return;
+      if (excludeDraft) excludeDraft.value = text;
+      await previewAndMaybeAppendFilterRule({
+        mode: "contains",
+        input: excludeDraft,
+        target: excludeTextarea,
+        previewBox,
+        append: true,
+        setStatus,
+      });
+    });
+  });
 }
 
 function renderGameBotsDiscoveredList(dialog) {
@@ -886,6 +934,7 @@ async function openResourceStatsModal() {
         <div class="form-actions">
           <button type="button" id="resourceStatsRefresh">刷新统计</button>
           <button type="button" id="resourceCoverageRefresh">覆盖诊断</button>
+          <button type="button" id="resourceCoverageReparse">补解析漏样本</button>
         </div>
         <p class="modal-status-line info" id="resourceStatsStatus" hidden></p>
       </section>
@@ -916,12 +965,32 @@ function bindResourceStatsModal(dialog) {
       setResourceStatsStatus(dialog, "error", error.message || "覆盖诊断失败");
     });
   });
+  dialog.querySelector("#resourceCoverageReparse")?.addEventListener("click", () => {
+    reparseResourceCoverage(dialog).catch((error) => {
+      setResourceStatsStatus(dialog, "error", error.message || "补解析失败");
+    });
+  });
   dialog.querySelector("#resourceStatsPeriod")?.addEventListener("change", () => {
     resetResourceStatsPlaceholder(dialog);
   });
   dialog.querySelector("#resourceStatsSource")?.addEventListener("change", () => {
     resetResourceStatsPlaceholder(dialog);
   });
+}
+
+async function reparseResourceCoverage(dialog) {
+  const button = dialog.querySelector("#resourceCoverageReparse");
+  if (button) button.disabled = true;
+  setResourceStatsStatus(dialog, "info", "正在重跑最近漏解析资源候选…");
+  try {
+    const payload = await postJson("/api/resource-coverage/reparse", { limit: 5000 });
+    if (!payload.ok) throw new Error(payload.error || "补解析失败");
+    const text = `补解析完成：扫描 ${payload.scanned || 0} 条，写入事件 ${payload.reparsed_events || 0}，流水 ${payload.reparsed_deltas || 0}，仍未识别 ${payload.still_missing || 0}`;
+    setResourceStatsStatus(dialog, payload.still_missing ? "warn" : "ok", text);
+    await refreshResourceCoverage(dialog);
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 async function refreshResourceCoverage(dialog) {
@@ -1391,6 +1460,7 @@ function normalizeDungeonStatusSummary(item) {
     route: item.route || "",
     strategy: item.strategy || "",
     silenceOrder: item.silence_order || "",
+    contextSource: item.context_source || "",
     joinSuccess: item.join_success || [],
     failures: item.failures || [],
     actions: item.actions || [],
@@ -1596,6 +1666,7 @@ function renderDungeonStatusCard(summary) {
     ["路线", summary.route],
     ["阵策", summary.strategy],
     ["静场令", summary.silenceOrder],
+    ["关联", summary.contextSource === "open_lookup" ? "已回查开门公告" : ""],
   ].filter(([, value]) => value);
   const latestId = summary.latestMessage?.id || "";
   const joins = summary.joinSuccess.length ? summary.joinSuccess.map((user) => `@${user}`).join("、") : "";
@@ -3790,6 +3861,10 @@ async function applyFocusExcludePattern(pattern) {
 async function toggleFocusMuteSender(message, button) {
   const senderId = Number(message?.sender_id || 0);
   if (!Number.isFinite(senderId) || senderId === 0) return;
+  await muteFocusSenderId(senderId, button);
+}
+
+async function muteFocusSenderId(senderId, button) {
   button.disabled = true;
   const originalText = button.textContent;
   button.textContent = "处理中…";
@@ -3811,12 +3886,14 @@ async function toggleFocusMuteSender(message, button) {
     renderQuickFilters();
     renderMessages();
     renderDetail();
+    button.textContent = ids.has(senderId) ? "已静音" : "已取消静音";
   } catch (error) {
     button.disabled = false;
     button.textContent = error.message || originalText || "操作失败";
     setTimeout(() => {
       button.textContent = originalText || "重点流静音此人";
     }, 1600);
+    throw error;
   }
 }
 

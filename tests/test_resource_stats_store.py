@@ -1,4 +1,4 @@
-from backend.app import GET_ROUTES
+from backend.app import GET_ROUTES, POST_ROUTES
 from backend.domain.models import RawMessageEvent
 from backend.repo.sqlite_store import RESOURCE_STATS_SCHEMA_VERSION, SQLiteStore
 from backend.server import MiniWebServer
@@ -70,6 +70,41 @@ def test_resource_coverage_reports_parsed_and_missing_candidates(tmp_path):
     assert payload["parsed"] == 1
     assert payload["missing"] == 1
     assert payload["missing_samples"][0]["kind"] == "虚天殿·求稳"
+
+
+def test_reparse_missing_resource_records_backfills_candidates(tmp_path):
+    store = SQLiteStore(tmp_path / "state.db")
+    event = RawMessageEvent(
+        id="tg:-1:102",
+        chat_id=-1,
+        msg_id=102,
+        text="""【野外历练 · 妖兽遭遇】
+@TrickPlayer 遭遇 变异碧眼金蟾。
+战力对比: 你 1378174928 / 妖兽 1848017514，胜算 31%。
+一番斗法后，妖兽伏诛。
+获得修为 +45000，获得 【阴凝之晶】x2。
+此战只结算 NPC 历练收益，不触发玩家仇怨。""",
+        source="韩天尊",
+        date="2026-05-15T12:02:00+00:00",
+        sender_id=7900199668,
+        sender_is_bot=True,
+    )
+    store.ingest_event(event)
+    with store._connect() as conn:
+        conn.execute("DELETE FROM resource_events WHERE raw_message_id=?", (event.id,))
+        conn.execute("DELETE FROM resource_deltas WHERE raw_message_id=?", (event.id,))
+
+    payload = store.reparse_missing_resource_records(limit=50)
+
+    assert payload["ok"] is True
+    assert payload["scanned"] == 1
+    assert payload["reparsed_events"] == 1
+    assert payload["reparsed_deltas"] == 2
+    assert payload["still_missing"] == 0
+    assert {(item["resource_name"], item["amount"]) for item in store.list_resource_deltas(event.id)} == {
+        ("修为", 45000),
+        ("阴凝之晶", 2),
+    }
 
 
 def test_ingest_coalesces_same_chat_message_with_different_local_ids(tmp_path):
@@ -207,6 +242,10 @@ def test_resource_stats_api_groups_by_period_and_excludes_blood_trial(tmp_path):
 
 def test_resource_coverage_route_is_wired():
     assert "/api/resource-coverage" in GET_ROUTES
+
+
+def test_resource_reparse_route_is_wired():
+    assert "/api/resource-coverage/reparse" in POST_ROUTES
 
 
 def test_resource_stats_api_can_filter_by_exact_source_name(tmp_path):

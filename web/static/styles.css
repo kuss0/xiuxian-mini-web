@@ -3104,6 +3104,23 @@ pre {
   color: var(--muted);
 }
 
+.filter-diagnostics-grid button,
+.filter-diagnostics-samples button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.filter-diagnostics-samples em {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-style: normal;
+}
+
 .login-verify {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;

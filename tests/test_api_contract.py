@@ -2724,6 +2724,50 @@ def test_dungeon_status_payload_distinguishes_request_from_success(tmp_path):
     assert joined["join_success"] == ["me"]
 
 
+def test_dungeon_status_hydrates_join_only_room_from_open_announcement(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(RawMessageEvent(
+        id="stale-open",
+        chat_id=-1,
+        msg_id=5,
+        text="""【黄龙山已开启】
+@old 消耗了【黄龙令】，开启了前往黄龙山的传送门！
+副本ID: 683
+其他道友可使用 .加入副本 683 加入队伍！(5人满)""",
+        source="韩天尊",
+        date="2026-05-14T00:00:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="open",
+        chat_id=-1,
+        msg_id=10,
+        text="""【虚天殿已开启】
+@tinghua01 消耗了【虚天残图】，开启了前往虚天殿的传送门！
+副本ID: 683
+其他道友可使用 .加入副本 683 加入队伍！(5人满)""",
+        source="韩天尊",
+        date="2026-05-15T00:00:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="joined",
+        chat_id=-1,
+        msg_id=99,
+        text="@WalterWA2000 已成功加入副本 683",
+        source="韩天尊",
+        date="2026-05-15T00:09:00+00:00",
+        sender_id=7900199668,
+    ))
+
+    payload = MiniWebServer(store=store).dungeon_status_payload(limit=1)
+    summary = next(item for item in payload["summaries"] if item["dungeon_id"] == "683")
+
+    assert summary["status_kind"] == "joined"
+    assert summary["dungeon_name"] == "虚天殿"
+    assert summary["context_source"] == "open_lookup"
+
+
 def test_dungeon_status_route_is_wired():
     from backend.app import GET_ROUTES
     assert "/api/dungeon-status" in GET_ROUTES
@@ -2747,6 +2791,7 @@ def test_filter_diagnostics_payload_counts_recent_reasons(tmp_path):
     assert payload["ok"] is True
     assert payload["focus_count"] >= 1
     assert any("关键词" in row["reason"] or "普通玩家" in row["reason"] for row in payload["reason_rows"])
+    assert any(row["sender_id"] == 222 for row in payload["focus_sender_rows"])
 
 
 def test_filter_diagnostics_route_is_wired():
