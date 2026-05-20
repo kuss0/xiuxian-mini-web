@@ -40,7 +40,7 @@ DEFAULT_LEADER_SOURCE_NAMES = ["@iosdo7"]
 DEFAULT_TARGET_CHAT = "-1001680975844"
 DEFAULT_TARGET_TOPIC_ID = "7310786"
 ACCOUNT_SECRET_KEYS = {"api_hash", "proxy_password"}
-RESOURCE_STATS_SCHEMA_VERSION = 6
+RESOURCE_STATS_SCHEMA_VERSION = 7
 INVENTORY_SCHEMA_VERSION = 1
 DUNGEON_CONTEXT_SCAN_LIMIT = 2500
 RESOURCE_BASIC_NAMES = ("修为", "贡献", "灵石")
@@ -57,11 +57,17 @@ RESOURCE_RARE_NAMES = (
     "天凤之翎",
     "风雷翅图纸",
     "风之祝福",
+    "极阴庇护",
     "风行丹丹方",
     "黄龙阵旗残片",
     "龙蛇回元散丹方",
     "皇鳞甲图纸",
     "第二元神残篇",
+    "第二元神修炼法（残篇）",
+    "青元剑诀（上）",
+    "金光砖",
+    "九曲灵参丹丹方",
+    "元磁山核·甲",
     "虚天鼎残片·甲",
     "虚天鼎残片·乙",
     "虚天鼎残片·丙",
@@ -216,6 +222,36 @@ class SQLiteStore:
                     aliases.append(username)
         return _merge_str_defaults([], aliases)
 
+    def inventory_owner_allowlist(self) -> list[str]:
+        """库存/转移页只展示明确配置成自己的储物袋 owner。"""
+        owners: list[str] = []
+        seen: set[str] = set()
+
+        def add(value: object) -> None:
+            owner = str(value or "").strip().lstrip("@")
+            if not owner:
+                return
+            key = owner.lower()
+            if key in seen:
+                return
+            seen.add(key)
+            owners.append(owner)
+
+        try:
+            for alias in self.get_settings().get("own_aliases") or []:
+                add(alias)
+        except Exception:
+            pass
+        for collection in (self.list_accounts, self.list_identities):
+            try:
+                items = collection()
+            except Exception:
+                continue
+            for item in items:
+                add((item or {}).get("username"))
+                add((item or {}).get("label"))
+        return owners
+
     def _collect_game_bot_ids(self) -> list[int]:
         try:
             ids = self.get_settings().get("game_bot_ids") or []
@@ -358,6 +394,13 @@ class SQLiteStore:
                    OR (source_type='dungeon' AND source_name='虚天殿')
                 """
             ).fetchone()[0]
+            legacy_removed_sources = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM resource_events
+                WHERE source_type IN ('deep_retreat', 'retreat_shallow', 'pet_touch', 'pet_warm')
+                """
+            ).fetchone()[0]
             stored_version_row = conn.execute(
                 "SELECT value_json FROM settings WHERE key='resource_stats_schema_version'"
             ).fetchone()
@@ -369,6 +412,7 @@ class SQLiteStore:
                 existing_events
                 and not legacy_per_member
                 and not legacy_unsplit_source
+                and not legacy_removed_sources
                 and stored_version >= RESOURCE_STATS_SCHEMA_VERSION
             ):
                 return {"events": 0, "deltas": 0}
@@ -383,12 +427,13 @@ class SQLiteStore:
                    OR text LIKE '%黄龙山大战%'
                    OR text LIKE '%登顶昆吾山%'
                    OR text LIKE '%坠魔谷%'
-                   OR text LIKE '%深度闭关总结%'
-                   OR text LIKE '%【闭关成功】%'
                    OR text LIKE '%灵果入腹%'
-                   OR text LIKE '%温养器灵%'
-                   OR (text LIKE '%默契%' AND text LIKE '%经验%')
                    OR (text LIKE '%逆天之举%' AND text LIKE '%风希%')
+                   OR text LIKE '%【极阴的欣赏】%'
+                   OR text LIKE '%【神魂碾压】%'
+                   OR text LIKE '%【侥幸逃脱】%'
+                   OR text LIKE '%【天机异闻·南陇侯的交易】%'
+                   OR text LIKE '%【天机异闻·魔君之怒】%'
                 ORDER BY rowid ASC
                 """
             ).fetchall()
@@ -1768,6 +1813,7 @@ class SQLiteStore:
         self,
         *,
         owner: str = "",
+        owners: Iterable[str] | None = None,
         latest_only: bool = True,
         include_items: bool = True,
         limit: int = 80,
@@ -1783,6 +1829,23 @@ class SQLiteStore:
         if owner:
             where.append("LOWER(owner)=LOWER(?)")
             params.append(owner)
+        elif owners is not None:
+            owner_list = []
+            seen_owner_keys: set[str] = set()
+            for item in owners:
+                normalized = str(item or "").strip().lstrip("@")
+                if not normalized:
+                    continue
+                key = normalized.lower()
+                if key in seen_owner_keys:
+                    continue
+                seen_owner_keys.add(key)
+                owner_list.append(normalized)
+            if not owner_list:
+                return []
+            placeholders = ",".join("?" for _ in owner_list)
+            where.append(f"LOWER(owner) IN ({placeholders})")
+            params.extend(item.lower() for item in owner_list)
         where_sql = ("WHERE " + " AND ".join(where)) if where else ""
         if latest_only:
             sql = f"""
@@ -1953,7 +2016,7 @@ class SQLiteStore:
                 "野外历练单独统计成功、失败和冷却;资源成果按正收益/负收益分开,不做净额抵消。",
                 "副本结算按具体副本/入口分开统计,按单次结算文案记录,不按队伍人数放大。",
                 "风希单独统计逆天之举收益,含限时增益出现次数。",
-                "深度闭关、浅闭关、灵树采摘、抚摸法宝和温养器灵只统计明确结算文案。",
+                "极阴、南陇侯单独统计抉择结算;灵树采摘只统计明确结算文案。",
                 "血色试炼结算已排除。",
             ],
         }
@@ -2592,11 +2655,12 @@ class SQLiteStore:
                     OR rm.text LIKE '%【登顶昆吾山%'
                     OR rm.text LIKE '%【坠魔谷%'
                     OR rm.text LIKE '%【逆天之举%'
-                    OR rm.text LIKE '%【深度闭关总结%'
-                    OR rm.text LIKE '%【闭关成功%'
                     OR rm.text LIKE '%【灵果入腹%'
-                    OR rm.text LIKE '%【温养器灵%'
-                    OR rm.text LIKE '%【抚摸法宝%'
+                    OR rm.text LIKE '%【极阴的欣赏%'
+                    OR rm.text LIKE '%【神魂碾压%'
+                    OR rm.text LIKE '%【侥幸逃脱%'
+                    OR rm.text LIKE '%【天机异闻·南陇侯的交易%'
+                    OR rm.text LIKE '%【天机异闻·魔君之怒%'
                 )
                 ORDER BY rowid DESC
                 LIMIT ?
@@ -2684,11 +2748,12 @@ class SQLiteStore:
                     OR rm.text LIKE '%【登顶昆吾山%'
                     OR rm.text LIKE '%【坠魔谷%'
                     OR rm.text LIKE '%【逆天之举%'
-                    OR rm.text LIKE '%【深度闭关总结%'
-                    OR rm.text LIKE '%【闭关成功%'
                     OR rm.text LIKE '%【灵果入腹%'
-                    OR rm.text LIKE '%【温养器灵%'
-                    OR rm.text LIKE '%【抚摸法宝%'
+                    OR rm.text LIKE '%【极阴的欣赏%'
+                    OR rm.text LIKE '%【神魂碾压%'
+                    OR rm.text LIKE '%【侥幸逃脱%'
+                    OR rm.text LIKE '%【天机异闻·南陇侯的交易%'
+                    OR rm.text LIKE '%【天机异闻·魔君之怒%'
                 )
                 AND NOT EXISTS (
                     SELECT 1 FROM resource_events re WHERE re.raw_message_id = rm.id
@@ -3492,20 +3557,16 @@ def _resource_coverage_kind(text: str) -> str:
         return "坠魔谷"
     if "【逆天之举" in text and "风希" in text and "【战利品】" in text:
         return "风希"
-    if "【深度闭关总结" in text:
-        return "深度闭关"
-    if "【闭关成功" in text:
-        if "修为最终增加" not in text and "【奇遇】" not in text:
-            return ""
-        return "闭关修炼"
     if "【灵果入腹" in text:
         return "灵树采摘"
-    if "【温养器灵" in text:
-        if "消耗" not in text and "提升" not in text:
+    if "【极阴的欣赏" in text or "【神魂碾压" in text or "【侥幸逃脱" in text:
+        return "极阴"
+    if "【天机异闻·南陇侯的交易" in text:
+        if "作为回报" not in text:
             return ""
-        return "温养器灵"
-    if "【抚摸法宝" in text:
-        return "抚摸法宝"
+        return "南陇侯"
+    if "【天机异闻·魔君之怒" in text:
+        return "南陇侯"
     return ""
 
 

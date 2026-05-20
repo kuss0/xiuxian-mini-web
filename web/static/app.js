@@ -915,7 +915,7 @@ async function openResourceStatsModal() {
     body: `
       <section class="modal-section">
         <h4>全服资源统计</h4>
-        <p class="muted">当前统计消息箱采集到的「野外历练」「风希」「非血色副本」「闭关/灵树/器灵」结算。副本可按入口单独筛选，稀有产物会优先展示。</p>
+        <p class="muted">当前统计消息箱采集到的「野外历练」「风希」「极阴」「南陇侯」「非血色副本」「灵树」结算。副本可按入口单独筛选，稀有产物会优先展示。</p>
         <div class="form-grid resource-stats-controls">
           <label>
             <span>周期</span>
@@ -931,11 +931,9 @@ async function openResourceStatsModal() {
               <option value="all">全部</option>
               <option value="wild_training">野外历练</option>
               <option value="wind_xi">风希</option>
-              <option value="deep_retreat">深度闭关</option>
-              <option value="retreat_shallow">闭关修炼</option>
+              <option value="jiyin">极阴</option>
+              <option value="nanlong">南陇侯</option>
               <option value="tree_harvest">灵树采摘</option>
-              <option value="pet_touch">抚摸法宝</option>
-              <option value="pet_warm">温养器灵</option>
               <option value="dungeon">副本结算（全部）</option>
               <option value="dungeon|虚天殿·夺鼎">副本 · 虚天殿 · 夺鼎</option>
               <option value="dungeon|虚天殿·求稳">副本 · 虚天殿 · 求稳</option>
@@ -1085,7 +1083,7 @@ function renderResourceStats(dialog, payload) {
   const summary = dialog.querySelector("#resourceStatsSummary");
   const table = dialog.querySelector("#resourceStatsTable");
   if (summary) {
-    summary.innerHTML = renderResourceStatsSummary(rows, eventSummary);
+    summary.innerHTML = renderResourceStatsSummary(rows, eventSummary, payload);
   }
   if (!table) return;
   if (!rows.length && !events.length) {
@@ -1193,7 +1191,10 @@ function renderResourceDeltaTable(rows) {
 function renderResourceDeltaAggregateTable(rows) {
   const sourceCount = new Set(rows.map((row) => `${row.source_type || ""}|${row.source_name || ""}`)).size;
   if (sourceCount <= 1) return "";
-  const aggregateRows = aggregateResourceRows(rows);
+  const isWildOnly = rows.length > 0 && rows.every((row) => row.source_type === "wild_training");
+  const aggregateRows = aggregateResourceRows(rows).map((row) => (
+    isWildOnly ? { ...row, source_type: "wild_training" } : row
+  ));
   return `
     ${renderResourceDeltaSubTable("稀有产物", aggregateRows.filter((row) => row.resource_category === "rare"), "全部来源汇总")}
     ${renderResourceDeltaSubTable("正收益", aggregateRows.filter((row) => row.resource_category !== "rare" && row.amount_kind !== "loss"), "全部来源汇总")}
@@ -1239,6 +1240,7 @@ function aggregateResourceRows(rows) {
 
 function renderResourceDeltaSubTable(title, rows, label) {
   if (!rows.length) return "";
+  const displayRows = sortResourceDeltaRowsForDisplay(rows, title);
   return `
     <div class="resource-stats-subtitle">${escapeHtml(title)} · ${escapeHtml(label)}</div>
     <table class="resource-stats-table">
@@ -1252,7 +1254,7 @@ function renderResourceDeltaSubTable(title, rows, label) {
         </tr>
       </thead>
       <tbody>
-        ${rows.map((row) => `
+        ${displayRows.map((row) => `
           <tr>
             <td>${escapeHtml(row.period || "")}</td>
             <td>${escapeHtml(row.resource_name || "")}</td>
@@ -1266,6 +1268,19 @@ function renderResourceDeltaSubTable(title, rows, label) {
   `;
 }
 
+function sortResourceDeltaRowsForDisplay(rows, title) {
+  const items = [...(rows || [])];
+  const isWildRare = title === "稀有产物" && items.some((row) => row.source_type === "wild_training");
+  if (!isWildRare) return items;
+  return items.sort((a, b) => (
+    String(b.period || "").localeCompare(String(a.period || ""), "zh-CN")
+    || Number(!isYinNingResource(a.resource_name)) - Number(!isYinNingResource(b.resource_name))
+    || Number(a.total_amount || 0) - Number(b.total_amount || 0)
+    || Number(a.event_count || 0) - Number(b.event_count || 0)
+    || String(a.resource_name || "").localeCompare(String(b.resource_name || ""), "zh-CN")
+  ));
+}
+
 function groupResourceRowsBySource(rows) {
   const grouped = new Map();
   for (const row of rows) {
@@ -1277,8 +1292,11 @@ function groupResourceRowsBySource(rows) {
   return Array.from(grouped.values());
 }
 
-function renderResourceStatsSummary(rows, eventSummary) {
+function renderResourceStatsSummary(rows, eventSummary, payload = {}) {
   if (!rows.length && !eventSummary.length) return "";
+  if (payload.source_type === "wild_training") {
+    return renderWildTrainingStatsSummary(rows, eventSummary);
+  }
   const rareRows = rows.filter((row) => row.resource_category === "rare");
   const latestRarePeriod = latestResourcePeriod(rareRows, []);
   const latestEventPeriod = latestResourcePeriod([], eventSummary);
@@ -1343,6 +1361,112 @@ function renderResourceStatsSummary(rows, eventSummary) {
   return cards.join("");
 }
 
+function renderWildTrainingStatsSummary(rows, eventSummary) {
+  const latestPeriod = latestResourcePeriod(rows, eventSummary);
+  const periodEvents = latestPeriod
+    ? eventSummary.filter((row) => String(row.period || "") === latestPeriod)
+    : eventSummary;
+  const periodRows = latestPeriod
+    ? rows.filter((row) => String(row.period || "") === latestPeriod)
+    : rows;
+  const cards = [];
+  const strategies = ["谨慎", "均衡", "深入"];
+  const byStrategy = new Map(strategies.map((strategy) => [strategy, {
+    strategy,
+    success: 0,
+    failed: 0,
+    cooldown: 0,
+    total: 0,
+  }]));
+  for (const row of periodEvents) {
+    const strategy = wildStrategyFromSourceName(row.source_name);
+    if (!byStrategy.has(strategy)) continue;
+    const target = byStrategy.get(strategy);
+    target.success += Number(row.success || 0) + Number(row.extra_success || 0);
+    target.failed += Number(row.failed || 0) + Number(row.basic_only || 0);
+    target.cooldown += Number(row.cooldown || 0);
+    target.total += Number(row.total || 0);
+  }
+  for (const strategy of strategies) {
+    const item = byStrategy.get(strategy);
+    const attempts = item.success + item.failed;
+    const rate = attempts ? `${((item.success * 100) / attempts).toFixed(1)}%` : "—";
+    cards.push(`
+      <div class="resource-stat-card">
+        <span>野外历练·${escapeHtml(strategy)}｜${escapeHtml(latestPeriod || "本期")}</span>
+        <strong>${escapeHtml(rate)}</strong>
+        <small>${escapeHtml(formatNumber(item.success))} 成 / ${escapeHtml(formatNumber(item.failed))} 败｜CD ${escapeHtml(formatNumber(item.cooldown))}</small>
+      </div>
+    `);
+  }
+
+  const rareRows = aggregateWildRareRows(periodRows);
+  const yinNing = rareRows.find((row) => isYinNingResource(row.resource_name)) || {
+    resource_name: "阴凝之晶",
+    total_amount: 0,
+    event_count: 0,
+    unit: "",
+    basis: "player",
+  };
+  cards.push(`
+    <div class="resource-stat-card">
+      <span>稀有｜阴凝之晶</span>
+      <strong>${escapeHtml(formatResourceAmount(yinNing.total_amount, yinNing.unit))}</strong>
+      <small>${escapeHtml(latestPeriod || "本期")}｜${escapeHtml(formatNumber(yinNing.event_count))} 次</small>
+    </div>
+  `);
+
+  const scarceRows = rareRows
+    .filter((row) => !isYinNingResource(row.resource_name))
+    .sort((a, b) => (
+      Number(a.total_amount || 0) - Number(b.total_amount || 0)
+      || Number(a.event_count || 0) - Number(b.event_count || 0)
+      || String(a.resource_name || "").localeCompare(String(b.resource_name || ""), "zh-CN")
+    ))
+    .slice(0, 2);
+  cards.push(...scarceRows.map((item) => `
+    <div class="resource-stat-card">
+      <span>低量稀有｜${escapeHtml(item.resource_name || "资源")}</span>
+      <strong>${escapeHtml(formatResourceAmount(item.total_amount, item.unit))}</strong>
+      <small>${escapeHtml(latestPeriod || "本期")}｜${escapeHtml(formatNumber(item.event_count))} 次</small>
+    </div>
+  `));
+  return cards.join("");
+}
+
+function aggregateWildRareRows(rows) {
+  const grouped = new Map();
+  for (const row of rows || []) {
+    if (row.source_type !== "wild_training") continue;
+    if (row.resource_category !== "rare") continue;
+    if (row.amount_kind === "loss") continue;
+    const key = `${row.resource_name || ""}|${row.unit || ""}|${row.basis || ""}`;
+    const prev = grouped.get(key) || {
+      resource_name: row.resource_name || "",
+      unit: row.unit || "",
+      basis: row.basis || "",
+      total_amount: 0,
+      event_count: 0,
+    };
+    prev.total_amount += Number(row.total_amount || 0);
+    prev.event_count += Number(row.event_count || 0);
+    grouped.set(key, prev);
+  }
+  return Array.from(grouped.values());
+}
+
+function wildStrategyFromSourceName(sourceName) {
+  const text = String(sourceName || "");
+  if (text.includes("谨慎")) return "谨慎";
+  if (text.includes("均衡")) return "均衡";
+  if (text.includes("深入")) return "深入";
+  return "";
+}
+
+function isYinNingResource(resourceName) {
+  return String(resourceName || "").includes("阴凝");
+}
+
 function latestResourcePeriod(rows, eventSummary) {
   const periods = [...rows, ...eventSummary]
     .map((row) => String(row.period || ""))
@@ -1354,12 +1478,10 @@ function latestResourcePeriod(rows, eventSummary) {
 function resourceSourceLabel(sourceType, sourceName) {
   if (sourceType === "wild_training") return sourceName || "野外历练";
   if (sourceType === "wind_xi") return "风希";
+  if (sourceType === "jiyin") return "极阴";
+  if (sourceType === "nanlong") return "南陇侯";
   if (sourceType === "dungeon") return sourceName ? `副本 · ${sourceName}` : "副本结算";
-  if (sourceType === "deep_retreat") return sourceName || "深度闭关";
-  if (sourceType === "retreat_shallow") return sourceName || "闭关修炼";
   if (sourceType === "tree_harvest") return sourceName || "灵树采摘";
-  if (sourceType === "pet_touch") return sourceName || "抚摸法宝";
-  if (sourceType === "pet_warm") return sourceName || "温养器灵";
   return sourceName || sourceType || "未知";
 }
 
@@ -1715,7 +1837,7 @@ async function openInventoryModal() {
     body: `
       <section class="modal-section">
         <h4>最近储物袋快照</h4>
-        <p class="muted">库存来自消息箱里最近一次 .储物袋 回复,不是实时账本。生成命令不会自动发送,也不会自动核减库存。</p>
+        <p class="muted">这里只展示已配置账号、身份或 own_aliases 对应的最近 .储物袋 回复。生成命令不会自动发送,也不会自动核减库存。</p>
         <div class="form-grid">
           <label>
             <span>资源号</span>
@@ -1782,7 +1904,7 @@ async function refreshInventorySnapshots(dialog) {
   }));
   renderInventoryOwnerSelect(dialog);
   const count = dialog._inventorySnapshots.length;
-  setInventoryStatus(dialog, count ? "ok" : "warn", count ? `已载入 ${count} 个角色的最近快照。` : "还没有储物袋快照。先用 .储物袋 让消息箱采到。");
+  setInventoryStatus(dialog, count ? "ok" : "warn", count ? `已载入 ${count} 个资源号的最近快照。` : "没有可见资源号快照。先确认账号/身份/own_aliases,再用 .储物袋 让消息箱采到。");
   await renderInventoryItems(dialog);
 }
 

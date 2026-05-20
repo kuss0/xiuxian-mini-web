@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Protocol
+from typing import Iterable, Protocol
 
 from backend.config import MAX_ACCOUNTS, MAX_IDENTITIES, MAX_LISTENERS
 from backend.domain import CHANNELS
@@ -64,6 +64,7 @@ class CardStore(Protocol):
         self,
         *,
         owner: str = "",
+        owners: Iterable[str] | None = None,
         latest_only: bool = True,
         include_items: bool = True,
         limit: int = 80,
@@ -629,8 +630,39 @@ class MiniWebServer:
     ) -> dict:
         if not hasattr(self._store, "list_inventory_snapshots"):
             return {"ok": False, "error": "store does not support inventory", "snapshots": []}
+        requested_owner = str(owner or "").strip().lstrip("@")
+        allowed_owners: list[str] = []
+        finder = getattr(self._store, "inventory_owner_allowlist", None)
+        if callable(finder):
+            try:
+                allowed_owners = [str(item or "").strip().lstrip("@") for item in finder()]
+            except Exception:
+                allowed_owners = []
+        allowed_owners = [item for item in allowed_owners if item]
+        allowed_keys = {item.lower() for item in allowed_owners}
+        if requested_owner and requested_owner.lower() not in allowed_keys:
+            return {
+                "ok": True,
+                "snapshots": [],
+                "allowed_owners": allowed_owners,
+                "notes": [
+                    "库存转移只展示已配置账号、身份或 own_aliases 对应的储物袋。",
+                    f"@{requested_owner} 不在本机资源号白名单内。",
+                ],
+            }
+        if not requested_owner and not allowed_owners:
+            return {
+                "ok": True,
+                "snapshots": [],
+                "allowed_owners": [],
+                "notes": [
+                    "库存转移只展示已配置账号、身份或 own_aliases 对应的储物袋。",
+                    "当前没有可见资源号;请先在接入配置里登录账号/身份,或补 own_aliases。",
+                ],
+            }
         snapshots = self._store.list_inventory_snapshots(
-            owner=owner,
+            owner=requested_owner,
+            owners=allowed_owners if not requested_owner else None,
             latest_only=latest_only,
             include_items=include_items,
             limit=limit,
@@ -638,8 +670,9 @@ class MiniWebServer:
         return {
             "ok": True,
             "snapshots": snapshots,
+            "allowed_owners": allowed_owners,
             "notes": [
-                "库存来自最近一次 .储物袋 面板,不是实时账本。",
+                "库存只展示已配置账号、身份或 own_aliases 对应的最近 .储物袋 面板。",
                 "生成转移命令不会自动发送,也不会自动核减库存。",
             ],
         }

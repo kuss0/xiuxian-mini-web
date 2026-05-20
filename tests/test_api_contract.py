@@ -1456,6 +1456,7 @@ def test_messages_payload_compact_omits_heavy_fields_but_target_stays_full(tmp_p
 
 def test_inventory_payload_can_omit_items_for_snapshot_list(tmp_path):
     store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_account({"local_id": "main", "account_id": "1", "username": "seller"})
     store.ingest_event(
         RawMessageEvent(
             id="tg:-1:90",
@@ -1472,13 +1473,31 @@ def test_inventory_payload_can_omit_items_for_snapshot_list(tmp_path):
             sender_is_bot=True,
         )
     )
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:91",
+            chat_id=-1,
+            msg_id=91,
+            text="""@other 的储物袋
+
+材料:
+- 灵石 x 999""",
+            source="韩天尊",
+            date="2026-05-15T10:01:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
     server = MiniWebServer(store=store)
 
     slim = server.inventory_payload(include_items=False)
     detail = server.inventory_payload(owner="seller", include_items=True, limit=1)
+    blocked = server.inventory_payload(owner="other", include_items=True, limit=1)
 
+    assert [snapshot["owner"] for snapshot in slim["snapshots"]] == ["seller"]
     assert slim["snapshots"][0]["owner"] == "seller"
     assert "items" not in slim["snapshots"][0]
+    assert blocked["snapshots"] == []
     assert {(item["name"], item["amount"]) for item in detail["snapshots"][0]["items"]} == {
         ("灵石", 100),
         ("阴凝之晶", 2),
