@@ -548,6 +548,12 @@ class MiniWebServer:
             dungeon_id = str(summary.get("dungeon_id") or "").strip()
             if not dungeon_id:
                 continue
+            if (
+                str(summary.get("dungeon_name") or "") not in weak_names
+                and summary.get("opened_by")
+                and summary.get("capacity")
+            ):
+                continue
             try:
                 context = finder(dungeon_id, before_seq=int(summary.get("latest_seq") or 0))
             except TypeError:
@@ -2193,11 +2199,13 @@ def normalize_channel_filters(
 def _aggregate_dungeon_status_rows(rows: list[tuple[int, ParsedCard]], *, context_finder=None) -> list[dict]:
     grouped: dict[str, dict] = {}
     context_by_name: dict[tuple[int, str], dict] = {}
+    context_by_id: dict[str, dict] = {}
     orphan_by_name: dict[tuple[int, str], dict] = {}
-    for seq, card in sorted(rows, key=lambda item: item[0]):
+    for seq, card in sorted(rows, key=_dungeon_row_sort_key):
         key, association = _dungeon_group_key(
             card,
             seq=seq,
+            context_by_id=context_by_id,
             context_by_name=context_by_name,
             orphan_by_name=orphan_by_name,
             context_finder=context_finder,
@@ -2213,11 +2221,15 @@ def _aggregate_dungeon_status_rows(rows: list[tuple[int, ParsedCard]], *, contex
         if association.get("open_message_id") and not summary.get("open_message_id"):
             summary["open_message_id"] = association["open_message_id"]
         _update_dungeon_summary(summary, seq, card)
-        _remember_dungeon_context(context_by_name, key, seq, card)
+        _remember_dungeon_context(context_by_name, context_by_id, key, seq, card)
     result = list(grouped.values())
+    result.sort(key=lambda item: (_dungeon_status_rank(item.get("status_kind")), -float(item.get("_latest_order") or item.get("latest_seq") or 0)))
     for item in result:
         item.pop("_status_seq", None)
-    result.sort(key=lambda item: (_dungeon_status_rank(item.get("status_kind")), -int(item.get("latest_seq") or 0)))
+        item.pop("_status_order", None)
+        item.pop("_latest_order", None)
+        for action in item.get("actions") or ():
+            action.pop("source_order", None)
     return result
 
 
@@ -2226,7 +2238,7 @@ def _new_dungeon_summary(key: str, seq: int, card: ParsedCard) -> dict:
     name = _dungeon_name(card)
     dungeon_id = str(fields.get("副本ID") or "")
     if key.startswith("id:"):
-        dungeon_id = key[3:]
+        dungeon_id = _dungeon_id_from_key(key)
     return {
         "key": key,
         "dungeon_id": dungeon_id,
@@ -2260,7 +2272,9 @@ def _update_dungeon_summary(summary: dict, seq: int, card: ParsedCard) -> None:
     tags = list(card.tags or ())
     title = str(card.title or "")
     raw = str(card.raw or "")
-    if seq >= int(summary.get("latest_seq") or 0):
+    order = _dungeon_order_value(seq, card)
+    if order >= float(summary.get("_latest_order") or -1):
+        summary["_latest_order"] = order
         summary["latest_seq"] = int(seq)
         summary["latest_message_id"] = card.id
         summary["latest_time"] = card.time
@@ -2297,18 +2311,19 @@ def _update_dungeon_summary(summary: dict, seq: int, card: ParsedCard) -> None:
             continue
         action_key = f"{command}|{payload.get('reply_to_msg_id') or ''}|{payload.get('chat_id') or ''}"
         if not any(item.get("key") == action_key for item in summary["actions"]):
-            summary["actions"].append({**payload, "key": action_key, "source_message_id": card.id, "source_seq": int(seq)})
+            summary["actions"].append({**payload, "key": action_key, "source_message_id": card.id, "source_seq": int(seq), "source_order": order})
     summary["actions"] = sorted(
         summary["actions"],
-        key=lambda item: int(item.get("source_seq") or 0),
+        key=lambda item: float(item.get("source_order") or item.get("source_seq") or 0),
         reverse=True,
     )[:6]
 
     info = _dungeon_status_from_card(card)
-    if info["kind"] != "info" and seq >= int(summary.get("_status_seq") or -1):
+    if info["kind"] != "info" and order >= float(summary.get("_status_order") or -1):
         summary["status"] = info["label"]
         summary["status_kind"] = info["kind"]
         summary["_status_seq"] = int(seq)
+        summary["_status_order"] = order
     elif summary.get("status_kind") == "info" and info["label"]:
         summary["status"] = info["label"]
 
@@ -2325,13 +2340,14 @@ def _update_dungeon_summary(summary: dict, seq: int, card: ParsedCard) -> None:
         }
     )
     summary["message_count"] = int(summary.get("message_count") or 0) + 1
-    summary["messages"] = sorted(summary["messages"], key=lambda item: int(item.get("seq") or 0), reverse=True)[:6]
+    summary["messages"] = sorted(summary["messages"], key=_dungeon_message_order, reverse=True)[:6]
 
 
 def _dungeon_group_key(
     card: ParsedCard,
     *,
     seq: int,
+    context_by_id: dict[str, dict],
     context_by_name: dict[tuple[int, str], dict],
     orphan_by_name: dict[tuple[int, str], dict],
     context_finder=None,
@@ -2339,6 +2355,26 @@ def _dungeon_group_key(
     fields = card.fields or {}
     dungeon_id = str(fields.get("副本ID") or "").strip()
     if dungeon_id:
+        if _is_dungeon_open_card(card):
+            existing = context_by_id.get(dungeon_id)
+            if existing and existing.get("open_seq"):
+                key = f"id:{dungeon_id}:open:{seq}"
+            else:
+                key = f"id:{dungeon_id}"
+            context_by_id[dungeon_id] = {
+                "key": key,
+                "source": "open_in_window",
+                "open_seq": int(seq),
+                "open_message_id": card.id,
+            }
+            return key, {"source": "explicit_id", "open_seq": int(seq), "open_message_id": card.id}
+        context = context_by_id.get(dungeon_id)
+        if context and context.get("key"):
+            return str(context["key"]), {
+                "source": context.get("source") or "explicit_id",
+                "open_seq": context.get("open_seq") or 0,
+                "open_message_id": context.get("open_message_id") or "",
+            }
         return f"id:{dungeon_id}", {"source": "explicit_id"}
     if card.title == "加入副本失败" and card.reply_to_msg_id:
         return f"join-failed:{card.chat_id or 0}:{card.reply_to_msg_id}", {"source": "reply_to"}
@@ -2367,7 +2403,13 @@ def _dungeon_group_key(
     return _dungeon_orphan_group_key(card, seq, name, orphan_by_name), {"source": "time_segment"}
 
 
-def _remember_dungeon_context(context_by_name: dict[tuple[int, str], dict], key: str, seq: int, card: ParsedCard) -> None:
+def _remember_dungeon_context(
+    context_by_name: dict[tuple[int, str], dict],
+    context_by_id: dict[str, dict],
+    key: str,
+    seq: int,
+    card: ParsedCard,
+) -> None:
     fields = card.fields or {}
     name = _dungeon_name(card) or ""
     dungeon_id = str(fields.get("副本ID") or "").strip()
@@ -2379,13 +2421,23 @@ def _remember_dungeon_context(context_by_name: dict[tuple[int, str], dict], key:
     if status_info["kind"] == "closed":
         if current and current.get("key") == key:
             context_by_name.pop(name_key, None)
+        if context_by_id.get(dungeon_id, {}).get("key") == key:
+            context_by_id.pop(dungeon_id, None)
         return
-    if card.title.endswith("开启") or status_info["kind"] in {"open", "joined", "active", "choice"}:
+    if _is_dungeon_open_card(card) or status_info["kind"] in {"open", "joined", "active", "choice"}:
+        open_seq = int(seq) if _is_dungeon_open_card(card) else int((current or context_by_id.get(dungeon_id) or {}).get("open_seq") or 0)
+        open_message_id = card.id if _is_dungeon_open_card(card) else str((current or context_by_id.get(dungeon_id) or {}).get("open_message_id") or "")
+        context_by_id[dungeon_id] = {
+            "key": key,
+            "source": "open_in_window" if _is_dungeon_open_card(card) else "id_in_window",
+            "open_seq": open_seq,
+            "open_message_id": open_message_id,
+        }
         context_by_name[name_key] = {
             "key": key,
-            "source": "open_in_window" if card.title.endswith("开启") else "id_in_window",
-            "open_seq": int(seq) if card.title.endswith("开启") else int((current or {}).get("open_seq") or 0),
-            "open_message_id": card.id if card.title.endswith("开启") else str((current or {}).get("open_message_id") or ""),
+            "source": "open_in_window" if _is_dungeon_open_card(card) else "id_in_window",
+            "open_seq": open_seq,
+            "open_message_id": open_message_id,
             "ts": _card_timestamp(card),
         }
 
@@ -2453,6 +2505,37 @@ def _dungeon_status_rank(kind: object) -> int:
         "closed": 5,
         "info": 6,
     }.get(str(kind or "info"), 6)
+
+
+def _dungeon_row_sort_key(item: tuple[int, ParsedCard]) -> tuple[float, int]:
+    seq, card = item
+    return (_dungeon_order_value(seq, card), int(seq))
+
+
+def _dungeon_order_value(seq: int, card: ParsedCard) -> float:
+    ts = _card_timestamp(card)
+    return ts if ts > 0 else float(seq)
+
+
+def _dungeon_message_order(message: dict) -> float:
+    text = str(message.get("time") or "").strip()
+    if text:
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            pass
+    return float(message.get("seq") or message.get("msg_id") or 0)
+
+
+def _dungeon_id_from_key(key: str) -> str:
+    if not key.startswith("id:"):
+        return ""
+    return key.split(":", 2)[1] if ":" in key[3:] else key[3:]
+
+
+def _is_dungeon_open_card(card: ParsedCard) -> bool:
+    fields = card.fields or {}
+    return str(card.title or "").endswith("开启") or str(fields.get("状态") or "").strip() == "可加入"
 
 
 def _card_timestamp(card: ParsedCard) -> float:

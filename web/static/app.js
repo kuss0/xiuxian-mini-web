@@ -1404,8 +1404,8 @@ async function openDungeonStatusModal() {
       <section class="modal-section">
         <h4>近期副本汇总</h4>
         <div class="quick-filters dungeon-status-filters">
-          <button type="button" class="quick-filter-chip active all" data-dungeon-status-filter="all">全部</button>
-          <button type="button" class="quick-filter-chip" data-dungeon-status-filter="live">活跃</button>
+          <button type="button" class="quick-filter-chip all" data-dungeon-status-filter="all">全部</button>
+          <button type="button" class="quick-filter-chip active" data-dungeon-status-filter="live">活跃</button>
           <button type="button" class="quick-filter-chip" data-dungeon-status-filter="open">可加入</button>
           <button type="button" class="quick-filter-chip" data-dungeon-status-filter="done">结束</button>
         </div>
@@ -1503,7 +1503,7 @@ function renderDungeonStatusModal(dialog, summaries, rawCount, totalCount = summ
   const summary = dialog.querySelector("#dungeonStatusSummary");
   const filter = dialog.querySelector("[data-dungeon-status-filter].active")?.dataset.dungeonStatusFilter || "all";
   const visible = filterDungeonStatusSummaries(summaries, filter);
-  const openCount = summaries.filter((item) => item.statusKind === "open" || item.statusKind === "choice").length;
+  const liveCount = summaries.filter((item) => ["open", "choice", "active"].includes(item.statusKind)).length;
   const closedCount = summaries.filter((item) => item.statusKind === "closed" || item.statusKind === "failed").length;
   const actionCount = summaries.reduce((total, item) => total + item.actions.length, 0);
   if (summary) {
@@ -1515,8 +1515,8 @@ function renderDungeonStatusModal(dialog, summaries, rawCount, totalCount = summ
       </div>
       <div class="resource-stat-card">
         <span>活跃副本</span>
-        <strong>${escapeHtml(formatNumber(openCount))}</strong>
-        <small>可加入 / 需要抉择</small>
+        <strong>${escapeHtml(formatNumber(liveCount))}</strong>
+        <small>可加入 / 进行中 / 需要抉择</small>
       </div>
       <div class="resource-stat-card">
         <span>可用动作</span>
