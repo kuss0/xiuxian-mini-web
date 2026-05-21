@@ -28,6 +28,8 @@ const state = {
   refreshState: "idle",
   activeIdentityId: null,
   discoveredBots: [],
+  worldSnapshot: null,
+  worldSnapshotLoading: false,
   lastMessageSeq: 0,
   channelSummaryMessages: [],
   channelSummarySeq: 0,
@@ -111,6 +113,16 @@ const gameCockpit = document.querySelector("#gameCockpit");
 const cockpitIdentity = document.querySelector("#cockpitIdentity");
 const cockpitModules = document.querySelector("#cockpitModules");
 const cockpitInbox = document.querySelector("#cockpitInbox");
+const gameHud = document.querySelector("#gameHud");
+const hudIdentity = document.querySelector("#hudIdentity");
+const hudModules = document.querySelector("#hudModules");
+const hudInbox = document.querySelector("#hudInbox");
+const liveSituationBoard = document.querySelector("#liveSituationBoard");
+const worldEventStrip = document.querySelector("#worldEventStrip");
+const gameSceneBoard = document.querySelector("#gameSceneBoard");
+const questTracker = document.querySelector("#questTracker");
+const gameActionDock = document.querySelector("#gameActionDock");
+const quickActionHotbar = document.querySelector("#quickActionHotbar");
 const sidebarIdentityList = document.querySelector("#identityList");
 const currentAccountLine = document.querySelector("#currentAccountLine");
 const gameBotsButton = document.querySelector("#gameBotsButton");
@@ -188,6 +200,42 @@ async function loadMessageAudit({ silent = false, deep = false } = {}) {
   return payload;
 }
 
+async function loadWorldSnapshot({ silent = false } = {}) {
+  if (state.worldSnapshotLoading) {
+    return state.worldSnapshot || {};
+  }
+  state.worldSnapshotLoading = true;
+  try {
+    const [dungeon, resource, leader, priority] = await Promise.all([
+      fetchJson("/api/dungeon-status?limit=90&summary_limit=3&order=recent"),
+      fetchJson("/api/resource-stats?period=day&source_type=all&limit=120"),
+      fetchJson("/api/messages?channel=leader&limit=6"),
+      fetchJson("/api/messages?channels=risk,focus&limit=16&compact=1"),
+    ]);
+    state.worldSnapshot = {
+      loadedAt: new Date().toISOString(),
+      dungeon,
+      resource,
+      leader,
+      priority,
+    };
+    renderLiveSituationBoard();
+    renderWorldEventStrip();
+    renderGameSceneBoard();
+    renderQuestTracker();
+    renderGameActionDock();
+    return state.worldSnapshot;
+  } catch (err) {
+    if (!silent) {
+      throw err;
+    }
+    console.warn("[mini-web] world snapshot refresh failed:", err);
+    return state.worldSnapshot || {};
+  } finally {
+    state.worldSnapshotLoading = false;
+  }
+}
+
 async function apiFetch(url, options = {}, allowRetry = true) {
   const response = await fetch(url, {
     ...options,
@@ -224,6 +272,9 @@ async function loadChannels() {
   renderChannelFilters();
   renderQuickFilters();
   renderGameCockpit();
+  renderWorldEventStrip();
+  renderGameSceneBoard();
+  renderQuestTracker();
 }
 
 async function loadChannelSummary({ incremental = false } = {}) {
@@ -250,6 +301,11 @@ async function loadChannelSummary({ incremental = false } = {}) {
     .slice(0, CHANNEL_SUMMARY_LIMIT);
   state.channelSummarySeq = incremental ? Math.max(state.channelSummarySeq, serverMax) : serverMax;
   renderChannelFilters();
+  renderLiveSituationBoard();
+  renderWorldEventStrip();
+  renderGameSceneBoard();
+  renderQuestTracker();
+  renderGameActionDock();
   return { changed: incoming.length > 0, count: incoming.length };
 }
 
@@ -518,25 +574,43 @@ function updateGlobalBanner() {
 }
 
 function renderGameCockpit() {
-  if (!gameCockpit) return;
+  if (!gameCockpit && !gameHud && !gameActionDock) return;
   renderCockpitIdentity();
   renderCockpitModules();
   renderCockpitInbox();
+  renderLiveSituationBoard();
+  renderGameActionDock();
+  renderGameSceneBoard();
+  renderQuestTracker();
 }
 
 function renderCockpitIdentity() {
-  if (!cockpitIdentity) return;
+  if (!cockpitIdentity && !hudIdentity) return;
   const activeId = Number(state.activeIdentityId || 0) || null;
   const identity = activeId ? identityById(activeId) : null;
   const account = identity ? accountForIdentity(identity) : null;
-  const patchMap = new Map(activeIdentityPatches().map((item) => [item.key, item.value]));
+  const patches = activeIdentityPatches();
+  const patchMap = new Map(patches.map((item) => [item.key, item.value]));
+  const sourceRows = identityProfileSourceRows(patches);
   if (!identity) {
-    cockpitIdentity.innerHTML = `
+    const hudSelect = renderHudIdentitySelect(activeId);
+    const emptyHtml = `
       <div class="cockpit-empty">
         <strong>未选择身份</strong>
         <span>左侧选身份后，下方发送栏会自动跟随。</span>
       </div>
     `;
+    if (cockpitIdentity) cockpitIdentity.innerHTML = emptyHtml;
+    if (hudIdentity) {
+      hudIdentity.innerHTML = `
+        <div class="hud-empty">
+          <strong>未选择身份</strong>
+          <span>选择角色后显示状态</span>
+          ${hudSelect}
+        </div>
+      `;
+      bindHudIdentitySelect();
+    }
     return;
   }
 
@@ -563,19 +637,127 @@ function renderCockpitIdentity() {
     ["称号", title || "未读"],
   ].filter(([, value]) => value);
 
-  cockpitIdentity.innerHTML = `
-    <div class="cockpit-identity-main">
-      <div class="cockpit-avatar">${escapeHtml(sourceInitial(name, "player"))}</div>
-      <div class="cockpit-identity-title">
-        <strong>${escapeHtml(name)}</strong>
-        <span>${escapeHtml(subtitleParts.join("｜") || "等待消息箱补全角色资料")}</span>
+  if (cockpitIdentity) {
+    cockpitIdentity.innerHTML = `
+      <div class="cockpit-identity-main">
+        <div class="cockpit-avatar">${escapeHtml(sourceInitial(name, "player"))}</div>
+        <div class="cockpit-identity-title">
+          <strong>${escapeHtml(name)}</strong>
+          <span>${escapeHtml(subtitleParts.join("｜") || "等待消息箱补全角色资料")}</span>
+        </div>
+        <span class="cockpit-status ${statusClass}">${escapeHtml(statusText)}</span>
       </div>
-      <span class="cockpit-status ${statusClass}">${escapeHtml(statusText)}</span>
-    </div>
-    <div class="cockpit-player-meta">
-      ${metricRows.map(([label, value]) => cockpitMetric(label, value)).join("")}
-    </div>
+      <div class="cockpit-player-meta">
+        ${metricRows.map(([label, value]) => cockpitMetric(label, value)).join("")}
+      </div>
+      ${renderHudProfileSource(sourceRows)}
+    `;
+  }
+
+  if (hudIdentity) {
+    const hudMetrics = [
+      ["境界", patchMap.get("境界") || "未读"],
+      ["灵根", patchMap.get("灵根") || "未读"],
+      ["战力", power || "未读"],
+      ["修为", cultivation || "未读"],
+    ];
+    hudIdentity.innerHTML = `
+      <div class="hud-identity-switch">
+        <span>当前角色</span>
+        ${renderHudIdentitySelect(activeId)}
+      </div>
+      <div class="hud-player-main">
+        <div class="cockpit-avatar hud-avatar">${escapeHtml(sourceInitial(name, "player"))}</div>
+        <div class="hud-player-title">
+          <strong>${escapeHtml(name)}</strong>
+          <span>${escapeHtml(subtitleParts.join("｜") || title || "等待角色资料")}</span>
+        </div>
+        <span class="cockpit-status ${statusClass}">${escapeHtml(statusText)}</span>
+      </div>
+      <div class="hud-player-metrics">
+        ${hudMetrics.map(([label, value]) => cockpitMetric(label, value)).join("")}
+      </div>
+      ${renderHudProfileSource(sourceRows)}
+    `;
+    bindHudIdentitySelect();
+  }
+  bindHudSourceButtons();
+}
+
+function renderHudIdentitySelect(activeId) {
+  if (!state.identities.length) {
+    return "";
+  }
+  const options = [
+    `<option value="">未选择</option>`,
+    ...state.identities.map((identity) => {
+      const id = Number(identity.send_as_id || 0);
+      const name = identity.label || identity.username || identity.send_as_id || "未命名";
+      const account = accountForIdentity(identity);
+      const accountLabel = account?.label || identity.account_local_id || "未绑定";
+      return `
+        <option value="${escapeAttr(String(id))}" ${id === Number(activeId || 0) ? "selected" : ""}>
+          ${escapeHtml(String(name))}｜${escapeHtml(String(accountLabel))}
+        </option>
+      `;
+    }),
+  ].join("");
+  return `<select class="hud-identity-select" data-hud-identity-select aria-label="切换当前角色">${options}</select>`;
+}
+
+function bindHudIdentitySelect() {
+  hudIdentity?.querySelector("[data-hud-identity-select]")?.addEventListener("change", (event) => {
+    const id = Number(event.currentTarget.value || 0) || null;
+    setActiveIdentity(id, { loadPatches: true }).catch((err) => {
+      console.warn("[mini-web] switch identity failed:", err);
+      showSkillToast(`切换身份失败: ${err.message || err}`, "err");
+    });
+  });
+}
+
+function renderHudProfileSource(rows) {
+  const cleanRows = Array.isArray(rows) ? rows.filter(Boolean) : [];
+  if (!cleanRows.length) {
+    return `
+      <button type="button" class="hud-profile-source muted" data-hud-source-status>
+        <span>资料来源</span>
+        <strong>等待玉牒 / 战力</strong>
+      </button>
+    `;
+  }
+  const latest = cleanRows
+    .map((row) => row.updatedAt)
+    .filter(Boolean)
+    .sort((a, b) => String(b).localeCompare(String(a)))[0] || "";
+  const primary = cleanRows.find((row) => row.sourceMessageId) || cleanRows[0];
+  const countText = `${cleanRows.length} 项投影`;
+  const timeText = auditTimeLabel(latest) || "未知时间";
+  const sourceAttr = primary?.sourceMessageId ? `data-hud-source-message="${escapeAttr(primary.sourceMessageId)}"` : "data-hud-source-status";
+  return `
+    <button type="button" class="hud-profile-source" ${sourceAttr}>
+      <span>资料来源</span>
+      <strong>${escapeHtml(countText)}｜${escapeHtml(timeText)}</strong>
+    </button>
   `;
+}
+
+function bindHudSourceButtons() {
+  [cockpitIdentity, hudIdentity].filter(Boolean).forEach((root) => {
+    root.querySelectorAll("[data-hud-source-message]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const id = button.dataset.hudSourceMessage || "";
+        const message = id ? await findOrFetchMessage(id) : null;
+        if (message) {
+          jumpToMessage(message);
+        } else {
+          openIdentityStatusModal();
+        }
+      });
+    });
+    root.querySelectorAll("[data-hud-source-status]").forEach((button) => {
+      button.addEventListener("click", () => openIdentityStatusModal());
+    });
+  });
 }
 
 function cockpitMetric(label, value) {
@@ -588,21 +770,28 @@ function cockpitMetric(label, value) {
 }
 
 function renderCockpitModules() {
-  if (!cockpitModules) return;
+  if (!cockpitModules && !hudModules) return;
   const activeId = Number(state.activeIdentityId || 0) || null;
   if (!activeId) {
-    cockpitModules.innerHTML = '<p class="cockpit-muted">选中身份后显示关键 CD。</p>';
+    const empty = '<p class="cockpit-muted">选中身份后显示关键 CD。</p>';
+    if (cockpitModules) cockpitModules.innerHTML = empty;
+    if (hudModules) hudModules.innerHTML = empty;
     return;
   }
   const moduleStates = state.identityModuleStates.get(activeId) || [];
   const byKey = new Map(moduleStates.map((item) => [item.module_key, item]));
   const now = Date.now() / 1000;
   const specs = [
+    { key: "wild_training", icon: "⚔️", label: "野外" },
+    { key: "checkin", icon: "📋", label: "点卯" },
+    { key: "tower", icon: "🗼", label: "闯塔" },
     { key: "deep_retreat", icon: "📿", label: "深闭" },
-    { key: "yuanying", icon: "🔮", label: "元婴" },
+    { key: "retreat_shallow", icon: "🧘", label: "浅闭" },
+    { key: "yuanying", icon: "👻", label: "元婴" },
     { key: "second_soul", icon: "🪞", label: "元神" },
-    { key: "pet_touch", icon: "🖐️", label: "抚摸器灵" },
-    { key: "pet_warm", icon: "🔥", label: "温养器灵" },
+    { key: "pet_touch", icon: "🖐️", label: "抚摸" },
+    { key: "pet_warm", icon: "♨️", label: "温养" },
+    { key: "pet_trial", icon: "🥊", label: "试炼" },
   ];
   const rows = specs.map((spec) => {
     const item = byKey.get(spec.key);
@@ -611,10 +800,28 @@ function renderCockpitModules() {
     const nextAt = Number(summary.next_at || st.cooldown_until || 0) || 0;
     const startAt = moduleStartTs(st);
     const label = item?.label || spec.label;
-    const ready = item ? (summary.ready === true || nextAt === 0 || (nextAt > 0 && nextAt <= now)) : false;
     if (!item) {
       return cockpitModuleChip({ icon: spec.icon, label, text: "未知", cls: "unknown" });
     }
+    const phase = String(summary.phase || st.phase || "");
+    if (phase === "running") {
+      if (nextAt > now) {
+        const remaining = Math.max(0, nextAt - now);
+        const total = Math.max(1, nextAt - startAt);
+        const pct = Math.min(100, Math.max(0, ((total - remaining) / total) * 100));
+        return cockpitModuleChip({
+          icon: spec.icon,
+          label,
+          text: `剩 ${fmtCountdown(remaining)}`,
+          cls: "cooling",
+          nextAt,
+          startAt,
+          pct,
+        });
+      }
+      return cockpitModuleChip({ icon: spec.icon, label, text: "待结算", cls: "ready" });
+    }
+    const ready = summary.ready === true || nextAt === 0 || (nextAt > 0 && nextAt <= now);
     if (ready) {
       return cockpitModuleChip({ icon: spec.icon, label, text: "已就绪", cls: "ready" });
     }
@@ -631,7 +838,9 @@ function renderCockpitModules() {
       pct,
     });
   });
-  cockpitModules.innerHTML = rows.join("");
+  const html = rows.join("");
+  if (cockpitModules) cockpitModules.innerHTML = html;
+  if (hudModules) hudModules.innerHTML = html;
 }
 
 function cockpitModuleChip({ icon, label, text, cls, nextAt = 0, startAt = 0, pct = 0 }) {
@@ -649,7 +858,7 @@ function cockpitModuleChip({ icon, label, text, cls, nextAt = 0, startAt = 0, pc
 }
 
 function renderCockpitInbox() {
-  if (!cockpitInbox) return;
+  if (!cockpitInbox && !hudInbox) return;
   const audit = state.messageAudit || {};
   const messages = audit.messages || {};
   const listener = audit.listener || state.listenerSummary || {};
@@ -660,7 +869,7 @@ function renderCockpitInbox() {
   const latestTime = auditTimeLabel(messages.latest_message_time || audit.time || "");
   const gapCount = Number(audit.gap_count || 0);
   const counts = channelMessageCounts();
-  cockpitInbox.innerHTML = `
+  const html = `
     <button type="button" class="cockpit-inbox-status ${escapeAttr(status)}" data-cockpit-action="health">
       <span class="health-dot" aria-hidden="true"></span>
       <strong>${escapeHtml(healthStatusLabel(status))}</strong>
@@ -673,7 +882,862 @@ function renderCockpitInbox() {
       ${cockpitMetric("最近", latestTime || "暂无")}
     </div>
   `;
-  cockpitInbox.querySelector('[data-cockpit-action="health"]')?.addEventListener("click", () => openHealthModal());
+  [cockpitInbox, hudInbox].filter(Boolean).forEach((root) => {
+    root.innerHTML = html;
+    root.querySelector('[data-cockpit-action="health"]')?.addEventListener("click", () => openHealthModal());
+  });
+}
+
+function renderGameActionDock() {
+  if (!gameActionDock) return;
+  const active = identityById(state.activeIdentityId);
+  const activeName = active ? (active.label || active.username || active.send_as_id) : "未选角色";
+  const counts = channelMessageCounts();
+  const focusCount = Number(counts.get("focus") || 0);
+  const dungeonCount = Number(counts.get("dungeon") || 0);
+  const resourceCount = Number(counts.get("resource") || 0) + Number(counts.get("training") || 0);
+  const leaderCount = Number(counts.get("leader") || 0);
+  const healthStatus = state.messageAudit?.status || (state.listenerSummary?.collector ? "ok" : "warn");
+  const questCount = questTrackerItems().length;
+  const dungeonSummary = actionableDungeonSnapshot() || currentDungeonSnapshot();
+  const dungeonActions = visibleDungeonActions(dungeonSummary).length;
+  const resource = liveResourceSnapshot();
+  const rareTop = resource?.rareRows?.[0] || null;
+  const dungeonMeta = dungeonSummary
+    ? `${dungeonSummaryDisplayLabel(dungeonSummary)} ${dungeonSummary.status || ""}`.trim()
+    : (dungeonCount ? `${formatNumber(dungeonCount)} 条` : "房间/卦象");
+  const rareMeta = rareTop
+    ? `${rareTop.resource_name}${formatResourceAmount(rareTop.total_amount, rareTop.unit)}`
+    : (resourceCount ? `${formatNumber(resourceCount)} 条` : "收益统计");
+  const dockItems = [
+    { key: "overview", label: "概览", meta: questCount ? `${formatNumber(questCount)} 待办` : (active ? "右侧面板" : "全局态势") },
+    { key: "report", label: "战报", meta: "世界总览" },
+    { key: "status", label: "状态", meta: active ? "角色总览" : "先选身份" },
+    { key: "intel", label: "情报", meta: leaderCount ? `${formatNumber(leaderCount)} 条` : "会长频道" },
+    { key: "dungeon", label: "副本", meta: dungeonActions ? `${formatNumber(dungeonActions)} 动作` : dungeonMeta },
+    { key: "guide", label: "攻略", meta: "虚天卦象" },
+    { key: "resource", label: "资源", meta: rareMeta },
+    { key: "inventory", label: "库存", meta: "批量转移" },
+    { key: "schedule", label: "定时", meta: "官方排班" },
+    { key: "logs", label: "记录", meta: focusCount ? `重点 ${formatNumber(focusCount)}` : "按天查看" },
+    { key: "health", label: "健康", meta: healthStatusLabel(healthStatus) },
+  ];
+  gameActionDock.innerHTML = `
+    <div class="game-dock-context">
+      <span>当前</span>
+      <strong>${escapeHtml(String(activeName))}</strong>
+      <div class="game-dock-context-metrics">
+        <span><b>待办</b>${escapeHtml(formatNumber(questCount))}</span>
+        <span><b>副本</b>${escapeHtml(dungeonSummary ? (dungeonSummary.status || "线索") : "暂无")}</span>
+        <span><b>收益</b>${escapeHtml(rareTop ? rareTop.resource_name : "今日")}</span>
+      </div>
+    </div>
+    <div class="game-dock-actions">
+      ${dockItems.map((item) => `
+        <button type="button" data-game-dock-action="${escapeAttr(item.key)}">
+          <strong>${escapeHtml(item.label)}</strong>
+          <small>${escapeHtml(item.meta)}</small>
+        </button>
+      `).join("")}
+    </div>
+  `;
+  gameActionDock.querySelectorAll("[data-game-dock-action]").forEach((button) => {
+    button.addEventListener("click", () => handleGameDockAction(button.dataset.gameDockAction || ""));
+  });
+}
+
+async function handleGameDockAction(action) {
+  try {
+    if (action === "overview") {
+      openOverviewDetailPanel();
+      return;
+    }
+    if (action === "report") {
+      await openWorldReportModal();
+      return;
+    }
+    if (action === "status") {
+      openIdentityStatusModal();
+      return;
+    }
+    if (action === "intel") {
+      await openLeaderIntelModal();
+      return;
+    }
+    if (action === "dungeon") {
+      await openDungeonStatusModal();
+      return;
+    }
+    if (action === "guide") {
+      await openXutianOracleGuideModal();
+      return;
+    }
+    if (action === "resource") {
+      await openResourceStatsModal();
+      return;
+    }
+    if (action === "inventory") {
+      await openInventoryModal();
+      return;
+    }
+    if (action === "schedule") {
+      await Promise.all([loadAccounts(), loadIdentities()]);
+      await openScheduleModal();
+      return;
+    }
+    if (action === "logs") {
+      await openLogsModal();
+      return;
+    }
+    if (action === "health") {
+      await openHealthModal();
+    }
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function openWorldReportModal() {
+  const dialog = openModal({
+    title: "今日战报",
+    body: `
+      <section class="modal-section world-report-modal">
+        <div id="worldReportBody" class="world-report-body">
+          <p class="empty inline">正在读取今日态势...</p>
+        </div>
+      </section>
+    `,
+    footer: `
+      <button type="button" id="worldReportRefresh">刷新战报</button>
+      <button type="button" data-modal-close>关闭</button>
+    `,
+  });
+  if (!dialog) return;
+  const load = async () => {
+    const body = dialog.querySelector("#worldReportBody");
+    const button = dialog.querySelector("#worldReportRefresh");
+    if (button) button.disabled = true;
+    if (body) body.innerHTML = '<p class="empty inline">正在读取今日态势...</p>';
+    try {
+      const [health, dungeon, resource, leader, priority] = await Promise.all([
+        fetchJson("/api/health"),
+        fetchJson("/api/dungeon-status?limit=90&summary_limit=3&order=recent"),
+        fetchJson("/api/resource-stats?period=day&source_type=all&limit=120"),
+        fetchJson("/api/messages?channel=leader&limit=6"),
+        fetchJson("/api/messages?channels=risk,focus&limit=16&compact=1"),
+      ]);
+      const payload = { health, dungeon, resource, leader, priority };
+      state.worldSnapshot = {
+        loadedAt: new Date().toISOString(),
+        dungeon,
+        resource,
+        leader,
+        priority,
+      };
+      renderLiveSituationBoard();
+      renderWorldEventStrip();
+      renderGameSceneBoard();
+      renderQuestTracker();
+      renderGameActionDock();
+      if (body) body.innerHTML = renderWorldReport(payload);
+      bindWorldReport(dialog, payload);
+    } catch (error) {
+      if (body) body.innerHTML = `<p class="empty inline">战报读取失败：${escapeHtml(error.message || "未知错误")}</p>`;
+    } finally {
+      if (button) button.disabled = false;
+    }
+  };
+  dialog.querySelector("#worldReportRefresh")?.addEventListener("click", () => load());
+  await load();
+}
+
+function renderWorldReport(payload) {
+  const health = payload.health || {};
+  const dungeonSummaries = ((payload.dungeon || {}).summaries || []).map(normalizeDungeonStatusSummary);
+  const currentDungeon = pickCurrentDungeonSummary(dungeonSummaries);
+  const resource = payload.resource || {};
+  const rows = resource.rows || [];
+  const events = resource.event_summary || resource.events || [];
+  const latestPeriod = latestResourcePeriod(rows, events);
+  const periodRows = filterResourceRowsByPeriod(rows, latestPeriod);
+  const periodEvents = filterResourceRowsByPeriod(events, latestPeriod);
+  const rareRows = aggregateRareResourceRows(periodRows.filter((row) => row.resource_category === "rare")).slice(0, 6);
+  const leaderItems = (payload.leader?.messages || []).slice(0, 4);
+  const quests = questTrackerItems().slice(0, 6);
+  return `
+    <div class="world-report-hero">
+      <div>
+        <span>消息箱</span>
+        <strong>${escapeHtml(worldReportListenerLabel(health))}</strong>
+        <small>${escapeHtml(worldReportLatestMessageLabel(health))}</small>
+      </div>
+      <div>
+        <span>当前副本</span>
+        <strong>${escapeHtml(currentDungeon ? `${currentDungeon.dungeonName}${currentDungeon.dungeonId ? ` #${currentDungeon.dungeonId}` : ""}` : "暂无")}</strong>
+        <small>${escapeHtml(currentDungeon?.status || "最近没有活跃副本线索")}</small>
+      </div>
+      <div>
+        <span>今日资源事件</span>
+        <strong>${escapeHtml(formatNumber((resource.events || []).length))}</strong>
+        <small>${escapeHtml(latestPeriod || "暂无周期")}</small>
+      </div>
+      <div>
+        <span>情报摘录</span>
+        <strong>${escapeHtml(formatNumber(leaderItems.length))}</strong>
+        <small>会长 / 天尊普通发言</small>
+      </div>
+      <div>
+        <span>待办动作</span>
+        <strong>${escapeHtml(formatNumber(quests.length))}</strong>
+        <small>只填入发送栏</small>
+      </div>
+    </div>
+    <div class="world-report-grid">
+      <section class="world-report-section wide">
+        <div class="world-report-section-head">
+          <strong>待办动作</strong>
+          <button type="button" data-world-report-open="overview">查看全部</button>
+        </div>
+        <div class="world-report-quests">
+          ${quests.length ? quests.map(renderWorldReportQuestCard).join("") : '<p class="empty inline">暂无风险、@我或待确认动作。</p>'}
+        </div>
+      </section>
+      <section class="world-report-section wide">
+        <div class="world-report-section-head">
+          <strong>当前副本</strong>
+          <button type="button" data-world-report-open="dungeon">副本面板</button>
+        </div>
+        ${currentDungeon ? renderCurrentDungeonPanel(currentDungeon) : '<p class="empty inline">暂无活跃副本线索。</p>'}
+      </section>
+      <section class="world-report-section">
+        <div class="world-report-section-head">
+          <strong>野外历练</strong>
+          <button type="button" data-world-report-open="resource">资源面板</button>
+        </div>
+        <div class="world-report-wild">
+          ${renderWorldReportWildCards(periodEvents)}
+        </div>
+      </section>
+      <section class="world-report-section">
+        <div class="world-report-section-head">
+          <strong>稀有产物</strong>
+          <button type="button" data-world-report-open="resource">查看统计</button>
+        </div>
+        <div class="world-report-rare">
+          ${rareRows.length ? rareRows.map((row) => `
+            <span>
+              <strong>${escapeHtml(row.resource_name || "资源")}</strong>
+              <em>${escapeHtml(formatResourceAmount(row.total_amount, row.unit))}</em>
+              <small>${escapeHtml((row.sources || []).slice(0, 2).join(" / ") || "来源")}</small>
+            </span>
+          `).join("") : '<p class="empty inline">暂无稀有产物统计。</p>'}
+        </div>
+      </section>
+      <section class="world-report-section wide">
+        <div class="world-report-section-head">
+          <strong>情报摘录</strong>
+          <button type="button" data-world-report-open="intel">情报频道</button>
+        </div>
+        <div class="leader-intel-list world-report-intel-list">
+          ${leaderItems.length ? leaderItems.map(renderLeaderIntelCard).join("") : '<p class="empty inline">暂无情报消息。</p>'}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderWorldReportQuestCard(message) {
+  const key = questTrackerItemKey(message);
+  const actionEntries = (message.actions || [])
+    .map((action, index) => ({ action, index }))
+    .filter(({ action }) => String(action.command || "").trim());
+  const { kind, text: kindText } = questItemKind(message, actionEntries);
+  const preview = clipGraphemes(
+    String(message.summary || message.raw || message.title || "").replace(/\s+/g, " ").trim(),
+    86
+  );
+  return `
+    <article class="world-report-quest ${escapeAttr(kind)}">
+      <button type="button" data-world-report-quest-view="${escapeAttr(key)}">
+        <span>${escapeHtml(kindText)}</span>
+        <strong>${escapeHtml(message.title || displaySource(message.source) || "待办")}</strong>
+        <small>${escapeHtml(formatChatTime(message.time) || "")}｜${escapeHtml(displaySource(message.source) || "快照")}</small>
+        <em>${escapeHtml(preview || "等待查看原文")}</em>
+      </button>
+      ${actionEntries.length ? `
+        <div>
+          ${actionEntries.slice(0, 2).map(({ action, index }) => `
+            <button type="button" data-world-report-quest-action="${escapeAttr(`${key}::${index}`)}" title="${escapeAttr(String(action.command || ""))}">
+              ${escapeHtml(quickActionLabel(action))}
+            </button>
+          `).join("")}
+        </div>
+      ` : ""}
+    </article>
+  `;
+}
+
+function renderWorldReportWildCards(periodEvents) {
+  const strategies = ["谨慎", "均衡", "深入"];
+  const cards = strategies.map((strategy) => {
+    const rows = (periodEvents || []).filter((row) => row.source_type === "wild_training" && String(row.source_name || "").includes(strategy));
+    const success = rows.filter((row) => row.result === "success").reduce((sum, row) => sum + Number(row.event_count || 0), 0);
+    const failed = rows.filter((row) => row.result === "failed").reduce((sum, row) => sum + Number(row.event_count || 0), 0);
+    const cooldown = rows.filter((row) => row.result === "cooldown").reduce((sum, row) => sum + Number(row.event_count || 0), 0);
+    const total = success + failed;
+    const rate = total ? `${Math.round((success / total) * 100)}%` : "暂无";
+    return `
+      <article class="world-report-wild-card">
+        <span>${escapeHtml(strategy)}</span>
+        <strong>${escapeHtml(rate)}</strong>
+        <small>${escapeHtml(formatNumber(success))} 成 / ${escapeHtml(formatNumber(failed))} 败｜CD ${escapeHtml(formatNumber(cooldown))}</small>
+      </article>
+    `;
+  });
+  return cards.join("");
+}
+
+function worldReportListenerLabel(health) {
+  const running = health?.listener?.running || {};
+  const rows = Object.values(running);
+  const first = rows[0] || {};
+  if (first.status === "running") return "监听运行中";
+  if (first.status === "starting") return "监听启动中";
+  return rows.length ? String(first.status || "未知") : "未运行";
+}
+
+function worldReportLatestMessageLabel(health) {
+  const messages = health?.messages || {};
+  const latest = messages.latest_msg_id ? `#${formatNumber(messages.latest_msg_id)}` : "无水位";
+  const time = auditTimeLabel(messages.latest_message_time || "");
+  return `${latest}${time ? `｜${time}` : ""}`;
+}
+
+function bindWorldReport(dialog, payload) {
+  const dungeonSummaries = ((payload.dungeon || {}).summaries || []).map(normalizeDungeonStatusSummary);
+  const body = dialog.querySelector("#worldReportBody");
+  if (body && dungeonSummaries.length) {
+    bindDungeonStatusCards(body, dungeonSummaries);
+  }
+  body?.querySelectorAll("[data-leader-intel-jump]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = button.dataset.leaderIntelJump || "";
+      if (!id) return;
+      const message = await findOrFetchMessage(id);
+      closeModal();
+      if (message) jumpToMessage(message);
+    });
+  });
+  body?.querySelectorAll("[data-world-report-open]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const target = button.dataset.worldReportOpen || "";
+      closeModal();
+      if (target === "dungeon") {
+        await openDungeonStatusModal();
+      } else if (target === "resource") {
+        await openResourceStatsModal();
+      } else if (target === "intel") {
+        await openLeaderIntelModal();
+      } else if (target === "overview") {
+        openOverviewDetailPanel();
+      }
+    });
+  });
+  body?.querySelectorAll("[data-world-report-quest-view]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const key = button.dataset.worldReportQuestView || "";
+      closeModal();
+      await openQuestTrackerItem(key);
+    });
+  });
+  body?.querySelectorAll("[data-world-report-quest-action]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const [key, indexText] = String(button.dataset.worldReportQuestAction || "").split("::");
+      closeModal();
+      await fillQuestTrackerAction(key, Number(indexText || 0), "战报动作");
+    });
+  });
+}
+
+async function openLeaderIntelModal() {
+  const dialog = openModal({
+    title: "情报频道",
+    body: `
+      <section class="modal-section leader-intel-modal">
+        <div class="leader-intel-head">
+          <div>
+            <strong>会长 / 天尊普通发言</strong>
+            <span>只读聚合，不自动发送；用于快速看新玩法线索和公告。</span>
+          </div>
+          <div class="quick-filters leader-intel-filters">
+            <button type="button" class="quick-filter-chip active" data-leader-intel-filter="all">全部</button>
+            <button type="button" class="quick-filter-chip" data-leader-intel-filter="owner">本人上号</button>
+            <button type="button" class="quick-filter-chip" data-leader-intel-filter="tianzun">天尊普通</button>
+            <button type="button" class="quick-filter-chip" data-leader-intel-filter="keyword">关键词</button>
+            <button type="button" class="quick-filter-chip" data-leader-intel-filter="reply">回复链</button>
+          </div>
+        </div>
+        <div id="leaderIntelSummary" class="leader-intel-summary">加载中...</div>
+        <div id="leaderIntelList" class="leader-intel-list">
+          <p class="empty inline">加载中...</p>
+        </div>
+      </section>
+    `,
+    footer: `
+      <button type="button" id="leaderIntelOpenChannel">切到会长频道</button>
+      <button type="button" id="leaderIntelRefresh">刷新情报</button>
+      <button type="button" data-modal-close>关闭</button>
+    `,
+  });
+  if (!dialog) return;
+  const local = { items: [], filter: "all", loading: false };
+  const load = async () => {
+    local.loading = true;
+    renderLeaderIntelModal(dialog, local);
+    try {
+      const payload = await fetchJson("/api/messages?channel=leader&limit=100");
+      local.items = payload.messages || [];
+    } catch (error) {
+      local.items = [];
+      const list = dialog.querySelector("#leaderIntelList");
+      if (list) list.innerHTML = `<p class="empty inline">情报读取失败：${escapeHtml(error.message || "未知错误")}</p>`;
+      const summary = dialog.querySelector("#leaderIntelSummary");
+      if (summary) summary.textContent = "读取失败";
+      return;
+    } finally {
+      local.loading = false;
+    }
+    renderLeaderIntelModal(dialog, local);
+  };
+  dialog.querySelectorAll("[data-leader-intel-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      dialog.querySelectorAll("[data-leader-intel-filter]").forEach((item) => item.classList.remove("active"));
+      button.classList.add("active");
+      local.filter = button.dataset.leaderIntelFilter || "all";
+      renderLeaderIntelModal(dialog, local);
+    });
+  });
+  dialog.querySelector("#leaderIntelRefresh")?.addEventListener("click", () => load());
+  dialog.querySelector("#leaderIntelOpenChannel")?.addEventListener("click", async () => {
+    closeModal();
+    await applyChannelSelection(["leader"]);
+  });
+  await load();
+}
+
+function renderLeaderIntelModal(dialog, local) {
+  const summary = dialog.querySelector("#leaderIntelSummary");
+  const list = dialog.querySelector("#leaderIntelList");
+  if (!summary || !list) return;
+  if (local.loading) {
+    summary.textContent = "加载中...";
+    list.innerHTML = '<p class="empty inline">加载中...</p>';
+    return;
+  }
+  const items = leaderIntelFilteredItems(local.items, local.filter);
+  const ownerCount = local.items.filter((item) => (item.tags || []).includes("本人上号")).length;
+  const tianzunCount = local.items.filter((item) => (item.tags || []).includes("会长上号")).length;
+  const keywordCount = local.items.filter((item) => (item.tags || []).some((tag) => String(tag).startsWith("关键词:"))).length;
+  summary.innerHTML = `
+    <span>全部 <b>${escapeHtml(formatNumber(local.items.length))}</b></span>
+    <span>本人上号 <b>${escapeHtml(formatNumber(ownerCount))}</b></span>
+    <span>天尊普通 <b>${escapeHtml(formatNumber(tianzunCount))}</b></span>
+    <span>关键词 <b>${escapeHtml(formatNumber(keywordCount))}</b></span>
+    <span>当前可见 <b>${escapeHtml(formatNumber(items.length))}</b></span>
+  `;
+  if (!items.length) {
+    list.innerHTML = '<p class="empty inline">当前筛选下没有情报。</p>';
+    return;
+  }
+  list.innerHTML = items.map((message) => renderLeaderIntelCard(message)).join("");
+  list.querySelectorAll("[data-leader-intel-jump]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = button.dataset.leaderIntelJump || "";
+      if (!id) return;
+      const message = await findOrFetchMessage(id);
+      closeModal();
+      if (message) jumpToMessage(message);
+    });
+  });
+}
+
+function leaderIntelFilteredItems(items, filter) {
+  const source = items || [];
+  if (filter === "owner") return source.filter((item) => (item.tags || []).includes("本人上号"));
+  if (filter === "tianzun") return source.filter((item) => (item.tags || []).includes("会长上号"));
+  if (filter === "keyword") return source.filter((item) => (item.tags || []).some((tag) => String(tag).startsWith("关键词:")));
+  if (filter === "reply") return source.filter((item) => Number(item.reply_to_msg_id || 0));
+  return source;
+}
+
+function renderLeaderIntelCard(message) {
+  const tags = message.tags || [];
+  const kind = tags.includes("本人上号")
+    ? "本人上号"
+    : tags.includes("会长上号")
+      ? "天尊普通"
+      : "会长";
+  const keywordTags = tags.filter((tag) => String(tag).startsWith("关键词:")).slice(0, 3);
+  const preview = clipGraphemes(
+    String(message.raw || message.summary || message.title || "").replace(/\s+/g, " ").trim() || "（空消息）",
+    150
+  );
+  const replyText = message.reply_to_msg_id ? `回复 #${message.reply_to_msg_id}` : "非回复";
+  return `
+    <article class="leader-intel-card">
+      <div class="leader-intel-card-head">
+        <span class="leader-intel-kind">${escapeHtml(kind)}</span>
+        <strong>${escapeHtml(displaySource(message.source))}</strong>
+        <small>${escapeHtml(formatChatTime(message.time) || "")}</small>
+      </div>
+      <p>${escapeHtml(preview)}</p>
+      <div class="leader-intel-card-foot">
+        <span>${escapeHtml(replyText)}</span>
+        ${keywordTags.map((tag) => `<em>${escapeHtml(String(tag).replace(/^关键词:/, ""))}</em>`).join("")}
+        <button type="button" data-leader-intel-jump="${escapeAttr(message.id || "")}">定位</button>
+      </div>
+    </article>
+  `;
+}
+
+const IDENTITY_STATUS_GROUPS = [
+  {
+    key: "daily",
+    title: "日常",
+    hint: "常规循环和会卡行动的长 CD。",
+    modules: [
+      { key: "wild_training", skill: "wild_training" },
+      { key: "checkin", skill: "checkin" },
+      { key: "tower", skill: "tower" },
+      { key: "deep_retreat", skill: "deep_retreat", query: "deep_retreat_query" },
+      { key: "retreat_shallow", skill: "retreat_shallow" },
+      { key: "yuanying", skill: "yuanying", query: "yuanying_status" },
+      { key: "second_soul", skill: "second_soul_train", query: "second_soul_status" },
+      { key: "ranch", skill: "ranch" },
+    ],
+  },
+  {
+    key: "artifact",
+    title: "器灵",
+    hint: "抚摸、温养、试炼三块合并看。",
+    modules: [
+      { key: "pet_touch", skill: "pet_touch" },
+      { key: "pet_warm", skill: "pet_warm" },
+      { key: "pet_trial", skill: "pet_trial" },
+    ],
+  },
+  {
+    key: "concubine",
+    title: "侍妾",
+    hint: "入梦、代卜、心劫分开显示，查询走我的侍妾。",
+    query: "concubine_status",
+    modules: [
+      { key: "concubine_dream", skill: "concubine_dream" },
+      { key: "concubine_tianji", skill: "concubine_tianji" },
+      { key: "concubine_heart", skill: "concubine_heart" },
+    ],
+  },
+  {
+    key: "stargazer",
+    title: "星宫",
+    hint: "观星台三项独立 CD，按宗门解锁快捷按钮。",
+    query: "stargazer_panel",
+    modules: [
+      { key: "stargazer_guide", skill: "stargazer_guide" },
+      { key: "stargazer_soothe", skill: "stargazer_soothe" },
+      { key: "stargazer_collect", skill: "stargazer_collect" },
+    ],
+  },
+  {
+    key: "tianti",
+    title: "天阶",
+    hint: "登天阶、问心台、九天罡风分开观测。",
+    query: "tianti_status",
+    modules: [
+      { key: "tianti_climb", skill: "tianti_climb" },
+      { key: "tianti_wenxin", skill: "tianti_wenxin" },
+      { key: "tianti_gangfeng", skill: "tianti_gangfeng" },
+    ],
+  },
+  {
+    key: "taiyi",
+    title: "太一",
+    hint: "太一周期用于引道 / 搜寻节点的手动判断。",
+    query: "taiyi",
+    modules: [
+      { key: "taiyi_cycle", skill: "yindao", extraSkills: ["node_search"] },
+    ],
+  },
+];
+
+function openIdentityStatusModal() {
+  const active = identityById(state.activeIdentityId);
+  const titleSuffix = active ? `｜${active.label || active.username || active.send_as_id}` : "";
+  const dialog = openModal({
+    title: `角色状态${titleSuffix}`,
+    body: `
+      <section class="modal-section identity-status-modal">
+        <div id="identityStatusBody" class="identity-status-body">
+          ${renderIdentityStatusBody()}
+        </div>
+      </section>
+    `,
+    footer: `
+      <button type="button" data-identity-status-action="refresh">刷新状态</button>
+      <button type="button" data-modal-close>关闭</button>
+    `,
+  });
+  if (!dialog) return;
+  bindIdentityStatusModal(dialog);
+}
+
+function renderIdentityStatusBody() {
+  const activeId = Number(state.activeIdentityId || 0) || null;
+  if (!activeId) {
+    return '<p class="empty">先在左侧或顶部选择一个身份。</p>';
+  }
+  const identity = identityById(activeId);
+  const patchMap = new Map(activeIdentityPatches().map((item) => [item.key, item.value]));
+  const stateItems = state.identityModuleStates.get(activeId) || [];
+  const byKey = new Map(stateItems.map((item) => [item.module_key, item]));
+  const titleParts = [
+    patchMap.get("境界"),
+    String(patchMap.get("宗门") || "").replace(/^【|】$/g, ""),
+    patchMap.get("灵根"),
+  ].filter(Boolean);
+  const name =
+    patchMap.get("角色名") ||
+    patchMap.get("道号") ||
+    identity?.label ||
+    identity?.username ||
+    String(activeId);
+  const profileChips = [
+    ["角色", name],
+    ["境界", patchMap.get("境界") || "未读"],
+    ["灵根", patchMap.get("灵根") || "未读"],
+    ["战力", patchMap.get("综合战力") || "未读"],
+    ["修为", patchMap.get("修为") || "未读"],
+  ];
+  const sourceRows = identityProfileSourceRows(activeIdentityPatches());
+  return `
+    <div class="identity-status-profile">
+      <div>
+        <strong>${escapeHtml(String(name))}</strong>
+        <span>${escapeHtml(titleParts.join("｜") || "等待消息箱补全角色资料")}</span>
+      </div>
+      <div class="identity-status-profile-grid">
+        ${profileChips.map(([label, value]) => cockpitMetric(label, value)).join("")}
+      </div>
+      ${renderIdentityProfileSources(sourceRows)}
+    </div>
+    <div class="identity-status-groups">
+      ${IDENTITY_STATUS_GROUPS.map((group) => renderIdentityStatusGroup(group, byKey)).join("")}
+    </div>
+  `;
+}
+
+function identityProfileSourceRows(patches) {
+  const wanted = ["角色名", "境界", "宗门", "灵根", "修为", "综合战力"];
+  const byKey = new Map((patches || []).map((item) => [item.key, item]));
+  return wanted
+    .map((key) => byKey.get(key))
+    .filter(Boolean)
+    .map((item) => ({
+      key: item.key,
+      value: item.value,
+      sourceMessageId: item.source_message_id || "",
+      updatedAt: item.updated_at || "",
+    }));
+}
+
+function renderIdentityProfileSources(rows) {
+  if (!rows.length) {
+    return '<p class="identity-source-empty">暂无投影来源。发送或监听“我的灵根 / 战力”后会更新。</p>';
+  }
+  const latest = rows
+    .map((row) => row.updatedAt)
+    .filter(Boolean)
+    .sort((a, b) => String(b).localeCompare(String(a)))[0] || "";
+  return `
+    <details class="identity-source-panel">
+      <summary>
+        <span>资料来源</span>
+        <strong>${escapeHtml(latest ? `最近 ${auditTimeLabel(latest)}` : "等待消息箱")}</strong>
+      </summary>
+      <div class="identity-source-list">
+        ${rows.map((row) => `
+          <div class="identity-source-row">
+            <span>${escapeHtml(row.key)}</span>
+            <strong>${escapeHtml(formatFieldValue(row.value))}</strong>
+            <small>${escapeHtml(auditTimeLabel(row.updatedAt) || "未知时间")}</small>
+            ${row.sourceMessageId ? `
+              <button type="button" data-identity-source-jump="${escapeAttr(row.sourceMessageId)}">
+                来源
+              </button>
+            ` : '<em>无来源</em>'}
+          </div>
+        `).join("")}
+      </div>
+    </details>
+  `;
+}
+
+function renderIdentityStatusGroup(group, byKey) {
+  const querySkill = group.query ? skillByKey(group.query) : null;
+  const queryButton = querySkill && skillIsUnlocked(querySkill)
+    ? `<button type="button" class="identity-status-query" data-status-skill="${escapeAttr(querySkill.key)}">${escapeHtml(querySkill.label || "查询")}</button>`
+    : "";
+  return `
+    <section class="identity-status-group ${escapeAttr(group.key)}">
+      <div class="identity-status-group-head">
+        <div>
+          <strong>${escapeHtml(group.title)}</strong>
+          <span>${escapeHtml(group.hint || "")}</span>
+        </div>
+        ${queryButton}
+      </div>
+      <div class="identity-status-grid">
+        ${group.modules.map((spec) => renderIdentityStatusCard(spec, byKey.get(spec.key))).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderIdentityStatusCard(spec, item) {
+  const view = identityModuleView(spec, item);
+  const actionButtons = identityStatusActions(spec)
+    .map((skill) => {
+      const disabled = !skillIsUnlocked(skill);
+      return `
+        <button type="button" data-status-skill="${escapeAttr(skill.key)}" ${disabled ? "disabled" : ""}>
+          ${escapeHtml(skill.label || skill.command || "填入")}
+        </button>
+      `;
+    })
+    .join("");
+  const excerpt = String(item?.state?.last_text_excerpt || "").trim();
+  return `
+    <article class="identity-status-card ${escapeAttr(view.cls)}" data-status-module="${escapeAttr(spec.key)}">
+      <div class="identity-status-card-head">
+        <span class="identity-status-icon">${escapeHtml(view.icon)}</span>
+        <strong>${escapeHtml(view.label)}</strong>
+        <em>${escapeHtml(view.status)}</em>
+      </div>
+      <div class="identity-status-card-main">
+        <span class="identity-status-time" ${view.nextAt ? `data-status-timer="1" data-next-at="${view.nextAt}" data-start-at="${view.startAt}"` : ""}>
+          ${escapeHtml(view.time)}
+        </span>
+        <span class="identity-status-bar"><span style="width:${view.pct.toFixed(1)}%"></span></span>
+      </div>
+      ${excerpt ? `<p>${escapeHtml(clipGraphemes(excerpt.replace(/\s+/g, " "), 82))}</p>` : '<p class="muted">暂无最近文案。</p>'}
+      ${actionButtons ? `<div class="identity-status-actions">${actionButtons}</div>` : ""}
+    </article>
+  `;
+}
+
+function identityModuleView(spec, item) {
+  const skill = spec.skill ? skillByKey(spec.skill) : null;
+  const now = Date.now() / 1000;
+  const summary = item?.summary || {};
+  const st = item?.state || {};
+  const label = item?.label || skill?.label || spec.label || spec.key;
+  const icon = skill?.icon || spec.icon || "•";
+  const nextAt = Number(summary.next_at || st.cooldown_until || 0) || 0;
+  const startAt = moduleStartTs(st);
+  const lastStatus = String(summary.status || st.last_status || "");
+  if (!item) {
+    return { label, icon, cls: "unknown", status: "未观测", time: "未知", nextAt: 0, startAt: 0, pct: 0 };
+  }
+  if (String(summary.phase || st.phase || "") === "running") {
+    if (nextAt > now) {
+      const remaining = nextAt - now;
+      return moduleTimingView({ label, icon, cls: "running", status: "进行中", nextAt, startAt, remaining });
+    }
+    return { label, icon, cls: "ready", status: "待结算", time: "已到点", nextAt: 0, startAt, pct: 100 };
+  }
+  if (!nextAt || nextAt <= now || summary.ready === true) {
+    const status = lastStatus === "failed" ? "上次失败" : lastStatus === "cooldown" ? "已过 CD" : "已就绪";
+    const cls = lastStatus === "failed" ? "warn" : "ready";
+    return { label, icon, cls, status, time: summary.text || "已就绪", nextAt: 0, startAt, pct: 100 };
+  }
+  return moduleTimingView({ label, icon, cls: "cooling", status: lastStatus === "cooldown" ? "冷却中" : "等待中", nextAt, startAt, remaining: nextAt - now });
+}
+
+function moduleTimingView({ label, icon, cls, status, nextAt, startAt, remaining }) {
+  const total = Math.max(1, nextAt - startAt);
+  const pct = Math.min(100, Math.max(0, ((total - remaining) / total) * 100));
+  return {
+    label,
+    icon,
+    cls,
+    status,
+    time: `剩 ${fmtCountdown(remaining)}`,
+    nextAt,
+    startAt,
+    pct,
+  };
+}
+
+function identityStatusActions(spec) {
+  const keys = [spec.skill, ...(spec.extraSkills || []), spec.query].filter(Boolean);
+  const seen = new Set();
+  return keys
+    .map((key) => skillByKey(key))
+    .filter(Boolean)
+    .filter((skill) => {
+      if (skill.reply_mode === "required" || !String(skill.command || "").trim()) return false;
+      if (seen.has(skill.key)) return false;
+      seen.add(skill.key);
+      return true;
+    });
+}
+
+function skillByKey(skillKey) {
+  if (!skillKey) return null;
+  return (state.skills || []).find((skill) => skill.key === skillKey) || null;
+}
+
+function bindIdentityStatusModal(dialog) {
+  bindIdentityStatusBody(dialog);
+  dialog.querySelector('[data-identity-status-action="refresh"]')?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const old = button.textContent;
+    button.disabled = true;
+    button.textContent = "刷新中...";
+    try {
+      await Promise.all([
+        loadIdentityModuleStates(),
+        loadIdentityPatches({ reset: true }),
+      ]);
+      const body = dialog.querySelector("#identityStatusBody");
+      if (body) body.innerHTML = renderIdentityStatusBody();
+      bindIdentityStatusBody(dialog);
+      renderGameCockpit();
+      renderSkillViews();
+    } catch (error) {
+      showSkillToast(`刷新失败: ${error.message || error}`, "err");
+    } finally {
+      button.disabled = false;
+      button.textContent = old || "刷新状态";
+    }
+  });
+}
+
+function bindIdentityStatusBody(dialog) {
+  dialog.querySelectorAll("[data-status-skill]").forEach((button) => {
+    button.addEventListener("click", () => fillSkillIntoComposer(button.dataset.statusSkill, button));
+  });
+  dialog.querySelectorAll("[data-identity-source-jump]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = button.dataset.identitySourceJump || "";
+      if (!id) return;
+      const message = await findOrFetchMessage(id);
+      if (message) {
+        closeModal();
+        jumpToMessage(message);
+      }
+    });
+  });
 }
 
 function directReplyContextFromMessage(message) {
@@ -792,6 +1856,15 @@ function closeWorkspacePanel({ rerenderList = true, clearSelection = true } = {}
   if (rerenderList) renderMessages();
   renderDirectSendComposer();
   renderDetail().catch((error) => console.warn("[mini-web] close detail failed:", error));
+}
+
+function openOverviewDetailPanel() {
+  state.detailMode = "overview";
+  state.selectedMessageId = null;
+  setWorkspacePanelOpen(true);
+  renderMessages();
+  renderDirectSendComposer();
+  renderDetail().catch((error) => console.warn("[mini-web] render overview detail failed:", error));
 }
 
 function renderDirectSendSelectionContext() {
@@ -1332,8 +2405,8 @@ function openFilterSettingsModal() {
             <div id="filterDiagnosticsBox" class="focus-preview-box"></div>
           </div>
           <label class="toggle-row">
-            <input type="checkbox" name="focus_include_player_plain" ${settings.focus_include_player_plain === false ? "" : "checked"} />
-            <span>不带点的玩家消息进入重点流</span>
+            <input type="checkbox" name="focus_include_player_plain" ${settings.focus_include_player_plain ? "checked" : ""} />
+            <span>普通玩家聊天也进入重点流（会明显增噪）</span>
           </label>
           <label class="toggle-row">
             <input type="checkbox" name="archive_dot_commands" ${settings.archive_dot_commands === false ? "" : "checked"} />
@@ -1893,7 +2966,7 @@ function renderResourceStats(dialog, payload) {
   const summary = dialog.querySelector("#resourceStatsSummary");
   const table = dialog.querySelector("#resourceStatsTable");
   if (summary) {
-    summary.innerHTML = renderResourceTrustCards(payload) + renderResourceStatsSummary(rows, eventSummary, payload);
+    summary.innerHTML = renderResourceDashboard(payload);
   }
   if (!table) return;
   if (!rows.length && !events.length) {
@@ -1922,6 +2995,219 @@ function renderResourceStats(dialog, payload) {
     detail.hidden = !hidden;
     toggle.textContent = hidden ? "收起明细" : "展开明细";
   });
+}
+
+function renderResourceDashboard(payload) {
+  const rows = payload.rows || [];
+  const eventSummary = payload.event_summary || [];
+  const latestPeriod = latestResourcePeriod(rows, eventSummary);
+  const sourceType = payload.source_type || "all";
+  const sections = [];
+  sections.push(`
+    <section class="resource-dashboard-section compact">
+      <div class="resource-dashboard-head">
+        <div>
+          <strong>统计口径</strong>
+          <span>${escapeHtml(latestPeriod || "暂无周期")}｜${escapeHtml(resourceStatsScopeLabel(payload))}</span>
+        </div>
+      </div>
+      <div class="resource-dashboard-strip">
+        ${renderResourceTrustCards(payload)}
+      </div>
+    </section>
+  `);
+  if (sourceType === "all" || sourceType === "wild_training") {
+    sections.push(renderWildTrainingDashboardPanel(rows, eventSummary, latestPeriod));
+  }
+  sections.push(renderRareResourceDashboardPanel(rows, latestPeriod));
+  sections.push(renderEventOutcomeDashboardPanel(eventSummary, latestPeriod, sourceType));
+  return `<div class="resource-dashboard">${sections.filter(Boolean).join("")}</div>`;
+}
+
+function renderWildTrainingDashboardPanel(rows, eventSummary, latestPeriod) {
+  const strategies = ["谨慎", "均衡", "深入"];
+  const periodEvents = filterResourceRowsByPeriod(eventSummary, latestPeriod)
+    .filter((row) => row.source_type === "wild_training");
+  const periodRows = filterResourceRowsByPeriod(rows, latestPeriod)
+    .filter((row) => row.source_type === "wild_training");
+  if (!periodEvents.length && !periodRows.length) return "";
+  const byStrategy = new Map(strategies.map((strategy) => [strategy, {
+    strategy,
+    success: 0,
+    failed: 0,
+    cooldown: 0,
+    total: 0,
+    gainXiuwei: 0,
+    lossXiuwei: 0,
+  }]));
+  for (const row of periodEvents) {
+    const strategy = wildStrategyFromSourceName(row.source_name);
+    if (!byStrategy.has(strategy)) continue;
+    const target = byStrategy.get(strategy);
+    target.success += Number(row.success || 0) + Number(row.extra_success || 0);
+    target.failed += Number(row.failed || 0) + Number(row.basic_only || 0);
+    target.cooldown += Number(row.cooldown || 0);
+    target.total += Number(row.total || 0);
+  }
+  for (const row of periodRows) {
+    const strategy = wildStrategyFromSourceName(row.source_name);
+    if (!byStrategy.has(strategy)) continue;
+    if (!String(row.resource_name || "").includes("修为")) continue;
+    const target = byStrategy.get(strategy);
+    const amount = Number(row.total_amount || 0);
+    if (amount >= 0) target.gainXiuwei += amount;
+    else target.lossXiuwei += Math.abs(amount);
+  }
+  return `
+    <section class="resource-dashboard-section">
+      <div class="resource-dashboard-head">
+        <div>
+          <strong>野外历练</strong>
+          <span>${escapeHtml(latestPeriod || "本期")}｜三难度成功率和修为正负收益分开看</span>
+        </div>
+      </div>
+      <div class="resource-wild-grid">
+        ${strategies.map((strategy) => renderWildStrategyCard(byStrategy.get(strategy))).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderWildStrategyCard(item) {
+  const attempts = item.success + item.failed;
+  const rate = attempts ? (item.success * 100) / attempts : 0;
+  return `
+    <article class="resource-wild-card">
+      <div class="resource-wild-card-head">
+        <strong>${escapeHtml(item.strategy)}</strong>
+        <span>${attempts ? `${rate.toFixed(1)}%` : "—"}</span>
+      </div>
+      <div class="resource-progress-bar" aria-hidden="true">
+        <span style="width:${Math.max(0, Math.min(100, rate)).toFixed(1)}%"></span>
+      </div>
+      <div class="resource-wild-stats">
+        <span>成功 <b>${escapeHtml(formatNumber(item.success))}</b></span>
+        <span>失败 <b>${escapeHtml(formatNumber(item.failed))}</b></span>
+        <span>CD <b>${escapeHtml(formatNumber(item.cooldown))}</b></span>
+      </div>
+      <div class="resource-wild-yield">
+        <span>修为 +${escapeHtml(formatNumber(item.gainXiuwei))}</span>
+        <span class="negative">-${escapeHtml(formatNumber(item.lossXiuwei))}</span>
+      </div>
+    </article>
+  `;
+}
+
+function renderRareResourceDashboardPanel(rows, latestPeriod) {
+  const rareRows = aggregateRareResourceRows(filterResourceRowsByPeriod(rows, latestPeriod));
+  if (!rareRows.length) return "";
+  const yinNing = rareRows.find((row) => isYinNingResource(row.resource_name));
+  const scarce = rareRows
+    .filter((row) => !isYinNingResource(row.resource_name))
+    .sort((a, b) => (
+      Number(a.total_amount || 0) - Number(b.total_amount || 0)
+      || Number(a.event_count || 0) - Number(b.event_count || 0)
+      || String(a.resource_name || "").localeCompare(String(b.resource_name || ""), "zh-CN")
+    ))
+    .slice(0, yinNing ? 5 : 6);
+  const items = [yinNing, ...scarce].filter(Boolean);
+  return `
+    <section class="resource-dashboard-section">
+      <div class="resource-dashboard-head">
+        <div>
+          <strong>稀有产物</strong>
+          <span>${escapeHtml(latestPeriod || "本期")}｜阴凝优先，其余按低量稀有靠前</span>
+        </div>
+      </div>
+      <div class="resource-rare-grid">
+        ${items.map((item) => `
+          <article class="resource-rare-card ${isYinNingResource(item.resource_name) ? "highlight" : ""}">
+            <span>${escapeHtml(item.resource_name || "资源")}</span>
+            <strong>${escapeHtml(formatResourceAmount(item.total_amount, item.unit))}</strong>
+            <small>${escapeHtml((item.sources || []).slice(0, 2).join(" / ") || "资源")}｜${escapeHtml(formatNumber(item.event_count))} 次</small>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderEventOutcomeDashboardPanel(eventSummary, latestPeriod, sourceType) {
+  const rows = filterResourceRowsByPeriod(eventSummary, latestPeriod)
+    .filter((row) => row.source_type !== "wild_training");
+  if (!rows.length) return "";
+  const grouped = new Map();
+  for (const row of rows) {
+    const key = `${row.source_type || ""}|${row.source_name || ""}`;
+    const item = grouped.get(key) || {
+      source_type: row.source_type || "",
+      source_name: row.source_name || "",
+      success: 0,
+      failed: 0,
+      escaped: 0,
+      cooldown: 0,
+      extra: 0,
+      basic: 0,
+      settled: 0,
+      total: 0,
+      outcomes: [],
+    };
+    item.success += Number(row.success || 0);
+    item.failed += Number(row.failed || 0);
+    item.escaped += Number(row.escaped || 0);
+    item.cooldown += Number(row.cooldown || 0);
+    item.extra += Number(row.extra_success || 0);
+    item.basic += Number(row.basic_only || 0);
+    item.settled += Number(row.settled || 0);
+    item.total += Number(row.total || 0);
+    if (row.outcome && !item.outcomes.includes(row.outcome)) item.outcomes.push(row.outcome);
+    grouped.set(key, item);
+  }
+  const title = sourceType === "dungeon" ? "副本结算" : "副本 / 奇遇";
+  const items = Array.from(grouped.values())
+    .sort((a, b) => outcomeSourceRank(a.source_type) - outcomeSourceRank(b.source_type) || String(a.source_name).localeCompare(String(b.source_name), "zh-CN"))
+    .slice(0, 8);
+  return `
+    <section class="resource-dashboard-section">
+      <div class="resource-dashboard-head">
+        <div>
+          <strong>${escapeHtml(title)}</strong>
+          <span>${escapeHtml(latestPeriod || "本期")}｜副本按入口，风希/极阴/南陇侯单列</span>
+        </div>
+      </div>
+      <div class="resource-outcome-grid">
+        ${items.map(renderOutcomeCard).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderOutcomeCard(item) {
+  const isDungeon = item.source_type === "dungeon";
+  const main = isDungeon
+    ? `${formatNumber(item.extra + item.basic + item.settled)} 次`
+    : `${formatNumber(item.success + item.failed + item.escaped || item.total)} 次`;
+  const detail = isDungeon
+    ? `额外 ${formatNumber(item.extra)}｜基础 ${formatNumber(item.basic)}｜结算 ${formatNumber(item.settled)}`
+    : `成功 ${formatNumber(item.success)}｜失败 ${formatNumber(item.failed)}${item.escaped ? `｜逃脱 ${formatNumber(item.escaped)}` : ""}`;
+  return `
+    <article class="resource-outcome-card ${escapeAttr(item.source_type || "unknown")}">
+      <span>${escapeHtml(resourceSourceLabel(item.source_type, item.source_name))}</span>
+      <strong>${escapeHtml(main)}</strong>
+      <small>${escapeHtml(detail)}</small>
+      ${item.outcomes.length ? `<em>${escapeHtml(item.outcomes.slice(0, 2).join(" / "))}</em>` : ""}
+    </article>
+  `;
+}
+
+function outcomeSourceRank(sourceType) {
+  return {
+    dungeon: 1,
+    wind_xi: 2,
+    jiyin: 3,
+    nanlong: 4,
+    tree_harvest: 5,
+  }[sourceType] || 9;
 }
 
 function renderResourceDiagnostics(diagnostics) {
@@ -2329,6 +3615,37 @@ function aggregateWildRareRows(rows) {
   return Array.from(grouped.values());
 }
 
+function aggregateRareResourceRows(rows) {
+  const grouped = new Map();
+  for (const row of rows || []) {
+    if (row.resource_category !== "rare") continue;
+    if (row.amount_kind === "loss") continue;
+    const key = `${row.resource_name || ""}|${row.unit || ""}|${row.basis || ""}`;
+    const prev = grouped.get(key) || {
+      resource_name: row.resource_name || "",
+      unit: row.unit || "",
+      basis: row.basis || "",
+      total_amount: 0,
+      event_count: 0,
+      sources: new Set(),
+    };
+    prev.total_amount += Number(row.total_amount || 0);
+    prev.event_count += Number(row.event_count || 0);
+    prev.sources.add(resourceSourceLabel(row.source_type, row.source_name));
+    grouped.set(key, prev);
+  }
+  return Array.from(grouped.values()).map((item) => ({
+    ...item,
+    sources: Array.from(item.sources).filter(Boolean),
+  }));
+}
+
+function filterResourceRowsByPeriod(rows, period) {
+  const source = rows || [];
+  if (!period) return source;
+  return source.filter((row) => String(row.period || "") === String(period));
+}
+
 function wildStrategyFromSourceName(sourceName) {
   const text = String(sourceName || "");
   if (text.includes("谨慎")) return "谨慎";
@@ -2421,6 +3738,7 @@ async function openDungeonStatusModal() {
       </section>
     `,
     footer: `
+      <button type="button" id="xutianGuideButton">虚天攻略</button>
       <button type="button" id="dungeonStatusRefresh">刷新</button>
       <button type="button" data-modal-close>关闭</button>
     `,
@@ -2436,6 +3754,9 @@ function bindDungeonStatusModal(dialog) {
     refreshDungeonStatusModal(dialog).catch((error) => {
       setDungeonStatusLine(dialog, "error", error.message || "刷新失败");
     });
+  });
+  dialog.querySelector("#xutianGuideButton")?.addEventListener("click", () => {
+    openXutianOracleGuideModal().catch((error) => showError(error));
   });
   dialog.querySelectorAll("[data-dungeon-status-filter]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2524,8 +3845,8 @@ function renderDungeonStatusModal(dialog, summaries, rawCount, totalCount = summ
   const summary = dialog.querySelector("#dungeonStatusSummary");
   const filter = dialog.querySelector("[data-dungeon-status-filter].active")?.dataset.dungeonStatusFilter || "all";
   const visible = filterDungeonStatusSummaries(summaries, filter);
-  const liveCount = summaries.filter((item) => ["open", "choice", "active"].includes(item.statusKind)).length;
-  const actionCount = summaries.reduce((total, item) => total + item.actions.length, 0);
+  const liveCount = summaries.filter((item) => ["open", "joined", "choice", "active"].includes(item.statusKind)).length;
+  const actionCount = summaries.reduce((total, item) => total + visibleDungeonActions(item).length, 0);
   const modeText = contextMode === "fast_window" ? "快速窗口" : "完整关联";
   const idGapNotes = dungeonIdGapNotes(visible);
   if (summary) {
@@ -2538,7 +3859,7 @@ function renderDungeonStatusModal(dialog, summaries, rawCount, totalCount = summ
       <div class="resource-stat-card">
         <span>活跃副本</span>
         <strong>${escapeHtml(formatNumber(liveCount))}</strong>
-        <small>可加入 / 进行中 / 需要抉择</small>
+        <small>可加入 / 已加入 / 进行中 / 需要抉择</small>
       </div>
       <div class="resource-stat-card">
         <span>可用动作</span>
@@ -2562,6 +3883,8 @@ function renderDungeonStatusModal(dialog, summaries, rawCount, totalCount = summ
     setDungeonStatusLine(dialog, "ok", `已汇总 ${summaries.length}/${totalCount} 个近期副本线索。`);
     return;
   }
+  const current = pickCurrentDungeonSummary(visible);
+  const recent = current ? visible.filter((item) => item.key !== current.key) : visible;
   list.innerHTML = `
     ${idGapNotes.length ? `
       <div class="dungeon-id-gap-note">
@@ -2569,7 +3892,16 @@ function renderDungeonStatusModal(dialog, summaries, rawCount, totalCount = summ
         ${idGapNotes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}
       </div>
     ` : ""}
-    ${visible.map(renderDungeonStatusCard).join("")}
+    ${current ? renderCurrentDungeonPanel(current) : ""}
+    ${recent.length ? `
+      <div class="dungeon-recent-head">
+        <strong>最近副本</strong>
+        <span>${escapeHtml(formatNumber(recent.length))} 条线索</span>
+      </div>
+      <div class="dungeon-recent-grid">
+        ${recent.map((item) => renderDungeonStatusCard(item, { compact: true })).join("")}
+      </div>
+    ` : ""}
   `;
   bindDungeonStatusCards(list, visible);
   setDungeonStatusLine(
@@ -2579,8 +3911,37 @@ function renderDungeonStatusModal(dialog, summaries, rawCount, totalCount = summ
   );
 }
 
+function pickCurrentDungeonSummary(summaries) {
+  const live = (summaries || []).filter((item) => ["choice", "active", "open", "joined"].includes(item.statusKind));
+  const actionable = live.filter((item) => visibleDungeonActions(item).length > 0);
+  if (actionable.length) {
+    return [...actionable].sort(compareActionableDungeonSummary)[0] || null;
+  }
+  return live[0] || summaries[0] || null;
+}
+
+function visibleDungeonActions(summary) {
+  if (!summary || ["closed", "failed"].includes(summary.statusKind)) return [];
+  return (summary.actions || []).filter((action) => {
+    const command = String(action?.command || "").trim();
+    if (!command) return false;
+    if (/^\.加入副本(?:\s|$)/.test(command)) {
+      return summary.statusKind === "open";
+    }
+    return true;
+  });
+}
+
+function compareActionableDungeonSummary(a, b) {
+  const liveRanks = { choice: 0, open: 1, active: 2, joined: 3 };
+  return (
+    (liveRanks[a?.statusKind] ?? 9) - (liveRanks[b?.statusKind] ?? 9)
+    || Number(b?.latestMessage?.seq || b?.latestSeq || 0) - Number(a?.latestMessage?.seq || a?.latestSeq || 0)
+  );
+}
+
 function filterDungeonStatusSummaries(summaries, filter) {
-  if (filter === "live") return summaries.filter((item) => ["choice", "active", "open"].includes(item.statusKind));
+  if (filter === "live") return summaries.filter((item) => ["choice", "active", "open", "joined"].includes(item.statusKind));
   if (filter === "open") return summaries.filter((item) => item.statusKind === "open");
   if (filter === "done") return summaries.filter((item) => ["closed", "failed"].includes(item.statusKind));
   return summaries;
@@ -2603,7 +3964,81 @@ function dungeonIdGapNotes(summaries) {
   return notes;
 }
 
-function renderDungeonStatusCard(summary) {
+function renderCurrentDungeonPanel(summary) {
+  const contextText = dungeonContextLabel(summary.contextSource);
+  const verdictText = dungeonRouteVerdictLabel(summary);
+  const oracleRows = dungeonOracleRows(summary, verdictText);
+  const joins = summary.joinSuccess.length ? summary.joinSuccess.map((user) => `@${user}`).join("、") : "";
+  const latestId = summary.latestMessage?.id || "";
+  const title = `${summary.dungeonName || "副本"}${summary.dungeonId ? ` #${summary.dungeonId}` : ""}`;
+  const primaryActions = visibleDungeonActions(summary).slice(0, 8);
+  return `
+    <article class="dungeon-current-panel ${escapeAttr(summary.statusKind)}" data-dungeon-key="${escapeAttr(summary.key)}">
+      <div class="dungeon-current-main">
+        <div class="dungeon-current-title">
+          <span>当前副本</span>
+          <strong>${escapeHtml(title)}</strong>
+          <small>${escapeHtml(formatChatTime(summary.latestMessage?.time) || summary.latestMessage?.time || "")}</small>
+        </div>
+        <span class="status-pill ${escapeAttr(dungeonStatusPillClass(summary.statusKind))}">${escapeHtml(summary.status)}</span>
+      </div>
+      <div class="dungeon-current-metrics">
+        ${dungeonMetric("阶段", summary.latestStage || "未读")}
+        ${dungeonMetric("开门", summary.openedBy || "未读")}
+        ${dungeonMetric("人数", summary.capacity || (summary.joinSuccess.length ? `${summary.joinSuccess.length} 人` : "未读"))}
+        ${dungeonMetric("关联", contextText || "消息")}
+      </div>
+      ${oracleRows.length ? `
+        <div class="dungeon-current-oracle">
+          ${oracleRows.slice(0, 6).map(([key, value]) => `
+            <div>
+              <span>${escapeHtml(key)}</span>
+              <strong>${escapeHtml(value)}</strong>
+            </div>
+          `).join("")}
+        </div>
+      ` : ""}
+      ${(joins || summary.failures.length) ? `
+        <div class="dungeon-current-feedback">
+          ${joins ? `<p class="dungeon-status-note ok">已加入：${escapeHtml(joins)}</p>` : ""}
+          ${summary.failures.length ? `<p class="dungeon-status-note warn">失败：${escapeHtml(summary.failures.slice(0, 3).join("；"))}</p>` : ""}
+        </div>
+      ` : ""}
+      ${primaryActions.length ? `
+        <div class="dungeon-current-actions">
+          ${primaryActions.map((action, index) => `
+            <button type="button" data-dungeon-key="${escapeAttr(summary.key)}" data-dungeon-action-index="${index}" title="复制命令，不会直接发送">
+              <strong>${escapeHtml(action.label || action.command || "动作")}</strong>
+              <small>${escapeHtml(action.command || "")}</small>
+            </button>
+          `).join("")}
+        </div>
+      ` : ""}
+      <div class="dungeon-current-timeline">
+        ${summary.messages.slice(0, 4).map((message) => `
+          <button type="button" data-dungeon-jump="${escapeAttr(message.id)}">
+            <span>${escapeHtml(formatChatTime(message.time) || "时间")}</span>
+            <strong>${escapeHtml(message.title || "副本消息")}</strong>
+            <small>${escapeHtml(clipGraphemes(String(message.summary || message.raw || "").replace(/\s+/g, " "), 72))}</small>
+          </button>
+        `).join("")}
+        ${latestId ? `<button type="button" class="dungeon-current-open" data-dungeon-jump="${escapeAttr(latestId)}">查看最新消息</button>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function dungeonMetric(label, value) {
+  return `
+    <div class="dungeon-current-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(String(value || "—"))}</strong>
+    </div>
+  `;
+}
+
+function renderDungeonStatusCard(summary, options = {}) {
+  const compact = Boolean(options.compact);
   const contextText = dungeonContextLabel(summary.contextSource);
   const verdictText = dungeonRouteVerdictLabel(summary);
   const chips = [
@@ -2620,8 +4055,9 @@ function renderDungeonStatusCard(summary) {
   const oracleRows = dungeonOracleRows(summary, verdictText);
   const latestId = summary.latestMessage?.id || "";
   const joins = summary.joinSuccess.length ? summary.joinSuccess.map((user) => `@${user}`).join("、") : "";
+  const actions = visibleDungeonActions(summary);
   return `
-    <article class="dungeon-status-card ${escapeAttr(summary.statusKind)}" data-dungeon-key="${escapeAttr(summary.key)}">
+    <article class="dungeon-status-card ${compact ? "compact" : ""} ${escapeAttr(summary.statusKind)}" data-dungeon-key="${escapeAttr(summary.key)}">
       <div class="dungeon-status-head">
         <div class="dungeon-status-title">
           <strong>${escapeHtml(summary.dungeonName || "副本")}${summary.dungeonId ? ` #${escapeHtml(summary.dungeonId)}` : ""}</strong>
@@ -2630,12 +4066,12 @@ function renderDungeonStatusCard(summary) {
         <small>${escapeHtml(formatChatTime(summary.latestMessage?.time) || summary.latestMessage?.time || "")}</small>
       </div>
       ${chips.length ? `<div class="dungeon-status-meta">${chips.map(([key, value]) => `<span><b>${escapeHtml(key)}</b>${escapeHtml(value)}</span>`).join("")}</div>` : ""}
-      ${oracleRows.length ? `<div class="dungeon-oracle-panel">${oracleRows.map(([key, value]) => `<div><b>${escapeHtml(key)}</b><span>${escapeHtml(value)}</span></div>`).join("")}</div>` : ""}
+      ${oracleRows.length && !compact ? `<div class="dungeon-oracle-panel">${oracleRows.map(([key, value]) => `<div><b>${escapeHtml(key)}</b><span>${escapeHtml(value)}</span></div>`).join("")}</div>` : ""}
       ${joins ? `<p class="dungeon-status-note ok">已成功加入：${escapeHtml(joins)}</p>` : ""}
       ${summary.failures.length ? `<p class="dungeon-status-note warn">失败：${escapeHtml(summary.failures.slice(0, 2).join("；"))}</p>` : ""}
-      ${summary.actions.length ? `
+      ${actions.length ? `
         <div class="dungeon-status-actions">
-          ${summary.actions.slice(0, 4).map((action, index) => `
+          ${actions.slice(0, 4).map((action, index) => `
             <button type="button" data-dungeon-key="${escapeAttr(summary.key)}" data-dungeon-action-index="${index}" title="复制命令，不会直接发送">${escapeHtml(action.command || "复制命令")}</button>
           `).join("")}
         </div>
@@ -2688,7 +4124,7 @@ function bindDungeonStatusCards(root, summaries) {
     if (button.dataset.dungeonActionIndex !== undefined) {
       const key = button.dataset.dungeonKey || "";
       const summary = byKey.get(key);
-      const action = summary?.actions[Number(button.dataset.dungeonActionIndex || 0)];
+      const action = visibleDungeonActions(summary)[Number(button.dataset.dungeonActionIndex || 0)];
       if (!action?.command) return;
       await copyCommandToClipboard(action.command, button);
       return;
@@ -2704,6 +4140,203 @@ function bindDungeonStatusCards(root, summaries) {
       }
     }
   };
+}
+
+async function openXutianOracleGuideModal() {
+  const dialog = openModal({
+    title: "虚天攻略",
+    body: `
+      <section class="modal-section xutian-guide-modal">
+        <div class="xutian-guide-head">
+          <div>
+            <strong>卦象样本库</strong>
+            <span>只读参考，按钮只填入发送栏，不会自动发送。</span>
+          </div>
+          <label class="message-search xutian-guide-search">
+            <span>搜索</span>
+            <input id="xutianGuideSearch" type="search" placeholder="卦象 / 路线 / 来源" autocomplete="off" />
+          </label>
+        </div>
+        <div class="quick-filters xutian-guide-filters">
+          <button type="button" class="quick-filter-chip active" data-xutian-guide-filter="all">全部</button>
+          <button type="button" class="quick-filter-chip" data-xutian-guide-filter="explicit">明示</button>
+          <button type="button" class="quick-filter-chip" data-xutian-guide-filter="success">顺例</button>
+          <button type="button" class="quick-filter-chip" data-xutian-guide-filter="failure">反例</button>
+        </div>
+        <div id="xutianGuideSummary" class="xutian-guide-summary">加载中...</div>
+        <div id="xutianGuideList" class="xutian-guide-list">
+          <p class="empty inline">加载中...</p>
+        </div>
+      </section>
+    `,
+    footer: `
+      <button type="button" id="xutianGuideRefresh">刷新攻略</button>
+      <button type="button" data-modal-close>关闭</button>
+    `,
+  });
+  if (!dialog) return;
+  const local = { payload: null, filter: "all", query: "", loading: false };
+  const load = async () => {
+    local.loading = true;
+    renderXutianGuide(dialog, local);
+    try {
+      local.payload = await fetchJson("/api/xutian-oracle-guide");
+    } catch (error) {
+      local.payload = { ok: false, error: error.message || "读取失败", cases: {}, counts: {} };
+    } finally {
+      local.loading = false;
+    }
+    renderXutianGuide(dialog, local);
+  };
+  dialog.querySelectorAll("[data-xutian-guide-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      dialog.querySelectorAll("[data-xutian-guide-filter]").forEach((item) => item.classList.remove("active"));
+      button.classList.add("active");
+      local.filter = button.dataset.xutianGuideFilter || "all";
+      renderXutianGuide(dialog, local);
+    });
+  });
+  dialog.querySelector("#xutianGuideSearch")?.addEventListener("input", (event) => {
+    local.query = event.target.value || "";
+    renderXutianGuide(dialog, local);
+  });
+  dialog.querySelector("#xutianGuideRefresh")?.addEventListener("click", () => load());
+  await load();
+}
+
+function renderXutianGuide(dialog, local) {
+  const summary = dialog.querySelector("#xutianGuideSummary");
+  const list = dialog.querySelector("#xutianGuideList");
+  if (!summary || !list) return;
+  if (local.loading) {
+    summary.textContent = "加载中...";
+    list.innerHTML = '<p class="empty inline">加载中...</p>';
+    return;
+  }
+  const payload = local.payload || {};
+  if (payload.ok === false) {
+    summary.textContent = "读取失败";
+    list.innerHTML = `<p class="empty inline">虚天攻略读取失败：${escapeHtml(payload.error || "未知错误")}</p>`;
+    return;
+  }
+  const counts = payload.counts || {};
+  const aliases = payload.element_aliases || [];
+  summary.innerHTML = `
+    <div class="xutian-guide-counts">
+      <span><strong>${escapeHtml(formatNumber(counts.explicit || 0))}</strong> 明示</span>
+      <span><strong>${escapeHtml(formatNumber(counts.success || 0))}</strong> 顺例</span>
+      <span><strong>${escapeHtml(formatNumber(counts.failure || 0))}</strong> 反例</span>
+    </div>
+    <div class="xutian-guide-aliases">
+      ${aliases.map((item) => `
+        <span><strong>${escapeHtml(item.label || "")}</strong>${escapeHtml((item.values || []).join(" / "))}</span>
+      `).join("")}
+    </div>
+  `;
+  const cases = xutianGuideVisibleCases(payload, local.filter, local.query);
+  if (!cases.length) {
+    list.innerHTML = '<p class="empty inline">没有匹配的卦象样本。</p>';
+    return;
+  }
+  list.innerHTML = cases.map(renderXutianGuideCase).join("");
+  bindXutianGuideCards(list);
+}
+
+function xutianGuideVisibleCases(payload, filter, query) {
+  const allCases = ["explicit", "success", "failure"].flatMap((kind) => (payload.cases?.[kind] || []));
+  const needle = cleanText(query).toLowerCase();
+  return allCases.filter((item) => {
+    if (filter && filter !== "all" && item.kind !== filter) return false;
+    if (!needle) return true;
+    const haystack = [
+      item.kind_label,
+      item.gua,
+      item.route,
+      item.strategy,
+      item.source,
+      item.advice,
+      item.basis,
+      item.confidence,
+      ...(item.positive_examples || []),
+      ...(item.negative_examples || []),
+      ...(item.examples || []).map((example) => `${example.route} ${example.strategy} ${example.source}`),
+    ].join(" ").toLowerCase();
+    return haystack.includes(needle);
+  });
+}
+
+function renderXutianGuideCase(item) {
+  const commands = xutianGuideCommands(item);
+  const examples = [
+    ...(item.positive_examples || []).map((text) => ["顺例", text]),
+    ...(item.negative_examples || []).map((text) => ["反例", text]),
+  ].slice(0, 3);
+  const meta = [
+    item.route ? ["路线", item.route] : null,
+    item.strategy ? ["阵策", item.strategy] : null,
+    item.source ? ["来源", item.source] : null,
+    item.confidence ? ["置信", item.confidence] : null,
+  ].filter(Boolean);
+  return `
+    <article class="xutian-guide-card ${escapeAttr(item.kind || "")}">
+      <div class="xutian-guide-card-head">
+        <span class="xutian-guide-kind">${escapeHtml(item.kind_label || item.kind || "样本")}</span>
+        <strong>${escapeHtml(item.gua || "未知卦象")}</strong>
+      </div>
+      ${meta.length ? `<div class="xutian-guide-meta">${meta.map(([key, value]) => `<span><b>${escapeHtml(key)}</b>${escapeHtml(value)}</span>`).join("")}</div>` : ""}
+      ${(item.advice || item.basis) ? `
+        <p class="xutian-guide-advice">
+          ${item.advice ? `<strong>${escapeHtml(item.advice)}</strong>` : ""}
+          ${item.basis ? `<span>${escapeHtml(item.basis)}</span>` : ""}
+        </p>
+      ` : ""}
+      ${examples.length ? `
+        <div class="xutian-guide-examples">
+          ${examples.map(([label, text]) => `<span><b>${escapeHtml(label)}</b>${escapeHtml(text)}</span>`).join("")}
+        </div>
+      ` : ""}
+      ${commands.length ? `
+        <div class="xutian-guide-actions">
+          ${commands.map((command) => `<button type="button" data-xutian-command="${escapeAttr(command)}">${escapeHtml(command)}</button>`).join("")}
+        </div>
+      ` : ""}
+    </article>
+  `;
+}
+
+function xutianGuideCommands(item) {
+  const commands = [];
+  for (const route of xutianGuideSplitChoices(item.route)) {
+    if (route.includes("冰")) commands.push(".选择道路 冰");
+    if (route.includes("火")) commands.push(".选择道路 火");
+  }
+  for (const strategy of xutianGuideSplitChoices(item.strategy)) {
+    if (strategy.includes("稳")) commands.push(".阵策 稳");
+    if (strategy.includes("压")) commands.push(".阵策 压");
+    if (strategy.includes("势")) commands.push(".阵策 势");
+  }
+  return [...new Set(commands)];
+}
+
+function xutianGuideSplitChoices(value) {
+  return String(value || "")
+    .split(/[\/／、；,，\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function bindXutianGuideCards(root) {
+  root.querySelectorAll("[data-xutian-command]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const command = button.dataset.xutianCommand || "";
+      if (!command) return;
+      closeModal();
+      fillDirectSendComposer(command, {
+        statusText: "已填入虚天殿命令，请确认后发送。",
+        statusKind: "info",
+      });
+    });
+  });
 }
 
 function dungeonContextLabel(source) {
@@ -2772,6 +4405,13 @@ async function openInventoryModal() {
       </section>
       <section class="modal-section">
         <div id="inventorySnapshots" class="inventory-snapshots"></div>
+        <div id="inventoryBatchBar" class="inventory-batch-bar" hidden>
+          <span id="inventoryPickCount">未选择物品</span>
+          <button type="button" data-inventory-batch="select-visible">选择可见</button>
+          <button type="button" data-inventory-batch="clear">清空</button>
+          <button type="button" data-inventory-batch="qty-max">数量填满</button>
+          <button type="button" data-inventory-batch="qty-one">数量填 1</button>
+        </div>
         <div id="inventoryItems" class="inventory-items"></div>
         <div id="inventoryPlanResult" class="send-as-result" hidden></div>
       </section>
@@ -2795,6 +4435,11 @@ function bindInventoryModal(dialog) {
   });
   dialog.querySelector("#inventoryPlan")?.addEventListener("click", () => {
     planInventoryTransfer(dialog).catch((error) => setInventoryStatus(dialog, "error", error.message));
+  });
+  dialog.querySelectorAll("[data-inventory-batch]").forEach((button) => {
+    button.addEventListener("click", () => {
+      applyInventoryBatchAction(dialog, button.dataset.inventoryBatch || "");
+    });
   });
 }
 
@@ -2841,6 +4486,7 @@ async function renderInventoryItems(dialog) {
   if (!snapshot) {
     if (snapshotBox) snapshotBox.innerHTML = '<p class="empty inline">暂无储物袋快照。</p>';
     if (itemBox) itemBox.innerHTML = "";
+    setInventoryBatchBarVisible(dialog, false);
     return;
   }
   if (!snapshot.items_loaded) {
@@ -2864,8 +4510,10 @@ async function renderInventoryItems(dialog) {
   if (!itemBox) return;
   if (!items.length) {
     itemBox.innerHTML = '<p class="empty inline">没有匹配物品。</p>';
+    setInventoryBatchBarVisible(dialog, false);
     return;
   }
+  setInventoryBatchBarVisible(dialog, true);
   itemBox.innerHTML = `
     <table class="inventory-table">
       <thead>
@@ -2895,8 +4543,59 @@ async function renderInventoryItems(dialog) {
       const idx = input.dataset.inventoryQty;
       const pick = itemBox.querySelector(`[data-inventory-pick="${CSS.escape(idx)}"]`);
       if (pick && String(input.value || "").trim()) pick.checked = true;
+      updateInventoryPickCount(dialog);
     });
   });
+  itemBox.querySelectorAll("[data-inventory-pick]").forEach((input) => {
+    input.addEventListener("change", () => updateInventoryPickCount(dialog));
+  });
+  updateInventoryPickCount(dialog);
+}
+
+function setInventoryBatchBarVisible(dialog, visible) {
+  const bar = dialog.querySelector("#inventoryBatchBar");
+  if (!bar) return;
+  bar.hidden = !visible;
+}
+
+function updateInventoryPickCount(dialog) {
+  const countEl = dialog.querySelector("#inventoryPickCount");
+  const itemBox = dialog.querySelector("#inventoryItems");
+  if (!countEl || !itemBox) return;
+  const picks = Array.from(itemBox.querySelectorAll("[data-inventory-pick]:checked"));
+  const totalQty = picks.reduce((total, pick) => {
+    const idx = pick.dataset.inventoryPick;
+    const qtyInput = itemBox.querySelector(`[data-inventory-qty="${CSS.escape(idx)}"]`);
+    return total + Math.max(0, Number(qtyInput?.value || 0));
+  }, 0);
+  countEl.textContent = picks.length
+    ? `已选 ${formatNumber(picks.length)} 类 / ${formatNumber(totalQty)} 件`
+    : "未选择物品";
+}
+
+function applyInventoryBatchAction(dialog, action) {
+  const itemBox = dialog.querySelector("#inventoryItems");
+  if (!itemBox) return;
+  const picks = Array.from(itemBox.querySelectorAll("[data-inventory-pick]"));
+  if (action === "select-visible") {
+    picks.forEach((pick) => { pick.checked = true; });
+  } else if (action === "clear") {
+    picks.forEach((pick) => { pick.checked = false; });
+  } else if (action === "qty-max") {
+    picks.forEach((pick) => {
+      const idx = pick.dataset.inventoryPick;
+      const qtyInput = itemBox.querySelector(`[data-inventory-qty="${CSS.escape(idx)}"]`);
+      if (qtyInput) qtyInput.value = String(Math.max(1, Number(pick.dataset.max || 1)));
+      pick.checked = true;
+    });
+  } else if (action === "qty-one") {
+    picks.forEach((pick) => {
+      const idx = pick.dataset.inventoryPick;
+      const qtyInput = itemBox.querySelector(`[data-inventory-qty="${CSS.escape(idx)}"]`);
+      if (qtyInput) qtyInput.value = "1";
+    });
+  }
+  updateInventoryPickCount(dialog);
 }
 
 async function loadInventorySnapshotItems(dialog, owner) {
@@ -3643,9 +5342,7 @@ function channelMessageCounts() {
   for (const channel of state.channels) {
     counts.set(channel.key, 0);
   }
-  const sourceMessages = state.channelSummaryMessages.length
-    ? state.channelSummaryMessages
-    : state.messages;
+  const sourceMessages = summarySignalMessages();
   for (const message of sourceMessages) {
     const keys = message.channels && message.channels.length ? message.channels : [message.channel];
     for (const key of keys) {
@@ -3783,6 +5480,9 @@ function renderMessages() {
   const searchSuffix = state.messageSearch ? "｜搜索中" : "";
   messageCount.textContent = `${messages.length} 条${searchSuffix}${collectorStatus ? `｜${collectorStatus}` : ""}`;
   renderActiveChannelText();
+  renderLiveSituationBoard();
+  renderWorldEventStrip();
+  renderGameActionDock();
 
   if (messages.length === 0) {
     messageList.innerHTML = `<div class="chat-empty">${escapeHtml(emptyMessageHint())}</div>`;
@@ -3822,6 +5522,1500 @@ function renderMessages() {
     jumpToLatestButton.hidden =
       messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight <= 120;
   }
+}
+
+function renderLiveSituationBoard() {
+  if (!liveSituationBoard) return;
+  const model = liveSituationModel();
+  liveSituationBoard.innerHTML = `
+    ${model.dungeonHero ? renderLiveDungeonHero(model.dungeonHero) : renderLiveMessageHero(model.primary)}
+    <div class="live-situation-grid">
+      ${model.dungeonSummary ? renderLiveDungeonSummaryTile(model.dungeonSummary) : renderLiveSituationTile("dungeon", "当前副本", model.dungeon, "暂无副本线索", "dungeon")}
+      ${renderLiveSituationTile("risk", "风险 / 我的", model.mine, "暂无风险或 @ 我", "mine")}
+      ${model.resourceSummary ? renderLiveResourceSummaryTile(model.resourceSummary) : renderLiveSituationTile("resource", "近期收益", model.resource, "暂无收益记录", "resource")}
+      ${renderLiveCooldownTile(model.module)}
+    </div>
+  `;
+  bindLiveSituationBoard();
+}
+
+function liveSituationModel() {
+  const source = summarySignalMessages();
+  const sorted = [...source]
+    .filter((message) => message?.id)
+    .sort((a, b) => worldEventRank(a) - worldEventRank(b) || Number(b.seq || 0) - Number(a.seq || 0));
+  const withAction = sorted.find((message) => (message.actions || []).some((item) => String(item.command || "").trim())) || null;
+  const withActionChannels = withAction ? (withAction.channels || [withAction.channel]) : [];
+  const mine = sorted.find((message) => {
+    return isPersonalSignal(message);
+  }) || null;
+  const dungeon = sorted.find((message) => (message.channels || [message.channel]).includes("dungeon")) || null;
+  const resource = sorted.find((message) => {
+    const channels = message.channels || [message.channel];
+    return channels.includes("resource") || channels.includes("training") || channels.includes("home");
+  }) || null;
+  const dungeonSummary = actionableDungeonSnapshot() || currentDungeonSnapshot();
+  const dungeonIsLive = dungeonSummary && ["open", "choice", "active", "joined"].includes(dungeonSummary.statusKind);
+  const dungeonHero = dungeonIsLive && !mine && (!withAction || withActionChannels.includes("dungeon"))
+    ? dungeonSummary
+    : null;
+  const module = overviewModuleRows(Number(state.activeIdentityId || 0) || null)[0] || null;
+  return {
+    primary: mine || withAction || dungeon || resource || latestLeaderSnapshotMessage() || sorted[0] || null,
+    dungeonSummary,
+    dungeonHero,
+    mine,
+    dungeon,
+    resource,
+    resourceSummary: liveResourceSnapshot(),
+    module,
+  };
+}
+
+function renderLiveMessageHero(primary) {
+  const primaryAction = (primary?.actions || []).find((item) => String(item.command || "").trim());
+  const primaryPreview = primary
+    ? liveMessagePreview(primary, 110)
+    : "监听运行后，这里会汇总最新风险、副本、收益和关键回复。";
+  const primaryMeta = primary
+    ? `${formatChatTime(primary.time) || "最近"}｜${displaySource(primary.source)}`
+    : collectorLiveStatus() || "等待消息箱";
+  return `
+    <article class="live-situation-hero ${primary ? escapeAttr(liveMessageKind(primary)) : "empty"}">
+      <div class="live-situation-title">
+        <span>当前态势</span>
+        <strong>${escapeHtml(primary?.title || "等待游戏事件")}</strong>
+        <small>${escapeHtml(primaryMeta)}</small>
+      </div>
+      <p>${escapeHtml(primaryPreview)}</p>
+      <div class="live-situation-actions">
+        ${primary ? `<button type="button" data-live-message="${escapeAttr(primary.id || "")}">查看原文</button>` : ""}
+        ${primaryAction ? `<button type="button" data-live-action="${escapeAttr(primary.id || "")}">填入 ${escapeHtml(quickActionLabel(primaryAction))}</button>` : ""}
+        <button type="button" data-live-panel="overview">打开概览</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderLiveDungeonHero(summary) {
+  const title = dungeonSummaryDisplayLabel(summary);
+  const advice = [summary.advice, summary.routeVerdict, summary.teamFit].filter(Boolean).join("｜");
+  const primaryActions = visibleDungeonActions(summary).slice(0, 3);
+  return `
+    <article class="live-situation-hero dungeon-live ${escapeAttr(summary.statusKind || "")}">
+      <div class="live-situation-title">
+        <span>当前副本</span>
+        <strong>${escapeHtml(title)}</strong>
+        <small>${escapeHtml(formatChatTime(summary.latestMessage?.time) || summary.latestMessage?.time || "最近")}</small>
+      </div>
+      <p>${escapeHtml(advice || summary.status || summary.latestStage || "副本线索已汇总，点击面板看原文和时间线。")}</p>
+      <div class="live-situation-metrics">
+        <span><b>阶段</b>${escapeHtml(summary.latestStage || "未读")}</span>
+        <span><b>状态</b>${escapeHtml(summary.status || "副本")}</span>
+        <span><b>人数</b>${escapeHtml(summary.capacity || (summary.joinSuccess.length ? `${summary.joinSuccess.length} 人` : "未读"))}</span>
+      </div>
+      <div class="live-situation-actions">
+        ${primaryActions.map((action, index) => `
+          <button type="button" data-live-dungeon-action="${index}" title="${escapeAttr(action.command || "")}">
+            填入 ${escapeHtml(action.label || action.command || "动作")}
+          </button>
+        `).join("")}
+        <button type="button" data-live-panel="dungeon">副本面板</button>
+      </div>
+    </article>
+  `;
+}
+
+function currentDungeonSnapshot() {
+  const summaries = ((state.worldSnapshot?.dungeon || {}).summaries || []).map(normalizeDungeonStatusSummary);
+  return pickCurrentDungeonSummary(summaries);
+}
+
+function latestLeaderSnapshotMessage() {
+  return ((state.worldSnapshot?.leader || {}).messages || [])[0] || null;
+}
+
+function snapshotPriorityMessages() {
+  return ((state.worldSnapshot?.priority || {}).messages || []).filter((message) => {
+    if (!message?.id) return false;
+    if (isArchivedOnlySignal(message)) return false;
+    const channels = message.channels || [message.channel];
+    return channels.includes("risk") || channels.includes("focus") || (message.tags || []).includes("被@") || (message.tags || []).includes("回复我");
+  });
+}
+
+function isArchivedOnlySignal(message) {
+  const channels = message?.channels || [message?.channel];
+  if (!channels.includes("archive")) return false;
+  if (message?.severity === "risk" || channels.includes("risk")) return false;
+  const tags = message?.tags || [];
+  if (tags.includes("被@") || tags.includes("回复我") || tags.includes("我发出")) return false;
+  return true;
+}
+
+function isPersonalSignal(message) {
+  const channels = message?.channels || [message?.channel];
+  const tags = message?.tags || [];
+  if (message?.severity === "risk" || channels.includes("risk")) return true;
+  if (tags.includes("被@") || tags.includes("回复我") || tags.includes("我发出")) return true;
+  return channels.includes("mine") && !isArchivedOnlySignal(message);
+}
+
+function summarySignalMessages() {
+  const base = state.channelSummaryMessages.length ? state.channelSummaryMessages : state.messages;
+  const byId = new Map();
+  for (const message of [...snapshotPriorityMessages(), ...base]) {
+    if (!message?.id || byId.has(message.id)) continue;
+    if (isArchivedOnlySignal(message)) continue;
+    byId.set(message.id, message);
+  }
+  return Array.from(byId.values());
+}
+
+function liveResourceSnapshot() {
+  const payload = state.worldSnapshot?.resource || null;
+  if (!payload) return null;
+  const rows = payload.rows || [];
+  const eventSummary = payload.event_summary || [];
+  const latestPeriod = latestResourcePeriod(rows, eventSummary);
+  const periodEvents = filterResourceRowsByPeriod(eventSummary, latestPeriod);
+  const periodRows = filterResourceRowsByPeriod(rows, latestPeriod);
+  const wild = {
+    success: 0,
+    failed: 0,
+    cooldown: 0,
+  };
+  for (const row of periodEvents) {
+    if (row.source_type !== "wild_training") continue;
+    wild.success += Number(row.success || 0) + Number(row.extra_success || 0);
+    wild.failed += Number(row.failed || 0) + Number(row.basic_only || 0);
+    wild.cooldown += Number(row.cooldown || 0);
+  }
+  const rareRows = aggregateRareResourceRows(periodRows)
+    .filter((row) => row.total_amount > 0)
+    .sort((a, b) => (
+      Number(!isYinNingResource(a.resource_name)) - Number(!isYinNingResource(b.resource_name))
+      || Number(a.total_amount || 0) - Number(b.total_amount || 0)
+      || String(a.resource_name || "").localeCompare(String(b.resource_name || ""), "zh-CN")
+    ))
+    .slice(0, 3);
+  return {
+    latestPeriod,
+    eventCount: periodEvents.reduce((sum, row) => sum + Number(row.total || row.event_count || 0), 0),
+    wild,
+    rareRows,
+  };
+}
+
+function renderLiveSituationTile(kind, label, message, emptyText, panel) {
+  const meta = message ? `${formatChatTime(message.time) || "最近"}｜${displaySource(message.source)}` : "等待消息箱";
+  const preview = message ? liveMessagePreview(message, 58) : emptyText;
+  const fields = message?.fields || {};
+  const dungeonId = fields["副本ID"] ? `#${fields["副本ID"]}` : "";
+  const badge = kind === "dungeon" && dungeonId ? dungeonId : (message ? liveMessageKindLabel(message) : "空");
+  return `
+    <article class="live-situation-tile ${escapeAttr(kind)} ${message ? "" : "empty"}">
+      <button type="button" ${message ? `data-live-message="${escapeAttr(message.id || "")}"` : `data-live-panel="${escapeAttr(panel)}"`}>
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(message?.title || emptyText)}</strong>
+        <small>${escapeHtml(meta)}</small>
+        <em>${escapeHtml(preview)}</em>
+      </button>
+      <button type="button" class="live-situation-badge" data-live-panel="${escapeAttr(panel)}">${escapeHtml(badge)}</button>
+    </article>
+  `;
+}
+
+function renderLiveDungeonSummaryTile(summary) {
+  const title = `${summary.dungeonName || "副本"}${summary.dungeonId ? ` #${summary.dungeonId}` : ""}`;
+  const preview = [summary.advice, summary.routeVerdict, summary.latestStage, summary.openedBy].filter(Boolean).join("｜");
+  return `
+    <article class="live-situation-tile dungeon ${escapeAttr(summary.statusKind || "")}">
+      <button type="button" data-live-panel="dungeon">
+        <span>当前副本</span>
+        <strong>${escapeHtml(title)}</strong>
+        <small>${escapeHtml(formatChatTime(summary.latestMessage?.time) || "最近")}｜${escapeHtml(summary.status || "副本")}</small>
+        <em>${escapeHtml(preview || "副本状态已从消息箱汇总。")}</em>
+      </button>
+      <button type="button" class="live-situation-badge" data-live-panel="dungeon">${escapeHtml(summary.status || "副本")}</button>
+    </article>
+  `;
+}
+
+function renderLiveResourceSummaryTile(summary) {
+  const attempts = summary.wild.success + summary.wild.failed;
+  const rate = attempts ? `${Math.round((summary.wild.success * 100) / attempts)}%` : "暂无";
+  const rareText = summary.rareRows.length
+    ? summary.rareRows.map((row) => `${row.resource_name}${formatResourceAmount(row.total_amount, row.unit)}`).join(" / ")
+    : "暂无稀有产物";
+  return `
+    <article class="live-situation-tile resource">
+      <button type="button" data-live-panel="resource">
+        <span>今日收益</span>
+        <strong>野外成功率 ${escapeHtml(rate)}</strong>
+        <small>${escapeHtml(summary.latestPeriod || "本期")}｜事件 ${escapeHtml(formatNumber(summary.eventCount))}</small>
+        <em>${escapeHtml(rareText)}</em>
+      </button>
+      <button type="button" class="live-situation-badge" data-live-panel="resource">统计</button>
+    </article>
+  `;
+}
+
+function renderLiveCooldownTile(moduleRow) {
+  if (!moduleRow) {
+    return `
+      <article class="live-situation-tile cooldown empty">
+        <button type="button" data-live-panel="status">
+          <span>关键冷却</span>
+          <strong>暂无角色 CD</strong>
+          <small>先选择身份</small>
+          <em>发送或监听状态消息后会补全。</em>
+        </button>
+        <button type="button" class="live-situation-badge" data-live-panel="status">状态</button>
+      </article>
+    `;
+  }
+  return `
+    <article class="live-situation-tile cooldown ${escapeAttr(moduleRow.view.cls)}">
+      <button type="button" data-live-panel="status">
+        <span>关键冷却</span>
+        <strong>${escapeHtml(moduleRow.view.label)}</strong>
+        <small>${escapeHtml(moduleRow.view.status)}｜${escapeHtml(moduleRow.view.time)}</small>
+        <em>点开角色状态可看完整 CD 和资料来源。</em>
+      </button>
+      <button type="button" class="live-situation-badge" data-live-panel="status">${escapeHtml(moduleRow.view.icon)}</button>
+    </article>
+  `;
+}
+
+function bindLiveSituationBoard() {
+  liveSituationBoard.querySelectorAll("[data-live-message]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = button.dataset.liveMessage || "";
+      const message = id ? await findOrFetchMessage(id) : null;
+      if (message) jumpToMessage(message);
+    });
+  });
+  liveSituationBoard.querySelectorAll("[data-live-action]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = button.dataset.liveAction || "";
+      const message = id ? await findOrFetchMessage(id) : null;
+      const action = (message?.actions || []).find((item) => String(item.command || "").trim());
+      if (!message || !action) return;
+      fillDirectSendComposer(action.command, {
+        identityId: action.identity_id,
+        replyContext: directReplyContextFromAction(action, message),
+        statusText: "已填入当前态势候选动作，请确认后发送。",
+        statusKind: "info",
+      });
+      jumpToMessage(message);
+    });
+  });
+  liveSituationBoard.querySelectorAll("[data-live-panel]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const panel = button.dataset.livePanel || "";
+      if (panel === "overview") {
+        openOverviewDetailPanel();
+        return;
+      }
+      await openGameScenePanel(panel);
+    });
+  });
+  liveSituationBoard.querySelectorAll("[data-live-dungeon-action]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const summary = liveSituationModel().dungeonSummary;
+      const action = visibleDungeonActions(summary)[Number(button.dataset.liveDungeonAction || 0)];
+      if (!action?.command) return;
+      fillDirectSendComposer(action.command, {
+        replyContext: directReplyContextFromAction(action),
+        statusText: "已填入副本动作，请看原文后手动发送。",
+        statusKind: "info",
+      });
+      const sourceId = action.source_message_id || summary?.latestMessage?.id || "";
+      const message = sourceId ? await findOrFetchMessage(sourceId) : null;
+      if (message) jumpToMessage(message);
+    });
+  });
+}
+
+function liveMessagePreview(message, limit) {
+  return clipGraphemes(String(message?.summary || message?.raw || message?.title || "").replace(/\s+/g, " ").trim(), limit);
+}
+
+function liveMessageKind(message) {
+  const meta = worldEventMeta(message);
+  return meta.kind || "focus";
+}
+
+function liveMessageKindLabel(message) {
+  const meta = worldEventMeta(message);
+  return meta.label || "消息";
+}
+
+function renderWorldEventStrip() {
+  if (!worldEventStrip) return;
+  const slots = worldEventSlots();
+  worldEventStrip.innerHTML = slots.map(({ def, message, count, snapshot }) => {
+    const firstAction =
+      snapshot?.action ||
+      (message?.actions || []).find((item) => String(item.command || "").trim());
+    const preview = clipGraphemes(
+      String(snapshot?.preview || message?.summary || message?.raw || message?.title || def.emptyText || "").replace(/\s+/g, " ").trim(),
+      78
+    );
+    const title = snapshot?.title || message?.title || def.emptyTitle;
+    const subline = snapshot?.subline || (
+      message
+        ? `${formatChatTime(message.time) || ""}｜${displaySource(message.source)}`
+        : def.emptySubline
+    );
+    const mainAttrs = message?.id
+      ? `data-world-event-id="${escapeAttr(message.id || "")}"`
+      : snapshot?.panel
+        ? `data-world-event-panel="${escapeAttr(snapshot.panel)}"`
+        : `data-world-event-channel="${escapeAttr(def.channel || "focus")}"`;
+    return `
+      <article class="world-event-card ${escapeAttr(def.kind)} ${message || snapshot ? "" : "empty"}"
+               title="${escapeAttr(preview || title || "消息")}">
+        <button type="button" class="world-event-main"
+                ${mainAttrs}>
+          <span class="world-event-kind">${escapeHtml(def.label)}</span>
+          <strong>${escapeHtml(title || def.label)}</strong>
+          <small>${escapeHtml(subline || "")}${count ? `｜${escapeHtml(formatNumber(count))} 条` : ""}</small>
+          <em>${escapeHtml(preview || "暂无消息")}</em>
+        </button>
+        ${firstAction ? `
+          <button type="button" class="world-event-action"
+                  ${snapshot?.action ? `data-world-event-snapshot-action="${escapeAttr(def.key)}"` : `data-world-event-action="${escapeAttr(message.id || "")}"`}
+                  title="${escapeAttr(String(firstAction.command || ""))}">
+            填入
+          </button>
+        ` : ""}
+      </article>
+    `;
+  }).join("");
+  worldEventStrip.querySelectorAll("[data-world-event-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = button.dataset.worldEventId || "";
+      if (!id) return;
+      const message = await findOrFetchMessage(id);
+      if (message) jumpToMessage(message);
+    });
+  });
+  worldEventStrip.querySelectorAll("[data-world-event-action]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const id = button.dataset.worldEventAction || "";
+      if (!id) return;
+      const message = await findOrFetchMessage(id);
+      const action = (message?.actions || []).find((item) => String(item.command || "").trim());
+      if (!message || !action) return;
+      fillDirectSendComposer(action.command, {
+        identityId: action.identity_id,
+        replyContext: directReplyContextFromAction(action, message),
+        statusText: "已填入世界事件候选动作，请确认后发送。",
+        statusKind: "info",
+      });
+      jumpToMessage(message);
+    });
+  });
+  worldEventStrip.querySelectorAll("[data-world-event-channel]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const channel = button.dataset.worldEventChannel || "focus";
+      applyChannelSelection([channel]).catch((error) => showSkillToast(`频道加载失败: ${error.message || error}`, "err"));
+    });
+  });
+  worldEventStrip.querySelectorAll("[data-world-event-panel]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await openGameScenePanel(button.dataset.worldEventPanel || "");
+    });
+  });
+  worldEventStrip.querySelectorAll("[data-world-event-snapshot-action]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const key = button.dataset.worldEventSnapshotAction || "";
+      const snapshot = worldEventSlotSnapshot({ key }) || {};
+      const action = snapshot.action || null;
+      if (!action?.command) return;
+      fillDirectSendComposer(action.command, {
+        identityId: action.identity_id,
+        replyContext: directReplyContextFromAction(action),
+        statusText: "已填入事件带候选动作，请确认后发送。",
+        statusKind: "info",
+      });
+      const message = action.source_message_id ? await findOrFetchMessage(action.source_message_id) : null;
+      if (message) jumpToMessage(message);
+    });
+  });
+}
+
+function renderGameSceneBoard() {
+  if (!gameSceneBoard) return;
+  const scenes = gameSceneSummaries();
+  gameSceneBoard.innerHTML = scenes.map((scene) => `
+    <article class="game-scene-card ${escapeAttr(scene.kind)} ${scene.message ? "" : "empty"}">
+      <button type="button" class="game-scene-main" data-scene-channel="${escapeAttr(scene.channel)}">
+        <span class="game-scene-icon">${escapeHtml(scene.icon)}</span>
+        <span class="game-scene-title">
+          <strong>${escapeHtml(scene.title)}</strong>
+          <small>${escapeHtml(scene.subtitle)}</small>
+        </span>
+        <span class="game-scene-count">${escapeHtml(formatNumber(scene.count))}</span>
+        <em>${escapeHtml(scene.preview)}</em>
+        ${scene.badges && scene.badges.length ? `
+          <span class="game-scene-badges">
+            ${scene.badges.map((badge) => `
+              <span class="${escapeAttr(badge.kind || "")}">
+                <b>${escapeHtml(badge.label)}</b>${escapeHtml(String(badge.value))}
+              </span>
+            `).join("")}
+          </span>
+        ` : ""}
+      </button>
+      ${scene.skillActions && scene.skillActions.length ? `
+        <div class="game-scene-skill-actions">
+          ${scene.skillActions.map((action) => `
+            <button type="button" class="${escapeAttr(action.cls)}"
+                    ${action.disabled ? "disabled" : ""}
+                    data-scene-skill="${escapeAttr(action.key)}"
+                    title="${escapeAttr(action.title)}">
+              ${action.icon ? `<span>${escapeHtml(action.icon)}</span>` : ""}
+              <strong>${escapeHtml(action.label)}</strong>
+              ${action.meta ? `<small>${escapeHtml(action.meta)}</small>` : ""}
+            </button>
+          `).join("")}
+        </div>
+      ` : ""}
+      ${scene.commandActions && scene.commandActions.length ? `
+        <div class="game-scene-skill-actions game-scene-command-actions">
+          ${scene.commandActions.map((action, index) => `
+            <button type="button" class="${escapeAttr(action.cls || "")}"
+                    data-scene-command-action="${index}"
+                    title="${escapeAttr(action.command || "")}">
+              <span>${escapeHtml(action.icon || "令")}</span>
+              <strong>${escapeHtml(action.label || action.command || "动作")}</strong>
+              ${action.meta ? `<small>${escapeHtml(action.meta)}</small>` : ""}
+            </button>
+          `).join("")}
+        </div>
+      ` : ""}
+      <div class="game-scene-actions">
+        ${scene.actions.map((action) => `
+          <button type="button" data-scene-panel="${escapeAttr(action.panel)}">${escapeHtml(action.label)}</button>
+        `).join("")}
+      </div>
+    </article>
+  `).join("");
+  gameSceneBoard.querySelectorAll("[data-scene-channel]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const channel = button.dataset.sceneChannel || "focus";
+      applyChannelSelection([channel]).catch((error) => showSkillToast(`频道加载失败: ${error.message || error}`, "err"));
+    });
+  });
+  gameSceneBoard.querySelectorAll("[data-scene-panel]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      await openGameScenePanel(button.dataset.scenePanel || "");
+    });
+  });
+  gameSceneBoard.querySelectorAll("[data-scene-skill]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (button.disabled) return;
+      fillSkillIntoComposer(button.dataset.sceneSkill || "", button);
+    });
+  });
+  gameSceneBoard.querySelectorAll("[data-scene-command-action]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const action = gameSceneCommandActions({ key: "dungeon" })[Number(button.dataset.sceneCommandAction || 0)];
+      if (!action?.command || !action.rawAction) return;
+      const sourceId = action.rawAction.source_message_id || "";
+      const sourceMessage = sourceId ? await findOrFetchMessage(sourceId) : null;
+      fillDirectSendComposer(action.command, {
+        replyContext: directReplyContextFromAction(action.rawAction, sourceMessage),
+        statusText: "已填入副本动作，请确认原文后发送。",
+        statusKind: "info",
+      });
+      if (sourceMessage) jumpToMessage(sourceMessage);
+    });
+  });
+}
+
+function gameSceneDefs() {
+  return [
+    {
+      key: "home",
+      kind: "home",
+      icon: "府",
+      title: "洞府",
+      channel: "home",
+      channels: ["home", "mine"],
+      fallback: "洞府、角色回复和个人状态会汇入这里。",
+      modules: ["pet_touch", "pet_warm", "pet_trial", "concubine_dream", "concubine_tianji", "concubine_heart"],
+      actionSkills: ["concubine_status", "pet_touch", "pet_warm", "pet_trial", "concubine_dream", "concubine_tianji"],
+      actions: [
+        { label: "状态", panel: "status" },
+        { label: "我的", panel: "mine" },
+      ],
+    },
+    {
+      key: "training",
+      kind: "training",
+      icon: "野",
+      title: "历练",
+      channel: "training",
+      channels: ["training", "resource"],
+      fallback: "野外历练、奇遇和资源结算会汇入这里。",
+      modules: ["wild_training", "checkin", "tower", "deep_retreat", "retreat_shallow", "yuanying", "second_soul", "ranch"],
+      actionSkills: ["wild_training", "deep_retreat", "tower", "checkin", "yuanying", "second_soul_train", "retreat_shallow", "ranch"],
+      actions: [
+        { label: "资源", panel: "resource" },
+        { label: "记录", panel: "training" },
+      ],
+    },
+    {
+      key: "dungeon",
+      kind: "dungeon",
+      icon: "副",
+      title: "副本",
+      channel: "dungeon",
+      channels: ["dungeon"],
+      fallback: "副本开房、加入、卦象和推进会汇入这里。",
+      modules: [],
+      actionSkills: [],
+      actions: [
+        { label: "状态", panel: "dungeon" },
+        { label: "攻略", panel: "guide" },
+      ],
+    },
+    {
+      key: "intel",
+      kind: "leader",
+      icon: "天",
+      title: "天机",
+      channel: "leader",
+      channels: ["leader", "focus", "risk"],
+      fallback: "会长、重点、风险和新玩法线索会汇入这里。",
+      modules: ["stargazer_guide", "stargazer_soothe", "stargazer_collect", "tianti_climb", "tianti_wenxin", "tianti_gangfeng", "taiyi_cycle"],
+      actionSkills: ["tianti_status", "tianti_climb", "tianti_wenxin", "tianti_gangfeng", "stargazer_panel", "stargazer_guide", "stargazer_soothe", "taiyi", "yindao", "node_search"],
+      actions: [
+        { label: "情报", panel: "intel" },
+        { label: "健康", panel: "health" },
+      ],
+    },
+  ];
+}
+
+function gameSceneSummaries() {
+  const source = summarySignalMessages();
+  return gameSceneDefs().map((def) => {
+    const messages = source
+      .filter((message) => gameSceneMatch(def, message))
+      .sort((a, b) => Number(b.seq || 0) - Number(a.seq || 0));
+    const message = messages[0] || null;
+    const snapshot = gameSceneSnapshot(def);
+    if (snapshot) {
+      return {
+        ...def,
+        ...snapshot,
+        badges: snapshot.badges || gameSceneModuleBadges(def),
+        skillActions: gameSceneSkillActions(def),
+        commandActions: gameSceneCommandActions(def),
+        count: Number(snapshot.count ?? messages.length ?? 0),
+        message: snapshot.message || message || { id: "" },
+      };
+    }
+    const subtitle = message
+      ? `${formatChatTime(message.time) || "最近"}｜${displaySource(message.source)}`
+      : "等待消息箱";
+    const preview = message
+      ? clipGraphemes(String(message.summary || message.raw || message.title || "").replace(/\s+/g, " ").trim(), 86)
+      : def.fallback;
+    return {
+      ...def,
+      count: messages.length,
+      message,
+      subtitle,
+      preview: preview || def.fallback,
+      badges: gameSceneModuleBadges(def),
+      skillActions: gameSceneSkillActions(def),
+      commandActions: gameSceneCommandActions(def),
+    };
+  });
+}
+
+function gameSceneSnapshot(def) {
+  if (def.key === "home") {
+    const identity = identityById(state.activeIdentityId);
+    const patches = activeIdentityPatches();
+    const patchMap = new Map(patches.map((item) => [item.key, item.value]));
+    if (!identity && !patches.length) return null;
+    const realm = patchMap.get("境界") || patchMap.get("灵根") || "角色资料";
+    const sourceRows = identityProfileSourceRows(patches);
+    return {
+      subtitle: identity ? `${identity.label || identity.username || identity.send_as_id}` : "当前身份",
+      preview: `${realm}｜资料来源 ${sourceRows.length || 0} 项`,
+      count: sourceRows.length,
+      badges: gameSceneModuleBadges(def),
+      message: sourceRows.find((row) => row.sourceMessageId) ? { id: sourceRows.find((row) => row.sourceMessageId).sourceMessageId } : null,
+    };
+  }
+  if (def.key === "training") {
+    const resource = liveResourceSnapshot();
+    if (!resource) return null;
+    const attempts = resource.wild.success + resource.wild.failed;
+    const rate = attempts ? `${Math.round((resource.wild.success * 100) / attempts)}%` : "暂无";
+    const rare = resource.rareRows.length
+      ? resource.rareRows.map((row) => `${row.resource_name}${formatResourceAmount(row.total_amount, row.unit)}`).join(" / ")
+      : "暂无稀有";
+    return {
+      subtitle: `${resource.latestPeriod || "本期"}｜野外成功率 ${rate}`,
+      preview: rare,
+      count: resource.eventCount,
+      badges: gameSceneModuleBadges(def, [{ label: "成功率", value: rate, kind: attempts ? "ok" : "muted" }]),
+    };
+  }
+  if (def.key === "dungeon") {
+    const summaries = ((state.worldSnapshot?.dungeon || {}).summaries || []).map(normalizeDungeonStatusSummary);
+    const latestSummary = summaries[0] || null;
+    const actionSummary = actionableDungeonSnapshot();
+    const summary = actionSummary || pickCurrentDungeonSummary(summaries);
+    if (!summary) return null;
+    const title = dungeonSummaryDisplayLabel(summary);
+    const latestDiffers = latestSummary && summary.key !== latestSummary.key;
+    const actionCount = visibleDungeonActions(summary).length;
+    const previewParts = [summary.advice, summary.routeVerdict, summary.latestStage, summary.openedBy].filter(Boolean);
+    if (latestDiffers) {
+      previewParts.unshift(`最新 ${dungeonSummaryDisplayLabel(latestSummary)} ${latestSummary.status || ""}`.trim());
+    }
+    return {
+      title,
+      subtitle: `${actionSummary ? "可操作" : (summary.status || "副本")}｜${formatChatTime(summary.latestMessage?.time) || "最近"}`,
+      preview: previewParts.join("｜") || "副本状态已汇总。",
+      count: Number((state.worldSnapshot?.dungeon || {}).total_summaries || summary.messageCount || 0),
+      badges: [
+        { label: "状态", value: summary.status || "副本", kind: ["open", "joined"].includes(summary.statusKind) ? "ok" : ["choice", "active"].includes(summary.statusKind) ? "warn" : "muted" },
+        { label: "动作", value: actionCount, kind: actionCount ? "warn" : "muted" },
+        latestDiffers ? { label: "最新", value: latestSummary.status || "线索", kind: "muted" } : null,
+      ].filter(Boolean),
+      message: summary.latestMessage || null,
+    };
+  }
+  if (def.key === "intel") {
+    const leaderMessages = ((state.worldSnapshot?.leader || {}).messages || []);
+    if (!leaderMessages.length) return null;
+    const first = leaderMessages[0];
+    return {
+      subtitle: `${formatChatTime(first.time) || "最近"}｜${displaySource(first.source)}`,
+      preview: liveMessagePreview(first, 86) || "会长频道消息",
+      count: leaderMessages.length,
+      badges: gameSceneModuleBadges(def, [{ label: "情报", value: leaderMessages.length, kind: leaderMessages.length ? "ok" : "muted" }]),
+      message: first,
+    };
+  }
+  return null;
+}
+
+function gameSceneModuleBadges(def, extras = []) {
+  const stats = gameSceneModuleStats(def?.modules || []);
+  const badges = [];
+  if (stats.total) {
+    badges.push({ label: "就绪", value: stats.ready, kind: stats.ready ? "ok" : "muted" });
+    if (stats.warn) badges.push({ label: "异常", value: stats.warn, kind: "warn" });
+    if (stats.running) badges.push({ label: "进行", value: stats.running, kind: "running" });
+    badges.push({ label: "冷却", value: stats.cooling, kind: stats.cooling ? "cooling" : "muted" });
+  }
+  return [...extras, ...badges].slice(0, 4);
+}
+
+function gameSceneModuleStats(keys) {
+  const wanted = new Set((keys || []).filter(Boolean));
+  if (!wanted.size) return { total: 0, ready: 0, warn: 0, running: 0, cooling: 0, unknown: 0 };
+  const activeId = Number(state.activeIdentityId || 0) || null;
+  if (!activeId) return { total: wanted.size, ready: 0, warn: 0, running: 0, cooling: 0, unknown: wanted.size };
+  const rows = overviewModuleRows(activeId).filter((row) => wanted.has(row.spec.key));
+  const stats = { total: wanted.size, ready: 0, warn: 0, running: 0, cooling: 0, unknown: 0 };
+  for (const row of rows) {
+    const cls = String(row.view?.cls || "unknown");
+    if (cls === "ready") stats.ready += 1;
+    else if (cls === "warn") stats.warn += 1;
+    else if (cls === "running") stats.running += 1;
+    else if (cls === "cooling") stats.cooling += 1;
+    else stats.unknown += 1;
+  }
+  stats.unknown += Math.max(0, wanted.size - rows.length);
+  return stats;
+}
+
+function gameSceneSkillActions(def) {
+  const keys = Array.isArray(def?.actionSkills) ? def.actionSkills : [];
+  if (!keys.length) return [];
+  const activeId = Number(state.activeIdentityId || 0) || null;
+  const now = Date.now() / 1000;
+  const modulesByKey = activeId
+    ? new Map((state.identityModuleStates.get(activeId) || []).map((item) => [item.module_key, item]))
+    : new Map();
+  const seen = new Set();
+  return keys
+    .map((key) => skillByKey(key))
+    .filter(Boolean)
+    .filter((skill) => {
+      if (seen.has(skill.key)) return false;
+      seen.add(skill.key);
+      return skill.reply_mode !== "required" && String(skill.command || "").trim() && skillIsUnlocked(skill);
+    })
+    .map((skill) => {
+      const moduleState = skill.cd_module ? modulesByKey.get(skill.cd_module) : null;
+      const cdUntil = moduleState
+        ? Number((moduleState.summary && moduleState.summary.next_at) || (moduleState.state && moduleState.state.cooldown_until) || 0)
+        : 0;
+      const cooling = cdUntil > now;
+      const busy = state.skillBarBusyKeys.has(skill.key);
+      const disabled = !activeId || busy || cooling;
+      return {
+        key: skill.key,
+        label: skill.label || skill.command || skill.key,
+        icon: skill.icon || "",
+        meta: cooling ? `剩 ${fmtCountdown(cdUntil - now)}` : busy ? "发送中" : "填入",
+        cls: [cooling ? "cooling" : "ready", busy ? "busy" : ""].filter(Boolean).join(" "),
+        disabled,
+        order: (cooling ? 2 : 0) + (busy ? 1 : 0),
+        title: skill.note || skill.command || skill.label || "",
+      };
+    })
+    .sort((a, b) => a.order - b.order || String(a.label).localeCompare(String(b.label), "zh-Hans-CN"))
+    .slice(0, 4);
+}
+
+function gameSceneCommandActions(def) {
+  if (def?.key !== "dungeon") return [];
+  const summary = actionableDungeonSnapshot();
+  if (!summary) return [];
+  const dungeonLabel = dungeonSummaryDisplayLabel(summary);
+  return visibleDungeonActions(summary)
+    .slice(0, 4)
+    .map((action) => ({
+      label: action.label || action.command || "动作",
+      command: action.command || "",
+      icon: "副",
+      meta: dungeonLabel,
+      cls: "dungeon",
+      rawAction: action,
+    }));
+}
+
+function dungeonSummaryDisplayLabel(summary) {
+  if (!summary) return "副本";
+  return `${summary.dungeonName || "副本"}${summary.dungeonId ? ` #${summary.dungeonId}` : ""}`;
+}
+
+function actionableDungeonSnapshot() {
+  const summaries = ((state.worldSnapshot?.dungeon || {}).summaries || []).map(normalizeDungeonStatusSummary);
+  return summaries
+    .filter((summary) => ["choice", "open", "active", "joined"].includes(summary.statusKind))
+    .filter((summary) => visibleDungeonActions(summary).length > 0)
+    .sort(compareActionableDungeonSummary)[0] || null;
+}
+
+function gameSceneMatch(def, message) {
+  if (!message) return false;
+  const channels = message.channels || [message.channel];
+  return def.channels.some((channel) => channels.includes(channel));
+}
+
+async function openGameScenePanel(panel) {
+  try {
+    if (panel === "status") {
+      openIdentityStatusModal();
+      return;
+    }
+    if (panel === "mine") {
+      await applyChannelSelection(["mine"]);
+      return;
+    }
+    if (panel === "resource") {
+      await openResourceStatsModal();
+      return;
+    }
+    if (panel === "training") {
+      await applyChannelSelection(["training"]);
+      return;
+    }
+    if (panel === "dungeon") {
+      await openDungeonStatusModal();
+      return;
+    }
+    if (panel === "guide") {
+      await openXutianOracleGuideModal();
+      return;
+    }
+    if (panel === "intel") {
+      await openLeaderIntelModal();
+      return;
+    }
+    if (panel === "health") {
+      await openHealthModal();
+    }
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function renderQuestTracker() {
+  if (!questTracker) return;
+  const allItems = questTrackerItems();
+  const items = allItems.slice(0, 4);
+  if (!items.length) {
+    questTracker.innerHTML = `
+      <div class="quest-tracker-head">
+        <span>任务追踪</span>
+        <strong>暂无待处理动作</strong>
+        <small>风险、@我和候选命令会出现在这里</small>
+      </div>
+    `;
+    return;
+  }
+  questTracker.innerHTML = `
+    <div class="quest-tracker-head">
+      <span>任务追踪</span>
+      <strong>${escapeHtml(formatNumber(allItems.length))} 条待看</strong>
+      <small>只填入发送栏，不自动发送</small>
+      ${allItems.length > items.length ? `<button type="button" data-quest-more>查看全部</button>` : ""}
+    </div>
+    <div class="quest-tracker-list">
+      ${items.map(renderQuestTrackerItem).join("")}
+    </div>
+  `;
+  questTracker.querySelectorAll("[data-quest-view]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await openQuestTrackerItem(button.dataset.questView || "");
+    });
+  });
+  questTracker.querySelectorAll("[data-quest-action]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const [key, indexText] = String(button.dataset.questAction || "").split("::");
+      await fillQuestTrackerAction(key, Number(indexText || 0), "任务动作");
+    });
+  });
+  questTracker.querySelector("[data-quest-more]")?.addEventListener("click", () => {
+    openOverviewDetailPanel();
+  });
+}
+
+function questTrackerItems() {
+  const source = summarySignalMessages();
+  const seen = new Set();
+  const items = source
+    .filter((message) => {
+      if (!message?.id || seen.has(message.id)) return false;
+      seen.add(message.id);
+      return questTrackerRank(message) < 90;
+    })
+    .sort((a, b) => questTrackerRank(a) - questTrackerRank(b) || Number(b.seq || 0) - Number(a.seq || 0));
+  const moduleQuests = currentModuleQuestItems(items);
+  const dungeonQuest = currentDungeonQuestItem(items);
+  return [dungeonQuest, ...moduleQuests, ...items]
+    .filter(Boolean)
+    .sort((a, b) => questTrackerRank(a) - questTrackerRank(b) || Number(b.seq || 0) - Number(a.seq || 0));
+}
+
+function currentDungeonQuestItem(existingItems = []) {
+  const summary = actionableDungeonSnapshot() || currentDungeonSnapshot();
+  if (!summary || !["open", "choice", "active", "joined"].includes(summary.statusKind)) return null;
+  const actions = visibleDungeonActions(summary);
+  if (!actions.length) return null;
+  const existingActionKeys = new Set(
+    existingItems.flatMap((item) => (item.actions || []).map(questActionKey))
+  );
+  const missingActions = actions.filter((action) => !existingActionKeys.has(questActionKey(action)));
+  if (!missingActions.length) return null;
+  const title = dungeonSummaryDisplayLabel(summary);
+  const preview = [summary.status, summary.advice, summary.routeVerdict, summary.latestStage]
+    .filter(Boolean)
+    .join("｜") || "副本快照里有待确认动作。";
+  return {
+    id: `snapshot:dungeon:${summary.key || summary.dungeonId || "current"}`,
+    title,
+    summary: preview,
+    raw: preview,
+    source: "副本快照",
+    time: summary.latestMessage?.time || "",
+    seq: Number(summary.latestSeq || summary.latestMessage?.seq || 0),
+    channels: ["dungeon", "focus"],
+    tags: ["副本", "快照", summary.status || ""].filter(Boolean),
+    actions: missingActions,
+    severity: summary.statusKind === "failed" ? "warning" : "normal",
+    fields: {
+      "副本名": summary.dungeonName || "",
+      "副本ID": summary.dungeonId || "",
+      "状态": summary.status || "",
+      "阶段": summary.latestStage || "",
+    },
+    __questSnapshot: "dungeon",
+    __dungeonKey: summary.key || summary.dungeonId || "current",
+    __sourceMessageId: summary.latestMessage?.id || missingActions[0]?.source_message_id || "",
+  };
+}
+
+function questActionKey(action) {
+  return [
+    String(action?.command || "").trim(),
+    String(action?.source_message_id || ""),
+    String(action?.reply_to_msg_id || ""),
+  ].join("|");
+}
+
+function currentModuleQuestItems(existingItems = []) {
+  const activeId = Number(state.activeIdentityId || 0) || null;
+  if (!activeId) return [];
+  const existingActionKeys = new Set(
+    existingItems.flatMap((item) => (item.actions || []).map(questActionKey))
+  );
+  return overviewModuleRows(activeId)
+    .map((row) => currentModuleQuestItem(row, activeId))
+    .filter(Boolean)
+    .filter((item) => {
+      const action = (item.actions || [])[0];
+      if (!action) return true;
+      const key = questActionKey(action);
+      if (existingActionKeys.has(key)) return false;
+      existingActionKeys.add(key);
+      return true;
+    })
+    .slice(0, 3);
+}
+
+function currentModuleQuestItem(row, activeId) {
+  if (!row?.item) return null;
+  if (!["warn", "ready"].includes(row.view?.cls)) return null;
+  const skill = moduleQuestSkill(row);
+  if (!skill || !skillIsUnlocked(skill)) return null;
+  const command = String(skill.command || "").trim();
+  if (!command || skill.reply_mode === "required") return null;
+  const updatedAt = Number(row.item.updated_at || 0);
+  const summary = [
+    row.view.status,
+    row.view.time,
+    row.spec?.__groupTitle,
+  ].filter(Boolean).join("｜");
+  const action = {
+    type: "copy",
+    label: skill.label || command,
+    command,
+    send_mode: "copy",
+    identity_id: activeId,
+    skill_key: skill.key,
+  };
+  return {
+    id: `snapshot:module:${activeId}:${row.spec.key}`,
+    title: `${row.view.icon || ""} ${row.view.label || row.spec.key}`.trim(),
+    summary,
+    raw: summary,
+    source: "状态机",
+    time: updatedAt ? new Date(updatedAt * 1000).toISOString() : "",
+    seq: 0,
+    channels: ["focus"],
+    tags: ["状态", row.spec?.__groupTitle || "", row.view.status || ""].filter(Boolean),
+    actions: [action],
+    severity: row.view.cls === "warn" ? "warning" : "normal",
+    fields: {
+      "模块": row.view.label || row.spec.key,
+      "状态": row.view.status || "",
+      "时间": row.view.time || "",
+    },
+    __questSnapshot: "module",
+    __moduleKey: row.spec.key,
+    __identityId: activeId,
+  };
+}
+
+function moduleQuestSkill(row) {
+  const spec = row?.spec || {};
+  const status = String(row?.view?.status || "");
+  const preferredKeys = [];
+  if (status === "待结算" && spec.query) {
+    preferredKeys.push(spec.query);
+  }
+  if (row?.view?.cls === "warn" && spec.query) {
+    preferredKeys.push(spec.query);
+  }
+  preferredKeys.push(spec.skill, ...(spec.extraSkills || []), spec.query, spec.__groupQuery);
+  for (const key of preferredKeys.filter(Boolean)) {
+    const skill = skillByKey(key);
+    if (skill && String(skill.command || "").trim()) return skill;
+  }
+  return null;
+}
+
+function questTrackerRank(message) {
+  if (message?.__questSnapshot === "dungeon") return 2;
+  if (message?.__questSnapshot === "module") return 3;
+  const channels = message.channels || [message.channel];
+  const tags = message.tags || [];
+  if (message.severity === "risk" || channels.includes("risk")) return 1;
+  if ((message.actions || []).some((action) => String(action.command || "").trim())) return 2;
+  if (isPersonalSignal(message)) return 3;
+  if (channels.includes("dungeon") && ["可加入", "需要抉择"].some((tag) => tags.includes(tag))) return 4;
+  return 99;
+}
+
+function renderQuestTrackerItem(message) {
+  const key = questTrackerItemKey(message);
+  const actionEntries = (message.actions || [])
+    .map((action, index) => ({ action, index }))
+    .filter(({ action }) => String(action.command || "").trim());
+  const { kind, text: kindText } = questItemKind(message, actionEntries);
+  const preview = clipGraphemes(
+    String(message.summary || message.raw || message.title || "").replace(/\s+/g, " ").trim(),
+    78
+  );
+  return `
+    <article class="quest-card ${escapeAttr(kind)}">
+      <button type="button" class="quest-card-main" data-quest-view="${escapeAttr(key)}">
+        <span class="quest-kind">${escapeHtml(kindText)}</span>
+        <strong>${escapeHtml(message.title || displaySource(message.source))}</strong>
+        <small>${escapeHtml(formatChatTime(message.time) || "")}｜${escapeHtml(displaySource(message.source))}</small>
+        <em>${escapeHtml(preview || "（空消息）")}</em>
+      </button>
+      <div class="quest-card-actions">
+        ${actionEntries.slice(0, 2).map(({ action, index }) => `
+          <button type="button" data-quest-action="${escapeAttr(`${key}::${index}`)}" title="${escapeAttr(String(action.command || ""))}">
+            ${escapeHtml(quickActionLabel(action))}
+          </button>
+        `).join("")}
+        <button type="button" data-quest-view="${escapeAttr(key)}">查看</button>
+      </div>
+    </article>
+  `;
+}
+
+function questItemKind(message, actionEntries = null) {
+  const channels = message?.channels || [message?.channel];
+  const actions = actionEntries || (message?.actions || []).filter((action) => String(action.command || "").trim());
+  if (message?.__questSnapshot === "dungeon") return { kind: "dungeon", text: "副本" };
+  if (message?.__questSnapshot === "module") return { kind: "module", text: "状态" };
+  if (message?.severity === "risk" || channels.includes("risk")) return { kind: "risk", text: "风险" };
+  if (actions.length) return { kind: "action", text: "动作" };
+  if (isPersonalSignal(message)) return { kind: "mine", text: "我的" };
+  return { kind: "focus", text: "重点" };
+}
+
+function questTrackerItemKey(item) {
+  if (!item) return "";
+  if (item.__questSnapshot) {
+    return `snapshot:${item.__questSnapshot}:${item.__dungeonKey || item.id || "current"}`;
+  }
+  return String(item.id || "");
+}
+
+function questTrackerItemByKey(key) {
+  const normalized = String(key || "");
+  return questTrackerItems().find((item) => questTrackerItemKey(item) === normalized) || null;
+}
+
+async function openQuestTrackerItem(key) {
+  const item = questTrackerItemByKey(key);
+  if (!item) return;
+  if (item.__questSnapshot === "module") {
+    openIdentityStatusModal();
+    return;
+  }
+  if (item.__questSnapshot === "dungeon") {
+    const sourceId = item.__sourceMessageId || item.actions?.[0]?.source_message_id || "";
+    const message = sourceId ? await findOrFetchMessage(sourceId) : null;
+    if (message) {
+      jumpToMessage(message);
+      return;
+    }
+    await openDungeonStatusModal();
+    return;
+  }
+  const message = await findOrFetchMessage(item.id || key);
+  if (message) jumpToMessage(message);
+}
+
+async function fillQuestTrackerAction(key, index, label) {
+  const item = questTrackerItemByKey(key);
+  const action = (item?.actions || [])[Number(index || 0)];
+  if (!item || !action?.command) return;
+  const sourceId = action.source_message_id || item.__sourceMessageId || "";
+  const sourceMessage = sourceId ? await findOrFetchMessage(sourceId) : (item.__questSnapshot ? null : item);
+  fillDirectSendComposer(action.command, {
+    identityId: action.identity_id,
+    replyContext: directReplyContextFromAction(action, sourceMessage || item),
+    statusText: quickActionNeedsManualReview(action)
+      ? `已填入${label}，请补全内容后发送。`
+      : `已填入${label}，请确认后发送。`,
+    statusKind: "info",
+  });
+  if (sourceMessage) jumpToMessage(sourceMessage);
+}
+
+function renderOverviewDetailPanel() {
+  const activeId = Number(state.activeIdentityId || 0) || null;
+  const identity = activeId ? identityById(activeId) : null;
+  const patchMap = new Map(activeIdentityPatches().map((item) => [item.key, item.value]));
+  const sourceRows = identityProfileSourceRows(activeIdentityPatches()).slice(0, 4);
+  const name =
+    patchMap.get("角色名") ||
+    patchMap.get("道号") ||
+    identity?.label ||
+    identity?.username ||
+    (activeId ? String(activeId) : "未选身份");
+  const subtitle = [
+    patchMap.get("境界"),
+    String(patchMap.get("宗门") || "").replace(/^【|】$/g, ""),
+    patchMap.get("灵根"),
+  ].filter(Boolean).join("｜") || "等待消息箱补全角色资料";
+  const metrics = [
+    ["战力", patchMap.get("综合战力") || "未读"],
+    ["修为", patchMap.get("修为") || "未读"],
+    ["身份", identity?.kind === "channel" ? "频道" : identity ? "账号" : "未选"],
+  ];
+  const moduleRows = overviewModuleRows(activeId).slice(0, 6);
+  const quests = questTrackerItems();
+  const scenes = gameSceneSummaries();
+  return `
+    <section class="overview-panel">
+      <div class="overview-hero">
+        <div class="cockpit-avatar overview-avatar">${escapeHtml(sourceInitial(String(name), "player"))}</div>
+        <div>
+          <span>当前角色</span>
+          <strong>${escapeHtml(String(name))}</strong>
+          <small>${escapeHtml(subtitle)}</small>
+        </div>
+      </div>
+      <div class="overview-metrics">
+        ${metrics.map(([label, value]) => cockpitMetric(label, value)).join("")}
+      </div>
+      <div class="overview-actions">
+        <button type="button" data-overview-action="status">角色状态</button>
+        <button type="button" data-overview-action="report">今日战报</button>
+        <button type="button" data-overview-action="refresh">刷新</button>
+      </div>
+
+      <section class="overview-section">
+        <div class="overview-section-head">
+          <strong>关键冷却</strong>
+          <span>${escapeHtml(moduleRows.length ? `${moduleRows.length} 项` : "暂无")}</span>
+        </div>
+        <div class="overview-module-list">
+          ${moduleRows.length ? moduleRows.map(renderOverviewModuleRow).join("") : '<p class="empty inline">选择身份后显示关键 CD。</p>'}
+        </div>
+      </section>
+
+      <section class="overview-section">
+        <div class="overview-section-head">
+          <strong>任务追踪</strong>
+          <span>${escapeHtml(quests.length ? `${quests.length} 条全部显示` : "暂无")}</span>
+        </div>
+        <div class="overview-quest-list">
+          ${quests.length ? quests.map(renderOverviewQuestRow).join("") : '<p class="empty inline">风险、@我和候选动作会出现在这里。</p>'}
+        </div>
+      </section>
+
+      <section class="overview-section">
+        <div class="overview-section-head">
+          <strong>场景入口</strong>
+          <span>修仙地图</span>
+        </div>
+        <div class="overview-scene-grid">
+          ${scenes.map((scene) => `
+            <button type="button" data-overview-scene-channel="${escapeAttr(scene.channel)}">
+              <strong>${escapeHtml(scene.title)}</strong>
+              <span>${escapeHtml(formatNumber(scene.count))} 条</span>
+              <small>${escapeHtml(clipGraphemes(scene.preview || "", 46))}</small>
+            </button>
+          `).join("")}
+        </div>
+      </section>
+
+      <section class="overview-section">
+        <div class="overview-section-head">
+          <strong>资料来源</strong>
+          <span>${escapeHtml(sourceRows.length ? "可追溯" : "暂无")}</span>
+        </div>
+        <div class="overview-source-list">
+          ${sourceRows.length ? sourceRows.map((row) => `
+            <button type="button" data-overview-source="${escapeAttr(row.sourceMessageId || "")}" ${row.sourceMessageId ? "" : "disabled"}>
+              <span>${escapeHtml(row.key)}</span>
+              <strong>${escapeHtml(formatFieldValue(row.value))}</strong>
+              <small>${escapeHtml(auditTimeLabel(row.updatedAt) || "未知时间")}</small>
+            </button>
+          `).join("") : '<p class="empty inline">发送或监听“我的灵根 / 战力”后会更新。</p>'}
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function overviewModuleRows(activeId) {
+  if (!activeId) return [];
+  const stateItems = state.identityModuleStates.get(activeId) || [];
+  const byKey = new Map(stateItems.map((item) => [item.module_key, item]));
+  const specs = identityStatusFlatSpecs();
+  const rank = { warn: 0, ready: 1, running: 2, cooling: 3, unknown: 4 };
+  return specs
+    .map((spec) => ({ spec, item: byKey.get(spec.key), view: identityModuleView(spec, byKey.get(spec.key)) }))
+    .sort((a, b) => (rank[a.view.cls] ?? 9) - (rank[b.view.cls] ?? 9) || (a.spec.__rank || 0) - (b.spec.__rank || 0));
+}
+
+function identityStatusFlatSpecs() {
+  return IDENTITY_STATUS_GROUPS.flatMap((group, groupIndex) => (
+    group.modules.map((spec, moduleIndex) => ({
+      ...spec,
+      __groupKey: group.key,
+      __groupTitle: group.title,
+      __groupQuery: group.query || "",
+      __rank: groupIndex * 100 + moduleIndex,
+    }))
+  ));
+}
+
+function renderOverviewModuleRow(row) {
+  return `
+    <div class="overview-module-row ${escapeAttr(row.view.cls)}">
+      <span>${escapeHtml(row.view.icon)}</span>
+      <strong>${escapeHtml(row.view.label)}</strong>
+      <small>${escapeHtml(row.view.status)}｜${escapeHtml(row.view.time)}</small>
+    </div>
+  `;
+}
+
+function renderOverviewQuestRow(message) {
+  const key = questTrackerItemKey(message);
+  const actionEntries = (message.actions || [])
+    .map((action, index) => ({ action, index }))
+    .filter(({ action }) => String(action.command || "").trim());
+  const { kind, text: kindText } = questItemKind(message, actionEntries);
+  const preview = clipGraphemes(String(message.summary || message.raw || message.title || "").replace(/\s+/g, " "), 58);
+  return `
+    <article class="overview-quest-row ${escapeAttr(kind)}">
+      <button type="button" data-overview-quest-view="${escapeAttr(key)}">
+        <span class="overview-quest-kind ${escapeAttr(kind)}">${escapeHtml(kindText)}</span>
+        <strong>${escapeHtml(message.title || displaySource(message.source))}</strong>
+        <small>${escapeHtml(formatChatTime(message.time) || "")}｜${escapeHtml(displaySource(message.source))}</small>
+        <span>${escapeHtml(preview || "（空消息）")}</span>
+      </button>
+      ${actionEntries[0] ? `<button type="button" data-overview-quest-action="${escapeAttr(`${key}::${actionEntries[0].index}`)}">${escapeHtml(quickActionLabel(actionEntries[0].action))}</button>` : ""}
+    </article>
+  `;
+}
+
+function bindOverviewDetailPanel() {
+  detailPanel.querySelector('[data-overview-action="status"]')?.addEventListener("click", () => openIdentityStatusModal());
+  detailPanel.querySelector('[data-overview-action="report"]')?.addEventListener("click", () => openWorldReportModal().catch((error) => showError(error)));
+  detailPanel.querySelector('[data-overview-action="refresh"]')?.addEventListener("click", async () => {
+    await Promise.all([refreshChatViewport(), loadIdentityPatches(), loadIdentityModuleStates()]);
+    renderDetail().catch((error) => console.warn("[mini-web] refresh overview failed:", error));
+  });
+  detailPanel.querySelectorAll("[data-overview-scene-channel]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const channel = button.dataset.overviewSceneChannel || "focus";
+      closeWorkspacePanel({ rerenderList: false, clearSelection: true });
+      applyChannelSelection([channel]).catch((error) => showSkillToast(`频道加载失败: ${error.message || error}`, "err"));
+    });
+  });
+  detailPanel.querySelectorAll("[data-overview-source]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = button.dataset.overviewSource || "";
+      if (!id) return;
+      const message = await findOrFetchMessage(id);
+      if (message) jumpToMessage(message);
+    });
+  });
+  detailPanel.querySelectorAll("[data-overview-quest-view]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await openQuestTrackerItem(button.dataset.overviewQuestView || "");
+    });
+  });
+  detailPanel.querySelectorAll("[data-overview-quest-action]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const [key, indexText] = String(button.dataset.overviewQuestAction || "").split("::");
+      await fillQuestTrackerAction(key, Number(indexText || 0), "概览动作");
+    });
+  });
+}
+
+function worldEventSlotDefs() {
+  return [
+    {
+      key: "mine",
+      kind: "mine",
+      label: "我的",
+      channel: "mine",
+      emptyTitle: "暂无个人回复",
+      emptySubline: "回复 / 提及 / 风险",
+      emptyText: "天尊回复我或有人提到我时显示在这里。",
+    },
+    {
+      key: "dungeon",
+      kind: "dungeon",
+      label: "副本",
+      channel: "dungeon",
+      emptyTitle: "暂无副本线索",
+      emptySubline: "开房 / 加入 / 推进",
+      emptyText: "副本开启、卦象、抉择和战利品线索会显示在这里。",
+    },
+    {
+      key: "resource",
+      kind: "resource",
+      label: "收益",
+      channel: "resource",
+      emptyTitle: "暂无收益记录",
+      emptySubline: "野外 / 副本 / 奇遇",
+      emptyText: "野外历练、副本掉落和奇遇资源会显示在这里。",
+    },
+    {
+      key: "leader",
+      kind: "leader",
+      label: "情报",
+      channel: "leader",
+      emptyTitle: "暂无情报",
+      emptySubline: "会长 / 天尊普通发言",
+      emptyText: "新玩法线索、本人上号和会长发言会显示在这里。",
+    },
+    {
+      key: "focus",
+      kind: "focus",
+      label: "重点",
+      channel: "focus",
+      emptyTitle: "等待消息箱",
+      emptySubline: "关注关键词",
+      emptyText: "采集到重点消息后会显示在这里。",
+    },
+  ];
+}
+
+function worldEventSlots() {
+  const source = summarySignalMessages();
+  const sorted = [...source].sort((a, b) => worldEventRank(a) - worldEventRank(b) || Number(b.seq || 0) - Number(a.seq || 0));
+  const used = new Set();
+  return worldEventSlotDefs().map((def) => {
+    const matches = sorted.filter((message) => worldEventSlotMatch(def, message));
+    const snapshot = worldEventSlotSnapshot(def, matches);
+    const message = matches.find((item) => !used.has(item.id)) || snapshot?.message || matches[0] || null;
+    if (message?.id) used.add(message.id);
+    return { def, message, count: Number(snapshot?.count ?? matches.length), snapshot };
+  });
+}
+
+function worldEventSlotSnapshot(def, matches = []) {
+  if (!def) return null;
+  if (def.key === "dungeon") {
+    const summary = actionableDungeonSnapshot() || currentDungeonSnapshot();
+    if (!summary) return null;
+    const title = dungeonSummaryDisplayLabel(summary);
+    return {
+      title,
+      subline: `${summary.status || "副本"}｜${formatChatTime(summary.latestMessage?.time) || "最近"}`,
+      preview: [summary.advice, summary.routeVerdict, summary.latestStage, summary.openedBy].filter(Boolean).join("｜") || "副本状态已从消息箱汇总。",
+      panel: "dungeon",
+      count: Number((state.worldSnapshot?.dungeon || {}).total_summaries || summary.messageCount || matches.length || 0),
+      message: summary.latestMessage || null,
+      action: visibleDungeonActions(summary)[0] || null,
+    };
+  }
+  if (def.key === "resource") {
+    const resource = liveResourceSnapshot();
+    if (!resource) return null;
+    const attempts = resource.wild.success + resource.wild.failed;
+    const rate = attempts ? `${Math.round((resource.wild.success * 100) / attempts)}%` : "暂无";
+    const rare = resource.rareRows.length
+      ? resource.rareRows.map((row) => `${row.resource_name}${formatResourceAmount(row.total_amount, row.unit)}`).join(" / ")
+      : "暂无稀有产物";
+    return {
+      title: "今日收益",
+      subline: `${resource.latestPeriod || "本期"}｜野外成功率 ${rate}`,
+      preview: rare,
+      panel: "resource",
+      count: resource.eventCount || matches.length || 0,
+    };
+  }
+  if (def.key === "leader") {
+    const message = latestLeaderSnapshotMessage();
+    if (!message) return null;
+    return {
+      title: message.title || "情报",
+      subline: `${formatChatTime(message.time) || "最近"}｜${displaySource(message.source)}`,
+      preview: liveMessagePreview(message, 78),
+      panel: "intel",
+      count: ((state.worldSnapshot?.leader || {}).messages || []).length || matches.length || 0,
+      message,
+    };
+  }
+  return null;
+}
+
+function worldEventSlotMatch(def, message) {
+  if (!message) return false;
+  const channels = message.channels || [message.channel];
+  const tags = message.tags || [];
+  if (def.key === "mine") {
+    return isPersonalSignal(message);
+  }
+  if (def.key === "dungeon") return channels.includes("dungeon");
+  if (def.key === "resource") return channels.includes("resource") || channels.includes("training") || channels.includes("home");
+  if (def.key === "leader") return channels.includes("leader") || tags.includes("会长");
+  if (def.key === "focus") return channels.includes("focus") || (message.actions || []).length > 0;
+  return false;
+}
+
+async function findOrFetchMessage(id) {
+  let message =
+    state.messages.find((item) => item.id === id) ||
+    state.channelSummaryMessages.find((item) => item.id === id) ||
+    null;
+  if (!message) {
+    message = await fetchMessageById(id);
+  }
+  if (message && !state.messages.some((item) => item.id === message.id)) {
+    const byId = new Map(state.messages.map((item) => [item.id, item]));
+    byId.set(message.id, message);
+    state.messages = Array.from(byId.values()).sort((a, b) => (b.seq || 0) - (a.seq || 0));
+  }
+  return message;
+}
+
+function worldEventCandidates() {
+  const source = summarySignalMessages();
+  const seen = new Set();
+  return source
+    .filter((message) => {
+      if (!message || !message.id || seen.has(message.id)) return false;
+      seen.add(message.id);
+      return worldEventRank(message) < 90;
+    })
+    .sort((a, b) => worldEventRank(a) - worldEventRank(b) || Number(b.seq || 0) - Number(a.seq || 0));
+}
+
+function worldEventRank(message) {
+  const channels = message.channels || [message.channel];
+  const tags = message.tags || [];
+  if (message.severity === "risk" || channels.includes("risk")) return 1;
+  if (isPersonalSignal(message)) return 2;
+  if (channels.includes("dungeon")) return 3;
+  if (channels.includes("leader") || tags.includes("会长")) return 4;
+  if (channels.includes("resource") || channels.includes("training") || channels.includes("home")) return 5;
+  if ((message.actions || []).length) return 6;
+  if (channels.includes("focus")) return 8;
+  return 99;
+}
+
+function worldEventMeta(message) {
+  const channels = message.channels || [message.channel];
+  const tags = message.tags || [];
+  if (message.severity === "risk" || channels.includes("risk")) return { kind: "risk", label: "风险" };
+  if (isPersonalSignal(message)) return { kind: "mine", label: "我的" };
+  if (channels.includes("dungeon")) return { kind: "dungeon", label: "副本" };
+  if (channels.includes("leader") || tags.includes("会长")) return { kind: "leader", label: "会长" };
+  if (channels.includes("resource")) return { kind: "resource", label: "资源" };
+  if (channels.includes("training")) return { kind: "training", label: "修炼" };
+  if (channels.includes("home")) return { kind: "home", label: "洞府" };
+  if ((message.actions || []).length) return { kind: "action", label: "候选" };
+  return { kind: "focus", label: "重点" };
 }
 
 function emptyMessageHint() {
@@ -3984,7 +7178,7 @@ function visibleMessageBadges(message) {
   if (message.severity === "risk" || channels.includes("risk")) {
     important.add("风险");
   }
-  if (channels.includes("mine")) {
+  if (isPersonalSignal(message)) {
     important.add("我的");
   }
   for (const tag of tags) {
@@ -4157,7 +7351,7 @@ function messageKind(message) {
   if (message.severity === "risk" || channels.includes("risk")) {
     return "risk";
   }
-  if (channels.includes("mine")) {
+  if (isPersonalSignal(message)) {
     return "mine";
   }
   if (message.sender_is_bot || channels.includes("system") || source.includes("韩天尊") || source.includes("天尊")) {
@@ -4181,6 +7375,12 @@ function sourceInitial(source, kind) {
 }
 
 async function renderDetail() {
+  if (state.detailMode === "overview") {
+    detailState.textContent = "概览";
+    detailPanel.innerHTML = renderOverviewDetailPanel();
+    bindOverviewDetailPanel();
+    return;
+  }
   if (state.detailMode !== "message") {
     return;
   }
@@ -4363,6 +7563,20 @@ const cardRenderers = {
   "试炼古塔战报": renderTowerTrialCard,
   "储物袋快照": renderInventoryCard,
   "第二元神归位": renderSecondSoulCard,
+  "登天阶面板": renderTiantiPanelCard,
+  "观星台面板": renderStargazerPanelCard,
+  "星盘显化": renderStargazerResultCard,
+  "天机阁快报": renderStargazerResultCard,
+  "小世界面板": renderSmallWorldPanelCard,
+  "侍妾面板": renderConcubinePanelCard,
+  "灵树面板": renderTreePanelCard,
+  "灵树采摘": renderTreeHarvestCard,
+  "抚摸法宝": renderPetPanelCard,
+  "温养器灵": renderPetPanelCard,
+  "器灵试炼": renderPetPanelCard,
+  "引动大道": renderTaiyiPanelCard,
+  "空间节点": renderTaiyiPanelCard,
+  "定星成功": renderTaiyiPanelCard,
   "虚天殿开启": renderDungeonCard,
   "风险提醒": renderRiskCard,
 };
@@ -4382,7 +7596,17 @@ function renderEnhancedBlock(message) {
   if ((message.channels || []).includes("dungeon")) {
     return renderDungeonCard(message);
   }
+  if (shouldRenderGenericGameplayCard(message)) {
+    return renderGenericGameplayCard(message);
+  }
   return renderDetailFields(message.fields);
+}
+
+function shouldRenderGenericGameplayCard(message) {
+  const fields = message.fields || {};
+  if (!Object.keys(fields).some((key) => isPresentValue(fields[key]))) return false;
+  const channels = message.channels || [message.channel];
+  return ["home", "training", "resource", "system", "mine", "risk"].some((channel) => channels.includes(channel));
 }
 
 function richHero(icon, label, value) {
@@ -4574,6 +7798,205 @@ function renderSecondSoulCard(message) {
   `;
 }
 
+function renderTiantiPanelCard(message) {
+  const f = message.fields || {};
+  const raw = String(message.raw || "");
+  const stepProgress =
+    f["阶进度数值"] ||
+    parseProgressObject(f["阶进度"]) ||
+    parseProgressObject(rawMatch(raw, /当前(?:云阶)?进度[:：]\s*(\d+\s*\/\s*\d+)/));
+  const gangfeng = f["罡风淬体"] || rawMatch(raw, /罡风淬体[:：]\s*([^\n。]+)/);
+  const currentStep = rawMatch(raw, /踏上了第\s*(\d+)\s*阶/) || rawMatch(raw, /第\s*(\d+)\s*阶云阶/);
+  const gain = rawMatch(raw, /本次获得\s*([^。\n]+)/);
+  const extra = rawLineValue(raw, "额外收获");
+  const heroValue = stepProgress ? `${stepProgress.current} / ${stepProgress.max} 阶` : (currentStep ? `第 ${currentStep} 阶` : "凌霄云阶");
+  return `
+    <div class="card-rich card-rich-summary">
+      ${richHero("🪜", "登天阶", heroValue)}
+      ${richStatGrid([
+        ["当前阶数", currentStep ? `第 ${currentStep} 阶` : ""],
+        ["周天", f["周天"] || ""],
+        ["罡风淬体", gangfeng || ""],
+        ["问心", f["问心"] || ""],
+        ["登阶冷却", f["登阶冷却"] || ""],
+        ["本次获得", gain || ""],
+        ["额外收获", extra || ""],
+      ])}
+      ${stepProgress ? richProgress("云阶进度", stepProgress.current, stepProgress.max, "阶") : ""}
+    </div>
+  `;
+}
+
+function renderStargazerPanelCard(message) {
+  const f = message.fields || {};
+  const slots = Array.isArray(f["引星盘"]) ? f["引星盘"] : [];
+  const slotLines = slots.map((slot) => `${slot.idx || "?"} 号：${slot.status || ""}`);
+  return `
+    <div class="card-rich card-rich-summary">
+      ${richHero("🔭", "观星台", f["引星盘总数"] ? `${f["引星盘总数"]} 座` : `${slots.length || 0} 座`)}
+      ${richStatGrid([
+        ["引星盘总数", f["引星盘总数"] || ""],
+        ["可用星盘", slots.filter((slot) => /可|空|未/.test(String(slot.status || ""))).length || ""],
+      ])}
+      ${richCollapsibleList("引星盘状态", slotLines, 6)}
+    </div>
+  `;
+}
+
+function renderStargazerResultCard(message) {
+  const f = message.fields || {};
+  const result = f["演化结果"] || f["下次事件"] || message.summary || "天机演化";
+  return `
+    <div class="card-rich card-rich-summary">
+      ${richHero("🌌", message.title || "天机", String(result))}
+      ${richStatGrid([
+        ["下次事件", f["下次事件"] || ""],
+        ["天命所归", f["天命所归"] || ""],
+        ["演化结果", f["演化结果"] || ""],
+      ])}
+      ${richChips([["来源", displaySource(message.source)]])}
+    </div>
+  `;
+}
+
+function renderSmallWorldPanelCard(message) {
+  const f = message.fields || {};
+  const faith = parseProgressObject(f["信仰"]);
+  const prayer = f["凡人祈愿"] || rawLineValue(message.raw, "凡人祈愿");
+  const wait = f["下次祈愿"] || rawMatch(message.raw, /下一次祈愿感应需等待[:：]\s*([^)）\n]+)/);
+  return `
+    <div class="card-rich card-rich-summary">
+      ${richHero("🌍", "小世界", f["主人"] ? `${f["主人"]}` : "凡间状态")}
+      ${richStatGrid([
+        ["待收香火", f["待收香火"] || ""],
+        ["香火库存", f["香火库存"] || ""],
+        ["凡人祈愿", prayer || ""],
+        ["下次祈愿", wait || ""],
+      ])}
+      ${faith ? richProgress("信仰", faith.current, faith.max) : ""}
+      ${richChips([["原则", "祈愿优先，香火只是刷新工具"]])}
+    </div>
+  `;
+}
+
+function renderConcubinePanelCard(message) {
+  const f = message.fields || {};
+  const fragments = parseProgressObject(f["拼片"]);
+  return `
+    <div class="card-rich card-rich-summary">
+      ${richHero("🌙", f["类型"] || "侍妾", f["侍妾"] || "未识别")}
+      ${richStatGrid([
+        ["状态", f["状态"] || ""],
+        ["情缘值", f["情缘值"] || ""],
+        ["当前誓约", f["当前誓约"] || ""],
+        ["入梦寻图", f["入梦寻图冷却"] || ""],
+        ["共历心劫", f["共历心劫冷却"] || ""],
+        ["天机代卜", f["天机代卜冷却"] || ""],
+      ])}
+      ${fragments ? richProgress("虚天残图拼片", fragments.current, fragments.max) : ""}
+    </div>
+  `;
+}
+
+function renderTreePanelCard(message) {
+  const raw = String(message.raw || "");
+  const progress = parseProgressObject(rawMatch(raw, /进度[:：][\s\S]*?(\d+(?:\.\d+)?)%/), 100);
+  const trend = rawLineValue(raw, "倾向");
+  const current = rawLineValue(raw, "你的当前状态");
+  return `
+    <div class="card-rich card-rich-summary">
+      ${richHero("🌲", "灵眼之树", rawLineValue(raw, "阶段") || "落云宗灵树")}
+      ${richStatGrid([
+        ["环境", rawLineValue(raw, "环境") || ""],
+        ["阶段", rawLineValue(raw, "阶段") || ""],
+        ["倾向", trend || ""],
+        ["灵纹", rawLineValue(raw, "灵纹") || ""],
+        ["本轮走向", rawLineValue(raw, "本轮走向") || ""],
+        ["我的状态", current || ""],
+      ])}
+      ${progress ? richProgress("成熟进度", progress.current, progress.max, "%") : ""}
+      ${rawLineValue(raw, "若此刻成熟") ? richChips([["成熟收益", rawLineValue(raw, "若此刻成熟")]]) : ""}
+    </div>
+  `;
+}
+
+function renderTreeHarvestCard(message) {
+  const f = message.fields || {};
+  return `
+    <div class="card-rich card-rich-loot">
+      ${richHero("🌰", "灵树采摘", f["采摘果实"] || "已采摘")}
+      ${richStatGrid([
+        ["果实", f["采摘果实"] || ""],
+        ["修为增长", f["修为增长"] || ""],
+      ])}
+    </div>
+  `;
+}
+
+function renderPetPanelCard(message) {
+  const f = message.fields || {};
+  const raw = String(message.raw || "");
+  const resonance = rawLineValue(raw, "当前共鸣");
+  const bonus = rawLineValue(raw, "当前总加成");
+  const cost = rawLineValue(raw, "- 消耗") || rawLineValue(raw, "消耗");
+  return `
+    <div class="card-rich card-rich-loot">
+      ${richHero("🗡️", message.title || "器灵", message.summary || "已记录")}
+      ${richStatGrid([
+        ["默契", f["默契"] != null ? `+${f["默契"]}` : rawLineValue(raw, "- 默契提升")],
+        ["经验", f["经验"] != null ? `+${f["经验"]}` : rawLineValue(raw, "- 经验提升")],
+        ["当前共鸣", resonance || ""],
+        ["总加成", bonus || ""],
+        ["消耗", cost || ""],
+      ])}
+      ${richChips([["类型", (message.tags || []).join(" / ")]])}
+    </div>
+  `;
+}
+
+function renderTaiyiPanelCard(message) {
+  const f = message.fields || {};
+  const value = f["节点"] || f["五行"] || message.summary || "太一记录";
+  return `
+    <div class="card-rich card-rich-summary">
+      ${richHero("🧭", message.title || "太一", String(value))}
+      ${richStatGrid([
+        ["五行", f["五行"] || ""],
+        ["空间节点", f["节点"] || ""],
+      ])}
+      ${richChips([["状态", message.summary || ""], ["提醒", "只展示，不自动发搜寻 / 定星"]])}
+    </div>
+  `;
+}
+
+function rawMatch(raw, regex) {
+  const m = regex.exec(String(raw || ""));
+  return m ? String(m[1] || "").trim() : "";
+}
+
+function rawLineValue(raw, label) {
+  const escaped = String(label || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = new RegExp(`${escaped}\\s*[:：]\\s*([^\\n]+)`).exec(String(raw || ""));
+  return m ? m[1].trim() : "";
+}
+
+function parseProgressObject(value, implicitMax = 0) {
+  if (!value) return null;
+  if (typeof value === "object" && Number(value.current) >= 0 && Number(value.max) > 0) {
+    return { current: Number(value.current), max: Number(value.max) };
+  }
+  const text = String(value);
+  const pair = /(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/.exec(text);
+  if (pair) {
+    return { current: Number(pair[1]), max: Number(pair[2]) };
+  }
+  const single = /(\d+(?:\.\d+)?)/.exec(text);
+  if (single && implicitMax > 0) {
+    return { current: Number(single[1]), max: Number(implicitMax) };
+  }
+  return null;
+}
+
 function renderDungeonCard(message) {
   const f = message.fields || {};
   const tags = message.tags || [];
@@ -4632,6 +8055,66 @@ function renderRiskCard(message) {
       ${richChips([["处理方式", handling]])}
     </div>
   `;
+}
+
+function renderGenericGameplayCard(message) {
+  const f = message.fields || {};
+  const title = String(message.title || "修仙事件").trim();
+  const icon = genericGameplayIcon(message);
+  const heroValue = String(
+    f["状态"] ||
+    f["阶段"] ||
+    f["结果"] ||
+    f["当前境界"] ||
+    f["副本名"] ||
+    f["玩法"] ||
+    clipGraphemes(String(message.summary || "").replace(/\s+/g, " ").trim(), 24) ||
+    "已记录"
+  );
+  const entries = Object.entries(f).filter(([, value]) => isPresentValue(value));
+  const primary = entries.slice(0, 10);
+  const rest = entries.slice(10).map(([key, value]) => `${key}: ${formatFieldValue(value)}`);
+  const chips = [
+    ["来源", displaySource(message.source)],
+    ["频道", genericGameplayChannelLabel(message)],
+    ["动作", (message.actions || []).length ? `${message.actions.length} 个候选` : ""],
+  ];
+  const summary = String(message.summary || "").trim();
+  return `
+    <div class="card-rich card-rich-generic ${escapeAttr(genericGameplayClass(message))}">
+      ${richHero(icon, title, heroValue)}
+      ${summary ? `<p class="rich-card-summary">${escapeHtml(summary)}</p>` : ""}
+      ${richStatGrid(primary.map(([key, value]) => [key, formatFieldValue(value)]))}
+      ${richChips(chips)}
+      ${richCollapsibleList("更多字段", rest, 4)}
+    </div>
+  `;
+}
+
+function genericGameplayIcon(message) {
+  const title = String(message.title || "");
+  const channels = message.channels || [message.channel];
+  if (/灵树|小世界|侍妾|器灵|法宝|灵兽|观星|星盘|定星|空间节点/.test(title) || channels.includes("home")) return "🏡";
+  if (/闭关|元婴|元神|修炼|闯塔|登天阶|悟道/.test(title) || channels.includes("training")) return "🧘";
+  if (/储物袋|资源|交易|货摊|战利品|野外/.test(title) || channels.includes("resource")) return "📦";
+  if (channels.includes("risk")) return "⚠️";
+  return "✨";
+}
+
+function genericGameplayClass(message) {
+  const title = String(message.title || "");
+  const channels = message.channels || [message.channel];
+  if (/灵树|小世界|侍妾|器灵|法宝|灵兽|观星|星盘|定星|空间节点/.test(title) || channels.includes("home")) return "home";
+  if (/闭关|元婴|元神|修炼|闯塔|登天阶|悟道/.test(title) || channels.includes("training")) return "training";
+  if (/储物袋|资源|交易|货摊|战利品|野外/.test(title) || channels.includes("resource")) return "resource";
+  if (channels.includes("risk")) return "risk";
+  return "system";
+}
+
+function genericGameplayChannelLabel(message) {
+  const channels = message.channels || [message.channel];
+  const known = new Map((state.channels || []).map((channel) => [channel.key, channel.label]));
+  return channels.map((channel) => known.get(channel) || channel).slice(0, 3).join(" / ");
 }
 
 function renderDetailFields(fields) {
@@ -5838,11 +9321,10 @@ function renderSidebarIdentityList() {
   sidebarIdentityList.querySelectorAll("[data-identity-row]").forEach((row) => {
     row.addEventListener("click", () => {
       const id = Number(row.dataset.identityRow);
-      state.activeIdentityId = state.activeIdentityId === id ? null : id;
-      clearIdentityPatchesForActive();
-      renderCultivationModules();
-      // 切换身份 → 重新拉这个身份的 state patches
-      loadIdentityPatches({ reset: true }).catch((err) => console.warn("[mini-web] reload patches failed:", err));
+      setActiveIdentity(id, { toggle: true, loadPatches: true }).catch((err) => {
+        console.warn("[mini-web] reload patches failed:", err);
+        showSkillToast(`切换身份失败: ${err.message || err}`, "err");
+      });
     });
   });
   renderCultivationModules();
@@ -6069,6 +9551,7 @@ function tickIdentityModuleChips() {
   tickSkillBarChips();
   tickCultivationModules();
   tickCockpitModuleChips();
+  tickIdentityStatusCards();
   if (!sidebarIdentityList) return;
   const chips = sidebarIdentityList.querySelectorAll('[data-module-chip="1"]');
   if (!chips.length) return;
@@ -6095,9 +9578,39 @@ function tickIdentityModuleChips() {
   });
 }
 
+function tickIdentityStatusCards() {
+  const timers = document.querySelectorAll('[data-status-timer="1"]');
+  if (!timers.length) return;
+  const nowSec = Date.now() / 1000;
+  let shouldRerender = false;
+  timers.forEach((timer) => {
+    const nextAt = Number(timer.dataset.nextAt || 0);
+    const startAt = Number(timer.dataset.startAt || 0);
+    const remaining = nextAt - nowSec;
+    if (remaining <= 0) {
+      shouldRerender = true;
+      return;
+    }
+    timer.textContent = `剩 ${fmtCountdown(remaining)}`;
+    const card = timer.closest(".identity-status-card");
+    const fill = card?.querySelector(".identity-status-bar span");
+    if (fill) {
+      const total = Math.max(1, nextAt - startAt);
+      const pct = Math.min(100, Math.max(0, ((total - remaining) / total) * 100));
+      fill.style.width = `${pct.toFixed(1)}%`;
+    }
+  });
+  if (shouldRerender) {
+    const body = modalRoot?.querySelector("#identityStatusBody");
+    if (body) {
+      body.innerHTML = renderIdentityStatusBody();
+      bindIdentityStatusBody(modalRoot);
+    }
+  }
+}
+
 function tickCockpitModuleChips() {
-  if (!cockpitModules) return;
-  const chips = cockpitModules.querySelectorAll('[data-cockpit-timer="1"]');
+  const chips = document.querySelectorAll('[data-cockpit-timer="1"]');
   if (!chips.length) return;
   const nowSec = Date.now() / 1000;
   let shouldRerender = false;
@@ -6122,8 +9635,7 @@ function tickCockpitModuleChips() {
 }
 
 function tickSkillBarChips() {
-  if (!skillBarChips) return;
-  const chips = skillBarChips.querySelectorAll(".skill-chip");
+  const chips = document.querySelectorAll(".skill-chip");
   if (!chips.length) return;
   const activeId = state.activeIdentityId;
   if (!activeId) return;
@@ -8297,12 +11809,38 @@ function ensureActiveIdentity() {
   const next = fallback ? Number(fallback.send_as_id || 0) || null : null;
   if (next !== previous) {
     state.activeIdentityId = next;
+    state.directSendIdentityId = next;
+    state.directSendLastActiveId = next;
     state.identityPatches = [];
     state.identityPatchesOwnerId = next;
     state.identityPatchesLoading = Boolean(next);
     state.identityPatchesRequestSeq += 1;
   }
   return next;
+}
+
+async function setActiveIdentity(identityId, options = {}) {
+  const next = Number(identityId || 0) || null;
+  const current = Number(state.activeIdentityId || 0) || null;
+  const resolved = options.toggle && current === next ? null : next;
+  if (resolved && !identityById(resolved)) {
+    showSkillToast("找不到这个身份", "err");
+    return current;
+  }
+  if (current === resolved) {
+    renderIdentityProfileViews();
+    renderCultivationModules();
+    return resolved;
+  }
+  state.activeIdentityId = resolved;
+  state.directSendIdentityId = resolved;
+  state.directSendLastActiveId = resolved;
+  clearIdentityPatchesForActive();
+  renderCultivationModules();
+  if (options.loadPatches !== false) {
+    await loadIdentityPatches({ reset: true });
+  }
+  return resolved;
 }
 
 function identityCanSend(identity) {
@@ -8562,7 +12100,7 @@ refreshButton.addEventListener("click", async () => {
   refreshButton.textContent = "正在刷新…";
   refreshButton.disabled = true;
   try {
-    await Promise.all([refreshChatViewport(), loadIdentityPatches()]);
+    await Promise.all([refreshChatViewport(), loadIdentityPatches(), loadWorldSnapshot({ silent: true })]);
   } catch (error) {
     showError(error);
   } finally {
@@ -8999,6 +12537,7 @@ loadChannels()
   .then(loadDiscoveredBots)
   .then(loadSkills)
   .then(refreshChatViewport)
+  .then(() => loadWorldSnapshot({ silent: true }))
   .then(() => loadMessageAudit({ silent: true }))
   .catch(showError);
 
@@ -9070,6 +12609,101 @@ function renderSkillMenuModal() {
 function renderSkillViews() {
   renderSkillBar();
   renderSkillMenuModal();
+  renderQuickActionHotbar();
+  renderQuestTracker();
+  renderLiveSituationBoard();
+  renderGameSceneBoard();
+  renderGameActionDock();
+}
+
+function hotbarSkillGroups() {
+  const preferred = ["日常", "玩法", "查询", "法宝", "副本"];
+  const available = state.skillGroups || [];
+  const seen = new Set();
+  return [...preferred, ...available].filter((group) => {
+    if (!group || seen.has(group)) return false;
+    seen.add(group);
+    return available.includes(group);
+  });
+}
+
+function hotbarSkillScore(skill) {
+  const groupScore = {
+    "日常": 1,
+    "玩法": 2,
+    "查询": 3,
+    "法宝": 4,
+    "副本": 5,
+  }[skill.group] || 9;
+  const label = `${skill.label || ""}${skill.key || ""}${skill.command || ""}`;
+  const important = [
+    ["深度闭关", 1],
+    ["野外历练", 2],
+    ["点卯", 3],
+    ["闯塔", 4],
+    ["元婴", 5],
+    ["第二元神", 6],
+    ["抚摸", 7],
+    ["温养", 8],
+    ["我的", 9],
+    ["战力", 10],
+  ];
+  const hit = important.find(([word]) => label.includes(word));
+  return groupScore * 100 + (hit ? hit[1] : 50);
+}
+
+function quickActionHotbarSkills() {
+  const groups = new Set(hotbarSkillGroups());
+  return (state.skills || [])
+    .filter((skill) => groups.has(skill.group))
+    .filter((skill) => skill.reply_mode !== "required")
+    .filter((skill) => String(skill.command || "").trim())
+    .filter((skill) => skillIsUnlocked(skill))
+    .sort((a, b) => hotbarSkillScore(a) - hotbarSkillScore(b) || String(a.label || "").localeCompare(String(b.label || ""), "zh-Hans-CN"))
+    .slice(0, 12);
+}
+
+function renderQuickActionHotbar() {
+  if (!quickActionHotbar) return;
+  const activeId = state.activeIdentityId;
+  const skills = quickActionHotbarSkills();
+  if (!skills.length) {
+    quickActionHotbar.innerHTML = `
+      <span class="quick-action-hotbar-empty">${activeId ? "暂无可用快捷指令" : "选择身份后显示常用操作"}</span>
+    `;
+    return;
+  }
+  const modulesByKey = activeId
+    ? new Map((state.identityModuleStates.get(Number(activeId)) || []).map((it) => [it.module_key, it]))
+    : new Map();
+  const now = Date.now() / 1000;
+  quickActionHotbar.innerHTML = skills.map((skill) => {
+    const moduleState = skill.cd_module ? modulesByKey.get(skill.cd_module) : null;
+    const cdUntil = moduleState
+      ? Number((moduleState.summary && moduleState.summary.next_at) || (moduleState.state && moduleState.state.cooldown_until) || 0)
+      : 0;
+    const cooling = cdUntil > now;
+    const busy = state.skillBarBusyKeys.has(skill.key);
+    const disabled = !activeId || busy || cooling;
+    const cls = [
+      "skill-chip",
+      "hotbar-skill",
+      cooling ? "cooling" : "",
+      busy ? "busy" : "",
+    ].filter(Boolean).join(" ");
+    const cdText = cooling ? `剩 ${fmtCountdown(cdUntil - now)}` : "";
+    return `
+      <button type="button" class="${cls}" ${disabled ? "disabled" : ""}
+              data-skill-key="${escapeAttr(skill.key)}" title="${escapeAttr(skill.note || skill.command || skill.label || "")}">
+        ${skill.icon ? `<span class="skill-chip-icon">${skill.icon}</span>` : ""}
+        <span class="skill-chip-label">${escapeHtml(skill.label || skill.command)}</span>
+        ${cdText ? `<span class="skill-chip-cd">${escapeHtml(cdText)}</span>` : ""}
+      </button>
+    `;
+  }).join("");
+  quickActionHotbar.querySelectorAll("[data-skill-key]").forEach((btn) => {
+    btn.addEventListener("click", () => fillSkillIntoComposer(btn.dataset.skillKey, btn));
+  });
 }
 
 function openSkillMenuModal() {
@@ -9218,12 +12852,14 @@ const ACCOUNT_POLL_INTERVAL_MS = 30000;
 const BOT_DISCOVERY_POLL_INTERVAL_MS = 60000;
 const IDENTITY_STATE_POLL_INTERVAL_MS = 30000;
 const HEALTH_POLL_INTERVAL_MS = 60000;
+const WORLD_SNAPSHOT_POLL_INTERVAL_MS = 90000;
 let pollTimer = null;
 let pollInflight = false;
 let nextAccountsPollAt = 0;
 let nextBotDiscoveryPollAt = 0;
 let nextIdentityStatePollAt = 0;
 let nextHealthPollAt = 0;
+let nextWorldSnapshotPollAt = 0;
 
 async function pollTick() {
   if (pollInflight) return;
@@ -9246,6 +12882,10 @@ async function pollTick() {
     if (now >= nextHealthPollAt) {
       nextHealthPollAt = now + HEALTH_POLL_INTERVAL_MS;
       tasks.push(loadMessageAudit({ silent: true }).catch((err) => console.warn("[mini-web] health poll failed:", err)));
+    }
+    if (now >= nextWorldSnapshotPollAt) {
+      nextWorldSnapshotPollAt = now + WORLD_SNAPSHOT_POLL_INTERVAL_MS;
+      tasks.push(loadWorldSnapshot({ silent: true }).catch((err) => console.warn("[mini-web] world snapshot poll failed:", err)));
     }
     const [messageResult] = await Promise.all(tasks);
     if ((messageResult && messageResult.changed) || now >= nextIdentityStatePollAt) {

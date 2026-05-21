@@ -969,6 +969,16 @@ class SQLiteStore:
         settings = self.get_settings()
         my_identity_ids = self._collect_my_identities()
         topic_id = self._get_target_topic_id()
+        game_bot_ids = {int(x) for x in (settings.get("game_bot_ids") or [])}
+
+        def is_game_bot_sender(sender_id: int | None) -> bool:
+            if sender_id is None:
+                return False
+            try:
+                return int(sender_id) in game_bot_ids
+            except (TypeError, ValueError):
+                return False
+
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -982,10 +992,9 @@ class SQLiteStore:
                 ORDER BY pc.rowid ASC
                 """
             ).fetchall()
-            updates = []
+            prepared_rows = []
+            events_by_key: dict[tuple[int, int], RawMessageEvent] = {}
             for row in rows:
-                rowid = int(row[0])
-                card = ParsedCard.from_api(json.loads(row[1]))
                 event = RawMessageEvent(
                     id=row[2],
                     chat_id=int(row[3]),
@@ -1003,10 +1012,18 @@ class SQLiteStore:
                     media_kind=row[15],
                     media_meta=(json.loads(row[16]) if row[16] else None),
                 )
+                prepared_rows.append((int(row[0]), row[1], event))
+                if event.chat_id and event.msg_id:
+                    events_by_key[(int(event.chat_id), int(event.msg_id))] = event
+            updates = []
+            for rowid, payload_json, event in prepared_rows:
+                card = ParsedCard.from_api(json.loads(payload_json))
                 clean_reply = _clean_reply_to(event, topic_id)
-                parent = None
-                if clean_reply:
-                    parent = self._lookup_parent_event(int(event.chat_id), int(clean_reply))
+                parent = (
+                    events_by_key.get((int(event.chat_id), int(clean_reply)))
+                    if clean_reply
+                    else None
+                )
                 base_card = replace(
                     card,
                     channels=tuple(
@@ -1035,7 +1052,7 @@ class SQLiteStore:
                     base_card,
                     event,
                     settings,
-                    is_game_bot_sender=self._is_game_bot_sender,
+                    is_game_bot_sender=is_game_bot_sender,
                     parent_event=parent,
                     clean_reply_to_msg_id=clean_reply,
                     my_identity_ids=my_identity_ids,
@@ -1895,7 +1912,7 @@ class SQLiteStore:
             "focus_muted_source_names": [],
             "focus_keywords": list(DEFAULT_FOCUS_KEYWORDS),
             "focus_exclude_patterns": list(DEFAULT_FOCUS_EXCLUDE_PATTERNS),
-            "focus_include_player_plain": True,
+            "focus_include_player_plain": False,
             "archive_dot_commands": True,
             "archive_bot_replies": True,
             "message_filter_version": CURRENT_MESSAGE_FILTER_VERSION,
@@ -2484,6 +2501,104 @@ class SQLiteStore:
         with self._connect() as conn:
             cursor = conn.execute("DELETE FROM outbox_drafts WHERE id=?", (draft_id,))
             return cursor.rowcount > 0
+
+    def append_send_log(self, payload: dict) -> dict:
+        """Append one outbound audit row.
+
+        send_logs is an append-only audit trail for user-triggered sends and
+        official scheduled-message creation attempts. It deliberately lives in
+        the repo layer so senders can stay focused on Telegram I/O.
+        """
+        row = _normalize_send_log(payload)
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO send_logs(
+                    kind, status, account_local_id, identity_id, send_as_id,
+                    chat_id, topic_id, reply_to_msg_id, command,
+                    source_message_id, tg_msg_id, scheduled_msg_id,
+                    batch_id, schedule_message_id, error, created_at, meta_json
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row["kind"],
+                    row["status"],
+                    row["account_local_id"],
+                    row["identity_id"],
+                    row["send_as_id"],
+                    row["chat_id"],
+                    row["topic_id"],
+                    row["reply_to_msg_id"],
+                    row["command"],
+                    row["source_message_id"],
+                    row["tg_msg_id"],
+                    row["scheduled_msg_id"],
+                    row["batch_id"],
+                    row["schedule_message_id"],
+                    row["error"],
+                    row["created_at"],
+                    json.dumps(row["meta"], ensure_ascii=False, sort_keys=True),
+                ),
+            )
+            row["id"] = int(cur.lastrowid)
+        return row
+
+    def list_send_logs(
+        self,
+        *,
+        limit: int = 100,
+        kind: str = "",
+        status: str = "",
+        identity_id: int = 0,
+        batch_id: int = 0,
+    ) -> list[dict]:
+        try:
+            limit = int(limit or 100)
+        except (TypeError, ValueError):
+            limit = 100
+        limit = max(1, min(limit, 500))
+        where = []
+        params: list = []
+        kind = str(kind or "").strip()
+        if kind:
+            where.append("kind=?")
+            params.append(kind)
+        status = str(status or "").strip()
+        if status:
+            where.append("status=?")
+            params.append(status)
+        try:
+            identity_id = int(identity_id or 0)
+        except (TypeError, ValueError):
+            identity_id = 0
+        if identity_id:
+            where.append("identity_id=?")
+            params.append(identity_id)
+        try:
+            batch_id = int(batch_id or 0)
+        except (TypeError, ValueError):
+            batch_id = 0
+        if batch_id:
+            where.append("batch_id=?")
+            params.append(batch_id)
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT id, kind, status, account_local_id, identity_id, send_as_id,
+                       chat_id, topic_id, reply_to_msg_id, command,
+                       source_message_id, tg_msg_id, scheduled_msg_id,
+                       batch_id, schedule_message_id, error, created_at, meta_json
+                FROM send_logs
+                {where_sql}
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [_send_log_row_to_api(row) for row in rows]
 
     # ---------- official schedule ----------
 
@@ -3330,6 +3445,34 @@ class SQLiteStore:
                 CREATE INDEX IF NOT EXISTS idx_outbox_drafts_status
                     ON outbox_drafts(status, created_at);
 
+                CREATE TABLE IF NOT EXISTS send_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    kind TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    account_local_id TEXT NOT NULL DEFAULT '',
+                    identity_id INTEGER NOT NULL DEFAULT 0,
+                    send_as_id INTEGER NOT NULL DEFAULT 0,
+                    chat_id INTEGER NOT NULL DEFAULT 0,
+                    topic_id INTEGER NOT NULL DEFAULT 0,
+                    reply_to_msg_id INTEGER NOT NULL DEFAULT 0,
+                    command TEXT NOT NULL DEFAULT '',
+                    source_message_id TEXT NOT NULL DEFAULT '',
+                    tg_msg_id INTEGER NOT NULL DEFAULT 0,
+                    scheduled_msg_id INTEGER NOT NULL DEFAULT 0,
+                    batch_id INTEGER NOT NULL DEFAULT 0,
+                    schedule_message_id INTEGER NOT NULL DEFAULT 0,
+                    error TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    meta_json TEXT NOT NULL DEFAULT '{}'
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_send_logs_kind_status
+                    ON send_logs(kind, status, id DESC);
+                CREATE INDEX IF NOT EXISTS idx_send_logs_identity
+                    ON send_logs(identity_id, id DESC);
+                CREATE INDEX IF NOT EXISTS idx_send_logs_batch
+                    ON send_logs(batch_id, schedule_message_id);
+
                 CREATE TABLE IF NOT EXISTS official_schedule_batches (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     send_as_id INTEGER NOT NULL,
@@ -4011,6 +4154,72 @@ def _normalize_outbox_draft(payload: dict) -> dict:
         if str(item).strip()
     ]
     return draft
+
+
+def _normalize_send_log(payload: dict) -> dict:
+    payload = payload or {}
+    meta = payload.get("meta") or {}
+    if not isinstance(meta, dict):
+        meta = {"value": meta}
+    return {
+        "id": _send_log_non_negative_int(payload.get("id")),
+        "kind": str(payload.get("kind") or "").strip() or "unknown",
+        "status": str(payload.get("status") or "").strip() or "unknown",
+        "account_local_id": safe_session_name(payload.get("account_local_id") or "", fallback="")
+        if str(payload.get("account_local_id") or "").strip()
+        else "",
+        "identity_id": _safe_int(payload.get("identity_id")),
+        "send_as_id": _safe_int(payload.get("send_as_id")),
+        "chat_id": _safe_int(payload.get("chat_id")),
+        "topic_id": _send_log_non_negative_int(payload.get("topic_id")),
+        "reply_to_msg_id": _send_log_non_negative_int(payload.get("reply_to_msg_id")),
+        "command": str(payload.get("command") or "").strip(),
+        "source_message_id": str(payload.get("source_message_id") or "").strip(),
+        "tg_msg_id": _send_log_non_negative_int(payload.get("tg_msg_id")),
+        "scheduled_msg_id": _send_log_non_negative_int(payload.get("scheduled_msg_id")),
+        "batch_id": _send_log_non_negative_int(payload.get("batch_id")),
+        "schedule_message_id": _send_log_non_negative_int(payload.get("schedule_message_id")),
+        "error": str(payload.get("error") or "").strip(),
+        "created_at": str(payload.get("created_at") or "").strip() or utc_now_iso(),
+        "meta": meta,
+    }
+
+
+def _send_log_non_negative_int(value: object) -> int:
+    try:
+        return max(0, int(str(value or "0").strip() or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _send_log_row_to_api(row) -> dict:
+    meta = {}
+    try:
+        meta = json.loads(row[17] or "{}")
+    except (TypeError, json.JSONDecodeError):
+        meta = {}
+    if not isinstance(meta, dict):
+        meta = {"value": meta}
+    return {
+        "id": int(row[0]),
+        "kind": row[1] or "",
+        "status": row[2] or "",
+        "account_local_id": row[3] or "",
+        "identity_id": int(row[4] or 0),
+        "send_as_id": int(row[5] or 0),
+        "chat_id": int(row[6] or 0),
+        "topic_id": int(row[7] or 0),
+        "reply_to_msg_id": int(row[8] or 0),
+        "command": row[9] or "",
+        "source_message_id": row[10] or "",
+        "tg_msg_id": int(row[11] or 0),
+        "scheduled_msg_id": int(row[12] or 0),
+        "batch_id": int(row[13] or 0),
+        "schedule_message_id": int(row[14] or 0),
+        "error": row[15] or "",
+        "created_at": row[16] or "",
+        "meta": meta,
+    }
 
 
 def _dungeon_context_name(card: ParsedCard) -> str:

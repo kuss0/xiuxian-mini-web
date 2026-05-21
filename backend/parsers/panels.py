@@ -23,9 +23,9 @@ from backend.domain.registry import ParserOutput
 
 # ============ 登天阶 ============
 TIANTI_PANEL_KW = "【凌霄云阶】"
-TIANTI_PROGRESS_RE = re.compile(r"当前进度[:：]\s*(\d+)\s*/\s*(\d+)\s*阶")
+TIANTI_PROGRESS_RE = re.compile(r"当前(?:云阶)?进度[:：]\s*(\d+)\s*/\s*(\d+)(?:\s*阶)?")
 TIANTI_CYCLE_RE = re.compile(r"已完成周天[:：]\s*(\d+)\s*轮")
-TIANTI_GANGFENG_RE = re.compile(r"罡风淬体[:：]\s*(\d+)\s*/\s*(\d+)\s*层")
+TIANTI_GANGFENG_RE = re.compile(r"罡风淬体[:：]\s*(\d+)\s*/\s*(\d+)(?:\s*层)?")
 TIANTI_CD_RE = re.compile(r"登阶冷却[:：]\s*([^\n]+)")
 TIANTI_WENXIN_RE = re.compile(r"问心状态[:：]\s*([^\n]+)")
 

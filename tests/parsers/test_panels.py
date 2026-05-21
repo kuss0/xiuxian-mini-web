@@ -26,6 +26,17 @@ def test_tianti_panel_extracts_progress_and_cooldown():
     assert f["问心"].startswith("今日")
 
 
+def test_tianti_panel_extracts_live_step_result_text():
+    text = ("【凌霄云阶】\n你消耗了 340 点修为，踏上了第 3 阶云阶。\n"
+            "本次获得 190 点修为、65 点宗门贡献。\n"
+            "当前云阶进度: 3 / 12，罡风淬体: 12 / 12。")
+    out = TiantiPanelParser().parse(make_event(text))
+    assert out is not None
+    f = out.cards[0].fields
+    assert f["阶进度"] == "3 / 12"
+    assert f["罡风淬体"] == "12 / 12 层"
+
+
 def test_stargazer_extracts_slots():
     text = ("【星宫 · 观星台】 (引星盘总数: 3座)\n"
             "1号引星盘: 庚金星 - 凝聚中 ✨ (剩余: 5小时59分钟49秒)\n"

@@ -27,6 +27,7 @@ from backend.outbox.schedule import (
 )
 from backend.notifications.dispatcher import NotificationDispatcher
 from backend.notifications.tg_bot import TelegramBotNotifier
+from backend.parsers.xutian_oracle import load_xutian_oracle_cases, xutian_advice
 from backend.repo import SQLiteStore
 from backend.skills import SkillRegistry
 from backend.skills.send import SkillSendService
@@ -35,6 +36,68 @@ from backend.tg.dialogs import TelegramDialogService
 from backend.tg.login import TelegramLoginService
 from backend.tg.listener_manager import TelegramListenerManager
 from backend.tg.send_as import SendAsService
+
+
+XUTIAN_ELEMENT_ALIASES = (
+    {"label": "金系", "values": ("金", "雷")},
+    {"label": "木系", "values": ("木", "风")},
+    {"label": "水系", "values": ("水", "冰")},
+    {"label": "火系", "values": ("火", "暗")},
+    {"label": "土系", "values": ("土",)},
+)
+
+XUTIAN_CASE_LABELS = {
+    "explicit": "明示",
+    "success": "顺例",
+    "failure": "反例",
+}
+
+
+def _xutian_guide_case(bucket: str, item: dict) -> dict:
+    gua = str(item.get("gua") or "").strip()
+    advice = xutian_advice(gua)
+    examples = [
+        {
+            "route": str(example.get("route") or "").strip(),
+            "strategy": str(example.get("strategy") or "").strip(),
+            "source": str(example.get("source") or "").strip(),
+        }
+        for example in (item.get("examples") or [])
+    ]
+    route = str(item.get("route") or "").strip()
+    strategy = str(item.get("strategy") or "").strip()
+    source = str(item.get("source") or "").strip()
+    if not route and examples:
+        route = "/".join(_ordered_unique(example["route"] for example in examples if example["route"]))
+    if not strategy and examples:
+        strategy = "/".join(_ordered_unique(example["strategy"] for example in examples if example["strategy"]))
+    if not source and examples:
+        source = "；".join(example["source"] for example in examples[:3] if example["source"])
+    return {
+        "kind": bucket,
+        "kind_label": XUTIAN_CASE_LABELS.get(bucket, bucket),
+        "gua": gua,
+        "route": route,
+        "strategy": strategy,
+        "source": source,
+        "advice": str(advice.get("行运建议") or "").strip(),
+        "basis": str(advice.get("建议依据") or "").strip(),
+        "confidence": str(advice.get("建议置信") or "").strip(),
+        "positive_examples": list(advice.get("历史顺例") or []),
+        "negative_examples": list(advice.get("历史反例") or []),
+        "examples": examples,
+    }
+
+
+def _ordered_unique(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
 
 
 class CardStore(Protocol):
@@ -605,6 +668,29 @@ class MiniWebServer:
             ],
         }
 
+    def outbox_logs_payload(
+        self,
+        *,
+        limit: int = 100,
+        kind: str = "",
+        status: str = "",
+        identity_id: int = 0,
+        batch_id: int = 0,
+    ) -> dict:
+        list_logs = getattr(self._store, "list_send_logs", None)
+        if not callable(list_logs):
+            return {"ok": False, "error": "store does not support send logs", "logs": []}
+        return {
+            "ok": True,
+            "logs": list_logs(
+                limit=limit,
+                kind=kind,
+                status=status,
+                identity_id=identity_id,
+                batch_id=batch_id,
+            ),
+        }
+
     def create_outbox_draft_payload(self, payload: dict) -> dict:
         plan = self._outbox.plan(payload)
         plan_payload = plan.to_api(public_account=public_account, public_identity=public_identity)
@@ -738,6 +824,28 @@ class MiniWebServer:
                 "副本状态只从消息箱派生,不自动加入。",
                 ".加入副本 只算请求/动作,必须等天尊回复成功或失败后才更新状态。",
                 "最近3次默认走快速窗口;展开更多时会做完整历史关联。",
+            ],
+        }
+
+    def xutian_oracle_guide_payload(self) -> dict:
+        data = load_xutian_oracle_cases()
+        cases = {
+            bucket: [_xutian_guide_case(bucket, item) for item in data.get(bucket, [])]
+            for bucket in ("explicit", "success", "failure")
+        }
+        return {
+            "ok": True,
+            "element_aliases": [
+                {"label": item["label"], "values": list(item["values"])}
+                for item in XUTIAN_ELEMENT_ALIASES
+            ],
+            "case_labels": XUTIAN_CASE_LABELS,
+            "counts": {bucket: len(items) for bucket, items in cases.items()},
+            "cases": cases,
+            "notes": [
+                "虚天殿队伍契合换算仅用于虚天殿:金系=金/雷,木系=木/风,水系=水/冰,火系=火/暗,土系=土。",
+                "明示优先级最高;顺例只表示历史实测可用;反例只用于避坑,不反推唯一答案。",
+                "本接口只给 UI 展示和填入命令,不会自动发送。",
             ],
         }
 
@@ -1648,7 +1756,8 @@ class MiniWebServer:
         skill_key = str(payload.get("skill_key") or "").strip()
         if not skill_key:
             return {"ok": False, "error": "缺少 skill_key"}
-        if self._skill_registry.get(skill_key) is None:
+        skill = self._skill_registry.get(skill_key)
+        if skill is None:
             return {"ok": False, "error": f"未知技能 key: {skill_key}"}
 
         try:
@@ -1703,6 +1812,26 @@ class MiniWebServer:
             command_override=command_override,
         )
         api = result.to_api()
+        self._record_send_log(
+            {
+                "kind": "manual_send",
+                "status": "success" if result.ok else "failed",
+                "account_local_id": account_local_id,
+                "identity_id": identity_id,
+                "send_as_id": send_as_id,
+                "chat_id": chat_id,
+                "topic_id": topic_id,
+                "reply_to_msg_id": reply_to or 0,
+                "command": result.command or command_override or skill.command,
+                "source_message_id": payload.get("source_message_id") or "",
+                "tg_msg_id": result.sent_msg_id,
+                "error": result.error,
+                "meta": {
+                    "skill_key": skill_key,
+                    "reply_mode": skill.reply_mode,
+                },
+            }
+        )
         # 顺手把 client.get_me() 抓到的真名 hydrate 回 account.label / identity.label
         # —— 之前两者都是手机号,UI 显示 +44... 很丑
         display = self._skill_send.last_display()
@@ -1736,6 +1865,15 @@ class MiniWebServer:
                 self._store.save_identity({**identity, "label": display})
             except Exception as exc:
                 print(f"[skill-send] hydrate identity label failed: {exc}")
+
+    def _record_send_log(self, payload: dict) -> None:
+        append = getattr(self._store, "append_send_log", None)
+        if not callable(append):
+            return
+        try:
+            append(payload or {})
+        except Exception as exc:
+            print(f"[send-log] append failed: {exc}")
 
     def schedule_preview_payload(self, payload: dict) -> dict:
         try:
@@ -1948,6 +2086,17 @@ class MiniWebServer:
 
         ok_count = 0
         fail_count = 0
+        account_local_id = ""
+        try:
+            batches = self._store.list_schedule_batches(include_inactive=True)
+            batch = next((b for b in batches if b["id"] == batch_id), None)
+            account_local_id = str((batch or {}).get("account_local_id") or "")
+        except Exception:
+            account_local_id = ""
+        try:
+            log_chat_id = int(target_chat) if str(target_chat).lstrip("-").isdigit() else 0
+        except (TypeError, ValueError):
+            log_chat_id = 0
         try:
             # GetSendAs precheck —— 错就早错,整批标失败
             try:
@@ -1965,6 +2114,22 @@ class MiniWebServer:
                     )
                     for m in messages:
                         self._store.mark_schedule_message(int(m["id"]), status="failed", last_error=err)
+                        self._record_send_log(
+                            {
+                                "kind": "official_schedule",
+                                "status": "failed",
+                                "account_local_id": account_local_id,
+                                "identity_id": send_as_id,
+                                "send_as_id": send_as_id,
+                                "chat_id": log_chat_id,
+                                "topic_id": target_topic_id,
+                                "command": m.get("command") or "",
+                                "batch_id": batch_id,
+                                "schedule_message_id": m.get("id") or 0,
+                                "error": err,
+                                "meta": {"schedule_at": m.get("schedule_at") or 0},
+                            }
+                        )
                     self._store.set_schedule_batch_status(batch_id, "failed")
                     return
             except Exception as exc:
@@ -1988,7 +2153,24 @@ class MiniWebServer:
                 command = str(msg.get("command") or "").strip()
                 schedule_at = float(msg.get("schedule_at") or 0)
                 if not command or schedule_at <= 0:
-                    self._store.mark_schedule_message(db_id, status="failed", last_error="命令或时间无效")
+                    err = "命令或时间无效"
+                    self._store.mark_schedule_message(db_id, status="failed", last_error=err)
+                    self._record_send_log(
+                        {
+                            "kind": "official_schedule",
+                            "status": "failed",
+                            "account_local_id": account_local_id,
+                            "identity_id": send_as_id,
+                            "send_as_id": send_as_id,
+                            "chat_id": log_chat_id,
+                            "topic_id": target_topic_id,
+                            "command": command,
+                            "batch_id": batch_id,
+                            "schedule_message_id": db_id,
+                            "error": err,
+                            "meta": {"schedule_at": schedule_at},
+                        }
+                    )
                     fail_count += 1
                     continue
                 try:
@@ -2003,9 +2185,42 @@ class MiniWebServer:
                     self._store.mark_schedule_message(
                         db_id, scheduled_msg_id=scheduled_msg_id, status="scheduled"
                     )
+                    self._record_send_log(
+                        {
+                            "kind": "official_schedule",
+                            "status": "scheduled",
+                            "account_local_id": account_local_id,
+                            "identity_id": send_as_id,
+                            "send_as_id": send_as_id,
+                            "chat_id": log_chat_id,
+                            "topic_id": target_topic_id,
+                            "command": command,
+                            "scheduled_msg_id": scheduled_msg_id,
+                            "batch_id": batch_id,
+                            "schedule_message_id": db_id,
+                            "meta": {"schedule_at": schedule_at},
+                        }
+                    )
                     ok_count += 1
                 except Exception as exc:
-                    self._store.mark_schedule_message(db_id, status="failed", last_error=str(exc))
+                    err = str(exc)
+                    self._store.mark_schedule_message(db_id, status="failed", last_error=err)
+                    self._record_send_log(
+                        {
+                            "kind": "official_schedule",
+                            "status": "failed",
+                            "account_local_id": account_local_id,
+                            "identity_id": send_as_id,
+                            "send_as_id": send_as_id,
+                            "chat_id": log_chat_id,
+                            "topic_id": target_topic_id,
+                            "command": command,
+                            "batch_id": batch_id,
+                            "schedule_message_id": db_id,
+                            "error": err,
+                            "meta": {"schedule_at": schedule_at},
+                        }
+                    )
                     fail_count += 1
 
                 if index < last_index:

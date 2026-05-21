@@ -147,7 +147,10 @@ class MiniWebHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store, must-revalidate")
         self.end_headers()
         if include_body:
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                return
 
     def _send_json(
         self,
@@ -162,7 +165,10 @@ class MiniWebHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         if include_body:
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                return
 
     def _send_error(self, status: HTTPStatus, message: str, *, include_body: bool = True) -> None:
         self._send_json({"ok": False, "error": message}, status=status, include_body=include_body)
@@ -179,7 +185,10 @@ class MiniWebHandler(BaseHTTPRequestHandler):
             )
         self.end_headers()
         if include_body:
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                return
 
 
 
@@ -275,6 +284,30 @@ def _get_outbox_drafts(request: MiniWebHandler, query: dict) -> dict:
     return _app(request).outbox_drafts_payload(status)
 
 
+def _get_outbox_logs(request: MiniWebHandler, query: dict) -> dict:
+    kind = (query.get("kind") or [""])[0]
+    status = (query.get("status") or [""])[0]
+    try:
+        identity_id = int((query.get("identity_id") or ["0"])[0])
+    except (TypeError, ValueError):
+        identity_id = 0
+    try:
+        batch_id = int((query.get("batch_id") or ["0"])[0])
+    except (TypeError, ValueError):
+        batch_id = 0
+    try:
+        limit = int((query.get("limit") or ["100"])[0])
+    except (TypeError, ValueError):
+        limit = 100
+    return _app(request).outbox_logs_payload(
+        limit=limit,
+        kind=kind,
+        status=status,
+        identity_id=identity_id,
+        batch_id=batch_id,
+    )
+
+
 def _get_settings(request: MiniWebHandler, query: dict) -> dict:
     return _app(request).settings_payload()
 
@@ -327,6 +360,10 @@ def _get_dungeon_status(request: MiniWebHandler, query: dict) -> dict:
         summary_limit = 80
     order = (query.get("order") or ["priority"])[0]
     return _app(request).dungeon_status_payload(limit=limit, summary_limit=summary_limit, order=order)
+
+
+def _get_xutian_oracle_guide(request: MiniWebHandler, query: dict) -> dict:
+    return _app(request).xutian_oracle_guide_payload()
 
 
 def _get_inventory(request: MiniWebHandler, query: dict) -> dict:
@@ -619,11 +656,13 @@ GET_ROUTES = {
     "/api/messages/export": _get_messages_export,
     "/api/outbox": _get_outbox,
     "/api/outbox/drafts": _get_outbox_drafts,
+    "/api/outbox/logs": _get_outbox_logs,
     "/api/settings": _get_settings,
     "/api/state-patches": _get_state_patches,
     "/api/resource-stats": _get_resource_stats,
     "/api/resource-coverage": _get_resource_coverage,
     "/api/dungeon-status": _get_dungeon_status,
+    "/api/xutian-oracle-guide": _get_xutian_oracle_guide,
     "/api/inventory": _get_inventory,
     "/api/discovered-bots": _get_discovered_bots,
     "/api/accounts": _get_accounts,

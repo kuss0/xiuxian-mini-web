@@ -185,6 +185,20 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
         is_game_bot_sender=lambda _sid: False,
         my_identity_ids=[123],
     )
+    short_noise = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x14", chat_id=1, msg_id=14, text="ok", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    vague_reply = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x15", chat_id=1, msg_id=15, text="你看看", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
 
     assert "focus" in plain.channels
     assert "archive" in command.channels
@@ -221,8 +235,12 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
     assert "archive" not in keyword_still_focus.channels
     assert "archive" in punctuation_noise.channels
     assert "focus" not in punctuation_noise.channels
-    assert "focus" in emoji_only.channels
-    assert "archive" not in emoji_only.channels
+    assert "archive" in emoji_only.channels
+    assert "focus" not in emoji_only.channels
+    assert "archive" in short_noise.channels
+    assert "focus" not in short_noise.channels
+    assert "archive" in vague_reply.channels
+    assert "focus" not in vague_reply.channels
 
 
 def test_message_filter_promotes_bot_reply_to_me_and_archives_reply_to_others():
@@ -381,6 +399,20 @@ def test_message_filter_promotes_plain_tianzun_speech_to_leader():
             chat_id=1,
             msg_id=42,
             text="【天机异闻·夺舍重生】\n天道轮回，命途已定。",
+            source="韩天尊",
+            date="",
+            sender_id=7900199668,
+        ),
+        settings,
+        is_game_bot_sender=lambda sid: sid == 7900199668,
+    )
+    short_mention_result = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="tz1-short-mention",
+            chat_id=1,
+            msg_id=421,
+            text="@Do 已做出抉择，极阴祖师的神念开始对其进行审视...",
             source="韩天尊",
             date="",
             sender_id=7900199668,
@@ -657,6 +689,9 @@ def test_message_filter_promotes_plain_tianzun_speech_to_leader():
     assert "leader" in gameplay_note.channels
     assert "会长上号" in gameplay_note.tags
     assert "leader" not in titled_system_notice.channels
+    assert "leader" not in short_mention_result.channels
+    assert "focus" not in short_mention_result.channels
+    assert "archive" in short_mention_result.channels
     assert "leader" not in source_spoof_plain.channels
     assert "会长上号" not in source_spoof_plain.tags
     assert "leader" in configured_leader.channels
@@ -791,6 +826,7 @@ def test_sqlite_settings_roundtrip(tmp_path):
     assert 7900199668 in store.get_settings()["game_bot_ids"]
     assert -1002049298748 in store.get_settings()["leader_sender_ids"]
     assert "@iosdo7" in store.get_settings()["leader_source_names"]
+    assert store.get_settings()["focus_include_player_plain"] is False
 
     saved = store.save_settings(
         {
@@ -842,6 +878,7 @@ def test_focus_muted_senders_roundtrip(tmp_path):
 
 def test_focus_exclude_preview_only_counts_unprotected_plain_focus(tmp_path):
     store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_settings({"focus_include_player_plain": True})
     store.save_identity({"send_as_id": 123, "label": "me"})
     now = utc_now_iso()
     store.ingest_event(RawMessageEvent(id="plain", chat_id=1, msg_id=1, text="是这样", source="玩家", date=now, sender_id=222))
@@ -2066,6 +2103,38 @@ def test_schedule_routes_are_wired():
     assert "/api/schedule/templates/delete" in POST_ROUTES
 
 
+def test_outbox_logs_route_and_store_roundtrip(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    saved = store.append_send_log(
+        {
+            "kind": "manual_send",
+            "status": "success",
+            "account_local_id": "main",
+            "identity_id": 12345,
+            "send_as_id": 0,
+            "chat_id": -1001680975844,
+            "topic_id": 7310786,
+            "reply_to_msg_id": 7000,
+            "command": ".野外历练",
+            "source_message_id": "tg:-1001680975844:6999",
+            "tg_msg_id": 8000,
+            "meta": {"skill_key": "wild_training"},
+        }
+    )
+
+    payload = server.outbox_logs_payload(kind="manual_send", identity_id=12345)
+
+    assert saved["id"] > 0
+    assert payload["ok"] is True
+    assert len(payload["logs"]) == 1
+    assert payload["logs"][0]["command"] == ".野外历练"
+    assert payload["logs"][0]["meta"]["skill_key"] == "wild_training"
+
+    from backend.app import GET_ROUTES
+    assert "/api/outbox/logs" in GET_ROUTES
+
+
 def test_schedule_sync_without_listener_returns_error(tmp_path):
     """没有 listener 在跑就没 client 可拉 TG,这时 sync 应明确报错而不是默默挂掉。"""
     store = SQLiteStore(tmp_path / "miniweb.db")
@@ -3228,6 +3297,21 @@ def test_dungeon_status_route_is_wired():
     assert "/api/dungeon-status" in GET_ROUTES
 
 
+def test_xutian_oracle_guide_payload_exposes_cases_and_aliases():
+    payload = MiniWebServer().xutian_oracle_guide_payload()
+
+    assert payload["ok"] is True
+    assert payload["counts"]["explicit"] > 0
+    assert payload["counts"]["success"] > 0
+    assert any(item["label"] == "金系" and "雷" in item["values"] for item in payload["element_aliases"])
+    assert any(item["gua"] == "兑泽上离火下 · 四爻转阵" for item in payload["cases"]["success"])
+
+
+def test_xutian_oracle_guide_route_is_wired():
+    from backend.app import GET_ROUTES
+    assert "/api/xutian-oracle-guide" in GET_ROUTES
+
+
 def test_filter_diagnostics_payload_counts_recent_reasons(tmp_path):
     store = SQLiteStore(tmp_path / "miniweb.db")
     store.save_settings({"focus_keywords": ["虚天殿"], "focus_include_player_plain": True})
@@ -3363,6 +3447,111 @@ def test_background_send_loop_preserves_cancelled_status(tmp_path):
     # 状态应仍是 cancelled,不要被 finally 覆盖成 completed/failed
     final = next(b for b in store.list_schedule_batches(include_inactive=True) if b["id"] == bid)
     assert final["status"] == "cancelled", f"finally 错误覆盖了 cancelled → {final['status']}"
+
+
+def test_official_schedule_background_records_success_send_log(tmp_path):
+    import asyncio
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    batch_id = store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "account_local_id": "main",
+            "preset_key": "custom",
+            "label": "自定义",
+            "anchor_at": time.time(),
+            "horizon_days": 1,
+            "options": {},
+        },
+        [{"command": ".签到", "schedule_at": time.time() + 3600, "status": "planned"}],
+    )
+    messages = store.list_schedule_messages(batch_id=batch_id, include_inactive=False)
+
+    class FakeClient:
+        async def get_input_entity(self, value):
+            return f"peer:{value}"
+
+    class FakeSendAs:
+        async def list_send_as_peers_on_client(self, client, chat):
+            return {"peers": [{"send_as_id": 12345}]}
+
+    class FakeSchedule:
+        async def create_one_on_client(self, client, *, peer, send_as_peer, reply_to, command, schedule_at):
+            assert peer == "peer:-1001680975844"
+            assert send_as_peer == "peer:12345"
+            assert command == ".签到"
+            return 99001
+
+    server._send_as = FakeSendAs()
+    server._schedule = FakeSchedule()
+
+    asyncio.run(server._run_official_send_background(
+        FakeClient(), batch_id, "-1001680975844", 7310786, 12345, messages
+    ))
+
+    refreshed = store.list_schedule_messages(batch_id=batch_id, include_inactive=True)[0]
+    logs = store.list_send_logs(kind="official_schedule", batch_id=batch_id)
+    batch = store.list_schedule_batches(include_inactive=True)[0]
+    assert refreshed["status"] == "scheduled"
+    assert refreshed["scheduled_msg_id"] == 99001
+    assert batch["status"] == "completed"
+    assert len(logs) == 1
+    assert logs[0]["status"] == "scheduled"
+    assert logs[0]["scheduled_msg_id"] == 99001
+    assert logs[0]["schedule_message_id"] == refreshed["id"]
+    assert logs[0]["meta"]["schedule_at"] == refreshed["schedule_at"]
+
+
+def test_official_schedule_background_records_failed_send_log_for_invalid_item(tmp_path):
+    import asyncio
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    batch_id = store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "account_local_id": "main",
+            "preset_key": "custom",
+            "label": "自定义",
+            "anchor_at": time.time(),
+            "horizon_days": 1,
+            "options": {},
+        },
+        [{"command": "", "schedule_at": 0, "status": "planned"}],
+    )
+    messages = store.list_schedule_messages(batch_id=batch_id, include_inactive=False)
+
+    class FakeClient:
+        async def get_input_entity(self, value):
+            return f"peer:{value}"
+
+    class FakeSendAs:
+        async def list_send_as_peers_on_client(self, client, chat):
+            return {"peers": [{"send_as_id": 12345}]}
+
+    class FakeSchedule:
+        async def create_one_on_client(self, *_args, **_kwargs):
+            raise AssertionError("invalid item should fail before Telegram scheduling")
+
+    server._send_as = FakeSendAs()
+    server._schedule = FakeSchedule()
+
+    asyncio.run(server._run_official_send_background(
+        FakeClient(), batch_id, "-1001680975844", 7310786, 12345, messages
+    ))
+
+    refreshed = store.list_schedule_messages(batch_id=batch_id, include_inactive=True)[0]
+    logs = store.list_send_logs(kind="official_schedule", status="failed", batch_id=batch_id)
+    batch = store.list_schedule_batches(include_inactive=True)[0]
+    assert refreshed["status"] == "failed"
+    assert refreshed["last_error"] == "命令或时间无效"
+    assert batch["status"] == "failed"
+    assert len(logs) == 1
+    assert logs[0]["schedule_message_id"] == refreshed["id"]
+    assert logs[0]["error"] == "命令或时间无效"
 
 
 def test_schedule_deep_retreat_pacing_is_non_linear_paired():
@@ -3813,6 +4002,39 @@ def test_manual_send_uses_command_override_and_optional_reply(tmp_path, monkeypa
     assert captured["chat_id"] == -1001680975844
     assert captured["command"] == "今晚手动看一下"
     assert captured["kwargs"].get("reply_to") == 7000
+    logs = server.outbox_logs_payload(kind="manual_send", identity_id=8574677796)["logs"]
+    assert len(logs) == 1
+    assert logs[0]["status"] == "success"
+    assert logs[0]["command"] == "今晚手动看一下"
+    assert logs[0]["chat_id"] == -1001680975844
+    assert logs[0]["reply_to_msg_id"] == 7000
+    assert logs[0]["tg_msg_id"] == 88001
+    assert logs[0]["meta"]["skill_key"] == "manual_send"
+
+
+def test_skill_send_records_failed_send_log_for_reply_required_skill(tmp_path):
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "1", "api_hash": "h",
+         "account_id": "8574677796", "target_chat": "-1001680975844",
+         "target_topic_id": "7310786"}
+    )
+    server.save_identity_payload(
+        {"send_as_id": "8574677796", "account_local_id": "main", "label": "self"}
+    )
+
+    result = server.skill_send_payload(
+        {"skill_key": "quiz_answer", "identity_id": 8574677796}
+    )
+
+    assert result["ok"] is False
+    logs = server.outbox_logs_payload(kind="manual_send", status="failed")["logs"]
+    assert len(logs) == 1
+    assert logs[0]["identity_id"] == 8574677796
+    assert logs[0]["command"] == ".作答"
+    assert logs[0]["tg_msg_id"] == 0
+    assert "reply_to_msg_id" in logs[0]["error"]
+    assert logs[0]["meta"]["reply_mode"] == "required"
 
 
 def test_manual_send_preserves_emoji_text(tmp_path, monkeypatch):

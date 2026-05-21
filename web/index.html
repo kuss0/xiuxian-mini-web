@@ -117,6 +117,21 @@
                 </details>
               </div>
             </div>
+            <section id="gameHud" class="game-hud" aria-label="当前修仙状态">
+              <div id="hudIdentity" class="hud-panel hud-identity"></div>
+              <div class="hud-panel hud-modules-shell">
+                <div class="hud-panel-head">
+                  <span>关键冷却</span>
+                </div>
+                <div id="hudModules" class="hud-modules"></div>
+              </div>
+              <div id="hudInbox" class="hud-panel hud-inbox"></div>
+            </section>
+            <section id="liveSituationBoard" class="live-situation-board" aria-label="当前态势"></section>
+            <section id="worldEventStrip" class="world-event-strip" aria-label="世界事件"></section>
+            <section id="gameSceneBoard" class="game-scene-board" aria-label="修仙地图"></section>
+            <section id="questTracker" class="quest-tracker" aria-label="任务追踪"></section>
+            <section id="gameActionDock" class="game-action-dock" aria-label="常用面板"></section>
             <div id="messageList" class="message-list"></div>
             <button id="jumpToLatest" class="jump-to-latest" type="button" hidden>↓ 回到最新</button>
           </section>
@@ -140,6 +155,7 @@
         </section>
 
         <footer id="directSendComposer" class="direct-send-composer chat-composer" aria-label="发送栏">
+          <div id="quickActionHotbar" class="quick-action-hotbar" aria-label="常用操作"></div>
           <div class="direct-send-head">
             <div class="direct-send-title">
               <strong>消息</strong>
