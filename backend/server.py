@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+from datetime import datetime, timezone
 from typing import Iterable, Protocol
 
 from backend.config import MAX_ACCOUNTS, MAX_IDENTITIES, MAX_LISTENERS
@@ -118,6 +119,120 @@ class CardStore(Protocol):
 
 
 SECRET_SETTING_KEYS = {"api_hash", "proxy_password", "notify_tg_bot_token"}
+INVENTORY_SNAPSHOT_STALE_SECONDS = 6 * 60 * 60
+
+
+def _parse_utc_datetime(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _inventory_age_seconds(value: object, now: datetime) -> int | None:
+    parsed = _parse_utc_datetime(value)
+    if parsed is None:
+        return None
+    return max(0, int((now - parsed).total_seconds()))
+
+
+def _inventory_state_payload(
+    *,
+    snapshots: list[dict],
+    current: list[dict],
+    allowed_owners: list[str],
+    now: datetime,
+) -> dict:
+    snapshots_by_owner: dict[str, dict] = {}
+    current_counts: dict[str, int] = {}
+    estimated_counts: dict[str, int] = {}
+    owner_labels: dict[str, str] = {}
+
+    def remember_owner(owner: object) -> str:
+        clean = str(owner or "").strip().lstrip("@")
+        key = clean.lower()
+        if clean and key not in owner_labels:
+            owner_labels[key] = clean
+        return key
+
+    for snapshot in snapshots:
+        key = remember_owner(snapshot.get("owner"))
+        if key and key not in snapshots_by_owner:
+            snapshots_by_owner[key] = snapshot
+
+    for item in current:
+        key = remember_owner(item.get("owner"))
+        if not key:
+            continue
+        current_counts[key] = current_counts.get(key, 0) + 1
+        if str(item.get("confidence") or "").lower() == "estimated":
+            estimated_counts[key] = estimated_counts.get(key, 0) + 1
+
+    for owner in allowed_owners:
+        remember_owner(owner)
+
+    states: list[dict] = []
+    for key, owner in owner_labels.items():
+        snapshot = snapshots_by_owner.get(key)
+        age = _inventory_age_seconds((snapshot or {}).get("event_time"), now) if snapshot else None
+        estimated_count = estimated_counts.get(key, 0)
+        current_count = current_counts.get(key, 0)
+        missing = snapshot is None
+        stale = age is not None and age >= INVENTORY_SNAPSHOT_STALE_SECONDS
+        if missing:
+            status = "missing"
+            note = "暂无权威 .储物袋 快照,需要手动校准。"
+        elif stale:
+            status = "stale"
+            note = "快照偏旧,建议手动 .储物袋 校准。"
+        elif estimated_count:
+            status = "estimated"
+            note = "存在成功回执估算项,关键转移前建议手动校准。"
+        else:
+            status = "fresh"
+            note = "快照较新。"
+        needs_manual = status != "fresh"
+        state = {
+            "owner": owner,
+            "snapshot_time": (snapshot or {}).get("event_time") or "",
+            "snapshot_age_seconds": age,
+            "stale_after_seconds": INVENTORY_SNAPSHOT_STALE_SECONDS,
+            "current_item_count": current_count,
+            "estimated_item_count": estimated_count,
+            "status": status,
+            "needs_manual_refresh": needs_manual,
+            "note": note,
+        }
+        states.append(state)
+        if snapshot is not None:
+            snapshot["snapshot_age_seconds"] = age
+            snapshot["stale_after_seconds"] = INVENTORY_SNAPSHOT_STALE_SECONDS
+            snapshot["current_item_count"] = current_count
+            snapshot["estimated_item_count"] = estimated_count
+            snapshot["state_status"] = status
+            snapshot["needs_manual_refresh"] = needs_manual
+            snapshot["state_note"] = note
+
+    summary = {
+        "owner_count": len(states),
+        "fresh_count": sum(1 for item in states if item["status"] == "fresh"),
+        "estimated_count": sum(1 for item in states if item["status"] == "estimated"),
+        "stale_count": sum(1 for item in states if item["status"] == "stale"),
+        "missing_count": sum(1 for item in states if item["status"] == "missing"),
+        "manual_required_count": sum(1 for item in states if item["needs_manual_refresh"]),
+    }
+    return {
+        "generated_at": now.isoformat(),
+        "stale_after_seconds": INVENTORY_SNAPSHOT_STALE_SECONDS,
+        "owners": states,
+        "summary": summary,
+    }
 DUNGEON_STATUS_CACHE_VERSION = 6
 
 
@@ -975,10 +1090,17 @@ class MiniWebServer:
                 owners=allowed_owners if not requested_owner else None,
                 limit=2000,
             )
+        inventory_state = _inventory_state_payload(
+            snapshots=snapshots,
+            current=current,
+            allowed_owners=allowed_owners,
+            now=datetime.now(timezone.utc),
+        )
         return {
             "ok": True,
             "snapshots": snapshots,
             "current": current,
+            "state": inventory_state,
             "allowed_owners": allowed_owners,
             "notes": [
                 "current 以最近 .储物袋 为权威快照,再叠加可确认成功回执;estimated 表示需要手动 .储物袋 校准。",

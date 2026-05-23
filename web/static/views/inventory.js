@@ -5,6 +5,7 @@
   const { fetchJson, postJson } = window.MiniwebApi;
   const { openModal } = window.MiniwebModal;
   const { escapeAttr, escapeHtml, formatNumber } = window.MiniwebFormat;
+  const INVENTORY_AUTO_REFRESH_MS = 60 * 1000;
 
   async function openInventoryModal({ copyCommandToClipboard }) {
     const dialog = openModal({
@@ -60,11 +61,12 @@
     const deps = { copyCommandToClipboard };
     bindInventoryModal(dialog, deps);
     await refreshInventorySnapshots(dialog);
+    startInventoryAutoRefresh(dialog);
   }
 
   function bindInventoryModal(dialog, deps) {
     dialog.querySelector("#inventoryRefresh")?.addEventListener("click", () => {
-      refreshInventorySnapshots(dialog).catch((error) => setInventoryStatus(dialog, "error", error.message));
+      refreshInventorySnapshots(dialog, { manual: true }).catch((error) => setInventoryStatus(dialog, "error", error.message));
     });
     dialog.querySelector("#inventoryOwnerSelect")?.addEventListener("change", () => {
       renderInventoryItems(dialog).catch((error) => setInventoryStatus(dialog, "error", error.message));
@@ -82,31 +84,73 @@
     });
   }
 
-  async function refreshInventorySnapshots(dialog) {
-    setInventoryStatus(dialog, "info", "读取当前库存…");
-    const payload = await fetchJson("/api/inventory?latest_only=1&limit=200&include_items=0");
-    dialog._inventorySnapshots = (payload.snapshots || []).map((snapshot) => ({
-      ...snapshot,
-      items: [],
-      items_loaded: false,
-    }));
-    dialog._inventoryCurrent = payload.current || [];
-    renderInventoryOwnerSelect(dialog);
-    const count = inventoryOwners(dialog).length;
-    setInventoryStatus(
-      dialog,
-      count ? "ok" : "warn",
-      count
-        ? `已载入 ${count} 个资源号的当前库存。`
-        : "没有可见资源号快照。先确认账号/身份/own_aliases,再用 .储物袋 让消息箱采到。"
-    );
-    await renderInventoryItems(dialog);
+  async function refreshInventorySnapshots(dialog, options = {}) {
+    if (dialog._inventoryRefreshing) return;
+    dialog._inventoryRefreshing = true;
+    const silent = Boolean(options.silent);
+    try {
+      if (!silent) setInventoryStatus(dialog, "info", "读取当前库存…");
+      const payload = await fetchJson("/api/inventory?latest_only=1&limit=200&include_items=0");
+      const previousByOwner = new Map((dialog._inventorySnapshots || []).map((snapshot) => [
+        String(snapshot.owner || "").toLowerCase(),
+        snapshot,
+      ]));
+      dialog._inventorySnapshots = (payload.snapshots || []).map((snapshot) => ({
+        ...snapshot,
+        items: previousByOwner.get(String(snapshot.owner || "").toLowerCase())?.items || [],
+        items_loaded: Boolean(previousByOwner.get(String(snapshot.owner || "").toLowerCase())?.items_loaded),
+      }));
+      dialog._inventoryCurrent = payload.current || [];
+      dialog._inventoryState = payload.state || {};
+      renderInventoryOwnerSelect(dialog);
+      const count = inventoryOwners(dialog).length;
+      const manualRequired = Number(payload.state?.summary?.manual_required_count || 0);
+      const statusKind = count && !manualRequired ? "ok" : "warn";
+      const statusText = inventoryStatusText({ count, manualRequired, silent });
+      setInventoryStatus(dialog, statusKind, statusText);
+      await renderInventoryItems(dialog);
+    } finally {
+      dialog._inventoryRefreshing = false;
+    }
+  }
+
+  function startInventoryAutoRefresh(dialog) {
+    if (!dialog || dialog._inventoryAutoRefreshTimer) return;
+    const tick = async () => {
+      if (!document.body.contains(dialog)) return;
+      try {
+        await refreshInventorySnapshots(dialog, { silent: true });
+      } catch (error) {
+        if (document.body.contains(dialog)) {
+          setInventoryStatus(dialog, "warn", `自动刷新失败:${error.message || error}`);
+        }
+      }
+      if (document.body.contains(dialog)) {
+        dialog._inventoryAutoRefreshTimer = window.setTimeout(tick, INVENTORY_AUTO_REFRESH_MS);
+      }
+    };
+    dialog._inventoryAutoRefreshTimer = window.setTimeout(tick, INVENTORY_AUTO_REFRESH_MS);
+  }
+
+  function inventoryStatusText({ count, manualRequired, silent }) {
+    if (!count) {
+      return "没有可见资源号快照。先确认账号/身份/own_aliases,再用 .储物袋 让消息箱采到。";
+    }
+    const prefix = silent ? `自动刷新 ${formatClockTime(new Date())}: ` : "";
+    if (manualRequired) {
+      return `${prefix}已载入 ${count} 个资源号,${manualRequired} 个建议手动 .储物袋 校准。`;
+    }
+    return `${prefix}已载入 ${count} 个资源号,快照状态正常。`;
   }
 
   function inventoryOwners(dialog) {
     const seen = new Set();
     const owners = [];
-    [...(dialog._inventorySnapshots || []), ...(dialog._inventoryCurrent || [])].forEach((item) => {
+    [
+      ...(dialog._inventorySnapshots || []),
+      ...(dialog._inventoryCurrent || []),
+      ...(dialog._inventoryState?.owners || []),
+    ].forEach((item) => {
       const owner = String(item.owner || "").trim();
       const key = owner.toLowerCase();
       if (!owner || seen.has(key)) return;
@@ -125,8 +169,10 @@
     const owners = inventoryOwners(dialog);
     select.innerHTML = owners.map((owner) => {
       const snapshot = snapshots.find((item) => String(item.owner || "").toLowerCase() === owner.toLowerCase()) || {};
+      const state = inventoryStateForOwner(dialog, owner);
       const itemCount = current.filter((item) => String(item.owner || "").toLowerCase() === owner.toLowerCase()).length || snapshot.item_count || 0;
-      const label = `@${owner}｜${formatNumber(itemCount)} 类｜${formatInventoryTime(snapshot.event_time || "")}`;
+      const stateLabel = inventoryStateLabel(state);
+      const label = `@${owner}｜${formatNumber(itemCount)} 类｜${stateLabel}｜${formatInventoryTime(snapshot.event_time || "")}`;
       return `<option value="${escapeAttr(owner)}">${escapeHtml(label)}</option>`;
     }).join("") || '<option value="">暂无快照</option>';
     if (prev && owners.some((owner) => owner === prev)) {
@@ -163,13 +209,17 @@
     }
     if (snapshotBox) {
       const estimatedCount = currentItems.filter((item) => item.confidence === "estimated").length;
+      const state = inventoryStateForOwner(dialog, snapshot.owner);
       snapshotBox.innerHTML = `
         <div class="inventory-summary">
           <strong>@${escapeHtml(snapshot.owner)}</strong>
           <span>当前 ${escapeHtml(formatNumber(currentItems.length || snapshot.item_count || 0))} 类</span>
           <span>估算 ${escapeHtml(formatNumber(estimatedCount))} 类</span>
+          <span>${renderInventoryStateBadge(state)}</span>
           <span>快照 ${escapeHtml(formatInventoryTime(snapshot.event_time))}</span>
+          <span>年龄 ${escapeHtml(formatInventoryAge(state?.snapshot_age_seconds))}</span>
           <span>消息 #${escapeHtml(String(snapshot.msg_id || ""))}</span>
+          ${state?.note ? `<small>${escapeHtml(state.note)}</small>` : ""}
         </div>
       `;
     }
@@ -238,6 +288,41 @@
     const label = confidence === "estimated" ? "估算" : "快照";
     const className = confidence === "estimated" ? "status-pill warn" : "status-pill ok";
     return `<span class="${className}">${escapeHtml(label)}</span>`;
+  }
+
+  function inventoryStateForOwner(dialog, owner) {
+    const key = String(owner || "").toLowerCase();
+    return (dialog._inventoryState?.owners || []).find((item) => String(item.owner || "").toLowerCase() === key) || null;
+  }
+
+  function inventoryStateLabel(state) {
+    const status = String(state?.status || "missing");
+    if (status === "fresh") return "正常";
+    if (status === "estimated") return "需校准";
+    if (status === "stale") return "偏旧";
+    return "缺快照";
+  }
+
+  function renderInventoryStateBadge(state) {
+    const label = inventoryStateLabel(state);
+    const ok = String(state?.status || "") === "fresh";
+    return `<span class="status-pill ${ok ? "ok" : "warn"}">${escapeHtml(label)}</span>`;
+  }
+
+  function formatInventoryAge(seconds) {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value < 0) return "未知";
+    if (value < 60) return `${Math.floor(value)} 秒`;
+    if (value < 3600) return `${Math.floor(value / 60)} 分钟`;
+    if (value < 86400) return `${Math.floor(value / 3600)} 小时`;
+    return `${Math.floor(value / 86400)} 天`;
+  }
+
+  function formatClockTime(value) {
+    const date = value instanceof Date ? value : new Date(value);
+    const hh = String(date.getHours()).padStart(2, "0");
+    const mm = String(date.getMinutes()).padStart(2, "0");
+    return `${hh}:${mm}`;
   }
 
   function setInventoryBatchBarVisible(dialog, visible) {

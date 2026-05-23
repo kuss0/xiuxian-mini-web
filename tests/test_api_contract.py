@@ -2319,6 +2319,67 @@ def test_inventory_payload_can_omit_items_for_snapshot_list(tmp_path):
     }
 
 
+def test_inventory_payload_reports_snapshot_state_for_manual_fallback(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_settings({"own_aliases": ["seller", "missing"]})
+    store.save_account({"local_id": "main", "account_id": "12345", "username": "seller"})
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:95",
+            chat_id=-1,
+            msg_id=95,
+            text="""@seller 的储物袋
+
+材料:
+- 灵石 x 100
+- 阴凝之晶 x 2""",
+            source="韩天尊",
+            date="2026-05-15T10:00:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:96",
+            chat_id=-1,
+            msg_id=96,
+            text=".灵树采摘",
+            source="seller",
+            date="2026-05-15T10:01:00+00:00",
+            sender_id=12345,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:97",
+            chat_id=-1,
+            msg_id=97,
+            text="你稳定分得【阴凝之晶】x1。",
+            source="韩天尊",
+            date="2026-05-15T10:02:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+            reply_to_msg_id=96,
+        )
+    )
+    server = MiniWebServer(store=store)
+
+    payload = server.inventory_payload(include_items=False)
+    states = {item["owner"]: item for item in payload["state"]["owners"]}
+
+    assert payload["state"]["stale_after_seconds"] == server_module.INVENTORY_SNAPSHOT_STALE_SECONDS
+    assert states["seller"]["status"] in {"estimated", "stale"}
+    assert states["seller"]["estimated_item_count"] == 1
+    assert states["seller"]["needs_manual_refresh"] is True
+    assert states["missing"]["status"] == "missing"
+    assert states["missing"]["snapshot_age_seconds"] is None
+    assert states["missing"]["needs_manual_refresh"] is True
+    assert payload["state"]["summary"]["manual_required_count"] >= 2
+    assert payload["snapshots"][0]["estimated_item_count"] == 1
+    assert payload["snapshots"][0]["needs_manual_refresh"] is True
+
+
 def test_inventory_current_applies_confirmed_deltas_after_snapshot(tmp_path):
     store = SQLiteStore(tmp_path / "miniweb.db")
     store.save_account({"local_id": "main", "account_id": "12345", "username": "seller"})
@@ -3025,6 +3086,61 @@ def test_schedule_create_blocks_real_batch_when_identity_quota_is_full(tmp_path)
     assert result["scheduled_current"] == 100
     assert result["planned_count"] == 1
     assert len(store.list_schedule_batches(include_inactive=True)) == 1
+
+
+def test_schedule_create_allows_real_batch_that_exactly_reaches_identity_quota(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_settings_payload({"target_chat": "-1001680975844", "target_topic_id": ""})
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "123", "api_hash": "hash", "account_id": "12345"}
+    )
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+
+    store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "account_local_id": "main",
+            "preset_key": "custom",
+            "label": "自定义",
+            "anchor_at": time.time(),
+            "horizon_days": 1,
+            "options": {},
+        },
+        [
+            {"command": ".签到", "schedule_at": time.time() + i * 60, "status": "scheduled"}
+            for i in range(99)
+        ],
+    )
+
+    class FakeListener:
+        def submit_background(self, _callback):
+            return None
+
+    class FakeListeners:
+        def get_listener(self, account_local_id):
+            return FakeListener()
+
+    server._listeners = FakeListeners()
+
+    result = server.schedule_create_payload(
+        {
+            "send_as_id": 12345,
+            "preset_key": "custom",
+            "command": ".签到",
+            "interval_sec": 60,
+            "count": 1,
+            "dry_run": False,
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "sending"
+    assert result["planned_count"] == 1
+    assert server._official_schedule_identity_usage(12345) == 100
+    assert len(store.list_schedule_batches(include_inactive=True)) == 2
 
 
 def test_schedule_create_without_target_chat_does_not_leave_active_batch(tmp_path):
