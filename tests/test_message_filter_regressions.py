@@ -138,7 +138,33 @@ def test_falling_demon_heart_trial_reply_to_me_keeps_mine_context():
     )
 
     assert "mine" in result.channels
+    assert "focus" in result.channels
+    assert "archive" not in result.channels
     assert "回复我" in result.tags
+    assert "坠魔心劫归档" not in result.reasons
+
+
+def test_falling_demon_heart_trial_mentioning_me_stays_focus():
+    text = (
+        "@MayaLing 【坠魔心劫·第3轮】\n"
+        "幻境再变，请继续回复 .稳 / .狠 / .骗。"
+    )
+    result = _classify(
+        text,
+        card=_card(
+            channels=("system", "prompt", "home"),
+            source="韩天尊",
+            title="坠魔心劫",
+            actions=(ActionSuggestion("copy", "稳", ".稳"),),
+        ),
+        event=_event(text, source="韩天尊", sender_id=-100),
+        settings={"own_aliases": ["MayaLing"]},
+    )
+
+    assert "mine" in result.channels
+    assert "focus" in result.channels
+    assert "archive" not in result.channels
+    assert "被@" in result.tags
     assert "坠魔心劫归档" not in result.reasons
 
 
