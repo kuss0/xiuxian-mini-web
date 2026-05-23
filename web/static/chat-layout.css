@@ -302,3 +302,77 @@
 .chat-client-shell .quick-action-hotbar::-webkit-scrollbar {
   display: none;
 }
+
+/* Hard width guard: header controls may scroll inside their own row, but must
+   never increase the page width beyond the browser viewport. */
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.chat-client-shell,
+.chat-client-shell .chat-workspace,
+.chat-client-shell .layout-grid,
+.chat-client-shell .chat-pane,
+.chat-client-shell .chat-pane .section-head,
+.chat-client-shell .stream-filter-inline,
+.chat-client-shell .stream-channel-tools,
+.chat-client-shell .game-primary-strip,
+.chat-client-shell .chat-composer,
+.chat-client-shell .direct-send-row {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chat-client-shell {
+  width: 100vw;
+  max-width: 100vw;
+  box-sizing: border-box;
+}
+
+.chat-client-shell .chat-pane .section-head {
+  overflow: hidden;
+}
+
+.chat-client-shell .stream-filter-inline .quick-filters,
+.chat-client-shell .stream-channel-tools,
+.chat-client-shell .game-primary-strip,
+.chat-client-shell .quick-action-hotbar {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
+.chat-client-shell .stream-channel-tools > *,
+.chat-client-shell .stream-filter-inline .quick-filter-chip,
+.chat-client-shell .game-primary-item,
+.chat-client-shell .game-primary-more {
+  flex-shrink: 0;
+}
+
+@media (max-width: 1180px) {
+  .chat-client-shell .chat-pane .section-head {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+  }
+
+  .chat-client-shell .chat-pane .section-head > .stream-filter-inline,
+  .chat-client-shell .chat-pane .section-head > .stream-channel-tools {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .chat-client-shell .stream-channel-tools {
+    flex-wrap: nowrap;
+  }
+}
+
+@media (max-width: 900px) {
+  .chat-client-shell {
+    width: 100%;
+    max-width: 100%;
+  }
+}
