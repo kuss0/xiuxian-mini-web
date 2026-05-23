@@ -91,9 +91,9 @@ backend/
     message_pipeline.py
     state_projection.py
   outbox/
-    drafts.py
-    sender.py
-    schedules.py
+    planner.py
+    send.py
+    schedule.py
   repo/
     db.py
     migrations.py
@@ -187,8 +187,9 @@ RawMessageEvent -> ParsedCard + StatePatch + ActionSuggestion[]
 统一出口：
 
 - 保存动作草稿。
-- 用户确认后普通发送。
-- 用户确认后创建官方定时。
+- `planner.py` 只负责把 `ActionSuggestion` 解析成待确认计划。
+- `send.py` 负责用户确认后的普通发送和 outgoing ingest。
+- `schedule.py` 负责 Telegram 官方定时的 plan/create/list/delete。
 - 删除未来官方定时。
 - 保存 send log。
 
@@ -213,14 +214,45 @@ SQLite 表建议：
 
 Web 第一屏应当是游戏聊天辅助界面，不是控制台或营销页。
 
+从两个修仙游戏仓库吸收的方向：
+
+- `react-xiuxian-game` 的优点是前端按功能切片：`views` 组合 UI，`components` 只展示，`hooks/useXxxHandlers` 收拢交互，`services` 放规则计算，`store` 放全局状态，`constants` 放玩法配置。
+- `vue-idle-xiuxian` 的优点是信息架构直接：顶层功能导航、全局角色摘要、每个玩法一个页面，长期状态进 store/IndexedDB，耗时计算用 worker。
+- Mini Web 的差异是消息客户端，不是单机放置游戏；因此模块边界围绕“消息、状态投影、动作确认、官方定时”，而不是围绕真实游戏战斗循环。
+
 目标布局：
 
 ```text
-左侧：账号/角色/频道
+左侧：官方定时 + 常用入口 + 账号/角色/频道
 中间：消息流
 右侧：消息详情 + 操作抽屉
-底部或弹层：官方定时排班
+底部：发送栏 + 快捷动作
 ```
+
+目标前端目录：
+
+```text
+web/static/
+  app.js                 # 启动入口，后续只做 bootstrap
+  api.js                 # apiFetch 和 API 封装
+  state.js               # 全局状态、选择器、轻量事件派发
+  constants.js           # 频道、模块、快捷入口、展示规则表
+  ui/
+    modal.js             # 通用弹层
+    toast.js             # 提示
+    format.js            # 时间、数字、文本格式化
+  views/
+    chat.js              # 消息流、详情、搜索、频道过滤
+    cockpit.js           # 角色摘要、模块状态、世界事件
+    outbox.js            # 草稿、发送日志、官方定时入口
+    inventory.js         # 背包/资源转移
+    dungeon.js           # 副本状态和虚天指引
+    resources.js         # 资源统计
+    accounts.js          # 账号/身份/登录
+    settings.js          # 通知、过滤、bot 设置
+```
+
+第一阶段可以继续使用原生 JS，不强行引入 React/Vue；关键是先把职责拆开。后续若 UI 继续扩张，再评估 Vite + TypeScript，而不是在单文件里继续堆功能。
 
 ### 频道模型
 
@@ -263,6 +295,30 @@ UI 面向玩家语言，底层字段保持机器可读。
 没有 `auto_send`。
 `confirm_send` 只能来自用户点击，不允许由 parser / processor 根据消息内容自动调用。
 
+### 前端模块边界
+
+每个玩法面板至少分三层：
+
+- `view`：读取 state，渲染 DOM，绑定事件。
+- `handler`：把用户操作转换成 API 请求或 state 更新。
+- `model/selector`：把 API 数据整理成 UI 可直接使用的展示模型。
+
+禁止继续新增跨域巨型函数，例如一个函数同时 fetch、筛选、生成 HTML、绑定事件、写全局状态。新功能先落到对应 view 文件；共享逻辑上移到 `api/state/ui/constants`。
+
+### 状态和后台计算
+
+Mini Web 的状态分三类：
+
+- 服务端事实：消息、卡片、账号、身份、发送日志、排班，SQLite 是事实来源。
+- 前端会话态：当前频道过滤、展开项、选中消息、弹层状态，只保存在浏览器内存。
+- 可重算投影：资源统计、库存计划、健康诊断、消息覆盖率，来源必须可追溯。
+
+耗时或批量任务不应阻塞 UI：
+
+- 服务端已有的数据重算优先放后端 API/job。
+- 纯前端大量计算以后可以加 Web Worker。
+- 所有重算结果都要带来源范围、更新时间和失败状态。
+
 ## 官方定时设计
 
 官方定时是 miniweb 的重点能力，不是旧脚本 scheduler。
@@ -276,7 +332,7 @@ UI 面向玩家语言，底层字段保持机器可读。
 
 原则：
 
-- 一次排未来 1-3 天。
+- 一次排未来最多 7 天；单个身份最多接受 100 条未来官方定时，超过后只提示手动处理。
 - 支持查看和删除已排定时。
 - 不做自动补发。
 - 不在游戏群输出工具日志。

@@ -35,6 +35,30 @@ Mini Web 的差异是：
 | `src/server/global_processors` | `backend/processors` | 全局消息学习/状态投影，第一阶段只做被动投影。 |
 | `tests/fixtures` | `tests/fixtures` | 真实文案 fixture 驱动 parser 测试。 |
 
+## 外部 Web 游戏仓库映射
+
+参考 `JeasonLoop/react-xiuxian-game`：
+
+- `views/<feature>/index.ts + useXxxHandlers.ts` 对应 Mini Web 的 `web/static/views/<feature>.js + handlers/selectors`。
+- `components/common/Modal.tsx` 对应 Mini Web 的通用 `ui/modal.js`，避免每个弹层重复关闭、footer、状态提示逻辑。
+- `store/gameStore.ts + uiStore.ts` 对应 Mini Web 的 `state.js`，但 Mini Web 不把服务端事实复制成第二份事实来源，只保存筛选、选中、弹层、加载状态。
+- `constants/*` 对应 Mini Web 的频道、模块、技能、展示规则表；固定配置不能散落在渲染函数里。
+- `services/*` 对应 Mini Web 的前端纯计算或后端 service。凡是涉及 Telegram、SQLite、发送、排班的逻辑仍放后端。
+
+参考 `setube/vue-idle-xiuxian`：
+
+- 顶部功能导航 + 全局角色摘要适合作为 Mini Web 的角色 HUD 和玩法入口组织方式。
+- `plugins/*` 的规则表思路可借鉴到 `domain/constants` 或前端 `constants.js`，用于境界、模块、频道、资源展示配置。
+- `workers/*` 的后台计算思路适合后续消息重算、资源统计、库存计划；第一版优先放后端 API，前端 worker 只处理纯浏览器计算。
+- `stores/db.js` 的 IndexedDB 思路只作为离线缓存参考。Mini Web 的事实来源仍是 SQLite，浏览器不承担权威存档。
+
+不吸收的部分：
+
+- 不搬单机修仙数值循环。
+- 不搬自动历练/自动修炼作为发送驱动。
+- 不让前端成为游戏状态事实来源。
+- 不为了套框架立刻迁 React/Vue；先用模块化原生 JS 清理现有债务。
+
 ## 目录计划
 
 ```text
@@ -85,9 +109,9 @@ backend/
 
   outbox/
     __init__.py
-    drafts.py
-    sender.py
-    schedules.py
+    planner.py
+    send.py
+    schedule.py
 
   repo/
     __init__.py
@@ -129,7 +153,7 @@ ActionSuggestion
   -> outbox draft
   -> Web 展示账号/群/命令/时间
   -> 用户确认
-  -> outbox.sender 普通发送 或 outbox.schedules 官方定时
+  -> outbox.send 手动发送 或 outbox.schedule 官方定时
   -> send log
 ```
 
@@ -137,6 +161,7 @@ ActionSuggestion
 
 - API route 不能直接调 tg.send。
 - parser/processor 不能直接调 tg.send。
+- 手动发送由 `/api/skills/send` 兼容入口触发，但实现必须收口到 `backend/outbox/send.py`。
 - 发送日志必须记录来源 card、identity、命令、时间、结果。
 - 官方定时必须支持 list/delete。
 
@@ -241,7 +266,7 @@ ActionSuggestion
 
 任务：
 
-1. 左侧频道支持多选合并，不再只有单选 tab。
+1. 消息流顶部频道支持横向过滤和多频道合并，不再只有单选 tab。
 2. 中间消息流按频道/标签/角色过滤。
 3. 右侧详情展示：
    - 原文
@@ -258,6 +283,44 @@ ActionSuggestion
 - 动作不会点击即发送。
 - UI 第一屏是消息界面，不是设置页。
 
+## Phase 3.5：前端模块化
+
+目标：吸收两个修仙游戏仓库的 UI 组织方式，把当前单体 `app.js/styles.css` 拆成可维护模块。
+
+任务：
+
+1. 建前端基础目录：
+   - `web/static/api.js`
+   - `web/static/state.js`
+   - `web/static/constants.js`
+   - `web/static/ui/modal.js`
+   - `web/static/ui/format.js`
+   - `web/static/views/`
+2. 先拆无业务风险的公共层：
+   - `apiFetch/postJson/fetchJson`
+   - modal/toast/status helpers
+   - escape/time/number/text formatters
+   - 频道、模块、技能、快捷入口常量
+3. 再按玩法拆 view：
+   - `chat`
+   - `cockpit`
+   - `outbox`
+   - `schedule`
+   - `inventory`
+   - `dungeon`
+   - `resources`
+   - `accounts/settings`
+4. 每个 view 只暴露 `render/bind/load` 这类小入口。
+5. `app.js` 逐步缩成 bootstrap：初始化 state、注册 view、启动 polling。
+6. CSS 同步按模块切分或至少按 section 重排，避免新 UI 继续追加到文件尾部。
+
+验收：
+
+- `app.js` 不再承担所有 DOM 查询和所有玩法渲染。
+- 新增一个玩法面板时，只改对应 view、constants、少量 bootstrap。
+- 公共 modal/status/format 不重复实现。
+- `node --check` 和现有 pytest 全通过。
+
 ## Phase 4：Outbox 和确认发送
 
 目标：所有发送都有统一出口。
@@ -267,17 +330,20 @@ ActionSuggestion
 1. 建 `outbox_drafts`。
 2. 建 `send_logs`。
 3. API：
+   - `GET /api/outbox`
+   - `GET /api/outbox/drafts?status=draft`
+   - `POST /api/outbox/plan`
    - `POST /api/outbox/drafts`
-   - `POST /api/outbox/drafts/{id}/confirm`
-   - `GET /api/outbox/logs`
-4. outbox sender 接普通发送，但默认仍可 dry-run。
+   - `POST /api/outbox/drafts/delete`
+   - `POST /api/skills/send`
+4. outbox sender 接手动发送；`/api/skills/send` 是用户点击确认后的兼容入口，不是 parser/processor 可直接调用的自动出口。
 
 验收：
 
 - API route 不直接调用 Telegram。
 - 每次发送都能追溯到 action/card。
 - 用户能在确认前看到账号、群、命令。
-- dry-run 模式下不真的发 Telegram。
+- parser/processor 不能因为识别到消息内容而触发 `/api/skills/send`。
 
 ## Phase 5：官方定时
 
@@ -300,7 +366,8 @@ ActionSuggestion
 
 验收：
 
-- 可以一次排 1-3 天。
+- 可以一次排最多 7 天。
+- 单个身份最多接受 100 条未来官方定时；超过后不继续发送定时创建请求，只提示用户手动处理。
 - 可以删除未来定时。
 - 不自动补发。
 - 不在游戏群输出工具日志。
@@ -326,7 +393,8 @@ ActionSuggestion
 
 ## Phase 7：状态投影
 
-目标：把“消息盒子”的价值迁过来，但不迁旧脚本状态机。
+目标：把“消息盒子”的价值迁过来；只吸收旧脚本里可被动验证的
+projection / ledger 思路，不吸收自动挂机、链式调度、重试发送。
 
 任务：
 
@@ -336,15 +404,22 @@ ActionSuggestion
    - 宗门
    - 法宝
 2. 战力投影。
-3. 储物袋库存快照。
-4. 第二元神状态。
-5. 风险状态。
+3. 储物袋库存：
+   - `.储物袋` 面板是权威快照。
+   - 树采摘、赠送、上架等明确成功回执可写入估算账本。
+   - 估算库存必须暴露 `confidence`，手动 `.储物袋` 仍是校准兜底。
+4. 小世界状态：
+   - 被动记录面板里的信仰、待收香火、香火库存、祈愿等待时间。
+   - 收割、淬炼、布道、资源不足只更新状态，不触发下一条命令。
+5. 第二元神状态。
+6. 风险状态。
 
 验收：
 
 - 状态来自消息投影，不来自旧脚本 runtime。
 - 每个状态字段有来源消息。
 - UI 可显示“更新时间/来源”。
+- parser / 状态机不能直接调用发送出口。
 
 ## 第一批 parser 优先级
 
@@ -363,7 +438,8 @@ ActionSuggestion
 
 4. 储物袋
    - 服务资源转移 UI。
-   - 只做库存展示和命令草稿。
+   - 展示快照库存和估算 current 库存。
+   - 只生成命令草稿，不自动发送。
 
 5. 第二元神
    - 识别归位、修炼中、心魔抉择。
