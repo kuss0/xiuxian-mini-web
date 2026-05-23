@@ -333,7 +333,7 @@ body {
 }
 
 .chat-client-shell .chat-pane .section-head {
-  overflow: hidden;
+  overflow: visible;
 }
 
 .chat-client-shell .stream-filter-inline .quick-filters,
@@ -351,6 +351,28 @@ body {
 .chat-client-shell .game-primary-item,
 .chat-client-shell .game-primary-more {
   flex-shrink: 0;
+}
+
+/* Recovery pass: the primary strip duplicated information already present in
+   the channel/tools header, and the header must not clip floating tool panels. */
+.chat-client-shell .game-primary-strip {
+  display: none;
+  min-height: 0;
+  max-height: 0;
+  border: 0;
+}
+
+.chat-client-shell .message-list {
+  grid-row: 2;
+}
+
+.chat-client-shell .workspace-tools-panel {
+  position: fixed;
+  top: 56px;
+  right: 14px;
+  z-index: 120;
+  width: min(920px, calc(100vw - 28px));
+  max-width: calc(100vw - 28px);
 }
 
 @media (max-width: 1180px) {
