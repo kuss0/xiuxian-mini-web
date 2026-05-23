@@ -371,8 +371,9 @@ async function loadIdentities() {
   if (activeChanged && previousActiveId !== null) {
     loadIdentityPatches({ reset: true }).catch((err) => console.warn("[mini-web] reload patches after identity refresh failed:", err));
   }
-  // 身份状态机摘要(深度闭关 / 抚摸 / 温养)— 失败不阻塞
-  loadIdentityModuleStates().catch((err) => console.warn("[mini-web] identity state fetch failed:", err));
+  // 身份状态机摘要(深度闭关 / 抚摸 / 温养 / 常用 CD)直接跟随身份刷新。
+  // 失败不阻塞身份列表,但成功时能让快捷指令和修炼状态首屏就是当前态。
+  await loadIdentityModuleStates();
   return payload;
 }
 
@@ -11033,7 +11034,13 @@ refreshButton.addEventListener("click", async () => {
   refreshButton.textContent = "正在刷新…";
   refreshButton.disabled = true;
   try {
-    await Promise.all([refreshChatViewport(), loadIdentityPatches(), loadWorldSnapshot({ silent: true }), loadScheduleRail({ silent: true })]);
+    await Promise.all([
+      refreshChatViewport(),
+      loadIdentityPatches(),
+      loadIdentityModuleStates(),
+      loadWorldSnapshot({ silent: true }),
+      loadScheduleRail({ silent: true }),
+    ]);
   } catch (error) {
     showError(error);
   } finally {
@@ -11131,7 +11138,7 @@ if (openCultivationButton) {
   openCultivationButton.addEventListener("click", async () => {
     try {
       openCultivationButton.closest("details")?.removeAttribute("open");
-      await Promise.all([loadAccounts(), loadIdentities(), loadIdentityModuleStates()]);
+      await Promise.all([loadAccounts(), loadIdentities()]);
       openCultivationModal();
     } catch (error) {
       showError(error);

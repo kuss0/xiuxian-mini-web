@@ -127,6 +127,27 @@ def test_frontend_bootstrap_loads_registered_views_before_app():
     assert app_view_refs <= registered_views
 
 
+def test_frontend_identity_state_refresh_is_first_class():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+
+    load_identities_start = app_js.index("async function loadIdentities()")
+    load_identity_states_start = app_js.index("async function loadIdentityModuleStates()")
+    load_identities = app_js[load_identities_start:load_identity_states_start]
+    assert "await loadIdentityModuleStates();" in load_identities
+    assert "loadIdentityModuleStates().catch" not in load_identities
+
+    refresh_start = app_js.index("refreshButton.addEventListener")
+    health_start = app_js.index("if (healthButton)", refresh_start)
+    refresh_handler = app_js[refresh_start:health_start]
+    assert "loadIdentityModuleStates()," in refresh_handler
+
+    cultivation_start = app_js.index("if (openCultivationButton)")
+    outbox_start = app_js.index("outboxButton.addEventListener", cultivation_start)
+    cultivation_handler = app_js[cultivation_start:outbox_start]
+    assert "loadIdentityModuleStates()" not in cultivation_handler
+
+
 def test_chat_viewport_layout_contract_keeps_composer_visible():
     root = Path(__file__).resolve().parents[1]
     html = (root / "web" / "index.html").read_text(encoding="utf-8")
