@@ -61,8 +61,6 @@
                   <input id="messageSearchInput" type="search" placeholder="当前频道" autocomplete="off" />
                 </label>
                 <span id="messageCount" class="message-count-pill">0 条</span>
-                <button id="refreshButton" type="button" class="stream-tool-button">刷新</button>
-                <button id="healthButton" type="button" class="stream-tool-button" title="查看监听、消息水位和断层审计">健康</button>
                 <details class="workspace-tools-shell" aria-label="账号、状态和工具">
                   <summary class="stream-tool-button workspace-tools-toggle">
                     <span>工具中心</span>
@@ -138,6 +136,8 @@
                         <small>设置 / 通知 / Bot</small>
                       </div>
                       <div class="sidebar-toolbox">
+                        <button id="refreshButton" type="button">刷新</button>
+                        <button id="healthButton" type="button" title="查看监听、消息水位和断层审计">健康</button>
                         <button id="settingsButton" type="button">接入配置</button>
                         <button id="filterSettingsButton" type="button">过滤设置</button>
                         <button id="gameBotsButton" type="button">游戏 Bot</button>

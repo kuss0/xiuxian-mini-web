@@ -334,6 +334,7 @@ body {
 
 .chat-client-shell .chat-pane .section-head {
   overflow: visible;
+  padding-right: 118px;
 }
 
 .chat-client-shell .stream-filter-inline .quick-filters,
@@ -368,11 +369,45 @@ body {
 
 .chat-client-shell .workspace-tools-panel {
   position: fixed;
-  top: 56px;
+  top: 48px;
   right: 14px;
   z-index: 120;
   width: min(920px, calc(100vw - 28px));
   max-width: calc(100vw - 28px);
+}
+
+/* Keep channel switching as the full-width primary header. Utility controls
+   float at the top-right instead of taking layout space from channels. */
+.chat-client-shell .sidebar-title {
+  display: none;
+}
+
+.chat-client-shell .stream-channel-tools {
+  position: fixed;
+  top: 9px;
+  right: 12px;
+  z-index: 125;
+  width: auto;
+  max-width: calc(100vw - 24px);
+  overflow: visible;
+}
+
+.chat-client-shell .message-search,
+.chat-client-shell .message-count-pill {
+  display: none;
+}
+
+.chat-client-shell .workspace-tools-toggle small {
+  display: none;
+}
+
+.chat-client-shell .chat-pane .section-head > .stream-filter-inline {
+  width: 100%;
+  max-width: 100%;
+}
+
+.chat-client-shell .stream-filter-inline .quick-filters {
+  width: 100%;
 }
 
 @media (max-width: 1180px) {
@@ -387,7 +422,15 @@ body {
     max-width: 100%;
   }
 
+  .chat-client-shell .chat-pane .section-head > .stream-channel-tools {
+    width: auto;
+    max-width: calc(100vw - 24px);
+  }
+
   .chat-client-shell .stream-channel-tools {
+    position: fixed;
+    top: 9px;
+    right: 12px;
     flex-wrap: nowrap;
   }
 }
@@ -396,5 +439,9 @@ body {
   .chat-client-shell {
     width: 100%;
     max-width: 100%;
+  }
+
+  .chat-client-shell .chat-pane .section-head {
+    padding-right: 110px;
   }
 }
