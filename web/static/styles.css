@@ -13105,8 +13105,7 @@ body {
 .chat-client-shell .message-search input,
 .chat-client-shell .stream-tool-button,
 .chat-client-shell .workspace-tools-toggle,
-.chat-client-shell .message-count-pill,
-.chat-client-shell .composer-tool-button {
+.chat-client-shell .message-count-pill {
   min-height: 34px;
   padding: 6px 12px;
   font-size: 13px;
@@ -13114,12 +13113,6 @@ body {
 
 .chat-client-shell .workspace-tools-toggle small {
   font-size: 11.5px;
-}
-
-.chat-client-shell .direct-send-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
 }
 
 .chat-client-shell .composer-tool-button {
@@ -13133,23 +13126,6 @@ body {
 .chat-client-shell .composer-tool-button:hover {
   border-color: rgba(96, 165, 250, 0.46);
   color: #bfdbfe;
-}
-
-.chat-client-shell .quick-action-hotbar .skill-chip {
-  min-height: 34px;
-  padding: 6px 12px;
-  font-size: 13px;
-}
-
-.chat-client-shell .direct-send-row {
-  grid-template-columns: clamp(140px, 15vw, 190px) minmax(0, 1fr) 86px;
-}
-
-.chat-client-shell .direct-send-row select,
-.chat-client-shell .direct-send-row textarea,
-.chat-client-shell #directSendSubmit {
-  min-height: 46px;
-  font-size: 14px;
 }
 
 @media (max-width: 1180px) {

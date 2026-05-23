@@ -166,6 +166,13 @@ def test_chat_viewport_layout_contract_keeps_composer_visible():
     assert '<div id="quickActionHotbar" class="quick-action-hotbar"' in html
     assert '<textarea id="directSendInput"' in html
     assert "/* ---------- Final chat viewport stability contract ---------- */" not in base_css
+    stale_base_fragments = [
+        ".chat-client-shell .quick-action-hotbar .skill-chip {\n  min-height: 34px;",
+        ".chat-client-shell .direct-send-row {\n  grid-template-columns: clamp(140px, 15vw, 190px)",
+        ".chat-client-shell .message-count-pill,\n.chat-client-shell .composer-tool-button",
+    ]
+    for fragment in stale_base_fragments:
+        assert fragment not in base_css
 
     final_contract = css
     required_fragments = [
