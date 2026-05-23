@@ -92,9 +92,8 @@ class OutboxPlanner:
         if action.chat_id is None and not target_chat:
             missing.append("target_chat")
 
-        # TODO(send_as): 真要发送时,把 identity_id 解析成 InputPeer
-        # (client.get_input_entity(send_as_id))再交给 SendMessageRequest(send_as=…)。
-        # mini-web 当前不真发送,先不接。
+        # 发送层才负责把 send_as_id 解析成 Telegram InputPeer。
+        # 这里保持纯计划对象,不碰 client / I/O。
 
         return OutboxPlan(
             action=action,

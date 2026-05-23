@@ -20,7 +20,7 @@ from backend.domain.models import (
 )
 from backend.identity_state import build_default_registry
 from backend.parsers import build_parser_registry
-from backend.parsers.inventory import parse_inventory_snapshot
+from backend.parsers.inventory import parse_inventory_delta_event, parse_inventory_snapshot
 from backend.parsers.resource_stats import infer_wild_strategy_from_command
 from backend.processors import MessagePipeline
 from backend.processors.message_filter import (
@@ -28,9 +28,30 @@ from backend.processors.message_filter import (
     CURRENT_MESSAGE_FILTER_VERSION,
     DEFAULT_FOCUS_EXCLUDE_PATTERNS,
     DEFAULT_FOCUS_KEYWORDS,
-    LEGACY_FOCUS_EXCLUDE_PATTERNS,
     enrich_filter_channels,
 )
+from backend.repo.accounts import _normalize_account, _normalize_identity
+from backend.repo.common import (
+    _coerce_non_zero_int,
+    _merge_int_defaults,
+    _merge_str_defaults,
+    _normalize_channel_filters,
+    _parse_message_dt,
+    _safe_int,
+)
+from backend.repo.outbox import _normalize_outbox_draft, _normalize_send_log, _send_log_row_to_api
+from backend.repo.resources import (
+    _inventory_item_row_to_api,
+    _inventory_snapshot_row_to_api,
+    _resource_coverage_kind,
+    _resource_delta_row_to_api,
+    _resource_event_diagnostics,
+    _resource_event_row_to_api,
+    _resource_event_summary,
+    _resource_period_keys,
+)
+from backend.repo.schedules import _normalize_schedule_saved_templates
+from backend.repo.settings import _merge_focus_exclude_defaults, _normalize_settings
 from backend.tg.client import safe_session_name
 
 
@@ -40,8 +61,8 @@ DEFAULT_LEADER_SOURCE_NAMES = ["@iosdo7"]
 DEFAULT_TARGET_CHAT = "-1001680975844"
 DEFAULT_TARGET_TOPIC_ID = "7310786"
 ACCOUNT_SECRET_KEYS = {"api_hash", "proxy_password"}
-RESOURCE_STATS_SCHEMA_VERSION = 7
-INVENTORY_SCHEMA_VERSION = 1
+RESOURCE_STATS_SCHEMA_VERSION = 8
+INVENTORY_SCHEMA_VERSION = 2
 DUNGEON_CONTEXT_SCAN_LIMIT = 2500
 RESOURCE_BASIC_NAMES = ("修为", "贡献", "灵石")
 RESOURCE_RARE_NAMES = (
@@ -523,6 +544,7 @@ class SQLiteStore:
                    OR text LIKE '%黄龙山大战%'
                    OR text LIKE '%登顶昆吾山%'
                    OR text LIKE '%坠魔谷%'
+                   OR text LIKE '%苍坤上人洞府%'
                    OR text LIKE '%灵果入腹%'
                    OR (text LIKE '%逆天之举%' AND text LIKE '%风希%')
                    OR text LIKE '%【极阴的欣赏】%'
@@ -589,8 +611,8 @@ class SQLiteStore:
     def backfill_inventory_snapshots_if_needed(self) -> dict[str, int]:
         """从历史消息箱补储物袋快照。
 
-        库存是“最近一次储物袋面板”的投影,不是实时账本。这里不回放购买/
-        上架流水去推库存,避免用不完整事件造出一个看似准确的余额。
+        .储物袋 面板是权威快照;成功回执只作为快照之后的估算账本,
+        用来减少手动刷新频率。UI 仍会暴露 confidence,方便回到手动刷新兜底。
         """
         with self._connect() as conn:
             stored_version_row = conn.execute(
@@ -610,6 +632,10 @@ class SQLiteStore:
                        edited_at, deleted_at, media_kind, media_meta_json
                 FROM raw_messages
                 WHERE text LIKE '%储物袋%'
+                   OR text LIKE '%上架成功%'
+                   OR text LIKE '%赠送了%'
+                   OR text LIKE '%获得【%'
+                   OR text LIKE '%分得【%'
                 ORDER BY rowid ASC
                 """
             ).fetchall()
@@ -618,6 +644,8 @@ class SQLiteStore:
         with self._connect() as conn:
             conn.execute("DELETE FROM inventory_items")
             conn.execute("DELETE FROM inventory_snapshots")
+            conn.execute("DELETE FROM inventory_ledger")
+            conn.execute("DELETE FROM inventory_current")
             for row in rows:
                 event = RawMessageEvent(
                     id=row[0],
@@ -638,6 +666,7 @@ class SQLiteStore:
                 )
                 before = conn.execute("SELECT COUNT(*) FROM inventory_items").fetchone()[0]
                 self._replace_inventory_snapshot(conn, event)
+                self._replace_inventory_delta_records(conn, event)
                 after = conn.execute("SELECT COUNT(*) FROM inventory_items").fetchone()[0]
                 if after > before:
                     snapshot_count += 1
@@ -1189,7 +1218,15 @@ class SQLiteStore:
                     media_meta_json,
                 ),
             )
-            conn.execute("DELETE FROM parsed_cards WHERE raw_message_id=?", (event.id,))
+            card_ids = [str(card.id) for card in cards]
+            if card_ids:
+                placeholders = ",".join("?" for _ in card_ids)
+                conn.execute(
+                    f"DELETE FROM parsed_cards WHERE raw_message_id=? AND id NOT IN ({placeholders})",
+                    (event.id, *card_ids),
+                )
+            else:
+                conn.execute("DELETE FROM parsed_cards WHERE raw_message_id=?", (event.id,))
             for card in cards:
                 conn.execute(
                     """
@@ -1218,6 +1255,7 @@ class SQLiteStore:
                 output.resource_events,
             )
             self._replace_inventory_snapshot(conn, event)
+            self._replace_inventory_delta_records(conn, event)
             for patch in output.state_patches:
                 # 解析 send_as_id:patch 自己有就用;没有就回退到本条 event sender,
                 # 如果本条是「游戏 bot 回复」(根据 settings.game_bot_ids 判断,不是
@@ -1472,6 +1510,7 @@ class SQLiteStore:
         if not items:
             return
         total_amount = sum(int(item.get("amount") or 0) for item in items)
+        owner = str(snapshot.get("owner") or "")
         cur = conn.execute(
             """
             INSERT INTO inventory_snapshots(
@@ -1481,7 +1520,7 @@ class SQLiteStore:
             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                str(snapshot.get("owner") or ""),
+                owner,
                 event.id,
                 str(snapshot.get("source") or event.source or ""),
                 str(snapshot.get("event_time") or event.date or utc_now_iso()),
@@ -1504,7 +1543,7 @@ class SQLiteStore:
                 """,
                 (
                     snapshot_id,
-                    str(snapshot.get("owner") or ""),
+                    owner,
                     str(item.get("section") or ""),
                     str(item.get("name") or ""),
                     int(item.get("amount") or 0),
@@ -1513,6 +1552,303 @@ class SQLiteStore:
                     event.id,
                 ),
             )
+        self._reset_inventory_current_from_snapshot(conn, owner, event, items)
+
+    def _reset_inventory_current_from_snapshot(
+        self,
+        conn,
+        owner: str,
+        event: RawMessageEvent,
+        items: Iterable[dict],
+    ) -> None:
+        owner = str(owner or "").strip().lstrip("@")
+        if not owner:
+            return
+        now = utc_now_iso()
+        event_time = event.date or now
+        conn.execute("DELETE FROM inventory_current WHERE LOWER(owner)=LOWER(?)", (owner,))
+        for item in items:
+            name = str(item.get("name") or "").strip()
+            amount = int(item.get("amount") or 0)
+            if not name or amount <= 0:
+                continue
+            conn.execute(
+                """
+                INSERT INTO inventory_current(
+                    owner, section, item_name, amount, extra, confidence,
+                    basis, last_snapshot_message_id, last_delta_message_id,
+                    event_time, updated_at
+                )
+                VALUES(?, ?, ?, ?, ?, 'snapshot', 'snapshot', ?, '', ?, ?)
+                ON CONFLICT(owner, item_name, extra) DO UPDATE SET
+                    section=excluded.section,
+                    amount=excluded.amount,
+                    confidence=excluded.confidence,
+                    basis=excluded.basis,
+                    last_snapshot_message_id=excluded.last_snapshot_message_id,
+                    event_time=excluded.event_time,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    owner,
+                    str(item.get("section") or ""),
+                    name,
+                    amount,
+                    str(item.get("extra") or ""),
+                    event.id,
+                    event_time,
+                    now,
+                ),
+            )
+        self._replay_inventory_ledger_after_snapshot(conn, owner, event.id, event_time)
+
+    def _replace_inventory_delta_records(self, conn, event: RawMessageEvent) -> None:
+        self._rollback_inventory_delta_records(conn, event.id)
+        conn.execute("DELETE FROM inventory_ledger WHERE raw_message_id=?", (event.id,))
+        parsed = parse_inventory_delta_event(event)
+        if parsed is None:
+            return
+        owner = self._inventory_owner_for_event(conn, event)
+        if not owner:
+            return
+        now = utc_now_iso()
+        event_time = str(parsed.get("event_time") or event.date or now)
+        for item_name, delta in (parsed.get("deltas") or {}).items():
+            name = str(item_name or "").strip()
+            amount_delta = int(delta or 0)
+            if not name or amount_delta == 0:
+                continue
+            conn.execute(
+                """
+                INSERT INTO inventory_ledger(
+                    owner, raw_message_id, source_type, item_name, amount_delta,
+                    confidence, event_time, chat_id, msg_id, created_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    owner,
+                    event.id,
+                    str(parsed.get("source_type") or "event_delta"),
+                    name,
+                    amount_delta,
+                    str(parsed.get("confidence") or "estimated"),
+                    event_time,
+                    int(parsed.get("chat_id") or event.chat_id or 0),
+                    int(parsed.get("msg_id") or event.msg_id or 0),
+                    now,
+                ),
+            )
+            row = conn.execute(
+                """
+                SELECT amount, section, extra FROM inventory_current
+                WHERE LOWER(owner)=LOWER(?) AND item_name=? AND extra=''
+                LIMIT 1
+                """,
+                (owner, name),
+            ).fetchone()
+            section = str(row[1] or "材料") if row else "材料"
+            self._apply_inventory_current_delta(
+                conn,
+                owner=owner,
+                item_name=name,
+                amount_delta=amount_delta,
+                section=section,
+                raw_message_id=event.id,
+                event_time=event_time,
+                updated_at=now,
+            )
+
+    def _inventory_owner_for_event(self, conn, event: RawMessageEvent) -> str:
+        sender_id = 0
+        if event.reply_to_msg_id:
+            parent = self._lookup_parent_event(int(event.chat_id or 0), int(event.reply_to_msg_id or 0))
+            if parent and parent.sender_id is not None:
+                try:
+                    sender_id = int(parent.sender_id)
+                except (TypeError, ValueError):
+                    sender_id = 0
+        if not sender_id and event.sender_id is not None:
+            try:
+                sender_id = int(event.sender_id)
+            except (TypeError, ValueError):
+                sender_id = 0
+        if not sender_id:
+            return ""
+        for table, key in (("identities", "send_as_id"), ("accounts", "account_id")):
+            try:
+                rows = conn.execute(f"SELECT payload_json FROM {table}").fetchall()
+            except sqlite3.Error:
+                continue
+            for row in rows:
+                try:
+                    payload = json.loads(row[0] or "{}")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                try:
+                    if int(payload.get(key) or 0) != sender_id:
+                        continue
+                except (TypeError, ValueError):
+                    continue
+                for candidate in (payload.get("username"), payload.get("label"), payload.get("daohao")):
+                    owner = str(candidate or "").strip().lstrip("@")
+                    if owner:
+                        return owner
+        return ""
+
+    def _replay_inventory_ledger_after_snapshot(
+        self,
+        conn,
+        owner: str,
+        snapshot_raw_message_id: str,
+        snapshot_event_time: str,
+    ) -> None:
+        owner = str(owner or "").strip().lstrip("@")
+        if not owner:
+            return
+        snapshot_dt = _parse_message_dt(snapshot_event_time)
+        rows = conn.execute(
+            """
+            SELECT raw_message_id, item_name, amount_delta, event_time
+            FROM inventory_ledger
+            WHERE LOWER(owner)=LOWER(?)
+            ORDER BY event_time ASC, id ASC
+            """,
+            (owner,),
+        ).fetchall()
+        now = utc_now_iso()
+        for row in rows:
+            raw_message_id = str(row[0] or "")
+            if raw_message_id == str(snapshot_raw_message_id or ""):
+                continue
+            ledger_time = str(row[3] or "")
+            ledger_dt = _parse_message_dt(ledger_time)
+            if snapshot_dt and ledger_dt:
+                if ledger_dt <= snapshot_dt:
+                    continue
+            elif ledger_time <= str(snapshot_event_time or ""):
+                continue
+            self._apply_inventory_current_delta(
+                conn,
+                owner=owner,
+                item_name=str(row[1] or ""),
+                amount_delta=int(row[2] or 0),
+                section="材料",
+                raw_message_id=raw_message_id,
+                event_time=ledger_time,
+                updated_at=now,
+            )
+
+    def _apply_inventory_current_delta(
+        self,
+        conn,
+        *,
+        owner: str,
+        item_name: str,
+        amount_delta: int,
+        section: str = "材料",
+        raw_message_id: str = "",
+        event_time: str = "",
+        updated_at: str = "",
+    ) -> None:
+        owner = str(owner or "").strip().lstrip("@")
+        name = str(item_name or "").strip()
+        amount_delta = int(amount_delta or 0)
+        if not owner or not name or amount_delta == 0:
+            return
+        row = conn.execute(
+            """
+            SELECT amount, section FROM inventory_current
+            WHERE LOWER(owner)=LOWER(?) AND item_name=? AND extra=''
+            LIMIT 1
+            """,
+            (owner, name),
+        ).fetchone()
+        old_amount = int(row[0] or 0) if row else 0
+        resolved_section = str(row[1] or section or "材料") if row else str(section or "材料")
+        new_amount = max(0, old_amount + amount_delta)
+        now = updated_at or utc_now_iso()
+        if new_amount > 0:
+            conn.execute(
+                """
+                INSERT INTO inventory_current(
+                    owner, section, item_name, amount, extra, confidence,
+                    basis, last_snapshot_message_id, last_delta_message_id,
+                    event_time, updated_at
+                )
+                VALUES(?, ?, ?, ?, '', 'estimated', 'ledger_delta', '', ?, ?, ?)
+                ON CONFLICT(owner, item_name, extra) DO UPDATE SET
+                    section=excluded.section,
+                    amount=excluded.amount,
+                    confidence=excluded.confidence,
+                    basis=excluded.basis,
+                    last_delta_message_id=excluded.last_delta_message_id,
+                    event_time=excluded.event_time,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    owner,
+                    resolved_section,
+                    name,
+                    new_amount,
+                    str(raw_message_id or ""),
+                    str(event_time or now),
+                    now,
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                DELETE FROM inventory_current
+                WHERE LOWER(owner)=LOWER(?) AND item_name=? AND extra=''
+                """,
+                (owner, name),
+            )
+
+    def _rollback_inventory_delta_records(self, conn, raw_message_id: str) -> None:
+        rows = conn.execute(
+            """
+            SELECT owner, item_name, amount_delta
+            FROM inventory_ledger
+            WHERE raw_message_id=?
+            """,
+            (raw_message_id,),
+        ).fetchall()
+        if not rows:
+            return
+        now = utc_now_iso()
+        for row in rows:
+            owner = str(row[0] or "")
+            name = str(row[1] or "")
+            amount_delta = int(row[2] or 0)
+            current = conn.execute(
+                """
+                SELECT amount, section FROM inventory_current
+                WHERE LOWER(owner)=LOWER(?) AND item_name=? AND extra=''
+                LIMIT 1
+                """,
+                (owner, name),
+            ).fetchone()
+            if not current:
+                continue
+            new_amount = max(0, int(current[0] or 0) - amount_delta)
+            if new_amount > 0:
+                conn.execute(
+                    """
+                    UPDATE inventory_current
+                    SET amount=?, confidence='estimated', basis='ledger_delta', updated_at=?
+                    WHERE LOWER(owner)=LOWER(?) AND item_name=? AND extra=''
+                    """,
+                    (new_amount, now, owner, name),
+                )
+            else:
+                conn.execute(
+                    """
+                    DELETE FROM inventory_current
+                    WHERE LOWER(owner)=LOWER(?) AND item_name=? AND extra=''
+                    """,
+                    (owner, name),
+                )
 
     def _reclassify_direct_reply_children(self, parent_event: RawMessageEvent) -> int:
         """父消息落库后,重算直接回复它的卡片过滤频道。
@@ -1648,27 +1984,40 @@ class SQLiteStore:
         rowid 是 SQLite 自动递增的插入序号,新进来的卡片 rowid 一定更大。
         Edit 走 UPSERT,rowid 不变 —— 当前不专门追踪「编辑过的旧卡片是否要重发」,
         前端按 id merge 即可处理。"""
-        sql_parts = ["SELECT rowid, payload_json FROM parsed_cards"]
+        sql_parts = ["SELECT parsed_cards.rowid, parsed_cards.payload_json FROM parsed_cards"]
+        joins = []
         where = []
         params: list = []
         if since_seq > 0:
-            where.append("rowid > ?")
+            where.append("parsed_cards.rowid > ?")
             params.append(int(since_seq))
         if before_seq > 0:
-            where.append("rowid < ?")
+            where.append("parsed_cards.rowid < ?")
             params.append(int(before_seq))
         channel_filters = _normalize_channel_filters(channel, channels)
         if channel_filters:
             where.append("(" + " OR ".join("channels_json LIKE ?" for _ in channel_filters) + ")")
             params.extend(f'%"{item}"%' for item in channel_filters)
+        if since_seq <= 0:
+            joins.append("JOIN raw_messages ON raw_messages.id = parsed_cards.raw_message_id")
+        if joins:
+            sql_parts.extend(joins)
         if where:
             sql_parts.append("WHERE " + " AND ".join(where))
-        # since_seq 模式按 rowid ASC 给前端,前端按到来顺序 merge;
-        # 否则按 DESC 给最新的在前。
+        # since_seq 模式按 rowid ASC 给前端推进增量游标;
+        # 普通初始化 / 翻页按消息真实时间倒序,避免重解析旧消息被 rowid 顶到最新。
         if since_seq > 0:
-            sql_parts.append("ORDER BY rowid ASC")
+            sql_parts.append("ORDER BY parsed_cards.rowid ASC")
         else:
-            sql_parts.append("ORDER BY rowid DESC")
+            sql_parts.append(
+                """
+                ORDER BY
+                    CASE WHEN raw_messages.date IS NULL OR raw_messages.date='' THEN 1 ELSE 0 END ASC,
+                    raw_messages.date DESC,
+                    raw_messages.msg_id DESC,
+                    parsed_cards.rowid DESC
+                """
+            )
         if limit and limit > 0:
             sql_parts.append("LIMIT ?")
             params.append(int(limit))
@@ -1747,7 +2096,17 @@ class SQLiteStore:
             where_parts.append("(" + " OR ".join("parsed_cards.channels_json LIKE ?" for _ in channel_filters) + ")")
             params.extend(f'%"{item}"%' for item in channel_filters)
 
-        order = "ORDER BY parsed_cards.rowid ASC" if since_seq > 0 else "ORDER BY parsed_cards.rowid DESC"
+        order = (
+            "ORDER BY parsed_cards.rowid ASC"
+            if since_seq > 0
+            else """
+            ORDER BY
+                CASE WHEN raw_messages.date IS NULL OR raw_messages.date='' THEN 1 ELSE 0 END ASC,
+                raw_messages.date DESC,
+                raw_messages.msg_id DESC,
+                parsed_cards.rowid DESC
+            """
+        )
         limit_clause = ""
         if limit and limit > 0:
             limit_clause = "LIMIT ?"
@@ -1812,7 +2171,7 @@ class SQLiteStore:
         这里按当前过滤器的保护口径近似:
         - 只看当前在 focus 的消息
         - 跳过 bot / 游戏 bot
-        - 跳过我的发送、回复我、被@、会长、风险、动作草稿
+        - 跳过被@、会长、风险、副本和动作草稿
         """
         item = str(pattern or "").strip()
         if not item:
@@ -1912,7 +2271,7 @@ class SQLiteStore:
             "focus_muted_source_names": [],
             "focus_keywords": list(DEFAULT_FOCUS_KEYWORDS),
             "focus_exclude_patterns": list(DEFAULT_FOCUS_EXCLUDE_PATTERNS),
-            "focus_include_player_plain": False,
+            "focus_include_player_plain": True,
             "archive_dot_commands": True,
             "archive_bot_replies": True,
             "message_filter_version": CURRENT_MESSAGE_FILTER_VERSION,
@@ -2154,6 +2513,72 @@ class SQLiteStore:
                 for snapshot in snapshots:
                     snapshot["items"] = grouped.get(int(snapshot["id"]), [])
         return snapshots
+
+    def list_inventory_current(
+        self,
+        *,
+        owner: str = "",
+        owners: Iterable[str] | None = None,
+        limit: int = 500,
+    ) -> list[dict]:
+        owner = str(owner or "").strip().lstrip("@")
+        try:
+            limit = int(limit or 500)
+        except (TypeError, ValueError):
+            limit = 500
+        limit = max(1, min(limit, 2000))
+        params: list = []
+        where = []
+        if owner:
+            where.append("LOWER(owner)=LOWER(?)")
+            params.append(owner)
+        elif owners is not None:
+            owner_list: list[str] = []
+            seen: set[str] = set()
+            for item in owners:
+                normalized = str(item or "").strip().lstrip("@")
+                if not normalized:
+                    continue
+                key = normalized.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                owner_list.append(normalized)
+            if not owner_list:
+                return []
+            placeholders = ",".join("?" for _ in owner_list)
+            where.append(f"LOWER(owner) IN ({placeholders})")
+            params.extend(item.lower() for item in owner_list)
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT owner, section, item_name, amount, extra, confidence, basis,
+                       last_snapshot_message_id, last_delta_message_id, event_time, updated_at
+                FROM inventory_current
+                {where_sql}
+                ORDER BY owner ASC, section ASC, item_name ASC, extra ASC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [
+            {
+                "owner": row[0] or "",
+                "section": row[1] or "",
+                "name": row[2] or "",
+                "amount": int(row[3] or 0),
+                "extra": row[4] or "",
+                "confidence": row[5] or "snapshot",
+                "basis": row[6] or "snapshot",
+                "last_snapshot_message_id": row[7] or "",
+                "last_delta_message_id": row[8] or "",
+                "event_time": row[9] or "",
+                "updated_at": row[10] or "",
+            }
+            for row in rows
+        ]
 
     def resource_stats(
         self,
@@ -2982,6 +3407,8 @@ class SQLiteStore:
             search_text = f"{card.title or ''}\n{card.raw or ''}"
             if str(fields.get("副本名") or "").strip() != dungeon_name and dungeon_name not in search_text:
                 continue
+            if _is_dungeon_context_closed_card(card):
+                return {}
             dungeon_id = str(fields.get("副本ID") or "").strip()
             if not dungeon_id:
                 continue
@@ -3018,6 +3445,7 @@ class SQLiteStore:
                     OR rm.text LIKE '%【黄龙山大战%'
                     OR rm.text LIKE '%【登顶昆吾山%'
                     OR rm.text LIKE '%【坠魔谷%'
+                    OR rm.text LIKE '%【苍坤上人洞府%'
                     OR rm.text LIKE '%【逆天之举%'
                     OR rm.text LIKE '%【灵果入腹%'
                     OR rm.text LIKE '%【极阴的欣赏%'
@@ -3111,6 +3539,7 @@ class SQLiteStore:
                     OR rm.text LIKE '%【黄龙山大战%'
                     OR rm.text LIKE '%【登顶昆吾山%'
                     OR rm.text LIKE '%【坠魔谷%'
+                    OR rm.text LIKE '%【苍坤上人洞府%'
                     OR rm.text LIKE '%【逆天之举%'
                     OR rm.text LIKE '%【灵果入腹%'
                     OR rm.text LIKE '%【极阴的欣赏%'
@@ -3404,6 +3833,44 @@ class SQLiteStore:
                 CREATE INDEX IF NOT EXISTS idx_inventory_items_name
                     ON inventory_items(item_name);
 
+                CREATE TABLE IF NOT EXISTS inventory_current (
+                    owner TEXT NOT NULL,
+                    section TEXT NOT NULL DEFAULT '',
+                    item_name TEXT NOT NULL,
+                    amount INTEGER NOT NULL DEFAULT 0,
+                    extra TEXT NOT NULL DEFAULT '',
+                    confidence TEXT NOT NULL DEFAULT 'snapshot',
+                    basis TEXT NOT NULL DEFAULT 'snapshot',
+                    last_snapshot_message_id TEXT NOT NULL DEFAULT '',
+                    last_delta_message_id TEXT NOT NULL DEFAULT '',
+                    event_time TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(owner, item_name, extra)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_inventory_current_owner
+                    ON inventory_current(owner, item_name);
+
+                CREATE TABLE IF NOT EXISTS inventory_ledger (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    owner TEXT NOT NULL,
+                    raw_message_id TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    item_name TEXT NOT NULL,
+                    amount_delta INTEGER NOT NULL,
+                    confidence TEXT NOT NULL DEFAULT 'estimated',
+                    event_time TEXT NOT NULL,
+                    chat_id INTEGER NOT NULL DEFAULT 0,
+                    msg_id INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(raw_message_id) REFERENCES raw_messages(id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_inventory_ledger_owner
+                    ON inventory_ledger(owner, event_time DESC);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_ledger_raw_item
+                    ON inventory_ledger(raw_message_id, owner, item_name);
+
                 CREATE TABLE IF NOT EXISTS state_patches (
                     scope TEXT NOT NULL,
                     send_as_id INTEGER NOT NULL DEFAULT 0,
@@ -3615,106 +4082,6 @@ class SQLiteStore:
         return conn
 
 
-def _normalize_settings(payload: dict) -> dict:
-    def text(key: str) -> str:
-        return str(payload.get(key) or "").strip()
-
-    def bool_value(key: str) -> bool:
-        return bool(payload.get(key))
-
-    raw_bot_ids = payload.get("game_bot_ids") or []
-    if isinstance(raw_bot_ids, str):
-        raw_bot_ids = raw_bot_ids.replace("\n", ",").split(",")
-    game_bot_ids = []
-    for item in raw_bot_ids:
-        raw = str(item or "").strip()
-        if not raw:
-            continue
-        try:
-            game_bot_ids.append(int(raw))
-        except ValueError:
-            continue
-
-    retention_raw = payload.get("message_retention_days")
-    if retention_raw is None or str(retention_raw).strip() == "":
-        retention = 30
-    else:
-        try:
-            retention = int(str(retention_raw).strip())
-        except (TypeError, ValueError):
-            retention = 30
-        if retention < 0:
-            retention = 0
-
-    # notify_card_titles: tuple/list of strings (UI 多选 checkbox)
-    raw_titles = payload.get("notify_card_titles") or []
-    if isinstance(raw_titles, str):
-        raw_titles = [raw_titles]
-    notify_card_titles = sorted(
-        {str(t).strip() for t in raw_titles if str(t or "").strip()}
-    )
-
-    raw_templates = payload.get("schedule_saved_templates") or []
-    schedule_saved_templates = _normalize_schedule_saved_templates(raw_templates)
-
-    def str_list(key: str, default: list[str] | None = None) -> list[str]:
-        raw = payload.get(key)
-        if raw is None:
-            raw = default or []
-        if isinstance(raw, str):
-            raw = raw.splitlines() if key == "focus_exclude_patterns" else raw.replace("\n", ",").split(",")
-        return [str(item).strip() for item in raw if str(item or "").strip()]
-
-    def int_list(key: str) -> list[int]:
-        out = []
-        for item in str_list(key):
-            try:
-                out.append(int(item))
-            except (TypeError, ValueError):
-                continue
-        return sorted(set(out))
-
-    return {
-        "api_id": text("api_id"),
-        "api_hash": text("api_hash"),
-        "phone": text("phone"),
-        "session_name": text("session_name") or "miniweb_session",
-        "target_chat": text("target_chat"),
-        "target_topic_id": text("target_topic_id"),
-        "game_bot_ids": sorted(set(game_bot_ids)),
-        "proxy_type": text("proxy_type").lower(),
-        "proxy_host": text("proxy_host"),
-        "proxy_username": text("proxy_username"),
-        "proxy_password": text("proxy_password"),
-        "listen_enabled": bool_value("listen_enabled"),
-        "login_status": text("login_status") or "idle",
-        "login_message": text("login_message"),
-        "login_account_id": text("login_account_id"),
-        "listener_status": text("listener_status") or "stopped",
-        "listener_message": text("listener_message"),
-        "message_retention_days": retention,
-        "own_aliases": sorted(set(str_list("own_aliases"))),
-        "leader_sender_ids": int_list("leader_sender_ids"),
-        "leader_source_names": sorted(set(str_list("leader_source_names"))),
-        "focus_muted_sender_ids": int_list("focus_muted_sender_ids"),
-        "focus_muted_source_names": sorted(set(str_list("focus_muted_source_names"))),
-        "focus_keywords": sorted(set(str_list("focus_keywords", list(DEFAULT_FOCUS_KEYWORDS)))),
-        "focus_exclude_patterns": _merge_focus_exclude_defaults(
-            str_list("focus_exclude_patterns", []),
-        ),
-        "focus_include_player_plain": bool_value("focus_include_player_plain"),
-        "archive_dot_commands": bool_value("archive_dot_commands"),
-        "archive_bot_replies": bool_value("archive_bot_replies"),
-        "message_filter_version": CURRENT_MESSAGE_FILTER_VERSION,
-        "leader_message_filter_version": CURRENT_LEADER_MESSAGE_FILTER_VERSION,
-        "notify_enabled": bool_value("notify_enabled"),
-        "notify_tg_bot_token": text("notify_tg_bot_token"),
-        "notify_tg_chat_id": text("notify_tg_chat_id"),
-        "notify_card_titles": notify_card_titles,
-        "schedule_saved_templates": schedule_saved_templates,
-    }
-
-
 def _clean_reply_to(event: RawMessageEvent, topic_id: int = 0) -> int | None:
     raw_reply = event.reply_to_msg_id
     if raw_reply and (
@@ -3725,501 +4092,14 @@ def _clean_reply_to(event: RawMessageEvent, topic_id: int = 0) -> int | None:
     return int(raw_reply) if raw_reply else None
 
 
-def _merge_int_defaults(raw_value, defaults: list[int]) -> list[int]:
-    items: list[int] = []
-    seen: set[int] = set()
-    for value in list(raw_value or []) + list(defaults or []):
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            continue
-        if parsed and parsed not in seen:
-            seen.add(parsed)
-            items.append(parsed)
-    return items
-
-
-def _merge_str_defaults(raw_value, defaults: list[str]) -> list[str]:
-    items: list[str] = []
-    seen: set[str] = set()
-    for value in list(raw_value or []) + list(defaults or []):
-        text = str(value or "").strip()
-        if not text:
-            continue
-        if text not in seen:
-            seen.add(text)
-            items.append(text)
-    return items
-
-
-def _merge_focus_exclude_defaults(raw_value) -> list[str]:
-    legacy = {str(item).strip() for item in LEGACY_FOCUS_EXCLUDE_PATTERNS}
-    custom = [
-        str(item or "").strip()
-        for item in list(raw_value or [])
-        if str(item or "").strip() and str(item or "").strip() not in legacy
-    ]
-    return _merge_str_defaults(custom, list(DEFAULT_FOCUS_EXCLUDE_PATTERNS))
-
-
 def _is_focus_protected_card(card: ParsedCard) -> bool:
     tags = set(card.tags or ())
     channels = set(card.channels or ())
-    if tags.intersection({"我发出", "回复我", "被@", "会长"}):
+    if tags.intersection({"被@", "会长"}):
         return True
-    if card.severity == "risk" or "risk" in channels:
+    if card.severity == "risk" or channels.intersection({"risk", "dungeon"}):
         return True
     return bool(card.actions)
-
-
-def _parse_message_dt(value: object) -> datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def _resource_period_keys(value: object) -> tuple[str, str, str]:
-    parsed = _parse_message_dt(value) or datetime.now(timezone.utc)
-    local = parsed.astimezone(timezone(timedelta(hours=8)))
-    iso_year, iso_week, _ = local.isocalendar()
-    return (
-        local.date().isoformat(),
-        f"{iso_year:04d}-W{iso_week:02d}",
-        f"{local.year:04d}-{local.month:02d}",
-    )
-
-
-def _resource_delta_row_to_api(row) -> dict:
-    meta = {}
-    try:
-        meta = json.loads(row[14] or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        meta = {}
-    return ResourceDelta(
-        raw_message_id=row[0],
-        source_type=row[1],
-        source_name=row[2],
-        player=row[3],
-        resource_name=row[4],
-        amount=int(row[5] or 0),
-        unit=row[6] or "",
-        basis=row[7] or "event",
-        event_time=row[8] or "",
-        chat_id=int(row[12] or 0),
-        msg_id=int(row[13] or 0),
-        meta=meta,
-    ).to_api() | {
-        "day": row[9],
-        "week": row[10],
-        "month": row[11],
-    }
-
-
-def _resource_event_row_to_api(row) -> dict:
-    meta = {}
-    try:
-        meta = json.loads(row[12] or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        meta = {}
-    return ResourceEvent(
-        raw_message_id=row[0],
-        source_type=row[1],
-        source_name=row[2],
-        player=row[3],
-        result=row[4],
-        outcome=row[5],
-        event_time=row[6] or "",
-        chat_id=int(row[10] or 0),
-        msg_id=int(row[11] or 0),
-        meta=meta,
-    ).to_api() | {
-        "day": row[7],
-        "week": row[8],
-        "month": row[9],
-    }
-
-
-def _inventory_snapshot_row_to_api(row) -> dict:
-    return {
-        "id": int(row[0]),
-        "owner": row[1] or "",
-        "raw_message_id": row[2] or "",
-        "source": row[3] or "",
-        "event_time": row[4] or "",
-        "chat_id": int(row[5] or 0),
-        "msg_id": int(row[6] or 0),
-        "item_count": int(row[7] or 0),
-        "total_amount": int(row[8] or 0),
-        "created_at": row[9] or "",
-        "items": [],
-    }
-
-
-def _inventory_item_row_to_api(row) -> dict:
-    return {
-        "snapshot_id": int(row[0] or 0),
-        "owner": row[1] or "",
-        "section": row[2] or "",
-        "name": row[3] or "",
-        "amount": int(row[4] or 0),
-        "extra": row[5] or "",
-        "event_time": row[6] or "",
-        "raw_message_id": row[7] or "",
-    }
-
-
-def _resource_event_summary(events: list[dict]) -> list[dict]:
-    grouped: dict[tuple[str, str, str], dict] = {}
-    for row in events:
-        key = (
-            str(row.get("period") or ""),
-            str(row.get("source_type") or ""),
-            str(row.get("source_name") or ""),
-        )
-        item = grouped.setdefault(
-            key,
-            {
-                "period": key[0],
-                "source_type": key[1],
-                "source_name": key[2],
-                "success": 0,
-                "failed": 0,
-                "cooldown": 0,
-                "settled": 0,
-                "basic_only": 0,
-                "extra_success": 0,
-                "total": 0,
-                "unknown_result": 0,
-                "empty_outcome": 0,
-                "success_rate": None,
-            },
-        )
-        result = str(row.get("result") or "")
-        outcome = str(row.get("outcome") or "")
-        count = int(row.get("event_count") or 0)
-        item["total"] += count
-        if not outcome:
-            item["empty_outcome"] += count
-        if result in item:
-            item[result] += count
-        elif not result:
-            item["unknown_result"] += count
-        else:
-            item.setdefault("other", 0)
-            item["other"] += count
-    for item in grouped.values():
-        attempts = int(item.get("success") or 0) + int(item.get("failed") or 0)
-        if attempts:
-            item["success_rate"] = round(int(item.get("success") or 0) * 100 / attempts, 1)
-    return sorted(
-        grouped.values(),
-        key=lambda item: (
-            str(item.get("period") or ""),
-            str(item.get("source_type") or ""),
-            str(item.get("source_name") or ""),
-        ),
-        reverse=True,
-    )
-
-
-def _resource_event_diagnostics(events: list[dict]) -> dict:
-    unknown_sources: dict[str, int] = {}
-    empty_outcomes: dict[str, int] = {}
-    for row in events:
-        count = int(row.get("event_count") or 0)
-        if count <= 0:
-            continue
-        source_name = str(row.get("source_name") or "")
-        source_type = str(row.get("source_type") or "")
-        label = f"{source_type}|{source_name}"
-        if source_name.endswith("未知"):
-            unknown_sources[label] = unknown_sources.get(label, 0) + count
-        if not str(row.get("outcome") or ""):
-            empty_outcomes[label] = empty_outcomes.get(label, 0) + count
-    return {
-        "unknown_source_events": sum(unknown_sources.values()),
-        "empty_outcome_events": sum(empty_outcomes.values()),
-        "unknown_sources": [
-            {"source": key, "count": value}
-            for key, value in sorted(unknown_sources.items(), key=lambda item: (-item[1], item[0]))
-        ],
-        "empty_outcomes": [
-            {"source": key, "count": value}
-            for key, value in sorted(empty_outcomes.items(), key=lambda item: (-item[1], item[0]))
-        ],
-    }
-
-
-def _resource_coverage_kind(text: str) -> str:
-    text = str(text or "")
-    if "奖励一览" in text:
-        return ""
-    if "【野外历练" in text:
-        if "正向荒野深处行去" in text or "选择【" in text:
-            return ""
-        if not any(marker in text for marker in ("获得", "修为折损", "负伤", "NPC 历练失败", "山中灵机未复", "后再来")):
-            return ""
-        return "野外历练"
-    if "【战利品结算" in text and "血色试炼" not in text:
-        if not any(marker in text for marker in ("均获得", "每位队员获得", "所有队员", "额外获得", "获得 【", "获得了【")):
-            return ""
-        if "夺鼎" in text:
-            return "虚天殿·夺鼎"
-        if "求稳" in text:
-            return "虚天殿·求稳"
-        return "副本战利品"
-    if "【黄龙山大战" in text:
-        if "指令" in text or "获得" not in text:
-            return ""
-        return "黄龙山"
-    if "【登顶昆吾山" in text:
-        if "最终收获" not in text:
-            return ""
-        return "昆吾山"
-    if ("【坠魔谷·" in text or "【坠魔谷・" in text) and "获得" in text:
-        return "坠魔谷"
-    if "【逆天之举" in text and "风希" in text and "【战利品】" in text:
-        return "风希"
-    if "【灵果入腹" in text:
-        return "灵树采摘"
-    if "【极阴的欣赏" in text or "【神魂碾压" in text or "【侥幸逃脱" in text:
-        return "极阴"
-    if "【天机异闻·南陇侯的交易" in text:
-        if "作为回报" not in text:
-            return ""
-        return "南陇侯"
-    if "【天机异闻·魔君之怒" in text:
-        return "南陇侯"
-    return ""
-
-
-def _normalize_schedule_saved_templates(raw: object) -> list[dict]:
-    items = raw if isinstance(raw, list) else ([] if raw is None else [raw])
-    normalized: list[dict] = []
-    seen: set[str] = set()
-    import time as _time
-
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("name") or "").strip()
-        payload = item.get("payload") or {}
-        if not isinstance(payload, dict):
-            payload = {}
-        template_id = str(item.get("id") or "").strip()
-        if not template_id:
-            template_id = str(item.get("key") or "").strip()
-        if not template_id:
-            template_id = f"tpl-{int(_time.time() * 1000)}"
-        if template_id in seen:
-            continue
-        seen.add(template_id)
-        normalized.append(
-            {
-                "id": template_id,
-                "name": name or template_id,
-                "payload": _normalize_schedule_template_payload(payload),
-                "updated_at": float(item.get("updated_at") or _time.time()),
-            }
-        )
-    normalized.sort(key=lambda item: (item.get("updated_at") or 0, item.get("name") or ""), reverse=True)
-    return normalized
-
-
-def _normalize_schedule_template_payload(payload: dict) -> dict:
-    data = dict(payload or {})
-    for key in ("anchor_at", "anchor_at_text"):
-        data.pop(key, None)
-    if "send_as_ids" in data:
-        raw_ids = data.get("send_as_ids") or []
-        if isinstance(raw_ids, str):
-            raw_ids = raw_ids.replace("\n", ",").split(",")
-        ids = []
-        for item in raw_ids:
-            try:
-                sid = int(str(item).strip())
-            except (TypeError, ValueError):
-                continue
-            if sid and sid not in ids:
-                ids.append(sid)
-        data["send_as_ids"] = ids
-    if "send_as_id" in data:
-        try:
-            data["send_as_id"] = int(data.get("send_as_id") or 0)
-        except (TypeError, ValueError):
-            data["send_as_id"] = 0
-    return data
-
-
-def _safe_int(value: object) -> int:
-    try:
-        return int(value or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _normalize_channel_filters(
-    channel: str = "all",
-    channels: list[str] | tuple[str, ...] | None = None,
-) -> list[str]:
-    raw_items: list[str] = []
-    if channels:
-        raw_items.extend(str(item or "").strip() for item in channels)
-    channel = str(channel or "all").strip()
-    if channel and channel != "all":
-        raw_items.append(channel)
-
-    result: list[str] = []
-    seen: set[str] = set()
-    for item in raw_items:
-        if not item or item == "all" or item in seen:
-            continue
-        seen.add(item)
-        result.append(item)
-    return result
-
-
-def _normalize_account(payload: dict) -> dict:
-    def text(key: str) -> str:
-        return str(payload.get(key) or "").strip()
-
-    raw_local_id = text("local_id") or text("session_name") or text("phone") or "account"
-    local_id = safe_session_name(raw_local_id, fallback="account")
-    session_name = safe_session_name(text("session_name") or local_id, fallback=local_id)
-
-    return {
-        "local_id": local_id,
-        "account_id": text("account_id"),
-        "label": text("label") or text("phone") or local_id,
-        "username": text("username").lstrip("@"),
-        "phone": text("phone"),
-        "session_name": session_name,
-        "api_id": text("api_id"),
-        "api_hash": text("api_hash"),
-        "target_chat": text("target_chat"),
-        "target_topic_id": text("target_topic_id"),
-        "proxy_type": text("proxy_type").lower(),
-        "proxy_host": text("proxy_host"),
-        "proxy_username": text("proxy_username"),
-        "proxy_password": text("proxy_password"),
-        "collector_enabled": bool(payload.get("collector_enabled", True)),
-        "collector_priority": _coerce_non_negative_int(payload.get("collector_priority")),
-        "listen_enabled": bool(payload.get("listen_enabled")),
-        "login_status": text("login_status") or "idle",
-        "login_message": text("login_message"),
-        "listener_status": text("listener_status") or "stopped",
-        "listener_message": text("listener_message"),
-    }
-
-
-def _normalize_identity(payload: dict) -> dict:
-    def text(key: str) -> str:
-        return str(payload.get(key) or "").strip()
-
-    send_as_id = _coerce_non_zero_int(payload.get("send_as_id") or payload.get("id"))
-    account_local_id = safe_session_name(text("account_local_id"), fallback="") if text("account_local_id") else ""
-    username = text("username").lstrip("@")
-    label = text("label") or username or (str(send_as_id) if send_as_id != 0 else "")
-    return {
-        "send_as_id": send_as_id,
-        "account_local_id": account_local_id,
-        "label": label,
-        "username": username,
-        "enabled": bool(payload.get("enabled", True)),
-        "note": text("note"),
-    }
-
-
-def _normalize_outbox_draft(payload: dict) -> dict:
-    draft = OutboxDraft.from_api(payload).to_api()
-    draft["id"] = str(draft.get("id") or "").strip()
-    draft["command"] = str(draft.get("command") or "").strip()
-    draft["target_chat"] = str(draft.get("target_chat") or "").strip()
-    draft["account_local_id"] = safe_session_name(draft.get("account_local_id") or "", fallback="")
-    draft["source_message_id"] = str(draft.get("source_message_id") or "").strip()
-    draft["send_mode"] = str(draft.get("send_mode") or "copy").strip() or "copy"
-    draft["status"] = str(draft.get("status") or "draft").strip() or "draft"
-    draft["created_at"] = str(draft.get("created_at") or "").strip()
-    draft["note"] = str(draft.get("note") or "").strip()
-    draft["missing"] = [
-        str(item).strip()
-        for item in (draft.get("missing") or [])
-        if str(item).strip()
-    ]
-    return draft
-
-
-def _normalize_send_log(payload: dict) -> dict:
-    payload = payload or {}
-    meta = payload.get("meta") or {}
-    if not isinstance(meta, dict):
-        meta = {"value": meta}
-    return {
-        "id": _send_log_non_negative_int(payload.get("id")),
-        "kind": str(payload.get("kind") or "").strip() or "unknown",
-        "status": str(payload.get("status") or "").strip() or "unknown",
-        "account_local_id": safe_session_name(payload.get("account_local_id") or "", fallback="")
-        if str(payload.get("account_local_id") or "").strip()
-        else "",
-        "identity_id": _safe_int(payload.get("identity_id")),
-        "send_as_id": _safe_int(payload.get("send_as_id")),
-        "chat_id": _safe_int(payload.get("chat_id")),
-        "topic_id": _send_log_non_negative_int(payload.get("topic_id")),
-        "reply_to_msg_id": _send_log_non_negative_int(payload.get("reply_to_msg_id")),
-        "command": str(payload.get("command") or "").strip(),
-        "source_message_id": str(payload.get("source_message_id") or "").strip(),
-        "tg_msg_id": _send_log_non_negative_int(payload.get("tg_msg_id")),
-        "scheduled_msg_id": _send_log_non_negative_int(payload.get("scheduled_msg_id")),
-        "batch_id": _send_log_non_negative_int(payload.get("batch_id")),
-        "schedule_message_id": _send_log_non_negative_int(payload.get("schedule_message_id")),
-        "error": str(payload.get("error") or "").strip(),
-        "created_at": str(payload.get("created_at") or "").strip() or utc_now_iso(),
-        "meta": meta,
-    }
-
-
-def _send_log_non_negative_int(value: object) -> int:
-    try:
-        return max(0, int(str(value or "0").strip() or 0))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _send_log_row_to_api(row) -> dict:
-    meta = {}
-    try:
-        meta = json.loads(row[17] or "{}")
-    except (TypeError, json.JSONDecodeError):
-        meta = {}
-    if not isinstance(meta, dict):
-        meta = {"value": meta}
-    return {
-        "id": int(row[0]),
-        "kind": row[1] or "",
-        "status": row[2] or "",
-        "account_local_id": row[3] or "",
-        "identity_id": int(row[4] or 0),
-        "send_as_id": int(row[5] or 0),
-        "chat_id": int(row[6] or 0),
-        "topic_id": int(row[7] or 0),
-        "reply_to_msg_id": int(row[8] or 0),
-        "command": row[9] or "",
-        "source_message_id": row[10] or "",
-        "tg_msg_id": int(row[11] or 0),
-        "scheduled_msg_id": int(row[12] or 0),
-        "batch_id": int(row[13] or 0),
-        "schedule_message_id": int(row[14] or 0),
-        "error": row[15] or "",
-        "created_at": row[16] or "",
-        "meta": meta,
-    }
 
 
 def _dungeon_context_name(card: ParsedCard) -> str:
@@ -4228,31 +4108,26 @@ def _dungeon_context_name(card: ParsedCard) -> str:
     if name:
         return name
     text = f"{card.title or ''}\n{card.raw or ''}"
-    for candidate in ("虚天殿", "黄龙山", "昆吾山", "坠魔谷", "血色试炼"):
+    for candidate in ("虚天殿", "黄龙山", "昆吾山", "坠魔谷", "血色试炼", "苍坤上人洞府"):
         if candidate in text:
             return candidate
     return ""
 
 
-def _coerce_positive_int(value: object) -> int:
-    try:
-        number = int(str(value or "").strip())
-    except (TypeError, ValueError):
-        return 0
-    return number if number > 0 else 0
-
-
-def _coerce_non_zero_int(value: object) -> int:
-    try:
-        number = int(str(value or "").strip())
-    except (TypeError, ValueError):
-        return 0
-    return number if number != 0 else 0
-
-
-def _coerce_non_negative_int(value: object) -> int:
-    try:
-        number = int(str(value).strip())
-    except (TypeError, ValueError):
-        return 100
-    return max(0, number)
+def _is_dungeon_context_closed_card(card: ParsedCard) -> bool:
+    fields = card.fields or {}
+    tags = set(card.tags or ())
+    title = str(card.title or "")
+    status = str(fields.get("状态") or "")
+    stage = str(fields.get("阶段") or "")
+    text = f"{title}\n{status}\n{stage}\n{card.raw or ''}"
+    if title == "副本房间解散" or "解散" in tags:
+        return True
+    if any(token in text for token in ("撤离成功", "撤离失败", "脱身成功", "脱身失败", "后殿冲关止步", "后殿冲关成功")):
+        return True
+    return bool(
+        "第五关" in text
+        and ("鼎灵退散" in text or "所有队员额外获得" in text or "最终鼎压" in text)
+        and "回合耗尽" not in text
+        and "仍未被真正压灭" not in text
+    )

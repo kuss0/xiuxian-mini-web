@@ -64,7 +64,7 @@ class RetreatSuccessParser:
             cards=(
                 ParsedCard(
                     id=event.id,
-                    channels=("mine",),
+                    channels=("training",),
                     title="闭关成功",
                     summary=summary,
                     source=event.source,

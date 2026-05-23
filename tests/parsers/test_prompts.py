@@ -129,3 +129,15 @@ def test_heart_emits_steady_action():
 def test_heart_skips_status_text_without_steady_hint():
     output = HeartPromptParser().parse(make_event("心劫余波未散,等待恢复"))
     assert output is None or output.cards[0].title != "共历心劫" or len(output.cards[0].actions) == 0
+
+
+def test_heart_skips_settlement_with_steady_choices():
+    text = """【坠魔心劫·结算】
+三轮抉择：稳 / 稳 / 稳
+你以守代攻，借势封魔，终在险境中稳稳落子。
+
+修为结算：+659
+情缘结算：+7
+心魔值结算：-5（当前 0）"""
+
+    assert HeartPromptParser().parse(make_event(text)) is None

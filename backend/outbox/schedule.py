@@ -21,6 +21,8 @@ from typing import Any, Callable
 # 默认锚点:现在
 # 默认 horizon:3 天
 DEFAULT_HORIZON_DAYS = 3
+MAX_HORIZON_DAYS = 7
+MAX_SCHEDULED_MESSAGES_PER_IDENTITY = 100
 SOURCE_TAG = "official_schedule"
 
 CMD_DEEP_RETREAT = ".深度闭关"
@@ -67,8 +69,8 @@ def _clamp_horizon_days(value) -> int:
     n = _positive_int(value, DEFAULT_HORIZON_DAYS)
     if n < 1:
         return 1
-    if n > 21:
-        return 21
+    if n > MAX_HORIZON_DAYS:
+        return MAX_HORIZON_DAYS
     return n
 
 
@@ -85,7 +87,7 @@ def _clamp_horizon_days(value) -> int:
 # 估算耗时:
 # - 3 天 deep_retreat ~6 条 → ~3 分钟
 # - 7 天 ~14 条 → ~7-9 分钟
-# - 21 天 ~60 条 → ~30-40 分钟
+# - 上限 100 条 → ~45-55 分钟
 # 因为时间长,server 把这个跑成后台任务,前端轮询批次进度,而不是阻塞 HTTP 响应。
 SHORT_PAUSE_MEAN_SEC = 28.0
 SHORT_PAUSE_STDEV_SEC = 8.0

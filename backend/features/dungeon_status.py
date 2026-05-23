@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 
 from backend.domain.models import ParsedCard
+from backend.features.cangkun_guide import build_cangkun_current_advice
 
 
 WEAK_DUNGEON_NAMES = {"", "副本", "加入副本成功", "加入副本失败", "副本房间解散"}
@@ -13,6 +14,7 @@ def aggregate_dungeon_status_rows(rows: list[tuple[int, ParsedCard]], *, context
     grouped: dict[str, dict] = {}
     context_by_name: dict[tuple[int, str], dict] = {}
     context_by_id: dict[str, dict] = {}
+    closed_by_id: dict[str, dict] = {}
     orphan_by_name: dict[tuple[int, str], dict] = {}
     for seq, card in sorted(rows, key=_dungeon_row_sort_key):
         key, association = _dungeon_group_key(
@@ -20,6 +22,7 @@ def aggregate_dungeon_status_rows(rows: list[tuple[int, ParsedCard]], *, context
             seq=seq,
             context_by_id=context_by_id,
             context_by_name=context_by_name,
+            closed_by_id=closed_by_id,
             orphan_by_name=orphan_by_name,
             context_finder=context_finder,
         )
@@ -34,7 +37,7 @@ def aggregate_dungeon_status_rows(rows: list[tuple[int, ParsedCard]], *, context
         if association.get("open_message_id") and not summary.get("open_message_id"):
             summary["open_message_id"] = association["open_message_id"]
         _update_dungeon_summary(summary, seq, card)
-        _remember_dungeon_context(context_by_name, context_by_id, key, seq, card)
+        _remember_dungeon_context(context_by_name, context_by_id, closed_by_id, key, seq, card)
     result = list(grouped.values())
     if order == "recent":
         result.sort(key=lambda item: -float(item.get("_latest_order") or item.get("latest_seq") or 0))
@@ -89,6 +92,8 @@ def _new_dungeon_summary(key: str, seq: int, card: ParsedCard) -> dict:
         "route": "",
         "strategy": "",
         "silence_order": "",
+        "cangkun_state": {},
+        "cangkun_advice": {},
         "context_source": "",
         "open_seq": 0,
         "open_message_id": "",
@@ -116,7 +121,6 @@ def _update_dungeon_summary(summary: dict, seq: int, card: ParsedCard) -> None:
         summary["dungeon_name"] = candidate_name
     for target, source in (
         ("dungeon_id", "副本ID"),
-        ("latest_stage", "阶段"),
         ("opened_by", "开门人"),
         ("capacity", "人数上限"),
         ("oracle", "卦象"),
@@ -131,6 +135,24 @@ def _update_dungeon_summary(summary: dict, seq: int, card: ParsedCard) -> None:
     ):
         if not summary.get(target) and fields.get(source):
             summary[target] = str(fields.get(source) or "")
+    if fields.get("阶段"):
+        summary["latest_stage"] = str(fields.get("阶段") or "")
+
+    cangkun_state = summary.setdefault("cangkun_state", {})
+    for source in ("禁制裂隙", "神魂稳度", "慕兰警戒", "贪念", "卷轴线索", "神识余量", "持识者"):
+        if fields.get(source) is not None:
+            cangkun_state[source] = str(fields.get(source) or "")
+    if _is_cangkun_card_or_summary(card, summary):
+        stage_text = " ".join(
+            part for part in (
+                str(summary.get("latest_stage") or ""),
+                title,
+                str(card.summary or ""),
+                raw,
+            )
+            if part
+        )
+        summary["cangkun_advice"] = build_cangkun_current_advice(stage_text, cangkun_state)
 
     for target, source in (
         ("positive_examples", "历史顺例"),
@@ -184,6 +206,8 @@ def _update_dungeon_summary(summary: dict, seq: int, card: ParsedCard) -> None:
         summary["_status_order"] = order
     elif summary.get("status_kind") == "info" and info["label"]:
         summary["status"] = info["label"]
+    if summary.get("status_kind") == "closed":
+        summary["actions"] = []
 
     summary["messages"].append(
         {
@@ -207,6 +231,7 @@ def _dungeon_group_key(
     seq: int,
     context_by_id: dict[str, dict],
     context_by_name: dict[tuple[int, str], dict],
+    closed_by_id: dict[str, dict],
     orphan_by_name: dict[tuple[int, str], dict],
     context_finder=None,
 ) -> tuple[str, dict]:
@@ -215,7 +240,7 @@ def _dungeon_group_key(
     if dungeon_id:
         if _is_dungeon_open_card(card):
             existing = context_by_id.get(dungeon_id)
-            if existing and existing.get("open_seq"):
+            if (existing and existing.get("open_seq")) or closed_by_id.get(dungeon_id):
                 key = f"id:{dungeon_id}:open:{seq}"
             else:
                 key = f"id:{dungeon_id}"
@@ -233,6 +258,8 @@ def _dungeon_group_key(
                 "open_seq": context.get("open_seq") or 0,
                 "open_message_id": context.get("open_message_id") or "",
             }
+        if closed_by_id.get(dungeon_id):
+            return f"id:{dungeon_id}:after-closed:{seq}", {"source": "explicit_id_after_closed"}
         return f"id:{dungeon_id}", {"source": "explicit_id"}
     if card.title == "加入副本失败" and card.reply_to_msg_id:
         return f"join-failed:{card.chat_id or 0}:{card.reply_to_msg_id}", {"source": "reply_to"}
@@ -264,6 +291,7 @@ def _dungeon_group_key(
 def _remember_dungeon_context(
     context_by_name: dict[tuple[int, str], dict],
     context_by_id: dict[str, dict],
+    closed_by_id: dict[str, dict],
     key: str,
     seq: int,
     card: ParsedCard,
@@ -271,16 +299,25 @@ def _remember_dungeon_context(
     fields = card.fields or {}
     name = _dungeon_name(card) or ""
     dungeon_id = str(fields.get("副本ID") or "").strip()
-    if not name or not dungeon_id:
+    if not name:
         return
     name_key = (int(card.chat_id or 0), name)
     status_info = _dungeon_status_from_card(card)
     current = None if name in WEAK_DUNGEON_NAMES else context_by_name.get(name_key)
     if status_info["kind"] == "closed":
+        closed_id = dungeon_id or _dungeon_id_from_key(str((current or {}).get("key") or key))
+        if closed_id:
+            closed_by_id[closed_id] = {"key": key, "seq": int(seq)}
         if current and current.get("key") == key:
             context_by_name.pop(name_key, None)
-        if context_by_id.get(dungeon_id, {}).get("key") == key:
+        if dungeon_id and context_by_id.get(dungeon_id, {}).get("key") == key:
             context_by_id.pop(dungeon_id, None)
+        elif not dungeon_id:
+            for existing_id, context in list(context_by_id.items()):
+                if context.get("key") == key:
+                    context_by_id.pop(existing_id, None)
+        return
+    if not dungeon_id:
         return
     if _is_dungeon_open_card(card) or status_info["kind"] in {"open", "joined", "active", "choice"}:
         open_seq = int(seq) if _is_dungeon_open_card(card) else int((current or context_by_id.get(dungeon_id) or {}).get("open_seq") or 0)
@@ -325,22 +362,47 @@ def _dungeon_name(card: ParsedCard) -> str:
     if card.title in {"加入副本成功", "加入副本失败", "副本房间解散"}:
         return "副本"
     text = f"{card.title or ''}\n{card.raw or ''}"
-    for name in ("虚天殿", "黄龙山", "昆吾山", "坠魔谷", "血色试炼"):
+    for name in ("虚天殿", "黄龙山", "昆吾山", "坠魔谷", "血色试炼", "苍坤上人洞府"):
         if name in text:
             return name
     title = str(card.title or "").strip()
     return title[:-2] if title.endswith("开启") else title
 
 
+def _is_cangkun_card_or_summary(card: ParsedCard, summary: dict) -> bool:
+    text = "\n".join(
+        str(part or "")
+        for part in (
+            summary.get("dungeon_name"),
+            card.title,
+            card.summary,
+            card.raw,
+        )
+    )
+    return "苍坤" in text
+
+
 def _dungeon_status_from_card(card: ParsedCard) -> dict:
     fields = card.fields or {}
     tags = set(card.tags or ())
     title = str(card.title or "")
+    raw = str(card.raw or "")
     status = str(fields.get("状态") or "").strip()
+    stage = str(fields.get("阶段") or "").strip()
     if title == "副本房间解散" or "解散" in tags:
         return {"kind": "closed", "label": "已解散"}
     if title == "加入副本失败" or "失败" in tags:
         return {"kind": "failed", "label": "加入失败"}
+    if any(word in status or word in stage or word in title for word in ("撤离成功", "撤离失败")):
+        return {"kind": "closed", "label": "撤离成功" if "撤离成功" in f"{status}{stage}{title}" else "撤离失败"}
+    if "脱身失败" in status or "脱身失败" in title:
+        return {"kind": "closed", "label": "脱身失败"}
+    if "脱身成功" in status or "脱身成功" in title:
+        return {"kind": "closed", "label": "脱身成功"}
+    if "后殿冲关成功" in status or _is_xutian_hou_dian_success(raw):
+        return {"kind": "closed", "label": "后殿冲关成功"}
+    if "后殿冲关止步" in status or "后殿冲关止步" in stage or "后殿冲关止步" in title:
+        return {"kind": "closed", "label": "后殿冲关止步"}
     if "静场" in status or "静场令" in tags:
         return {"kind": "choice", "label": status or "静场令"}
     if "需要抉择" in status or "需要抉择" in tags:
@@ -349,9 +411,23 @@ def _dungeon_status_from_card(card: ParsedCard) -> dict:
         return {"kind": "open", "label": status or "可加入"}
     if "已加入" in status or title == "加入副本成功":
         return {"kind": "joined", "label": status or "已加入"}
-    if re.search(r"进行中|路线已选|卦象|路策", status) or re.search(r"推进|卦象|路线|路策", title):
+    if re.search(r"进行中|路线已选|卦象|路策", status) or re.search(r"推进|卦象|路线|路策|苍坤上人洞府", title):
         return {"kind": "active", "label": status or "进行中"}
     return {"kind": "info", "label": status or title or "副本消息"}
+
+
+def _is_xutian_hou_dian_success(text: str) -> bool:
+    raw = str(text or "")
+    return bool(
+        "第五关" in raw
+        and (
+            "鼎灵退散" in raw
+            or "所有队员额外获得" in raw
+            or "最终鼎压" in raw
+        )
+        and "回合耗尽" not in raw
+        and "仍未被真正压灭" not in raw
+    )
 
 
 def _dungeon_status_rank(kind: object) -> int:

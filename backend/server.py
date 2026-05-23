@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from typing import Iterable, Protocol
 
 from backend.config import MAX_ACCOUNTS, MAX_IDENTITIES, MAX_LISTENERS
@@ -12,8 +13,11 @@ from backend.features.dungeon_status import (
     aggregate_dungeon_status_rows,
     select_visible_dungeon_summaries,
 )
+from backend.features.cangkun_guide import build_cangkun_guide_payload
+from backend.features.xutian_guide import build_xutian_oracle_guide_payload
 from backend.outbox import OutboxPlanner
 from backend.outbox.schedule import (
+    MAX_SCHEDULED_MESSAGES_PER_IDENTITY,
     OfficialScheduleService,
     PRESET_LABELS,
     SHORT_PAUSE_MEAN_SEC,
@@ -26,78 +30,14 @@ from backend.outbox.schedule import (
     list_presets as list_schedule_presets,
 )
 from backend.notifications.dispatcher import NotificationDispatcher
-from backend.notifications.tg_bot import TelegramBotNotifier
-from backend.parsers.xutian_oracle import load_xutian_oracle_cases, xutian_advice
 from backend.repo import SQLiteStore
 from backend.skills import SkillRegistry
-from backend.skills.send import SkillSendService
+from backend.outbox.send import SkillSendService
 from backend.tg.client import safe_session_name
 from backend.tg.dialogs import TelegramDialogService
 from backend.tg.login import TelegramLoginService
 from backend.tg.listener_manager import TelegramListenerManager
 from backend.tg.send_as import SendAsService
-
-
-XUTIAN_ELEMENT_ALIASES = (
-    {"label": "金系", "values": ("金", "雷")},
-    {"label": "木系", "values": ("木", "风")},
-    {"label": "水系", "values": ("水", "冰")},
-    {"label": "火系", "values": ("火", "暗")},
-    {"label": "土系", "values": ("土",)},
-)
-
-XUTIAN_CASE_LABELS = {
-    "explicit": "明示",
-    "success": "顺例",
-    "failure": "反例",
-}
-
-
-def _xutian_guide_case(bucket: str, item: dict) -> dict:
-    gua = str(item.get("gua") or "").strip()
-    advice = xutian_advice(gua)
-    examples = [
-        {
-            "route": str(example.get("route") or "").strip(),
-            "strategy": str(example.get("strategy") or "").strip(),
-            "source": str(example.get("source") or "").strip(),
-        }
-        for example in (item.get("examples") or [])
-    ]
-    route = str(item.get("route") or "").strip()
-    strategy = str(item.get("strategy") or "").strip()
-    source = str(item.get("source") or "").strip()
-    if not route and examples:
-        route = "/".join(_ordered_unique(example["route"] for example in examples if example["route"]))
-    if not strategy and examples:
-        strategy = "/".join(_ordered_unique(example["strategy"] for example in examples if example["strategy"]))
-    if not source and examples:
-        source = "；".join(example["source"] for example in examples[:3] if example["source"])
-    return {
-        "kind": bucket,
-        "kind_label": XUTIAN_CASE_LABELS.get(bucket, bucket),
-        "gua": gua,
-        "route": route,
-        "strategy": strategy,
-        "source": source,
-        "advice": str(advice.get("行运建议") or "").strip(),
-        "basis": str(advice.get("建议依据") or "").strip(),
-        "confidence": str(advice.get("建议置信") or "").strip(),
-        "positive_examples": list(advice.get("历史顺例") or []),
-        "negative_examples": list(advice.get("历史反例") or []),
-        "examples": examples,
-    }
-
-
-def _ordered_unique(values: Iterable[str]) -> list[str]:
-    seen: set[str] = set()
-    result: list[str] = []
-    for value in values:
-        if not value or value in seen:
-            continue
-        seen.add(value)
-        result.append(value)
-    return result
 
 
 class CardStore(Protocol):
@@ -131,6 +71,15 @@ class CardStore(Protocol):
         latest_only: bool = True,
         include_items: bool = True,
         limit: int = 80,
+    ) -> list[dict]:
+        ...
+
+    def list_inventory_current(
+        self,
+        *,
+        owner: str = "",
+        owners: Iterable[str] | None = None,
+        limit: int = 500,
     ) -> list[dict]:
         ...
 
@@ -169,6 +118,7 @@ class CardStore(Protocol):
 
 
 SECRET_SETTING_KEYS = {"api_hash", "proxy_password", "notify_tg_bot_token"}
+DUNGEON_STATUS_CACHE_VERSION = 6
 
 
 def _server_dungeon_status_rank(kind: object) -> int:
@@ -213,6 +163,20 @@ def _estimate_send_seconds(n: int) -> int:
     short_pauses -= long_pauses
     request_time = n * 1.5
     return int(short_pauses * SHORT_PAUSE_MEAN_SEC + long_pauses * avg_long_pause + request_time)
+
+
+def _looks_like_schedule_quota_error(exc: object) -> bool:
+    raw = f"{type(exc).__name__} {exc}".strip().lower()
+    compact = re.sub(r"[\s_\-]+", "", raw)
+    spaced = re.sub(r"[_\-]+", " ", raw)
+    if "scheduletoomuch" in compact or "toomanyscheduled" in compact:
+        return True
+    scheduleish = "schedule" in spaced or "scheduled" in spaced or "定时" in spaced
+    limitish = any(
+        token in spaced
+        for token in ("too many", "too much", "limit", "maximum", "max", "上限", "过多")
+    )
+    return bool(scheduleish and limitish and ("100" in spaced or "too many" in spaced or "too much" in spaced))
 
 
 
@@ -270,6 +234,9 @@ class MiniWebServer:
         self._notify = NotificationDispatcher(get_settings=self._store.get_settings)
         if hasattr(self._store, "set_notify_dispatcher"):
             self._store.set_notify_dispatcher(self._notify)
+        # ThreadingHTTPServer 下并发 schedule_create 会撞 dedup 秒级唯一约束。
+        # 用锁串行化整个 _create_one_schedule，确保 list/dedup/insert 原子化。
+        self._schedule_create_lock = threading.Lock()
 
     def health_payload(self) -> dict:
         self._ensure_collector_running()
@@ -806,6 +773,8 @@ class MiniWebServer:
             self._hydrate_dungeon_summaries(summaries)
         if not fast_window and hasattr(self._store, "replace_dungeon_rooms"):
             try:
+                for summary in summaries:
+                    summary["cache_version"] = DUNGEON_STATUS_CACHE_VERSION
                 self._store.replace_dungeon_rooms(summaries)
             except Exception as exc:
                 print(f"[mini-web] dungeon room cache refresh failed: {exc}")
@@ -828,26 +797,10 @@ class MiniWebServer:
         }
 
     def xutian_oracle_guide_payload(self) -> dict:
-        data = load_xutian_oracle_cases()
-        cases = {
-            bucket: [_xutian_guide_case(bucket, item) for item in data.get(bucket, [])]
-            for bucket in ("explicit", "success", "failure")
-        }
-        return {
-            "ok": True,
-            "element_aliases": [
-                {"label": item["label"], "values": list(item["values"])}
-                for item in XUTIAN_ELEMENT_ALIASES
-            ],
-            "case_labels": XUTIAN_CASE_LABELS,
-            "counts": {bucket: len(items) for bucket, items in cases.items()},
-            "cases": cases,
-            "notes": [
-                "虚天殿队伍契合换算仅用于虚天殿:金系=金/雷,木系=木/风,水系=水/冰,火系=火/暗,土系=土。",
-                "明示优先级最高;顺例只表示历史实测可用;反例只用于避坑,不反推唯一答案。",
-                "本接口只给 UI 展示和填入命令,不会自动发送。",
-            ],
-        }
+        return build_xutian_oracle_guide_payload()
+
+    def cangkun_guide_payload(self) -> dict:
+        return build_cangkun_guide_payload()
 
     def _cached_dungeon_summaries(self, *, order: str) -> list[dict]:
         list_rooms = getattr(self._store, "list_dungeon_rooms", None)
@@ -869,6 +822,8 @@ class MiniWebServer:
             payload = dict(item.get("payload") or {})
             if not payload:
                 continue
+            if int(payload.get("cache_version") or 0) != DUNGEON_STATUS_CACHE_VERSION:
+                return []
             payload.setdefault("key", item.get("key") or "")
             payload.setdefault("dungeon_id", item.get("dungeon_id") or "")
             payload.setdefault("dungeon_name", item.get("dungeon_name") or "")
@@ -1013,13 +968,21 @@ class MiniWebServer:
             include_items=include_items,
             limit=limit,
         )
+        current: list[dict] = []
+        if hasattr(self._store, "list_inventory_current"):
+            current = self._store.list_inventory_current(
+                owner=requested_owner,
+                owners=allowed_owners if not requested_owner else None,
+                limit=2000,
+            )
         return {
             "ok": True,
             "snapshots": snapshots,
+            "current": current,
             "allowed_owners": allowed_owners,
             "notes": [
-                "库存只展示已配置账号、身份或 own_aliases 对应的最近 .储物袋 面板。",
-                "生成转移命令不会自动发送,也不会自动核减库存。",
+                "current 以最近 .储物袋 为权威快照,再叠加可确认成功回执;estimated 表示需要手动 .储物袋 校准。",
+                "生成转移命令不会自动发送。",
             ],
         }
 
@@ -1740,8 +1703,9 @@ class MiniWebServer:
             "境界突破", "赐予道号",
             "深度闭关总结", "闭关成功",
             "试炼古塔战报",
-            "虚天殿开启", "黄龙山开启", "昆吾山开启", "坠魔谷开启", "血色试炼开启",
-            "虚天殿推进", "黄龙山推进", "昆吾山推进", "坠魔谷推进", "血色试炼推进",
+            "虚天殿开启", "黄龙山开启", "昆吾山开启", "坠魔谷开启", "血色试炼开启", "苍坤上人洞府开启",
+            "虚天殿推进", "黄龙山推进", "昆吾山推进", "坠魔谷推进", "血色试炼推进", "苍坤上人洞府推进",
+            "苍坤上人洞府脱身成功", "苍坤上人洞府脱身失败",
             "副本静场令", "加入副本成功", "加入副本失败", "副本房间解散",
             "第二元神归位", "角色信息", "战力评估", "储物袋快照",
             "登天阶面板", "观星台面板", "星盘显化", "天机阁快报",
@@ -1906,7 +1870,8 @@ class MiniWebServer:
             return {"ok": False, "error": "请选择至少一个 identity (send_as_id 或 send_as_ids)"}
 
         if len(sids) == 1:
-            return self._create_one_schedule({**payload, "send_as_id": sids[0]})
+            with self._schedule_create_lock:
+                return self._create_one_schedule({**payload, "send_as_id": sids[0]})
 
         # 批量
         try:
@@ -1926,7 +1891,8 @@ class MiniWebServer:
             sub.pop("send_as_ids", None)
             sub["send_as_id"] = sid
             sub["offset_minutes"] = base_offset + i * step
-            r = self._create_one_schedule(sub)
+            with self._schedule_create_lock:
+                r = self._create_one_schedule(sub)
             r["send_as_id"] = sid
             r["offset_minutes_applied"] = sub["offset_minutes"]
             if r.get("ok"):
@@ -1943,6 +1909,56 @@ class MiniWebServer:
             "total_estimate_seconds": total_estimate,
             "offset_step_minutes": step,
             "results": results,
+        }
+
+    def _official_schedule_identity_usage(self, send_as_id: int) -> int:
+        """估算单个身份当前占用的官方定时额度。
+
+        Telegram 的上限按实际已排/正在排的 scheduled message 算。dry_run
+        只是本地预演,不计入;cancelled 里未发送的 planned 不计入,但已经排到
+        TG 的 scheduled 仍然计入,直到用户删除。
+        """
+        batches = {
+            int(batch.get("id") or 0): batch
+            for batch in self._store.list_schedule_batches(include_inactive=True)
+            if int(batch.get("send_as_id") or 0) == int(send_as_id or 0)
+        }
+        count = 0
+        for msg in self._store.list_schedule_messages(send_as_id=send_as_id, include_inactive=True):
+            status = str(msg.get("status") or "")
+            if status == "deleted":
+                continue
+            batch = batches.get(int(msg.get("batch_id") or 0)) or {}
+            batch_status = str(batch.get("status") or "")
+            options = batch.get("options") or {}
+            if status == "scheduled":
+                count += 1
+            elif (
+                status == "planned"
+                and batch_status in {"active", "queued", "sending"}
+                and not bool(options.get("dry_run"))
+            ):
+                count += 1
+        return count
+
+    def _schedule_quota_block_payload(self, *, send_as_id: int, current: int, incoming: int) -> dict:
+        remaining = max(0, MAX_SCHEDULED_MESSAGES_PER_IDENTITY - int(current or 0))
+        message = (
+            f"官方定时已到单身份上限: send_as {send_as_id} 当前 {current}/"
+            f"{MAX_SCHEDULED_MESSAGES_PER_IDENTITY},本次还需要 {incoming} 条,"
+            f"剩余 {remaining} 条。已停止创建/发送;请先手动删除或处理旧定时。"
+        )
+        return {
+            "ok": False,
+            "status": "quota_blocked",
+            "manual_required": True,
+            "manual_message": message,
+            "error": message,
+            "send_as_id": send_as_id,
+            "scheduled_limit": MAX_SCHEDULED_MESSAGES_PER_IDENTITY,
+            "scheduled_current": int(current or 0),
+            "planned_count": int(incoming or 0),
+            "scheduled_remaining": remaining,
         }
 
     def _create_one_schedule(self, payload: dict) -> dict:
@@ -1990,6 +2006,29 @@ class MiniWebServer:
                 }
                 for item in plan["items"]
             ]
+            if not dry_run and items_for_db:
+                current_usage = self._official_schedule_identity_usage(send_as_id)
+                if current_usage + len(items_for_db) > MAX_SCHEDULED_MESSAGES_PER_IDENTITY:
+                    return self._schedule_quota_block_payload(
+                        send_as_id=send_as_id,
+                        current=current_usage,
+                        incoming=len(items_for_db),
+                    )
+            target_chat = ""
+            target_topic_id = 0
+            if not dry_run and listener is not None:
+                target_chat = self._store.get_settings().get("target_chat") or ""
+                target_topic_id = self._store.get_settings().get("target_topic_id") or 0
+                try:
+                    target_topic_id = int(target_topic_id)
+                except (TypeError, ValueError):
+                    target_topic_id = 0
+                if not target_chat:
+                    return {
+                        "ok": False,
+                        "error": "settings.target_chat 未配置,无法定位发送目标群",
+                        "items": items_for_db,
+                    }
             # 去重秒:让所有 active scheduled_messages 的 schedule_at(秒级)全局唯一,
             # 避免 N 个账号同一秒撞天尊。jitter 已经把分布拉开,这里只兜底极少数撞秒情况。
             self._dedupe_schedule_seconds(items_for_db)
@@ -2017,19 +2056,6 @@ class MiniWebServer:
             send_errors: list[str] = []
             sending_status = "queued"
             if not dry_run and listener is not None:
-                target_chat = self._store.get_settings().get("target_chat") or ""
-                target_topic_id = self._store.get_settings().get("target_topic_id") or 0
-                try:
-                    target_topic_id = int(target_topic_id)
-                except (TypeError, ValueError):
-                    target_topic_id = 0
-                if not target_chat:
-                    return {
-                        "ok": False,
-                        "error": "settings.target_chat 未配置,无法定位发送目标群",
-                        "batch_id": batch_id,
-                        "items": items_for_db,
-                    }
                 msgs = self._store.list_schedule_messages(batch_id=batch_id, include_inactive=False)
                 # 拟人节奏发送可能要 30+ 分钟,不能阻塞 HTTP 响应。
                 # 走后台:listener loop 上 fire-and-forget,DB 实时更新每条状态,
@@ -2077,12 +2103,12 @@ class MiniWebServer:
         """在 listener loop 上跑的后台发送。逐条排 + 实时更新 DB + 拟人节奏停顿。
         每次循环前看一眼 batch.status,如果被改成 cancelled / deleted 就早退。"""
         import asyncio as _asyncio
-        from telethon import types as _types
         from backend.outbox.schedule import (
             humanized_send_pause,
             humanized_long_pause,
             next_long_pause_gap,
         )
+        from backend.tg.requests import input_reply_to_message
 
         ok_count = 0
         fail_count = 0
@@ -2137,7 +2163,7 @@ class MiniWebServer:
 
             peer = await client.get_input_entity(int(target_chat) if str(target_chat).lstrip("-").isdigit() else target_chat)
             send_as_peer = await client.get_input_entity(send_as_id)
-            reply_to = _types.InputReplyToMessage(reply_to_msg_id=target_topic_id) if target_topic_id > 0 else None
+            reply_to = input_reply_to_message(reply_to_msg_id=target_topic_id) if target_topic_id > 0 else None
 
             countdown_to_long = next_long_pause_gap()
             last_index = len(messages) - 1
@@ -2204,6 +2230,40 @@ class MiniWebServer:
                     ok_count += 1
                 except Exception as exc:
                     err = str(exc)
+                    if _looks_like_schedule_quota_error(exc):
+                        local_usage = self._official_schedule_identity_usage(send_as_id)
+                        remaining = messages[index:]
+                        err = (
+                            f"Telegram 官方定时触发单身份上限: send_as {send_as_id} "
+                            f"本地统计 {local_usage}/{MAX_SCHEDULED_MESSAGES_PER_IDENTITY},"
+                            f"本批剩余 {len(remaining)} 条已停止发送并标记失败;"
+                            f"请先手动删除或处理旧定时。原始错误:{err}"
+                        )
+                        for pending in remaining:
+                            pending_id = int(pending["id"])
+                            pending_command = str(pending.get("command") or "").strip()
+                            pending_schedule_at = float(pending.get("schedule_at") or 0)
+                            self._store.mark_schedule_message(
+                                pending_id, status="failed", last_error=err
+                            )
+                            self._record_send_log(
+                                {
+                                    "kind": "official_schedule",
+                                    "status": "failed",
+                                    "account_local_id": account_local_id,
+                                    "identity_id": send_as_id,
+                                    "send_as_id": send_as_id,
+                                    "chat_id": log_chat_id,
+                                    "topic_id": target_topic_id,
+                                    "command": pending_command,
+                                    "batch_id": batch_id,
+                                    "schedule_message_id": pending_id,
+                                    "error": err,
+                                    "meta": {"schedule_at": pending_schedule_at},
+                                }
+                            )
+                        fail_count += len(remaining)
+                        return
                     self._store.mark_schedule_message(db_id, status="failed", last_error=err)
                     self._record_send_log(
                         {
@@ -2869,7 +2929,7 @@ def build_inventory_transfer_plan(payload: dict) -> dict:
         "commands": commands,
         "notes": [
             "这里只生成命令,不自动发送。",
-            "库存来自最近快照,转移后请重新 .储物袋 刷新。",
+            "库存会按成功回执被动估算;赠送回执只能校正来源号,目标号仍建议用 .储物袋 校准。",
             "购买命令里的货摊 ID 必须按 .我的货摊 回复填写。",
         ],
     }

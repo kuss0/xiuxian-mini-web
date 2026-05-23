@@ -228,11 +228,15 @@ def build_default_registry() -> ModuleRegistry:
     from backend.identity_state.cooldown import build_cooldown_modules
     from backend.identity_state.pet_touch import PetTouchModule
     from backend.identity_state.pet_warm import PetWarmModule
+    from backend.identity_state.small_world import SmallWorldModule
+    from backend.identity_state.weakness import WeaknessModule
 
     reg = ModuleRegistry()
     reg.register(DeepRetreatModule())
     reg.register(PetTouchModule())
     reg.register(PetWarmModule())
+    reg.register(WeaknessModule())
+    reg.register(SmallWorldModule())
     for module in build_cooldown_modules():
         reg.register(module)
     return reg

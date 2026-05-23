@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import hmac
 import json
 import mimetypes
 import os
+import re
 import sys
 import time
-from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -18,19 +17,13 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.config import ACCESS_TOKEN, WEB_DIR
+from backend.api import handlers
+from backend.api.routes import RawResponse, build_get_routes, build_post_routes
 from backend.server import MiniWebServer
 
 
-@dataclass
-class RawResponse:
-    """非 JSON 的 GET 响应,handler 看到这个就走 _send_raw 而不是 _send_json。
-    用来支持文件下载(导出消息日志等)。"""
-
-    body: bytes
-    content_type: str = "application/octet-stream"
-    filename: str = ""
-
 BUILD_ID = os.environ.get("MINIWEB_BUILD_ID") or str(int(time.time()))
+STATIC_REF_RE = re.compile(r'(?P<attr>\b(?:href|src))="/static/(?P<asset>[^"?#]+)"')
 
 
 def is_authorized_api_headers(headers, access_token: str) -> bool:
@@ -48,9 +41,10 @@ def _inject_build_id(body: bytes) -> bytes:
     让浏览器和反代每次重启都把它们当新 URL,绕开缓存。"""
     text = body.decode("utf-8", errors="replace")
     suffix = f"?v={BUILD_ID}"
-    text = text.replace('href="/static/styles.css"', f'href="/static/styles.css{suffix}"')
-    text = text.replace('src="/static/app.js"', f'src="/static/app.js{suffix}"')
-    return text.encode("utf-8")
+    return STATIC_REF_RE.sub(
+        lambda match: f'{match.group("attr")}="/static/{match.group("asset")}{suffix}"',
+        text,
+    ).encode("utf-8")
 
 
 class MiniWebHandler(BaseHTTPRequestHandler):
@@ -90,9 +84,14 @@ class MiniWebHandler(BaseHTTPRequestHandler):
 
     def _handle_post(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path.startswith("/api/") and not self._is_authorized_api_request():
-            self._send_error(HTTPStatus.UNAUTHORIZED, "需要访问口令")
-            return
+        if parsed.path.startswith("/api/"):
+            if not self._is_authorized_api_request():
+                self._send_error(HTTPStatus.UNAUTHORIZED, "需要访问口令")
+                return
+            content_type = str(self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if content_type != "application/json":
+                self._send_error(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "POST 请求必须使用 application/json")
+                return
 
         route = POST_ROUTES.get(parsed.path)
         if route is None:
@@ -190,534 +189,14 @@ class MiniWebHandler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 return
 
-
-
-
-class PostRoute:
-    def __init__(self, handler, *, needs_payload: bool = False) -> None:
-        self._handler = handler
-        self.needs_payload = needs_payload
-
-    def __call__(self, request: MiniWebHandler, payload: dict) -> dict:
-        return self._handler(request, payload)
-
-
-def _app(request: MiniWebHandler) -> MiniWebServer:
-    if request.app_server is None:
-        raise RuntimeError("MiniWebServer is not configured")
-    return request.app_server
-
-
-def _get_health(request: MiniWebHandler, query: dict) -> dict:
-    return _app(request).health_payload()
-
-
-def _get_message_audit(request: MiniWebHandler, query: dict) -> dict:
-    try:
-        since_hours = int((query.get("since_hours") or ["24"])[0])
-    except (TypeError, ValueError):
-        since_hours = 24
-    try:
-        min_gap_seconds = int((query.get("min_gap_seconds") or ["300"])[0])
-    except (TypeError, ValueError):
-        min_gap_seconds = 300
-    try:
-        limit = int((query.get("limit") or ["12"])[0])
-    except (TypeError, ValueError):
-        limit = 12
-    deep_raw = str((query.get("deep") or ["0"])[0]).lower()
-    deep = deep_raw in {"1", "true", "yes"}
-    return _app(request).message_audit_payload(
-        since_hours=since_hours,
-        min_gap_seconds=min_gap_seconds,
-        limit=limit,
-        deep=deep,
-    )
-
-
-def _get_channels(request: MiniWebHandler, query: dict) -> dict:
-    return _app(request).channels_payload()
-
-
-def _get_messages(request: MiniWebHandler, query: dict) -> dict:
-    channel = (query.get("channel") or ["all"])[0]
-    channels = query.get("channels") or []
-    since_seq = (query.get("since_seq") or ["0"])[0]
-    before_seq = (query.get("before_seq") or ["0"])[0]
-    limit = (query.get("limit") or ["0"])[0]
-    target_id = (query.get("id") or query.get("target_id") or [""])[0]
-    mode = (query.get("mode") or [""])[0]
-    compact_raw = str((query.get("compact") or ["0"])[0]).lower()
-    compact = compact_raw in {"1", "true", "yes"}
-    return _app(request).messages_payload(
-        channel,
-        channels=channels,
-        since_seq=since_seq,
-        before_seq=before_seq,
-        limit=limit,
-        target_id=target_id,
-        mode=mode,
-        compact=compact,
-    )
-
-
-def _get_messages_export(request: MiniWebHandler, query: dict):
-    """日志 modal 的「导出」按钮端点。返 RawResponse → 浏览器触发文件下载。
-    fmt: jsonl(默认)/ csv / txt"""
-    channel = (query.get("channel") or ["all"])[0]
-    mode = (query.get("mode") or [""])[0]
-    fmt = (query.get("fmt") or query.get("format") or ["jsonl"])[0]
-    result = _app(request).messages_export_payload(channel, mode=mode, fmt=fmt)
-    return RawResponse(
-        body=result.get("body") or b"",
-        content_type=result.get("content_type") or "application/octet-stream",
-        filename=result.get("filename") or "xiuxian-messages.txt",
-    )
-
-
-def _get_outbox(request: MiniWebHandler, query: dict) -> dict:
-    return _app(request).outbox_payload()
-
-
-def _get_outbox_drafts(request: MiniWebHandler, query: dict) -> dict:
-    status = (query.get("status") or ["draft"])[0]
-    return _app(request).outbox_drafts_payload(status)
-
-
-def _get_outbox_logs(request: MiniWebHandler, query: dict) -> dict:
-    kind = (query.get("kind") or [""])[0]
-    status = (query.get("status") or [""])[0]
-    try:
-        identity_id = int((query.get("identity_id") or ["0"])[0])
-    except (TypeError, ValueError):
-        identity_id = 0
-    try:
-        batch_id = int((query.get("batch_id") or ["0"])[0])
-    except (TypeError, ValueError):
-        batch_id = 0
-    try:
-        limit = int((query.get("limit") or ["100"])[0])
-    except (TypeError, ValueError):
-        limit = 100
-    return _app(request).outbox_logs_payload(
-        limit=limit,
-        kind=kind,
-        status=status,
-        identity_id=identity_id,
-        batch_id=batch_id,
-    )
-
-
-def _get_settings(request: MiniWebHandler, query: dict) -> dict:
-    return _app(request).settings_payload()
-
-
-def _get_state_patches(request: MiniWebHandler, query: dict) -> dict:
-    scope = (query.get("scope") or [""])[0]
-    try:
-        send_as_id = int((query.get("send_as_id") or ["0"])[0])
-    except (TypeError, ValueError):
-        send_as_id = 0
-    return _app(request).state_patches_payload(scope, send_as_id=send_as_id)
-
-
-def _get_resource_stats(request: MiniWebHandler, query: dict) -> dict:
-    period = (query.get("period") or ["day"])[0]
-    source_type = (query.get("source_type") or [""])[0]
-    source_name = (query.get("source_name") or [""])[0]
-    try:
-        limit = int((query.get("limit") or ["120"])[0])
-    except (TypeError, ValueError):
-        limit = 120
-    return _app(request).resource_stats_payload(
-        period=period,
-        source_type=source_type,
-        source_name=source_name,
-        limit=limit,
-    )
-
-
-def _get_resource_coverage(request: MiniWebHandler, query: dict) -> dict:
-    try:
-        limit = int((query.get("limit") or ["5000"])[0])
-    except (TypeError, ValueError):
-        limit = 5000
-    return _app(request).resource_coverage_payload(limit=limit)
-
-
-def _post_resource_reparse(request: MiniWebHandler, payload: dict) -> dict:
-    return _app(request).resource_reparse_payload(payload)
-
-
-def _get_dungeon_status(request: MiniWebHandler, query: dict) -> dict:
-    try:
-        limit = int((query.get("limit") or ["500"])[0])
-    except (TypeError, ValueError):
-        limit = 500
-    try:
-        summary_limit = int((query.get("summary_limit") or ["80"])[0])
-    except (TypeError, ValueError):
-        summary_limit = 80
-    order = (query.get("order") or ["priority"])[0]
-    return _app(request).dungeon_status_payload(limit=limit, summary_limit=summary_limit, order=order)
-
-
-def _get_xutian_oracle_guide(request: MiniWebHandler, query: dict) -> dict:
-    return _app(request).xutian_oracle_guide_payload()
-
-
-def _get_inventory(request: MiniWebHandler, query: dict) -> dict:
-    owner = (query.get("owner") or [""])[0]
-    latest_raw = str((query.get("latest_only") or ["1"])[0]).lower()
-    latest_only = latest_raw not in {"0", "false", "no"}
-    include_items_raw = str((query.get("include_items") or ["1"])[0]).lower()
-    include_items = include_items_raw not in {"0", "false", "no"}
-    try:
-        limit = int((query.get("limit") or ["80"])[0])
-    except (TypeError, ValueError):
-        limit = 80
-    return _app(request).inventory_payload(
-        owner=owner,
-        latest_only=latest_only,
-        include_items=include_items,
-        limit=limit,
-    )
-
-
-def _get_discovered_bots(request: MiniWebHandler, query: dict) -> dict:
-    return _app(request).discovered_bots_payload()
-
-
-def _get_accounts(request: MiniWebHandler, query: dict) -> dict:
-    return _app(request).accounts_payload()
-
-
-def _get_identities(request: MiniWebHandler, query: dict) -> dict:
-    return _app(request).identities_payload()
-
-
-def _get_identity_state(request: MiniWebHandler, query: dict) -> dict:
-    send_as_id = (query.get("send_as_id") or [""])[0]
-    return _app(request).identity_state_payload(send_as_id)
-
-
-def _get_listener_status(request: MiniWebHandler, query: dict) -> dict:
-    return _app(request).listener_status_payload()
-
-
-def _get_telegram_dialogs(request: MiniWebHandler, query: dict) -> dict:
-    return asyncio.run(_app(request).telegram_dialogs_payload())
-
-
-def _get_telegram_topics(request: MiniWebHandler, query: dict) -> dict:
-    chat = (query.get("chat") or [""])[0]
-    return asyncio.run(_app(request).telegram_topics_payload(chat))
-
-
-def _get_account_send_as_peers(request: MiniWebHandler, query: dict) -> dict:
-    local_id = (query.get("local_id") or [""])[0]
-    target_chat = (query.get("target_chat") or [""])[0]
-    return _app(request).account_send_as_peers_payload(local_id, target_chat)
-
-
-def _get_account_dialogs(request: MiniWebHandler, query: dict) -> dict:
-    local_id = (query.get("local_id") or [""])[0]
-    return _app(request).account_dialogs_payload(local_id)
-
-
-def _get_account_topics(request: MiniWebHandler, query: dict) -> dict:
-    local_id = (query.get("local_id") or [""])[0]
-    chat = (query.get("chat") or [""])[0]
-    return _app(request).account_topics_payload(local_id, chat)
-
-
-def _post_settings(request: MiniWebHandler, payload: dict) -> dict:
-    return _app(request).save_settings_payload(payload)
-
-
-def _post_focus_exclude_preview(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).focus_exclude_preview_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_inventory_transfer_plan(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).inventory_transfer_plan_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_account(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).save_account_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_account_delete(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).delete_account_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_account_logout(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).logout_account_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_identity(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).save_identity_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_identity_batch(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).batch_save_identities_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc), "results": []}
-
-
-def _post_identity_delete(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).delete_identity_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_outbox_plan(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).outbox_plan_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_outbox_draft(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).create_outbox_draft_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_outbox_draft_delete(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).delete_outbox_draft_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_login_start(request: MiniWebHandler, payload: dict) -> dict:
-    return _app(request).login_start_payload()
-
-
-def _post_login_cancel(request: MiniWebHandler, payload: dict) -> dict:
-    return _app(request).login_cancel_payload()
-
-
-def _post_login_verify(request: MiniWebHandler, payload: dict) -> dict:
-    return _app(request).login_verify_payload(payload)
-
-
-def _post_listener_start(request: MiniWebHandler, payload: dict) -> dict:
-    return _app(request).listener_start_payload()
-
-
-def _post_listener_stop(request: MiniWebHandler, payload: dict) -> dict:
-    return _app(request).listener_stop_payload()
-
-
-def _post_account_login_start(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).account_login_start_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_account_login_verify(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).account_login_verify_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_account_login_cancel(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).account_login_cancel_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_account_listener_start(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).account_listener_start_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_account_listener_stop(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).account_listener_stop_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_account_resolve_entity(request: MiniWebHandler, payload: dict) -> dict:
-    return _app(request).account_resolve_entity_payload(payload)
-
-
-# ---------- 官方定时 ----------
-
-def _get_schedule_presets(request: MiniWebHandler, query: dict) -> dict:
-    return _app(request).schedule_presets_payload()
-
-
-def _get_schedule_templates(request: MiniWebHandler, query: dict) -> dict:
-    return _app(request).schedule_templates_payload()
-
-
-def _get_schedule(request: MiniWebHandler, query: dict) -> dict:
-    return _app(request).schedule_list_payload()
-
-
-def _get_schedule_sync(request: MiniWebHandler, query: dict) -> dict:
-    send_as_id = (query.get("send_as_id") or ["0"])[0]
-    return _app(request).schedule_sync_payload(send_as_id)
-
-
-def _post_schedule_preview(request: MiniWebHandler, payload: dict) -> dict:
-    return _app(request).schedule_preview_payload(payload)
-
-
-def _post_schedule_create(request: MiniWebHandler, payload: dict) -> dict:
-    return _app(request).schedule_create_payload(payload)
-
-
-def _post_schedule_delete(request: MiniWebHandler, payload: dict) -> dict:
-    return _app(request).schedule_delete_payload(payload)
-
-
-def _post_schedule_template_save(request: MiniWebHandler, payload: dict) -> dict:
-    return _app(request).schedule_template_save_payload(payload)
-
-
-def _post_schedule_template_delete(request: MiniWebHandler, payload: dict) -> dict:
-    return _app(request).schedule_template_delete_payload(payload)
-
-
-def _post_schedule_cancel(request: MiniWebHandler, payload: dict) -> dict:
-    return _app(request).schedule_cancel_payload(payload)
-
-
-# ---------- 技能盘(直接 / 回复发送)----------
-
-def _get_skills(request: MiniWebHandler, query: dict) -> dict:
-    return _app(request).skills_payload()
-
-
-def _post_skill_send(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).skill_send_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-# ---------- 通知 ----------
-
-def _post_notify_test(request: MiniWebHandler, payload: dict) -> dict:
-    try:
-        return _app(request).notify_test_payload(payload or {})
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _get_notify_card_titles(request: MiniWebHandler, query: dict) -> dict:
-    return _app(request).notify_card_titles_payload()
-
-
-def _get_filter_diagnostics(request: MiniWebHandler, query: dict) -> dict:
-    try:
-        limit = int((query.get("limit") or ["1000"])[0])
-    except (TypeError, ValueError):
-        limit = 1000
-    return _app(request).filter_diagnostics_payload(limit=limit)
-
-
-GET_ROUTES = {
-    "/api/health": _get_health,
-    "/api/message-audit": _get_message_audit,
-    "/api/channels": _get_channels,
-    "/api/messages": _get_messages,
-    "/api/messages/export": _get_messages_export,
-    "/api/outbox": _get_outbox,
-    "/api/outbox/drafts": _get_outbox_drafts,
-    "/api/outbox/logs": _get_outbox_logs,
-    "/api/settings": _get_settings,
-    "/api/state-patches": _get_state_patches,
-    "/api/resource-stats": _get_resource_stats,
-    "/api/resource-coverage": _get_resource_coverage,
-    "/api/dungeon-status": _get_dungeon_status,
-    "/api/xutian-oracle-guide": _get_xutian_oracle_guide,
-    "/api/inventory": _get_inventory,
-    "/api/discovered-bots": _get_discovered_bots,
-    "/api/accounts": _get_accounts,
-    "/api/identities": _get_identities,
-    "/api/identity-state": _get_identity_state,
-    "/api/listener/status": _get_listener_status,
-    "/api/telegram/dialogs": _get_telegram_dialogs,
-    "/api/telegram/topics": _get_telegram_topics,
-    "/api/accounts/send-as-peers": _get_account_send_as_peers,
-    "/api/accounts/dialogs": _get_account_dialogs,
-    "/api/accounts/topics": _get_account_topics,
-    "/api/schedule/presets": _get_schedule_presets,
-    "/api/schedule/templates": _get_schedule_templates,
-    "/api/schedule": _get_schedule,
-    "/api/schedule/sync": _get_schedule_sync,
-    "/api/skills": _get_skills,
-    "/api/notify/card-titles": _get_notify_card_titles,
-    "/api/filter/diagnostics": _get_filter_diagnostics,
+API_HANDLERS = {
+    name: value
+    for name, value in handlers.__dict__.items()
+    if name.startswith("_get_") or name.startswith("_post_")
 }
 
-
-POST_ROUTES = {
-    "/api/settings": PostRoute(_post_settings, needs_payload=True),
-    "/api/focus-exclude/preview": PostRoute(_post_focus_exclude_preview, needs_payload=True),
-    "/api/resource-coverage/reparse": PostRoute(_post_resource_reparse, needs_payload=True),
-    "/api/inventory/transfer-plan": PostRoute(_post_inventory_transfer_plan, needs_payload=True),
-    "/api/accounts": PostRoute(_post_account, needs_payload=True),
-    "/api/accounts/delete": PostRoute(_post_account_delete, needs_payload=True),
-    "/api/accounts/logout": PostRoute(_post_account_logout, needs_payload=True),
-    "/api/identities": PostRoute(_post_identity, needs_payload=True),
-    "/api/identities/batch": PostRoute(_post_identity_batch, needs_payload=True),
-    "/api/identities/delete": PostRoute(_post_identity_delete, needs_payload=True),
-    "/api/outbox/plan": PostRoute(_post_outbox_plan, needs_payload=True),
-    "/api/outbox/drafts": PostRoute(_post_outbox_draft, needs_payload=True),
-    "/api/outbox/drafts/delete": PostRoute(_post_outbox_draft_delete, needs_payload=True),
-    "/api/login/start": PostRoute(_post_login_start),
-    "/api/login/cancel": PostRoute(_post_login_cancel),
-    "/api/login/verify": PostRoute(_post_login_verify, needs_payload=True),
-    "/api/listener/start": PostRoute(_post_listener_start),
-    "/api/listener/stop": PostRoute(_post_listener_stop),
-    "/api/accounts/login/start": PostRoute(_post_account_login_start, needs_payload=True),
-    "/api/accounts/login/verify": PostRoute(_post_account_login_verify, needs_payload=True),
-    "/api/accounts/login/cancel": PostRoute(_post_account_login_cancel, needs_payload=True),
-    "/api/accounts/listener/start": PostRoute(_post_account_listener_start, needs_payload=True),
-    "/api/accounts/listener/stop": PostRoute(_post_account_listener_stop, needs_payload=True),
-    "/api/accounts/resolve-entity": PostRoute(_post_account_resolve_entity, needs_payload=True),
-    "/api/schedule/preview": PostRoute(_post_schedule_preview, needs_payload=True),
-    "/api/schedule/create": PostRoute(_post_schedule_create, needs_payload=True),
-    "/api/schedule/delete": PostRoute(_post_schedule_delete, needs_payload=True),
-    "/api/schedule/templates/save": PostRoute(_post_schedule_template_save, needs_payload=True),
-    "/api/schedule/templates/delete": PostRoute(_post_schedule_template_delete, needs_payload=True),
-    "/api/schedule/cancel": PostRoute(_post_schedule_cancel, needs_payload=True),
-    "/api/skills/send": PostRoute(_post_skill_send, needs_payload=True),
-    "/api/notify/test": PostRoute(_post_notify_test, needs_payload=True),
-}
+GET_ROUTES = build_get_routes(API_HANDLERS)
+POST_ROUTES = build_post_routes(API_HANDLERS)
 
 
 def create_handler(

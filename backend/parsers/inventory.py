@@ -19,6 +19,11 @@ ITEM_RE = re.compile(
     r"^\s*[-•]?\s*(?P<name>.+?)\s*[xX×*]\s*(?P<amount>\d+)"
     r"(?:\s*(?P<extra>[(（][^)）]+[)）]))?\s*$"
 )
+TREE_HARVEST_REWARD_RE = re.compile(r"【([^】]+)】\s*(?:[xX×]\s*([\d,]+))?")
+LISTING_SUCCESS_RE = re.compile(r"你已将\s*【(?P<item>.+?)】\s*[xX×](?P<count>[\d,]+)\s*上架至万宝楼")
+GIFT_SUCCESS_RE = re.compile(r"赠送了\s*【(?P<item>.+?)】\s*[xX×](?P<count>[\d,]+)")
+GIFT_TAX_RE = re.compile(r"额外支付了\s*(?P<count>[\d,]+)\s*灵石")
+TREE_REWARD_KEYWORDS = ("获得【", "分得【", "稳定分得【")
 
 
 class InventoryParser:
@@ -114,6 +119,59 @@ def parse_inventory_snapshot(event: RawMessageEvent) -> dict | None:
     }
 
 
+def parse_inventory_delta_event(event: RawMessageEvent) -> dict | None:
+    """Parse confirmed item changes from bot replies.
+
+    This is deliberately conservative: only success/result text that already
+    names the item and quantity becomes a delta. The caller decides which owner
+    the delta belongs to, usually from the replied-to command sender.
+    """
+    text = event.text or ""
+    deltas: dict[str, int] = {}
+    source_type = ""
+    confidence = "estimated"
+
+    if match := LISTING_SUCCESS_RE.search(text):
+        item = _clean_item_name(match.group("item"))
+        amount = _parse_amount(match.group("count"))
+        if item and amount > 0:
+            deltas[item] = deltas.get(item, 0) - amount
+            source_type = "listing_success"
+    elif match := GIFT_SUCCESS_RE.search(text):
+        item = _clean_item_name(match.group("item"))
+        amount = _parse_amount(match.group("count"))
+        if item and amount > 0:
+            deltas[item] = deltas.get(item, 0) - amount
+            source_type = "gift_success"
+        if tax_match := GIFT_TAX_RE.search(text):
+            tax = _parse_amount(tax_match.group("count"))
+            if tax > 0:
+                deltas["灵石"] = deltas.get("灵石", 0) - tax
+    elif any(keyword in text for keyword in TREE_REWARD_KEYWORDS):
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not any(keyword in line for keyword in TREE_REWARD_KEYWORDS):
+                continue
+            for raw_item, raw_count in TREE_HARVEST_REWARD_RE.findall(line):
+                item = _clean_item_name(raw_item)
+                amount = _parse_amount(raw_count or "1")
+                if item and amount > 0:
+                    deltas[item] = deltas.get(item, 0) + amount
+                    source_type = "tree_harvest"
+
+    if not deltas or not source_type:
+        return None
+    return {
+        "raw_message_id": event.id,
+        "source_type": source_type,
+        "confidence": confidence,
+        "event_time": event.date or "",
+        "chat_id": int(event.chat_id or 0),
+        "msg_id": int(event.msg_id or 0),
+        "deltas": deltas,
+    }
+
+
 def _extract_owner(text: str) -> str:
     if match := OWNER_RE.search(text):
         return match.group("owner").strip().lstrip("@")
@@ -128,4 +186,11 @@ def _clean_item_name(value: str) -> str:
     return text.strip("-• \t")
 
 
-__all__ = ["InventoryParser", "parse_inventory_snapshot"]
+def _parse_amount(value: object) -> int:
+    try:
+        return int(str(value or "0").replace(",", "").strip() or "0")
+    except (TypeError, ValueError):
+        return 0
+
+
+__all__ = ["InventoryParser", "parse_inventory_delta_event", "parse_inventory_snapshot"]

@@ -278,10 +278,11 @@ class HeartPromptParser:
 
     def parse(self, event: RawMessageEvent) -> ParserOutput | None:
         text = event.text or ""
-        # 必须含心劫关键词,且 bot 在请求一个抉择回复(出现 .稳 提示 或 选择)
+        # 必须含心劫关键词,且 bot 在请求一个抉择回复(出现 .稳 提示)。
+        # 结算文里可能出现“三轮抉择：稳 / 稳 / 稳”,不能误判成 prompt。
         if not any(kw in text for kw in HEART_PROMPT_KEYWORDS):
             return None
-        if ".稳" not in text and "稳" not in text:
+        if not re.search(r"[.。]\s*稳", text):
             # 没出现 .稳 提示就不是 prompt,而是 status / cd 提示
             return None
         actions = (

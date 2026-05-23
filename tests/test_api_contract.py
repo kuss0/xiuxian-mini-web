@@ -1,5 +1,8 @@
+import re
+from pathlib import Path
+
 from backend.domain import CHANNELS
-from backend.domain.models import ParsedCard, RawMessageEvent, utc_now_iso
+from backend.domain.models import ActionSuggestion, ParsedCard, RawMessageEvent, utc_now_iso
 from backend.app import MiniWebHandler, create_handler, is_authorized_api_headers
 from backend.config import MAX_ACCOUNTS, MAX_IDENTITIES, MAX_LISTENERS
 import backend.server as server_module
@@ -34,6 +37,137 @@ def test_sample_messages_reference_known_channels():
     known = {channel.key for channel in CHANNELS}
     messages = [card.to_api() for card in SampleStore().list_cards()]
     assert {message["channel"] for message in messages} <= known
+
+
+def test_api_handler_route_tables_cover_collected_handlers():
+    from backend.api.routes import PostRoute
+    from backend.app import API_HANDLERS, GET_ROUTES, POST_ROUTES
+
+    routed_handlers = set(GET_ROUTES.values())
+    routed_handlers.update(route._handler for route in POST_ROUTES.values())
+
+    unused_handlers = sorted(
+        name for name, handler in API_HANDLERS.items()
+        if handler not in routed_handlers
+    )
+    assert unused_handlers == []
+    assert all(path.startswith("/api/") for path in GET_ROUTES)
+    assert all(path.startswith("/api/") for path in POST_ROUTES)
+    assert all(callable(handler) for handler in GET_ROUTES.values())
+    assert all(isinstance(route, PostRoute) for route in POST_ROUTES.values())
+    assert all(callable(route._handler) for route in POST_ROUTES.values())
+    assert sorted(path for path, route in POST_ROUTES.items() if not route.needs_payload) == [
+        "/api/listener/start",
+        "/api/listener/stop",
+        "/api/login/cancel",
+        "/api/login/start",
+    ]
+
+
+def test_static_modules_are_loaded_and_cache_busted():
+    from backend.app import BUILD_ID, _inject_build_id
+
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "web" / "index.html").read_text(encoding="utf-8")
+    loaded_assets = re.findall(r'(?:src|href)="/static/([^"?]+)"', html)
+    view_assets = {
+        f"views/{path.name}"
+        for path in (root / "web" / "static" / "views").glob("*.js")
+    }
+
+    missing_assets = [
+        asset for asset in loaded_assets
+        if not (root / "web" / "static" / asset).is_file()
+    ]
+    assert missing_assets == []
+    assert view_assets <= set(loaded_assets)
+    assert "styles.css" in loaded_assets
+    assert "chat-layout.css" in loaded_assets
+    assert loaded_assets.index("styles.css") < loaded_assets.index("chat-layout.css")
+
+    injected = _inject_build_id(html.encode("utf-8")).decode("utf-8")
+    for asset in loaded_assets:
+        assert f'"/static/{asset}?v={BUILD_ID}"' in injected
+
+    synthetic = '<link rel="stylesheet" href="/static/future-panel.css" /><script src="/static/views/future.js"></script>'
+    injected_synthetic = _inject_build_id(synthetic.encode("utf-8")).decode("utf-8")
+    assert f'"/static/future-panel.css?v={BUILD_ID}"' in injected_synthetic
+    assert f'"/static/views/future.js?v={BUILD_ID}"' in injected_synthetic
+
+
+def test_frontend_bootstrap_loads_registered_views_before_app():
+    root = Path(__file__).resolve().parents[1]
+    web_dir = root / "web"
+    html = (web_dir / "index.html").read_text(encoding="utf-8")
+    app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
+    scripts = re.findall(r'<script src="/static/([^"?]+)"', html)
+
+    assert scripts[-1] == "app.js"
+    for required in [
+        "state.js",
+        "constants.js",
+        "ui/format.js",
+        "api.js",
+        "ui/modal.js",
+        "ui/toast.js",
+    ]:
+        assert scripts.index(required) < scripts.index("app.js")
+
+    view_files = sorted((web_dir / "static" / "views").glob("*.js"))
+    loaded_views = [script for script in scripts if script.startswith("views/")]
+    assert sorted(loaded_views) == [f"views/{path.name}" for path in view_files]
+    assert all(scripts.index(view) < scripts.index("app.js") for view in loaded_views)
+
+    registered_views = set()
+    for path in view_files:
+        content = path.read_text(encoding="utf-8")
+        registered_views.update(re.findall(r"window\.MiniwebViews\.([A-Za-z0-9_]+)\s*=", content))
+    app_view_refs = set(re.findall(r"window\.MiniwebViews\.([A-Za-z0-9_]+)\b", app_js))
+
+    assert app_view_refs <= registered_views
+
+
+def test_chat_viewport_layout_contract_keeps_composer_visible():
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "web" / "index.html").read_text(encoding="utf-8")
+    base_css = (root / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+    css = (root / "web" / "static" / "chat-layout.css").read_text(encoding="utf-8")
+
+    workspace = html.index('<main class="main chat-workspace">')
+    layout = html.index('<section class="layout-grid detail-closed">')
+    composer = html.index('<footer id="directSendComposer" class="direct-send-composer chat-composer"')
+    styles_link = html.index('<link rel="stylesheet" href="/static/styles.css"')
+    layout_link = html.index('<link rel="stylesheet" href="/static/chat-layout.css"')
+    assert styles_link < layout_link
+    assert workspace < layout < composer
+    assert '<section id="gamePrimaryStrip" class="game-primary-strip"' in html
+    assert '<div id="messageList" class="message-list"></div>' in html
+    assert '<div id="quickActionHotbar" class="quick-action-hotbar"' in html
+    assert '<textarea id="directSendInput"' in html
+    assert "/* ---------- Final chat viewport stability contract ---------- */" not in base_css
+
+    final_contract = css
+    required_fragments = [
+        "Final chat viewport stability contract.",
+        ".chat-client-shell {\n  height: 100dvh;\n  max-height: 100dvh;\n  overflow: hidden;",
+        ".chat-client-shell .chat-workspace {\n  display: grid;\n  grid-template-rows: auto minmax(0, 1fr) auto;",
+        ".chat-client-shell .layout-grid,\n.chat-client-shell .layout-grid.detail-open,\n.chat-client-shell .layout-grid.detail-closed {\n  grid-row: 2;\n  display: grid;\n  min-height: 0;\n  height: 100%;\n  overflow: hidden;",
+        ".chat-client-shell .chat-pane {\n  display: grid;\n  grid-template-rows: auto auto minmax(0, 1fr);\n  min-height: 0;\n  height: 100%;\n  overflow: hidden;",
+        ".chat-client-shell .message-list {\n  grid-row: 3;\n  min-height: 0;\n  height: auto;\n  overflow-y: auto;",
+        ".chat-client-shell .chat-composer {\n  grid-row: 3;\n  align-self: stretch;\n  max-height: min(34dvh, 310px);",
+        ".chat-client-shell .quick-action-hotbar {\n  display: flex;\n  flex-wrap: nowrap;",
+        "@media (max-width: 900px)",
+        "grid-template-rows: clamp(112px, 20dvh, 170px) minmax(0, 1fr);",
+        ".chat-client-shell .conversation-rail {\n    grid-row: 1;\n    overflow: auto;",
+        ".chat-client-shell .chat-workspace {\n    grid-row: 2;\n    min-height: 0;",
+        ".chat-client-shell .chat-composer {\n    position: static;\n    bottom: auto;\n    max-height: min(42dvh, 220px);",
+        ".chat-client-shell .chat-pane .section-head {\n    display: grid;\n    grid-template-columns: minmax(0, 1fr);\n    grid-template-rows: auto auto;",
+        ".chat-client-shell .stream-channel-tools {\n    justify-content: flex-start;",
+        "scrollbar-width: none;",
+        ".chat-client-shell .direct-send-row {\n    grid-template-columns: minmax(96px, 28%) minmax(0, 1fr) 72px;",
+    ]
+    for fragment in required_fragments:
+        assert fragment in final_contract
 
 
 def test_sample_store_filters_by_secondary_channel():
@@ -108,6 +242,13 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
     command_without_dot = enrich_filter_channels(
         base,
         RawMessageEvent(id="x8", chat_id=1, msg_id=8, text="洞天绘卷", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    resource_command_without_dot = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x8b", chat_id=1, msg_id=81, text="储物袋", source="玩家", date="", sender_id=222),
         {"focus_include_player_plain": True},
         is_game_bot_sender=lambda _sid: False,
         my_identity_ids=[123],
@@ -199,6 +340,76 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
         is_game_bot_sender=lambda _sid: False,
         my_identity_ids=[123],
     )
+    observed_low_signal = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x16", chat_id=1, msg_id=16, text="我看看", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    observed_placeholder = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x16b", chat_id=1, msg_id=161, text="路过", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    observed_short_ack = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x16c", chat_id=1, msg_id=162, text="明了", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    observed_single_word_ack = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x16d", chat_id=1, msg_id=163, text="知道", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    observed_go_noise = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x16e", chat_id=1, msg_id=164, text="冲冲冲", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    dungeon_choice_noise = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x17", chat_id=1, msg_id=17, text="稳", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    useful_plain_question = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x18", chat_id=1, msg_id=18, text="冲击元婴需要准备什么材料？", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True, "focus_keywords": []},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    keyword_question_with_short_word = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x19", chat_id=1, msg_id=19, text="坠魔心劫怎么选比较稳", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True, "focus_keywords": ["坠魔心劫"]},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    useful_route_discussion = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x20", chat_id=1, msg_id=20, text="刚刚路过虚天殿的时候看到队伍满了", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True, "focus_keywords": ["虚天殿"]},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
+    useful_coordination = enrich_filter_channels(
+        base,
+        RawMessageEvent(id="x21", chat_id=1, msg_id=21, text="这边好了", source="玩家", date="", sender_id=222),
+        {"focus_include_player_plain": True},
+        is_game_bot_sender=lambda _sid: False,
+        my_identity_ids=[123],
+    )
 
     assert "focus" in plain.channels
     assert "archive" in command.channels
@@ -210,13 +421,18 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
     assert "focus" not in short_reply.channels
     assert "archive" in short_reply.channels
     assert any(str(tag).startswith("重点排除:") for tag in short_reply.tags)
-    assert "focus" in own_command.channels
+    assert "focus" not in own_command.channels
     assert "archive" in own_command.channels
+    assert "mine" in own_command.channels
+    assert "training" in own_command.channels
     assert "我发出" in own_command.tags
     assert "focus" in short_reply_without_exclude.channels
     assert "archive" in command_without_dot.channels
     assert "focus" not in command_without_dot.channels
     assert any(str(tag).startswith("重点排除:") for tag in command_without_dot.tags)
+    assert "archive" in resource_command_without_dot.channels
+    assert "focus" not in resource_command_without_dot.channels
+    assert any(str(tag).startswith("重点排除:") for tag in resource_command_without_dot.tags)
     assert "archive" in keyword_command_without_dot.channels
     assert "focus" not in keyword_command_without_dot.channels
     assert any(str(tag).startswith("重点排除:") for tag in keyword_command_without_dot.tags)
@@ -241,6 +457,152 @@ def test_message_filter_promotes_plain_mentions_and_archives_commands():
     assert "focus" not in short_noise.channels
     assert "archive" in vague_reply.channels
     assert "focus" not in vague_reply.channels
+    assert "archive" in observed_low_signal.channels
+    assert "focus" not in observed_low_signal.channels
+    assert "archive" in observed_placeholder.channels
+    assert "focus" not in observed_placeholder.channels
+    assert "archive" in observed_short_ack.channels
+    assert "focus" not in observed_short_ack.channels
+    assert "archive" in observed_single_word_ack.channels
+    assert "focus" not in observed_single_word_ack.channels
+    assert "archive" in observed_go_noise.channels
+    assert "focus" not in observed_go_noise.channels
+    assert "archive" in dungeon_choice_noise.channels
+    assert "focus" not in dungeon_choice_noise.channels
+    assert "focus" in useful_plain_question.channels
+    assert "archive" not in useful_plain_question.channels
+    assert "focus" in keyword_question_with_short_word.channels
+    assert "archive" not in keyword_question_with_short_word.channels
+    assert "focus" in useful_route_discussion.channels
+    assert "archive" not in useful_route_discussion.channels
+    assert "focus" in useful_coordination.channels
+    assert "archive" not in useful_coordination.channels
+
+
+def test_message_filter_archives_observed_low_signal_without_hiding_coordination():
+    base = ParsedCard(
+        id="observed-short-plain",
+        channels=("world",),
+        title="玩家消息",
+        summary="",
+        source="玩家",
+        time="",
+        tags=(),
+        raw="",
+    )
+
+    def classify(text: str):
+        return enrich_filter_channels(
+            base,
+            RawMessageEvent(
+                id=f"obs-{text}",
+                chat_id=1,
+                msg_id=1000,
+                text=text,
+                source="玩家",
+                date="",
+                sender_id=222,
+            ),
+            {"focus_include_player_plain": True, "focus_keywords": []},
+            is_game_bot_sender=lambda _sid: False,
+            my_identity_ids=[123],
+        )
+
+    archived_texts = [
+        "不好说",
+        "家人们谁懂啊",
+        "这事可太难办啦",
+        "随机",
+        "收到啦",
+        "知道啦",
+        "懂了懂了",
+        "哦哦好",
+        "牛的",
+        "真敢说",
+    ]
+    kept_texts = [
+        "来个助阵呗",
+        "带带我",
+        "蹭车",
+        "怎么玩",
+        "打不动",
+        "职业不能重复",
+        "解散吧",
+        "我到了",
+        "这边好了",
+    ]
+
+    for text in archived_texts:
+        result = classify(text)
+        assert "archive" in result.channels
+        assert "focus" not in result.channels
+    for text in kept_texts:
+        result = classify(text)
+        assert "focus" in result.channels
+        assert "archive" not in result.channels
+
+
+def test_message_filter_archives_commerce_and_empty_noise_without_hiding_discussion():
+    base = ParsedCard(
+        id="commerce-noise",
+        channels=("world",),
+        title="玩家消息",
+        summary="",
+        source="玩家",
+        time="",
+        tags=(),
+        raw="",
+    )
+    settings = {
+        "focus_include_player_plain": True,
+        "focus_keywords": [],
+        "leader_sender_ids": [2049298748],
+    }
+
+    def classify(text: str, **event_patch):
+        return enrich_filter_channels(
+            base,
+            RawMessageEvent(
+                id=f"commerce-{len(text)}-{event_patch.get('msg_id', 1)}",
+                chat_id=1,
+                msg_id=int(event_patch.pop("msg_id", 1)),
+                text=text,
+                source=str(event_patch.pop("source", "玩家")),
+                date="",
+                sender_id=event_patch.pop("sender_id", 222),
+                **event_patch,
+            ),
+            settings,
+            is_game_bot_sender=lambda _sid: False,
+            my_identity_ids=[123],
+        )
+
+    shop = classify(
+        "🌟 乐上师的小店【LDC商城】\n"
+        "━━━━━━━━━━━━━━━\n"
+        "1. 天雷竹*1\n"
+        "   └ 💰价格:1.50 | 📦库存:467\n"
+        "📝 使用 .购入 <编号> [数量] 或 .购入 <编号>*<数量> 下单"
+    )
+    order = classify("✅ 订单已创建\n\n📋 订单号：ORD_1\n🛍 商品：养魂木*1")
+    done = classify("🎉 交易完成啦！\n\n谢谢您的支持！东西已经发给你了。")
+    plain_discussion = classify("LDC商城现在还有凝魂丹吗")
+    empty_plain = classify("")
+    empty_media = classify("", media_kind="photo")
+    empty_leader = classify("", source="嬴驷", sender_id=2049298748)
+
+    for result in (shop, order, done, empty_plain):
+        assert "archive" in result.channels
+        assert "focus" not in result.channels
+    assert "商城目录归档" in shop.reasons
+    assert "交易订单归档" in order.reasons
+    assert "交易完成归档" in done.reasons
+    assert "空白普通消息归档" in empty_plain.reasons
+
+    for result in (plain_discussion, empty_media, empty_leader):
+        assert "focus" in result.channels
+        assert "archive" not in result.channels
+    assert "leader" in empty_leader.channels
 
 
 def test_message_filter_promotes_bot_reply_to_me_and_archives_reply_to_others():
@@ -287,16 +649,65 @@ def test_message_filter_promotes_bot_reply_to_me_and_archives_reply_to_others():
         my_identity_ids=[12345],
     )
 
-    assert "focus" in reply_to_me.channels
-    assert "archive" not in reply_to_me.channels
+    assert "focus" not in reply_to_me.channels
+    assert "archive" in reply_to_me.channels
+    assert "mine" in reply_to_me.channels
+    assert "training" in reply_to_me.channels
     assert "回复我" in reply_to_me.tags
-    assert "focus" in reply_to_me_with_other_mentions.channels
+    assert "focus" not in reply_to_me_with_other_mentions.channels
+    assert "mine" in reply_to_me_with_other_mentions.channels
     assert "archive" not in reply_to_me_with_other_mentions.channels
     assert "回复我" in reply_to_me_with_other_mentions.tags
     assert "提到别人" in reply_to_me_with_other_mentions.tags
     assert "archive" in reply_to_other.channels
     assert "focus" not in reply_to_other.channels
     assert "回复别人" in reply_to_other.tags
+
+
+def test_message_filter_archives_action_prompt_for_other_player():
+    base = ParsedCard(
+        id="heart-other",
+        channels=("system", "prompt", "home"),
+        title="共历心劫",
+        summary="bot 在等你 .稳(回复本消息)",
+        source="韩天尊",
+        time="",
+        tags=("侍妾", "心劫"),
+        raw="",
+        actions=(ActionSuggestion("copy", "稳(回复)", ".稳"),),
+    )
+    parent = RawMessageEvent(
+        id="p-heart", chat_id=1, msg_id=101, text=".共历心劫", source="other", date="", sender_id=67890
+    )
+    bot_event = RawMessageEvent(
+        id="b-heart",
+        chat_id=1,
+        msg_id=102,
+        text=(
+            "【坠魔心劫·第2轮已定】\n"
+            "你按韩立式谨慎节奏步步为营，侍妾神念与你渐趋同频。\n\n"
+            "【坠魔心劫·第3轮】\n"
+            "幻境再变，请继续回复 .稳 / .狠 / .骗。"
+        ),
+        source="韩天尊",
+        date="",
+        sender_id=-100,
+        reply_to_msg_id=101,
+    )
+
+    result = enrich_filter_channels(
+        base,
+        bot_event,
+        {"archive_bot_replies": False, "focus_keywords": []},
+        is_game_bot_sender=lambda sid: sid == -100,
+        parent_event=parent,
+        my_identity_ids=[12345],
+    )
+
+    assert "archive" in result.channels
+    assert "focus" not in result.channels
+    assert "回复别人" in result.tags
+    assert "有可操作按钮" in result.reasons
 
 
 def test_message_filter_archives_bot_mentions_to_others():
@@ -338,6 +749,217 @@ def test_message_filter_archives_bot_mentions_to_others():
     assert "提到别人" in reply_to_other.tags
     assert "focus" in reply_to_me.channels
     assert "archive" not in reply_to_me.channels
+
+
+def test_message_filter_keeps_dungeon_bot_mentions_in_focus():
+    base = ParsedCard(
+        id="dungeon-mention",
+        channels=("system", "dungeon"),
+        title="虚天殿开启",
+        summary="",
+        source="韩天尊",
+        time="",
+        tags=("副本",),
+        raw="",
+    )
+    settings = {
+        "archive_bot_replies": True,
+        "focus_keywords": [],
+        "own_aliases": ["wa2000"],
+    }
+
+    result = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="d1",
+            chat_id=1,
+            msg_id=21,
+            text="【虚天殿已开启】 @other 开启了传送门！副本ID: 809",
+            source="韩天尊",
+            date="",
+            sender_id=-100,
+        ),
+        settings,
+        is_game_bot_sender=lambda sid: sid == -100,
+    )
+
+    assert "focus" in result.channels
+    assert "archive" not in result.channels
+    assert "提到别人" in result.tags
+    assert "副本消息" in result.reasons
+
+
+def test_message_filter_archives_blood_trial_dungeon_messages():
+    base = ParsedCard(
+        id="blood-trial",
+        channels=("system", "dungeon", "resource"),
+        title="血色试炼集结",
+        summary="",
+        source="韩天尊",
+        time="",
+        tags=("副本",),
+        raw="",
+    )
+
+    result = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="bt1",
+            chat_id=1,
+            msg_id=22,
+            text="【血色试炼·集结】 @MayaLing 正在召集同伴，准备进入【血色禁地】采药试炼！房间ID: 520",
+            source="韩天尊",
+            date="",
+            sender_id=-100,
+        ),
+        {"archive_bot_replies": False, "focus_keywords": ["血色试炼", "副本ID"]},
+        is_game_bot_sender=lambda sid: sid == -100,
+    )
+
+    assert "archive" in result.channels
+    assert "focus" not in result.channels
+    assert "dungeon" in result.channels
+    assert "血色禁地归档" in result.reasons
+
+
+def test_message_filter_archives_xutian_back_hall_stop_message():
+    base = ParsedCard(
+        id="xutian-back-hall-stop",
+        channels=("system", "dungeon"),
+        title="后殿冲关止步",
+        summary="",
+        source="韩天尊",
+        time="",
+        tags=("副本",),
+        raw="",
+    )
+
+    result = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="xh1",
+            chat_id=1,
+            msg_id=23,
+            text=(
+                "【后殿冲关止步】\n"
+                "回合耗尽，鼎灵残焰仍未被真正压灭。\n"
+                "好在第三关结算所得早已锁定，这次失去的只有后殿追加机缘。"
+            ),
+            source="韩天尊",
+            date="",
+            sender_id=-100,
+        ),
+        {"archive_bot_replies": False, "focus_keywords": ["虚天殿", "后殿冲关止步"]},
+        is_game_bot_sender=lambda sid: sid == -100,
+    )
+
+    assert "archive" in result.channels
+    assert "focus" not in result.channels
+    assert "dungeon" in result.channels
+    assert "虚天殿后殿止步归档" in result.reasons
+
+
+def test_message_filter_archives_unconfigured_tianzun_heart_demon_result():
+    base = ParsedCard(
+        id="heart-demon-result",
+        channels=("world",),
+        title="玩家消息",
+        summary="",
+        source="韩天尊",
+        time="",
+        tags=("未分类",),
+        raw="",
+    )
+
+    result = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="hm1",
+            chat_id=1,
+            msg_id=24,
+            text=(
+                "【坠魔心劫·结算】\n"
+                "三轮抉择：稳 / 稳 / 稳\n"
+                "你以守代攻，借势封魔，终在险境中稳稳落子。\n\n"
+                "修为结算：+659\n"
+                "情缘结算：+7\n"
+                "心魔值结算：-5（当前 0）"
+            ),
+            source="韩天尊",
+            date="",
+            sender_id=8567800706,
+        ),
+        {"archive_bot_replies": False, "focus_include_player_plain": True, "focus_keywords": ["心魔"]},
+        is_game_bot_sender=lambda _sid: False,
+    )
+
+    assert "archive" in result.channels
+    assert "focus" not in result.channels
+    assert "坠魔心劫归档" in result.reasons
+
+
+def test_message_filter_keeps_player_heart_demon_discussion_in_focus():
+    base = ParsedCard(
+        id="heart-demon-player",
+        channels=("world",),
+        title="玩家消息",
+        summary="",
+        source="玩家",
+        time="",
+        tags=("未分类",),
+        raw="",
+    )
+
+    result = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="hm2",
+            chat_id=1,
+            msg_id=25,
+            text="坠魔心劫这个怎么选比较稳",
+            source="玩家",
+            date="",
+            sender_id=222,
+        ),
+        {"archive_bot_replies": False, "focus_include_player_plain": True, "focus_keywords": ["坠魔心劫"]},
+        is_game_bot_sender=lambda _sid: False,
+    )
+
+    assert "focus" in result.channels
+    assert "archive" not in result.channels
+
+
+def test_message_filter_archives_unconfigured_tianzun_short_reply():
+    base = ParsedCard(
+        id="tianzun-short-reply",
+        channels=("world",),
+        title="玩家消息",
+        summary="",
+        source="韩天尊",
+        time="",
+        tags=("未分类",),
+        raw="",
+    )
+
+    result = enrich_filter_channels(
+        base,
+        RawMessageEvent(
+            id="tz-short",
+            chat_id=1,
+            msg_id=26,
+            text="你的观星台上没有需要安抚的星辰。",
+            source="韩天尊",
+            date="",
+            sender_id=8400307678,
+            reply_to_msg_id=25,
+        ),
+        {"archive_bot_replies": True, "focus_include_player_plain": True, "focus_keywords": []},
+        is_game_bot_sender=lambda _sid: False,
+    )
+
+    assert "archive" in result.channels
+    assert "focus" not in result.channels
+    assert "普通天尊回复归档" in result.reasons
 
 
 def test_message_filter_promotes_plain_tianzun_speech_to_leader():
@@ -826,7 +1448,7 @@ def test_sqlite_settings_roundtrip(tmp_path):
     assert 7900199668 in store.get_settings()["game_bot_ids"]
     assert -1002049298748 in store.get_settings()["leader_sender_ids"]
     assert "@iosdo7" in store.get_settings()["leader_source_names"]
-    assert store.get_settings()["focus_include_player_plain"] is False
+    assert store.get_settings()["focus_include_player_plain"] is True
 
     saved = store.save_settings(
         {
@@ -858,11 +1480,30 @@ def test_focus_exclude_patterns_preserve_regex_commas(tmp_path):
 def test_focus_exclude_patterns_prune_legacy_defaults(tmp_path):
     store = SQLiteStore(tmp_path / "miniweb.db")
     legacy_short_noise = r"^(嗯+|哦+|噢+|好+|好的|行吧?|对|是|收到|收到了|来了|回来了|晚安|谢谢|谢谢老板)$"
-    saved = store.save_settings({"focus_exclude_patterns": [legacy_short_noise, "第二期机缘"]})
+    legacy_extended_noise = r"^(a+|o+|嗯+|哦+|噢+|喵+|哈+|哈哈+|哇+|呜+|额+|呃+|好+|好的|好的呢|好吧|行吧?|对|是|是的|收到|收到了|来了|来了来了|回来了|晚安|谢谢|谢谢老板|等下|稍等|明白|知道了|没问题|可以|冒泡|打卡|起来了|欸行|你好|早安|差不多|差不多了|得嘞|妥了|好嘞|在呢|在吗|嘿嘿|呵呵|了解|okk|619|555|拉屎好爽)$"
+    legacy_observed_default = r"^(a+|o+|ok+|okay|OK+|Ok+|6+|嗯+|哦+|噢+|喵+|哈+|哈哈+|哇+|呜+|额+|呃+|好+|好的|好的呢|好吧|行吧?|对|是|是的|收到|收到了|来了|来了来了|回来了|晚安|谢谢|谢谢老板|等下|稍等|明白|知道了|没问题|可以|冒泡|打卡|起来了|欸行|你好|早安|差不多|差不多了|得嘞|妥了|好嘞|在呢|在吗|嘿嘿|呵呵|了解|草|笑死|乐|泪目|绷|牛|牛逼|nb|NB|nice|看看|你看看|看下|看一下|直觉|随便|都行|可以吧|619|555|拉屎好爽)$"
+    legacy_low_signal = r"^(q|Q|稳|狠|骗|信对了|我看看|氪金吧|好贵|太贵了|可以的|啊+|嗯好|嗯嗯|哦哦|对啊|是啊|不是吧|离谱)$"
+    legacy_routine = r"^(查看闭关|宗门点卯|宗门悬赏|宗门战况|天机代卜|闯塔|我的侍妾|查看侍妾|我的货摊|我的宗门|宗门宝库|每日问安|万宝楼|洞府|战力|状态|观星台|观星|助阵|启阵|出关|归来|强行出关|深度闭关|闭关修炼|闭关结束|登天阶|元婴状态|元婴出窍|元婴归窍|冲击元婴|第二元神|安抚星辰|入梦寻图|黄粱一梦|共历心劫|野外历练|斩妖除魔|小药园|洞天绘卷|宗门传功|我的灵根|收集精华|解散副本)$"
+    saved = store.save_settings({
+        "focus_exclude_patterns": [
+            legacy_short_noise,
+            legacy_extended_noise,
+            legacy_observed_default,
+            legacy_low_signal,
+            legacy_routine,
+            "第二期机缘",
+        ],
+    })
 
     assert legacy_short_noise not in saved["focus_exclude_patterns"]
+    assert legacy_extended_noise not in saved["focus_exclude_patterns"]
+    assert legacy_observed_default not in saved["focus_exclude_patterns"]
+    assert legacy_low_signal not in saved["focus_exclude_patterns"]
+    assert legacy_routine not in saved["focus_exclude_patterns"]
     assert "第二期机缘" in saved["focus_exclude_patterns"]
     assert any("拉屎好爽" in item for item in saved["focus_exclude_patterns"])
+    assert any("路过" in item for item in saved["focus_exclude_patterns"])
+    assert any("储物袋" in item for item in saved["focus_exclude_patterns"])
 
 
 def test_focus_muted_senders_roundtrip(tmp_path):
@@ -889,9 +1530,9 @@ def test_focus_exclude_preview_only_counts_unprotected_plain_focus(tmp_path):
 
     assert preview["ok"] is True
     assert preview["pattern"] == "^是这样$"
-    assert preview["total"] == 1
-    assert preview["last_24h"] == 1
-    assert preview["samples"][0]["sender_id"] == 222
+    assert preview["total"] == 2
+    assert preview["last_24h"] == 2
+    assert {sample["sender_id"] for sample in preview["samples"]} == {123, 222}
 
 
 def test_settings_auto_collects_own_usernames(tmp_path):
@@ -1465,6 +2106,82 @@ def test_messages_payload_supports_incremental_pull(tmp_path):
     assert incremental["incremental"] is True
 
 
+def test_reingesting_existing_message_preserves_card_seq(tmp_path):
+    """重解析/编辑旧消息不应通过删插把旧卡片顶到最新消息流。"""
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    old_event = RawMessageEvent(
+        id="old-message",
+        chat_id=-1,
+        msg_id=100,
+        text="old text",
+        source="玩家",
+        date="2026-05-15T00:00:00+00:00",
+        sender_id=111,
+    )
+    newer_event = RawMessageEvent(
+        id="newer-message",
+        chat_id=-1,
+        msg_id=101,
+        text="newer text",
+        source="玩家",
+        date="2026-05-15T00:01:00+00:00",
+        sender_id=111,
+    )
+    store.ingest_event(old_event)
+    old_seq = store.get_card("old-message")[0]
+    store.ingest_event(newer_event)
+
+    store.ingest_event(
+        RawMessageEvent(
+            id="old-message",
+            chat_id=-1,
+            msg_id=100,
+            text="old text edited",
+            source="玩家",
+            date="2026-05-15T00:00:00+00:00",
+            sender_id=111,
+            edited_at="2026-05-15T00:02:00+00:00",
+        )
+    )
+
+    assert store.get_card("old-message")[0] == old_seq
+    payload = MiniWebServer(store=store).messages_payload("all", limit=2)
+    assert [item["id"] for item in payload["messages"]] == ["newer-message", "old-message"]
+    assert payload["messages"][1]["raw"] == "old text edited"
+
+
+def test_messages_payload_initial_order_uses_message_time_not_seq(tmp_path):
+    """初始化消息流按真实消息时间排序;seq 只作为增量游标兜底。"""
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(
+        RawMessageEvent(
+            id="newer-first",
+            chat_id=-1,
+            msg_id=200,
+            text="newer by time",
+            source="玩家",
+            date="2026-05-15T00:10:00+00:00",
+            sender_id=111,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="older-second",
+            chat_id=-1,
+            msg_id=199,
+            text="older by time but higher seq",
+            source="玩家",
+            date="2026-05-15T00:00:00+00:00",
+            sender_id=111,
+        )
+    )
+
+    payload = MiniWebServer(store=store).messages_payload("all", limit=2)
+
+    assert [item["id"] for item in payload["messages"]] == ["newer-first", "older-second"]
+    assert payload["messages"][0]["seq"] < payload["messages"][1]["seq"]
+
+
 def test_messages_payload_supports_multi_channel_sqlite_store(tmp_path):
     store = SQLiteStore(tmp_path / "miniweb.db")
     seed_sqlite_samples(store)
@@ -1600,6 +2317,219 @@ def test_inventory_payload_can_omit_items_for_snapshot_list(tmp_path):
         ("灵石", 100),
         ("阴凝之晶", 2),
     }
+
+
+def test_inventory_current_applies_confirmed_deltas_after_snapshot(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_account({"local_id": "main", "account_id": "12345", "username": "seller"})
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:100",
+            chat_id=-1,
+            msg_id=100,
+            text="""@seller 的储物袋
+
+材料:
+- 灵石 x 100
+- 阴凝之晶 x 2""",
+            source="韩天尊",
+            date="2026-05-15T10:00:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:101",
+            chat_id=-1,
+            msg_id=101,
+            text=".灵树采摘",
+            source="seller",
+            date="2026-05-15T10:01:00+00:00",
+            sender_id=12345,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:102",
+            chat_id=-1,
+            msg_id=102,
+            text="你稳定分得【清灵草】x2，并获得【阴凝之晶】。",
+            source="韩天尊",
+            date="2026-05-15T10:02:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+            reply_to_msg_id=101,
+        )
+    )
+
+    by_name = {item["name"]: item for item in store.list_inventory_current(owner="seller")}
+    assert by_name["灵石"]["amount"] == 100
+    assert by_name["阴凝之晶"]["amount"] == 3
+    assert by_name["阴凝之晶"]["confidence"] == "estimated"
+    assert by_name["清灵草"]["amount"] == 2
+    assert by_name["清灵草"]["basis"] == "ledger_delta"
+
+
+def test_inventory_current_resets_to_authoritative_snapshot(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_account({"local_id": "main", "account_id": "12345", "username": "seller"})
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:110",
+            chat_id=-1,
+            msg_id=110,
+            text="""@seller 的储物袋
+
+材料:
+- 阴凝之晶 x 2""",
+            source="韩天尊",
+            date="2026-05-15T10:00:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:111",
+            chat_id=-1,
+            msg_id=111,
+            text=".赠送 阴凝之晶 1",
+            source="seller",
+            date="2026-05-15T10:01:00+00:00",
+            sender_id=12345,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:112",
+            chat_id=-1,
+            msg_id=112,
+            text="【赠送成功】你向道友赠送了 【阴凝之晶】x1。",
+            source="韩天尊",
+            date="2026-05-15T10:02:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+            reply_to_msg_id=111,
+        )
+    )
+    assert {item["name"]: item["amount"] for item in store.list_inventory_current(owner="seller")}["阴凝之晶"] == 1
+
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:113",
+            chat_id=-1,
+            msg_id=113,
+            text="""@seller 的储物袋
+
+材料:
+- 阴凝之晶 x 5""",
+            source="韩天尊",
+            date="2026-05-15T10:03:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
+    current = {item["name"]: item for item in store.list_inventory_current(owner="seller")}
+    assert current["阴凝之晶"]["amount"] == 5
+    assert current["阴凝之晶"]["confidence"] == "snapshot"
+
+
+def test_inventory_current_delta_reingest_is_idempotent(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_account({"local_id": "main", "account_id": "12345", "username": "seller"})
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:120",
+            chat_id=-1,
+            msg_id=120,
+            text="""@seller 的储物袋
+
+材料:
+- 阴凝之晶 x 2""",
+            source="韩天尊",
+            date="2026-05-15T10:00:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:121",
+            chat_id=-1,
+            msg_id=121,
+            text=".灵树采摘",
+            source="seller",
+            date="2026-05-15T10:01:00+00:00",
+            sender_id=12345,
+        )
+    )
+    delta = RawMessageEvent(
+        id="tg:-1:122",
+        chat_id=-1,
+        msg_id=122,
+        text="你稳定分得【阴凝之晶】x1。",
+        source="韩天尊",
+        date="2026-05-15T10:02:00+00:00",
+        sender_id=7900199668,
+        sender_is_bot=True,
+        reply_to_msg_id=121,
+    )
+    store.ingest_event(delta)
+    store.ingest_event(delta)
+
+    current = {item["name"]: item for item in store.list_inventory_current(owner="seller")}
+    assert current["阴凝之晶"]["amount"] == 3
+
+
+def test_inventory_current_replays_later_deltas_when_old_snapshot_reingested(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_account({"local_id": "main", "account_id": "12345", "username": "seller"})
+    snapshot = RawMessageEvent(
+        id="tg:-1:130",
+        chat_id=-1,
+        msg_id=130,
+        text="""@seller 的储物袋
+
+材料:
+- 阴凝之晶 x 2""",
+        source="韩天尊",
+        date="2026-05-15T10:00:00+00:00",
+        sender_id=7900199668,
+        sender_is_bot=True,
+    )
+    store.ingest_event(snapshot)
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:131",
+            chat_id=-1,
+            msg_id=131,
+            text=".灵树采摘",
+            source="seller",
+            date="2026-05-15T10:01:00+00:00",
+            sender_id=12345,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:132",
+            chat_id=-1,
+            msg_id=132,
+            text="你稳定分得【阴凝之晶】x1。",
+            source="韩天尊",
+            date="2026-05-15T10:02:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+            reply_to_msg_id=131,
+        )
+    )
+    assert {item["name"]: item["amount"] for item in store.list_inventory_current(owner="seller")}["阴凝之晶"] == 3
+
+    store.ingest_event(snapshot)
+
+    current = {item["name"]: item for item in store.list_inventory_current(owner="seller")}
+    assert current["阴凝之晶"]["amount"] == 3
+    assert current["阴凝之晶"]["confidence"] == "estimated"
 
 
 def test_account_routes_are_wired():
@@ -2046,6 +2976,181 @@ def test_schedule_create_dry_run_writes_batch_without_telegram(tmp_path):
     assert listing["batches"][0]["counts"]["planned"] > 0
 
 
+def test_schedule_create_blocks_real_batch_when_identity_quota_is_full(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "123", "api_hash": "hash", "account_id": "12345"}
+    )
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+
+    store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "account_local_id": "main",
+            "preset_key": "custom",
+            "label": "自定义",
+            "anchor_at": time.time(),
+            "horizon_days": 1,
+            "options": {},
+        },
+        [
+            {"command": ".签到", "schedule_at": time.time() + i * 60, "status": "scheduled"}
+            for i in range(100)
+        ],
+    )
+
+    class FakeListeners:
+        def get_listener(self, account_local_id):
+            return object()
+
+    server._listeners = FakeListeners()
+
+    result = server.schedule_create_payload(
+        {
+            "send_as_id": 12345,
+            "preset_key": "custom",
+            "command": ".签到",
+            "interval_sec": 60,
+            "count": 1,
+            "dry_run": False,
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "quota_blocked"
+    assert result["manual_required"] is True
+    assert result["scheduled_current"] == 100
+    assert result["planned_count"] == 1
+    assert len(store.list_schedule_batches(include_inactive=True)) == 1
+
+
+def test_schedule_create_without_target_chat_does_not_leave_active_batch(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_settings_payload({"target_chat": "", "target_topic_id": ""})
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "123", "api_hash": "hash", "account_id": "12345"}
+    )
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+
+    class FakeListeners:
+        def get_listener(self, account_local_id):
+            return object()
+
+    server._listeners = FakeListeners()
+
+    result = server.schedule_create_payload(
+        {
+            "send_as_id": 12345,
+            "preset_key": "custom",
+            "command": ".签到",
+            "interval_sec": 60,
+            "count": 1,
+            "dry_run": False,
+        }
+    )
+
+    assert result["ok"] is False
+    assert "target_chat" in result["error"] or "目标群" in result["error"]
+    assert store.list_schedule_batches(include_inactive=True) == []
+    assert store.list_schedule_messages(send_as_id=12345, include_inactive=True) == []
+
+
+def test_schedule_create_blocks_entire_batch_when_identity_quota_would_overflow(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "123", "api_hash": "hash", "account_id": "12345"}
+    )
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+
+    store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "account_local_id": "main",
+            "preset_key": "custom",
+            "label": "自定义",
+            "anchor_at": time.time(),
+            "horizon_days": 1,
+            "options": {},
+        },
+        [
+            {"command": ".签到", "schedule_at": time.time() + i * 60, "status": "scheduled"}
+            for i in range(99)
+        ],
+    )
+
+    class FakeListeners:
+        def get_listener(self, account_local_id):
+            return object()
+
+    server._listeners = FakeListeners()
+
+    result = server.schedule_create_payload(
+        {
+            "send_as_id": 12345,
+            "preset_key": "custom",
+            "command": ".签到",
+            "interval_sec": 60,
+            "count": 2,
+            "dry_run": False,
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "quota_blocked"
+    assert result["scheduled_current"] == 99
+    assert result["planned_count"] == 2
+    assert len(store.list_schedule_batches(include_inactive=True)) == 1
+
+
+def test_schedule_create_dry_run_ignores_official_quota(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "123", "api_hash": "hash", "account_id": "12345"}
+    )
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+    store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "account_local_id": "main",
+            "preset_key": "custom",
+            "label": "自定义",
+            "anchor_at": time.time(),
+            "horizon_days": 1,
+            "options": {},
+        },
+        [
+            {"command": ".签到", "schedule_at": time.time() + i * 60, "status": "scheduled"}
+            for i in range(100)
+        ],
+    )
+
+    result = server.schedule_create_payload(
+        {
+            "send_as_id": 12345,
+            "preset_key": "custom",
+            "command": ".本地预演",
+            "interval_sec": 60,
+            "count": 2,
+            "dry_run": True,
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["dry_run"] is True
+    assert result["planned_count"] == 2
+    assert len(store.list_schedule_batches(include_inactive=True)) == 2
+
+
 def test_schedule_delete_marks_batch_and_messages_deleted(tmp_path):
     store = SQLiteStore(tmp_path / "miniweb.db")
     server = MiniWebServer(store=store)
@@ -2419,6 +3524,133 @@ def test_second_soul_cooldown_module_uses_short_recheck_when_no_remaining_time()
     assert state["cooldown_until"] == ctx.now + 3600
 
 
+def test_weakness_module_records_weakness_until_without_blocking_send_logic():
+    from backend.identity_state.weakness import WeaknessModule
+    module = WeaknessModule()
+    parent = _evt(id="p", msg_id=350, text=".抚摸法宝 玄天斩灵剑", sender_id=12345)
+    event = _evt(
+        id="e",
+        msg_id=351,
+        text="🚫 虚弱状态\n暂时无法运转灵力，请在洞府中静养 29分钟。",
+        sender_id=-1003983937918,
+        reply_to_msg_id=350,
+    )
+    ctx = _fake_ctx(parent=parent, sender_kind="bot", now=1000.0)
+    assert module.resolve_target(event, ctx) == 12345
+    state = module.observe(event, ctx, dict(module.default_state))
+    assert state["source"] == "weakness"
+    assert state["blocked_until"] > ctx.now + 29 * 60
+    summary = module.status_summary(state, now=ctx.now)
+    assert summary["ready"] is False
+    assert "虚弱中" in summary["text"]
+
+
+def test_weakness_module_records_and_clears_jingsi_state():
+    from backend.identity_state.weakness import WeaknessModule
+    module = WeaknessModule()
+    parent = _evt(id="p", msg_id=360, text=".静思崖", sender_id=12345)
+    busy = _evt(
+        id="e1",
+        msg_id=361,
+        text="你消耗了 100 灵石与 2000 修为，来到静思崖面壁悟道。\n此过程需 4小时，期间你将无法进行大部分操作。",
+        sender_id=-1003983937918,
+        reply_to_msg_id=360,
+    )
+    ctx = _fake_ctx(parent=parent, sender_kind="bot", now=2000.0)
+    state = module.observe(busy, ctx, dict(module.default_state))
+    assert state["source"] == "jingsi"
+    assert state["blocked_until"] >= ctx.now + 4 * 3600
+    assert "静思中" in module.status_summary(state, now=ctx.now)["text"]
+
+    interrupt = _evt(
+        id="e2",
+        msg_id=362,
+        text="【心乱如麻】你终究无法忍受面壁的枯燥，强行中断了感悟，离开了静思崖。",
+        sender_id=-1003983937918,
+        reply_to_msg_id=360,
+    )
+    cleared = module.observe(interrupt, ctx, state)
+    assert cleared["blocked_until"] == 0
+    assert cleared["source"] == ""
+    assert module.status_summary(cleared, now=ctx.now)["ready"] is True
+
+
+def test_small_world_module_records_panel_and_wait():
+    from backend.identity_state.small_world import SmallWorldModule
+    module = SmallWorldModule()
+    parent = _evt(id="p", msg_id=370, text=".小世界", sender_id=12345)
+    event = _evt(
+        id="e",
+        msg_id=371,
+        text=(
+            "【吕洛的小世界】\n"
+            "🙏 信仰: 100 / 100\n"
+            "☁️ 待收香火: 3189.33\n"
+            "🏺 香火库存: 3\n"
+            "暂无祈愿，凡间风调雨顺。\n"
+            "(下一次祈愿感应需等待: 7小时53分钟50秒)"
+        ),
+        sender_id=-1003983937918,
+        reply_to_msg_id=370,
+    )
+    ctx = _fake_ctx(parent=parent, sender_kind="bot", now=3000.0)
+    assert module.resolve_target(event, ctx) == 12345
+    state = module.observe(event, ctx, dict(module.default_state))
+    assert state["owner"] == "吕洛"
+    assert state["faith"] == 100
+    assert state["pending_incense"] == 3189.33
+    assert state["incense_stock"] == 3
+    assert state["prayer_wait_until"] > ctx.now + 7 * 3600
+    summary = module.status_summary(state, now=ctx.now)
+    assert summary["ready"] is False
+    assert "信仰 100/100" in summary["text"]
+
+
+def test_small_world_module_updates_harvest_refine_and_shortage():
+    from backend.identity_state.small_world import SmallWorldModule
+    module = SmallWorldModule()
+    parent = _evt(id="p", msg_id=380, text=".收割香火", sender_id=12345)
+    ctx = _fake_ctx(parent=parent, sender_kind="bot", now=4000.0)
+    state = module.observe(
+        _evt(
+            id="e1",
+            msg_id=381,
+            text="收割完成，当前香火库存: 27",
+            sender_id=-1003983937918,
+            reply_to_msg_id=380,
+        ),
+        ctx,
+        {"pending_incense": 10, "incense_stock": 2},
+    )
+    assert state["incense_stock"] == 27
+    assert state["pending_incense"] == 0
+    refined = module.observe(
+        _evt(
+            id="e2",
+            msg_id=382,
+            text="你燃烧了 20 点香火，神识得到淬炼。",
+            sender_id=-1003983937918,
+            reply_to_msg_id=380,
+        ),
+        ctx,
+        state,
+    )
+    assert refined["incense_stock"] == 7
+    blocked = module.observe(
+        _evt(
+            id="e3",
+            msg_id=383,
+            text="香火库存不足（拥有: 7）",
+            sender_id=-1003983937918,
+            reply_to_msg_id=380,
+        ),
+        ctx,
+        refined,
+    )
+    assert blocked["last_status"] == "blocked"
+    assert "香火库存不足" in blocked["last_error"]
+
+
 def test_module_registry_observe_only_writes_when_state_changes():
     from backend.identity_state import build_default_registry
     reg = build_default_registry()
@@ -2432,6 +3664,9 @@ def test_module_registry_observe_only_writes_when_state_changes():
     ctx = _fake_ctx(parent=parent, sender_kind="bot")
     results = reg.observe_all(unrelated, ctx, get_state=_get, save_state=_save)
     assert results == []
+
+    assert reg.get("weakness") is not None
+    assert reg.get("small_world") is not None
     assert storage == {}
 
 
@@ -2725,11 +3960,11 @@ def test_messages_solo_mode_filters_to_me_and_bot_replies(tmp_path):
     assert payload["mode"] == "solo"
 
 
-def test_parent_arriving_after_bot_reply_reclassifies_focus(tmp_path):
+def test_parent_arriving_after_bot_reply_reclassifies_mine_relation(tmp_path):
     """miniweb 主动发送时可能先收到 bot reply,后写 outgoing 父消息。
 
-    父消息补齐后,直接回复它的 bot 卡片必须从普通 system/archive 重分流到
-    focus,否则首页重点流看不到刚刚自己触发的结果。
+    父消息补齐后,直接回复它的 bot 卡片必须补上「我的/回复我」关系。
+    是否进 focus 由功能频道、风险、动作和关键词另行决定。
     """
     store = SQLiteStore(tmp_path / "miniweb.db")
     store.save_settings({
@@ -2767,7 +4002,7 @@ def test_parent_arriving_after_bot_reply_reclassifies_focus(tmp_path):
     store.ingest_event(parent)
 
     after = store.get_card("bot-reply")[1]
-    assert "focus" in after.channels
+    assert "mine" in after.channels
     assert "回复我" in after.tags
 
 
@@ -2874,7 +4109,7 @@ def test_message_payload_includes_structured_filter_reasons(tmp_path):
         sender_is_bot=True,
     ))
 
-    payload = MiniWebServer(store=store).messages_payload("focus", limit=20)
+    payload = MiniWebServer(store=store).messages_payload("mine", limit=20)
     bot = next(item for item in payload["messages"] if item["id"] == "bot")
     assert "天尊回复我" in bot["filter_reasons"]
     assert "filter_reasons" not in (bot.get("fields") or {})
@@ -2927,6 +4162,96 @@ def test_dungeon_status_payload_distinguishes_request_from_success(tmp_path):
     joined = next(item for item in after["summaries"] if item["dungeon_id"] == "394")
     assert joined["status_kind"] == "joined"
     assert joined["join_success"] == ["me"]
+
+
+def test_dungeon_status_closes_blood_trial_on_successful_evacuation(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(RawMessageEvent(
+        id="blood-open",
+        chat_id=-1,
+        msg_id=520,
+        text="""【血色试炼·集结】
+@MayaLing 正在召集同伴，准备进入【血色禁地】采药试炼！
+房间ID: 520
+其他道友可使用 .加入副本 520 加入队伍！(最多 3 人)""",
+        source="韩天尊",
+        date="2026-05-15T00:00:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="blood-progress",
+        chat_id=-1,
+        msg_id=521,
+        text="""【血色试炼·第一回合】
+灵草香气弥漫山谷，队伍正在采药。""",
+        source="韩天尊",
+        date="2026-05-15T00:01:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="blood-finish",
+        chat_id=-1,
+        msg_id=522,
+        text="""【血色试炼·撤离成功】
+队伍成功带着灵草撤离血色禁地。""",
+        source="韩天尊",
+        date="2026-05-15T00:02:00+00:00",
+        sender_id=7900199668,
+    ))
+
+    payload = MiniWebServer(store=store).dungeon_status_payload(limit=10, summary_limit=1, order="recent")
+    summary = payload["summaries"][0]
+    assert summary["dungeon_id"] == "520"
+    assert summary["status_kind"] == "closed"
+    assert summary["status"] == "撤离成功"
+    assert summary["actions"] == []
+
+
+def test_dungeon_status_ignores_stale_room_cache_without_cache_version(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(RawMessageEvent(
+        id="blood-open-stale-cache",
+        chat_id=-1,
+        msg_id=530,
+        text="""【血色试炼·集结】
+@MayaLing 正在召集同伴，准备进入【血色禁地】采药试炼！
+房间ID: 530
+其他道友可使用 .加入副本 530 加入队伍！(最多 3 人)""",
+        source="韩天尊",
+        date="2026-05-15T00:00:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="blood-finish-stale-cache",
+        chat_id=-1,
+        msg_id=531,
+        text="""【血色试炼·撤离成功】
+队伍成功带着灵草撤离血色禁地。""",
+        source="韩天尊",
+        date="2026-05-15T00:02:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.replace_dungeon_rooms([
+        {
+            "key": "id:530",
+            "dungeon_id": "530",
+            "dungeon_name": "血色试炼",
+            "status": "进行中",
+            "status_kind": "active",
+            "latest_seq": store.max_dungeon_card_seq(),
+            "latest_message_id": "blood-finish-stale-cache",
+            "latest_time": "2026-05-15T00:02:00+00:00",
+            "latest_stage": "撤离成功",
+            "actions": [{"command": ".加入副本 530"}],
+        }
+    ])
+
+    payload = MiniWebServer(store=store).dungeon_status_payload(limit=10, summary_limit=1, order="recent")
+    summary = payload["summaries"][0]
+    assert payload["source"] == "derived_from_messages"
+    assert summary["dungeon_id"] == "530"
+    assert summary["status_kind"] == "closed"
+    assert summary["actions"] == []
 
 
 def test_dungeon_status_hydrates_join_only_room_from_open_announcement(tmp_path):
@@ -3292,6 +4617,296 @@ def test_dungeon_status_exposes_xutian_verdict_and_advice(tmp_path):
     assert summary["positive_examples"]
 
 
+def test_dungeon_status_links_cangkun_progress_to_room(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(RawMessageEvent(
+        id="cangkun-open",
+        chat_id=-1,
+        msg_id=1500,
+        text="""【苍坤上人洞府·集结】
+@takaranoao_bot 以【苍坤残图】锁定了太妙神禁的薄弱方位！
+房间ID: 15
+其他道友可使用 .加入苍坤洞府 15 加入队伍！(5人满)
+队长可在满员后使用 .进入苍坤洞府。""",
+        source="韩天尊",
+        date="2026-05-21T21:34:50+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="cangkun-choice",
+        chat_id=-1,
+        msg_id=1501,
+        text="""【苍坤上人洞府·第一幕】
+持识者：@cupaopao | 可调神识：22546
+
+1 · 匿踪潜行：压低气机。
+2 · 伪装混入：借杂乱灵息。
+3 · 强闯速进：强行破禁。
+
+请队长使用 .苍坤抉择 1/2/3 做出第一步选择。""",
+        source="韩天尊",
+        date="2026-05-21T21:40:50+00:00",
+        sender_id=7900199668,
+    ))
+
+    payload = MiniWebServer(store=store).dungeon_status_payload(limit=10, summary_limit=1, order="recent")
+    summary = payload["summaries"][0]
+
+    assert summary["dungeon_id"] == "15"
+    assert summary["dungeon_name"] == "苍坤上人洞府"
+    assert summary["latest_stage"] == "第一幕"
+    assert summary["status_kind"] == "choice"
+    assert summary["cangkun_advice"]["stage"] == "第一幕"
+    assert summary["cangkun_advice"]["command"] == ".苍坤抉择 1"
+    assert summary["cangkun_advice"]["label"] == "匿踪潜行"
+    assert [action["command"] for action in summary["actions"][:3]] == [
+        ".苍坤抉择 1",
+        ".苍坤抉择 2",
+        ".苍坤抉择 3",
+    ]
+
+
+def test_dungeon_status_updates_cangkun_latest_stage_and_state(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(RawMessageEvent(
+        id="cangkun-open-16",
+        chat_id=-1,
+        msg_id=1510,
+        text="""【苍坤上人洞府·集结】
+@takaranoao_bot 以【苍坤残图】锁定了太妙神禁的薄弱方位！
+房间ID: 16
+其他道友可使用 .加入苍坤洞府 16 加入队伍！(5人满)
+队长可在满员后使用 .进入苍坤洞府。""",
+        source="韩天尊",
+        date="2026-05-23T00:00:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="cangkun-first-16",
+        chat_id=-1,
+        msg_id=1511,
+        text="""【苍坤上人洞府·第一幕】
+1 · 匿踪潜行：压低气机。
+2 · 伪装混入：借杂乱灵息。
+3 · 强闯速进：强行破禁。
+请队长使用 .苍坤抉择 1/2/3 做出第一步选择。""",
+        source="韩天尊",
+        date="2026-05-23T00:01:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="cangkun-fifth-16",
+        chat_id=-1,
+        msg_id=1512,
+        text="""【苍坤上人洞府·第五幕】
+禁制裂隙106 / 神魂稳度104 / 慕兰警戒49 / 贪念18 / 卷轴线索3
+
+1 · 平分速退：就此撤离。
+2 · 夺图先遁：抢下图卷先走。
+3 · 暗藏后手：冒险再贪一手。
+
+请队长使用 .苍坤抉择 1/2/3 做出最后选择。""",
+        source="韩天尊",
+        date="2026-05-23T00:02:00+00:00",
+        sender_id=7900199668,
+    ))
+
+    payload = MiniWebServer(store=store).dungeon_status_payload(limit=20, summary_limit=1, order="recent")
+    summary = payload["summaries"][0]
+
+    assert summary["dungeon_id"] == "16"
+    assert summary["latest_stage"] == "第五幕"
+    assert summary["cangkun_state"]["禁制裂隙"] == "106"
+    assert summary["cangkun_state"]["卷轴线索"] == "3"
+    assert summary["cangkun_advice"]["stage"] == "第五幕"
+    assert summary["cangkun_advice"]["command"] == ".苍坤抉择 2"
+    assert summary["cangkun_advice"]["avoid"] == ".苍坤抉择 3"
+    assert ["禁制裂隙", "106"] in summary["cangkun_advice"]["state_rows"]
+    assert ["卷轴线索", "3"] in summary["cangkun_advice"]["state_rows"]
+    assert [action["source_message_id"] for action in summary["actions"][:3]] == [
+        "cangkun-fifth-16",
+        "cangkun-fifth-16",
+        "cangkun-fifth-16",
+    ]
+
+
+def test_dungeon_status_does_not_merge_cangkun_messages_after_final_state(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(RawMessageEvent(
+        id="cangkun-open-reused-16",
+        chat_id=-1,
+        msg_id=1520,
+        text="""【苍坤上人洞府·集结】
+@hfsscxf 以【苍坤残图】锁定了太妙神禁的薄弱方位！
+房间ID: 16
+其他道友可使用 .加入苍坤洞府 16 加入队伍！(5人满)
+队长可在满员后使用 .进入苍坤洞府。""",
+        source="韩天尊",
+        date="2026-05-23T01:00:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="cangkun-final-reused-16",
+        chat_id=-1,
+        msg_id=1521,
+        text="""【苍坤上人洞府·脱身成功】
+通关保底：每位队员获得 6256修为、555贡献。
+最终禁制裂隙：106 | 神魂稳度：104 | 慕兰警戒：49 | 贪念：18 | 卷轴线索：3""",
+        source="韩天尊",
+        date="2026-05-23T01:08:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="cangkun-new-first-after-final",
+        chat_id=-1,
+        msg_id=1522,
+        text="""【苍坤上人洞府·第一幕】
+1 · 匿踪潜行：压低气机。
+2 · 伪装混入：借杂乱灵息。
+3 · 强闯速进：强行破禁。
+请队长使用 .苍坤抉择 1/2/3 做出第一步选择。""",
+        source="韩天尊",
+        date="2026-05-23T01:12:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="cangkun-reopen-same-id-16",
+        chat_id=-1,
+        msg_id=1523,
+        text="""【苍坤上人洞府·集结】
+@GinJ_6600 以【苍坤残图】锁定了太妙神禁的薄弱方位！
+房间ID: 16
+其他道友可使用 .加入苍坤洞府 16 加入队伍！(5人满)
+队长可在满员后使用 .进入苍坤洞府。""",
+        source="韩天尊",
+        date="2026-05-23T01:15:00+00:00",
+        sender_id=7900199668,
+    ))
+
+    payload = MiniWebServer(store=store).dungeon_status_payload(limit=20, summary_limit=20, order="recent")
+    summaries = payload["summaries"]
+    closed = next(item for item in summaries if item["key"] == "id:16")
+    late = next(item for item in summaries if item["latest_message_id"] == "cangkun-new-first-after-final")
+    reopened = next(item for item in summaries if item["latest_message_id"] == "cangkun-reopen-same-id-16")
+
+    assert closed["status_kind"] == "closed"
+    assert closed["status"] == "脱身成功"
+    assert closed["latest_message_id"] == "cangkun-final-reused-16"
+    assert all(message["id"] != "cangkun-new-first-after-final" for message in closed["messages"])
+    assert late["key"].startswith("segment:苍坤上人洞府:")
+    assert late["dungeon_id"] == ""
+    assert late["status_kind"] == "choice"
+    assert reopened["key"].startswith("id:16:open:")
+    assert reopened["status_kind"] == "open"
+
+
+def test_dungeon_status_links_xutian_hou_dian_choice_to_room(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(RawMessageEvent(
+        id="xutian-open",
+        chat_id=-1,
+        msg_id=1600,
+        text="""【虚天殿已开启】
+@cupaopao 消耗了【虚天残图】，开启了前往虚天殿的传送门！
+副本ID: 901
+其他道友可使用 .加入副本 901 加入队伍！(5人满)""",
+        source="韩天尊",
+        date="2026-05-21T22:20:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="xutian-houdian",
+        chat_id=-1,
+        msg_id=1601,
+        text="""【后殿余波】
+第三关的战利品已先行封存，后续冲关无论成败，都不会回吐当前已得奖励。
+队长 @cupaopao，请在 120秒 内决定是否继续深入后殿：
+- 见好就收：就此退去，稳稳带走第三关全部收获
+- 继续冲关：开启第四、第五关，去抢后殿追加机缘
+- 也可输入 .后殿抉择 收手 / .后殿抉择 冲关""",
+        source="韩天尊",
+        date="2026-05-21T22:22:18+00:00",
+        sender_id=7900199668,
+    ))
+
+    payload = MiniWebServer(store=store).dungeon_status_payload(limit=10, summary_limit=1, order="recent")
+    summary = payload["summaries"][0]
+
+    assert summary["dungeon_id"] == "901"
+    assert summary["dungeon_name"] == "虚天殿"
+    assert summary["latest_stage"] == "后殿余波"
+    assert summary["status_kind"] == "choice"
+    assert [action["command"] for action in summary["actions"][:2]] == [
+        ".后殿抉择 收手",
+        ".后殿抉择 冲关",
+    ]
+
+
+def test_dungeon_status_closes_xutian_hou_dian_success_and_clears_actions(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(RawMessageEvent(
+        id="xutian-success-open",
+        chat_id=-1,
+        msg_id=1700,
+        text="""【虚天殿已开启】
+@cupaopao 消耗了【虚天残图】，开启了前往虚天殿的传送门！
+副本ID: 902
+其他道友可使用 .加入副本 902 加入队伍！(5人满)""",
+        source="韩天尊",
+        date="2026-05-21T23:20:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="xutian-success-houdian",
+        chat_id=-1,
+        msg_id=1701,
+        text="""【后殿余波】
+第三关的战利品已先行封存，后续冲关无论成败，都不会回吐当前已得奖励。
+队长 @cupaopao，请在 120秒 内决定是否继续深入后殿：
+- 见好就收：就此退去，稳稳带走第三关全部收获
+- 继续冲关：开启第四、第五关，去抢后殿追加机缘
+- 也可输入 .后殿抉择 收手 / .后殿抉择 冲关""",
+        source="韩天尊",
+        date="2026-05-21T23:22:18+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="xutian-success-fifth-choice",
+        chat_id=-1,
+        msg_id=1702,
+        text="""【第四关·后殿试阵】
+三座残碑正在争抢殿心主权，队长必须先定试阵之法，才能真正摸到后殿炉心。
+请在 120秒 内点击按钮，或输入 .后殿阵策 镇/夺/卦：
+- 镇碑固脉：以稳阵为先。
+- 裂纹夺隙：趁碑纹裂开。
+- 借卦逆推：强借本轮卦势。""",
+        source="韩天尊",
+        date="2026-05-21T23:23:00+00:00",
+        sender_id=7900199668,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="xutian-success-final",
+        chat_id=-1,
+        msg_id=1703,
+        text="""【第五关·鼎灵余焰】 你们硬生生压灭了后殿残焰，逼得鼎灵退散。
+所有队员额外获得 2800修为 与 220贡献。
+路径余韵回响：每位队员再得 天雷竹x1。
+最终鼎压：32 | 最终士气：118%""",
+        source="韩天尊",
+        date="2026-05-21T23:24:00+00:00",
+        sender_id=7900199668,
+    ))
+
+    payload = MiniWebServer(store=store).dungeon_status_payload(limit=20, summary_limit=1, order="recent")
+    summary = payload["summaries"][0]
+
+    assert summary["dungeon_id"] == "902"
+    assert summary["latest_stage"] == "第五关·鼎灵余焰"
+    assert summary["status_kind"] == "closed"
+    assert summary["status"] == "后殿冲关成功"
+    assert summary["actions"] == []
+
+
 def test_dungeon_status_route_is_wired():
     from backend.app import GET_ROUTES
     assert "/api/dungeon-status" in GET_ROUTES
@@ -3310,6 +4925,24 @@ def test_xutian_oracle_guide_payload_exposes_cases_and_aliases():
 def test_xutian_oracle_guide_route_is_wired():
     from backend.app import GET_ROUTES
     assert "/api/xutian-oracle-guide" in GET_ROUTES
+
+
+def test_cangkun_guide_payload_exposes_stable_route_and_boundaries():
+    payload = MiniWebServer().cangkun_guide_payload()
+
+    assert payload["ok"] is True
+    assert payload["default_route"] == "1 -> 1 -> 2"
+    assert payload["default_commands"] == [".苍坤抉择 1", ".苍坤抉择 1", ".苍坤抉择 2"]
+    assert any(route["route"] == "1 -> 1 -> 3" and route["kind"] == "risk" for route in payload["routes"])
+    assert any("前置链路" in note for note in payload["boundaries"])
+    fifth = next(stage for stage in payload["stages"] if stage["key"] == "fifth")
+    assert fifth["recommendation"]["command"] == ".苍坤抉择 2"
+    assert fifth["recommendation"]["avoid"] == ".苍坤抉择 3"
+
+
+def test_cangkun_guide_route_is_wired():
+    from backend.app import GET_ROUTES
+    assert "/api/cangkun-guide" in GET_ROUTES
 
 
 def test_filter_diagnostics_payload_counts_recent_reasons(tmp_path):
@@ -3554,6 +5187,66 @@ def test_official_schedule_background_records_failed_send_log_for_invalid_item(t
     assert logs[0]["error"] == "命令或时间无效"
 
 
+def test_official_schedule_background_stops_on_telegram_quota_error(tmp_path):
+    import asyncio
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    batch_id = store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "account_local_id": "main",
+            "preset_key": "custom",
+            "label": "自定义",
+            "anchor_at": time.time(),
+            "horizon_days": 1,
+            "options": {},
+        },
+        [
+            {"command": f".签到{i}", "schedule_at": time.time() + i * 3600, "status": "planned"}
+            for i in range(3)
+        ],
+    )
+    messages = store.list_schedule_messages(batch_id=batch_id, include_inactive=False)
+
+    class FakeClient:
+        async def get_input_entity(self, value):
+            return f"peer:{value}"
+
+    class FakeSendAs:
+        async def list_send_as_peers_on_client(self, client, chat):
+            return {"peers": [{"send_as_id": 12345}]}
+
+    class ScheduleTooMuchError(Exception):
+        pass
+
+    class FakeSchedule:
+        def __init__(self):
+            self.calls = 0
+
+        async def create_one_on_client(self, *_args, **_kwargs):
+            self.calls += 1
+            raise ScheduleTooMuchError("You have reached the 100 scheduled messages limit")
+
+    fake_schedule = FakeSchedule()
+    server._send_as = FakeSendAs()
+    server._schedule = fake_schedule
+
+    asyncio.run(server._run_official_send_background(
+        FakeClient(), batch_id, "-1001680975844", 7310786, 12345, messages
+    ))
+
+    refreshed = store.list_schedule_messages(batch_id=batch_id, include_inactive=True)
+    logs = store.list_send_logs(kind="official_schedule", status="failed", batch_id=batch_id)
+    batch = store.list_schedule_batches(include_inactive=True)[0]
+    assert fake_schedule.calls == 1
+    assert batch["status"] == "failed"
+    assert [m["status"] for m in refreshed] == ["failed", "failed", "failed"]
+    assert all("单身份上限" in m["last_error"] for m in refreshed)
+    assert len(logs) == 3
+
+
 def test_schedule_deep_retreat_pacing_is_non_linear_paired():
     """新节奏:trigger → command 配对,下一对 = 上一对 command + 8h + jitter,
     不是死按 anchor + N*8h 节拍。验证相邻两对的 trigger 间距落在 8h ± 5min。"""
@@ -3582,6 +5275,23 @@ def test_schedule_deep_retreat_trigger_command_is_customizable():
     assert triggers and all(t["command"] == "闭关结束" for t in triggers)
     cmds = [it for i, it in enumerate(plan["items"]) if i % 2 == 1]
     assert all(c["command"] == ".深度闭关" for c in cmds)
+
+
+def test_schedule_horizon_days_is_capped_at_seven():
+    from backend.outbox.schedule import MAX_HORIZON_DAYS, build_plan
+
+    plan = build_plan(
+        {
+            "preset_key": "custom",
+            "horizon_days": 30,
+            "command": ".签到",
+            "interval_sec": 3600,
+            "count": 1,
+        }
+    )
+
+    assert MAX_HORIZON_DAYS == 7
+    assert plan["horizon_days"] == 7
 
 
 def test_schedule_offset_minutes_shifts_entire_batch():

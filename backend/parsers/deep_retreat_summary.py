@@ -68,7 +68,7 @@ class DeepRetreatSummaryParser:
             cards=(
                 ParsedCard(
                     id=event.id,
-                    channels=("mine",),
+                    channels=("training",),
                     title="深度闭关总结",
                     summary=summary,
                     source=event.source,

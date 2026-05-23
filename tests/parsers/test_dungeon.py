@@ -129,6 +129,94 @@ def test_extracts_xutian_strategy_and_cauldron_actions():
     assert [action.command for action in output.cards[0].actions] == [".争鼎 求稳", ".争鼎 夺鼎"]
 
 
+def test_extracts_xutian_hou_dian_strategy_actions():
+    event = make_event(
+        "【第四关·后殿试阵】\n"
+        "三座残碑正在争抢殿心主权，队长必须先定试阵之法，才能真正摸到后殿炉心。\n"
+        "请在 120秒 内点击按钮，或输入 .后殿阵策 镇/夺/卦：\n"
+        "- 镇碑固脉：稳住残碑。\n"
+        "- 裂纹夺隙：抢夺裂隙。\n"
+        "- 借卦逆推：借卦推演。"
+    )
+
+    output = DungeonParser().parse(event)
+
+    assert output is not None
+    card = output.cards[0]
+    assert card.title == "虚天殿推进"
+    assert card.fields["副本名"] == "虚天殿"
+    assert card.fields["阶段"] == "第四关·后殿试阵"
+    assert [action.command for action in card.actions] == [
+        ".后殿阵策 镇",
+        ".后殿阵策 夺",
+        ".后殿阵策 卦",
+    ]
+
+
+def test_extracts_xutian_hou_dian_continue_choice_and_result_states():
+    afterwave = DungeonParser().parse(
+        make_event(
+            "【后殿余波】\n"
+            "第三关的战利品已先行封存，后续冲关无论成败，都不会回吐当前已得奖励。\n"
+            "队长 @cupaopao，请在 120秒 内决定是否继续深入后殿：\n"
+            "- 见好就收：就此退去，稳稳带走第三关全部收获\n"
+            "- 继续冲关：开启第四、第五关，去抢后殿追加机缘\n"
+            "- 也可输入 .后殿抉择 收手 / .后殿抉择 冲关"
+        )
+    )
+    assert afterwave is not None
+    assert afterwave.cards[0].title == "虚天殿推进"
+    assert afterwave.cards[0].fields["阶段"] == "后殿余波"
+    assert afterwave.cards[0].fields["后殿奖励"] == "第三关战利品已锁定"
+    assert [action.command for action in afterwave.cards[0].actions] == [
+        ".后殿抉择 收手",
+        ".后殿抉择 冲关",
+    ]
+
+    fifth = DungeonParser().parse(
+        make_event(
+            "【第五关·虚天鼎灵·残焰】\n"
+            "后殿真正的考验终于现身。鼎灵残焰不再吃单纯打断，而会不断抬升 鼎压。\n"
+            "你们必须在 5 回合内 压灭残焰，并把鼎压控制在 100 以下。\n"
+            "（推演血量：551.58亿 | 开局士气：111% | 开局鼎压：14）"
+        )
+    )
+    assert fifth is not None
+    assert fifth.cards[0].fields["状态"] == "后殿冲关中"
+    assert fifth.cards[0].fields["推演血量"] == "551.58亿"
+    assert fifth.cards[0].fields["开局士气"] == "111%"
+    assert fifth.cards[0].fields["开局鼎压"] == "14"
+
+    success = DungeonParser().parse(
+        make_event(
+            "【第五关·鼎灵余焰】 你们硬生生压灭了后殿残焰，逼得鼎灵退散。\n"
+            "所有队员额外获得 2800修为 与 220贡献。\n"
+            "路径余韵回响：每位队员再得 天雷竹x1。\n"
+            "最终鼎压：32 | 最终士气：118%"
+        )
+    )
+    assert success is not None
+    assert success.cards[0].title == "虚天殿后殿冲关成功"
+    assert success.cards[0].summary == "虚天殿后殿冲关成功,已记录最终状态。"
+    assert success.cards[0].fields["状态"] == "后殿冲关成功"
+    assert success.cards[0].fields["后殿追加"] == "已获得"
+    assert success.cards[0].fields["最终鼎压"] == "32"
+    assert success.cards[0].fields["最终士气"] == "118%"
+
+    stopped = DungeonParser().parse(
+        make_event(
+            "【后殿冲关止步】\n"
+            "回合耗尽，鼎灵残焰仍未被真正压灭。\n"
+            "好在第三关结算所得早已锁定，这次失去的只有后殿追加机缘。"
+        )
+    )
+    assert stopped is not None
+    assert stopped.cards[0].title == "虚天殿后殿冲关止步"
+    assert stopped.cards[0].fields["阶段"] == "后殿冲关止步"
+    assert stopped.cards[0].fields["状态"] == "后殿冲关止步"
+    assert stopped.cards[0].fields["后殿追加"] == "未获得"
+
+
 def test_extracts_xutian_route_result_verdict():
     event = make_event(
         "【极寒冰魄】的光芒被成功压制！冰火炼心阵威力大减，你们通过了第二关的考验。\n"
@@ -192,6 +280,122 @@ def test_extracts_zhuimo_progress_choices_and_silence_status():
         ".坠魔抉择 路径3",
     ]
     assert all(action.reply_to_msg_id == event.msg_id for action in card.actions)
+
+
+def test_extracts_cangkun_open_with_room_id_and_join_action():
+    event = make_event(
+        "【苍坤上人洞府·集结】\n"
+        "@takaranoao_bot 以【苍坤残图】锁定了太妙神禁的薄弱方位！\n"
+        "房间ID: 15\n"
+        "其他道友可使用 .加入苍坤洞府 15 加入队伍！(5人满)\n"
+        "队长可在满员后使用 .进入苍坤洞府。"
+    )
+
+    output = DungeonParser().parse(event)
+
+    assert output is not None
+    card = output.cards[0]
+    assert card.title == "苍坤上人洞府开启"
+    assert card.fields["副本名"] == "苍坤上人洞府"
+    assert card.fields["副本ID"] == "15"
+    assert card.fields["房间ID"] == "15"
+    assert card.fields["开门人"] == "@takaranoao_bot"
+    assert card.fields["消耗道具"] == "苍坤残图"
+    assert card.fields["人数上限"] == "5人"
+    assert card.actions[0].label == "加入苍坤洞府"
+    assert card.actions[0].command == ".加入苍坤洞府 15"
+    assert card.actions[0].reply_to_msg_id is None
+
+
+def test_extracts_cangkun_choices_and_paths():
+    first = DungeonParser().parse(
+        make_event(
+            "【苍坤上人洞府·第一幕】\n"
+            "1 · 匿踪潜行：压低气息。\n"
+            "2 · 伪装混入：借势入阵。\n"
+            "3 · 强闯速进：强破禁制。\n"
+            "请队长使用 .苍坤抉择 1/2/3 做出第一步选择。"
+        )
+    )
+    assert first is not None
+    assert first.cards[0].title == "苍坤上人洞府推进"
+    assert first.cards[0].fields["阶段"] == "第一幕"
+    assert first.cards[0].fields["可选路径"] == [
+        "1 · 匿踪潜行",
+        "2 · 伪装混入",
+        "3 · 强闯速进",
+    ]
+    assert [action.command for action in first.cards[0].actions] == [
+        ".苍坤抉择 1",
+        ".苍坤抉择 2",
+        ".苍坤抉择 3",
+    ]
+
+    later = DungeonParser().parse(
+        make_event(
+            "【第一幕结果】\n"
+            "【第三幕·玉矶阁取宝】\n"
+            "1 · 先取卷轴：取走案上古卷。\n"
+            "2 · 先开玉盒：强行启盒。\n"
+            "3 · 先探偏殿：绕行偏殿。\n"
+            "请队长使用 .苍坤抉择 1/2/3 做出取宝选择。"
+        )
+    )
+    assert later is not None
+    assert later.cards[0].title == "苍坤上人洞府推进"
+    assert later.cards[0].fields["阶段"] == "第三幕·玉矶阁取宝"
+    assert later.cards[0].fields["可选路径"] == [
+        "1 · 先取卷轴",
+        "2 · 先开玉盒",
+        "3 · 先探偏殿",
+    ]
+
+
+def test_bare_first_stage_with_xutian_context_is_not_cangkun():
+    output = DungeonParser().parse(
+        make_event(
+            "【第一幕·前殿探路】\n"
+            "你们刚踏入虚天殿外层，残破宫阙间便接连涌现尸煞、迷雾与古禁。"
+        )
+    )
+
+    assert output is not None
+    card = output.cards[0]
+    assert card.title == "虚天殿推进"
+    assert card.fields["副本名"] == "虚天殿"
+    assert card.fields["阶段"] == "第一幕·前殿探路"
+
+
+def test_extracts_cangkun_all_member_choice_and_final_state():
+    choice = DungeonParser().parse(
+        make_event(
+            "【第四幕·玉矶阁反目】\n"
+            "1 · 守契护人：守住契约。\n"
+            "2 · 夺图背盟：强夺残图。\n"
+            "此阶段需全员表态。每位队员都可使用 .苍坤抉择 1/2 决定立场。"
+        )
+    )
+    assert choice is not None
+    assert choice.cards[0].fields["阶段"] == "第四幕·玉矶阁反目"
+    assert [action.command for action in choice.cards[0].actions] == [
+        ".苍坤抉择 1",
+        ".苍坤抉择 2",
+    ]
+
+    final = DungeonParser().parse(
+        make_event(
+            "【苍坤上人洞府·脱身成功】\n"
+            "通关保底：每位队员获得 6256修为、555贡献。\n"
+            "最终禁制裂隙：108 | 神魂稳度：102 | 慕兰警戒：52 | 卷轴线索：3"
+        )
+    )
+    assert final is not None
+    card = final.cards[0]
+    assert card.title == "苍坤上人洞府脱身成功"
+    assert card.fields["禁制裂隙"] == "108"
+    assert card.fields["神魂稳度"] == "102"
+    assert card.fields["慕兰警戒"] == "52"
+    assert card.fields["卷轴线索"] == "3"
 
 
 def test_extracts_silence_order_ready_message():

@@ -216,6 +216,52 @@ def test_extracts_zhui_mo_failure_result():
     }
 
 
+def test_extracts_cangkun_success_result():
+    event = make_event(
+        """【苍坤上人洞府·脱身成功】
+通关保底：每位队员获得 6256修为、555贡献。
+幸运道友 @miki_8344 额外获得 【阴凝之晶】x2。
+首通奖励：@jfdffdddd、@tinghua01、@hfsscxf、@ccahen、@miki_8344 获得 【坠魔谷禁制令】。
+最终禁制裂隙：108 | 神魂稳度：102 | 慕兰警戒：52 | 卷轴线索：3"""
+    )
+
+    output = ResourceStatsParser().parse(event)
+
+    assert output is not None
+    assert output.resource_events[0].source_name == "苍坤上人洞府"
+    assert output.resource_events[0].result == "success"
+    assert output.resource_events[0].outcome == "脱身成功"
+    assert {
+        (delta.player, delta.resource_name, delta.amount) for delta in output.resource_deltas
+    } >= {
+        ("", "修为", 6256),
+        ("", "贡献", 555),
+        ("miki_8344", "阴凝之晶", 2),
+        ("jfdffdddd", "坠魔谷禁制令", 1),
+    }
+
+
+def test_extracts_cangkun_failure_result():
+    event = make_event(
+        """【苍坤上人洞府·脱身失败】
+4轮破禁之后，洞府外层禁制仍未撕开，众人被迫退去。
+
+虽未能把洞府遗宝尽数带出，你们仍各自获得 2200修为、140贡献。
+最终禁制裂隙：76 | 神魂稳度：90 | 慕兰警戒：41 | 卷轴线索：0"""
+    )
+
+    output = ResourceStatsParser().parse(event)
+
+    assert output is not None
+    assert output.resource_events[0].source_name == "苍坤上人洞府"
+    assert output.resource_events[0].result == "failed"
+    assert output.resource_events[0].outcome == "脱身失败"
+    assert {(delta.resource_name, delta.amount) for delta in output.resource_deltas} == {
+        ("修为", 2200),
+        ("贡献", 140),
+    }
+
+
 def test_extracts_wind_xi_result_as_separate_resource_source():
     event = make_event(
         """【逆天之举】

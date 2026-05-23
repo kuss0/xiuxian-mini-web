@@ -106,7 +106,7 @@ class TowerTrialReportParser:
             cards=(
                 ParsedCard(
                     id=event.id,
-                    channels=("mine",),
+                    channels=("training", "resource"),
                     title="试炼古塔战报",
                     summary=summary,
                     source=event.source,
