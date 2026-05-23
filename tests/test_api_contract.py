@@ -179,6 +179,8 @@ def test_chat_viewport_layout_contract_keeps_composer_visible():
         ".chat-client-shell .quick-action-hotbar {\n  display: grid;\n  grid-template-rows: repeat(2, minmax(0, auto));\n  grid-auto-flow: column;",
         "grid-auto-columns: minmax(72px, max-content);",
         "max-height: 56px;",
+        ".chat-client-shell .direct-send-head {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr) auto;",
+        ".chat-client-shell .direct-send-actions .composer-tool-button {\n  min-height: 26px;",
         "@media (max-width: 900px)",
         "grid-template-rows: clamp(112px, 20dvh, 170px) minmax(0, 1fr);",
         ".chat-client-shell .conversation-rail {\n    grid-row: 1;\n    overflow: auto;",

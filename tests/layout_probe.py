@@ -361,8 +361,11 @@ PROBE_SCRIPT = """
     toolsPanel: rect(".workspace-tools-panel"),
     messageList: rect("#messageList"),
     composer: rect("#directSendComposer"),
+    composerHead: rect("#directSendComposer .direct-send-head"),
     input: rect("#directSendInput"),
     hotbar: rect("#quickActionHotbar"),
+    emojiButton: rect("#emojiPickerButton"),
+    cultivationButton: rect("#openCultivationButton"),
     health: rect("#healthButton")
   };
   var checks = [];
@@ -377,6 +380,10 @@ PROBE_SCRIPT = """
   check("composer visible", visible(boxes.composer, 180, 80), JSON.stringify(boxes.composer));
   check("composer within viewport", boxes.composer.bottom <= window.innerHeight + 1 && boxes.composer.top >= -1,
     JSON.stringify(boxes.composer));
+  check("composer stays compact", boxes.composer.height <= 170,
+    JSON.stringify(boxes.composer));
+  check("composer tool row stays compact", visible(boxes.composerHead, 160, 20) && boxes.composerHead.height <= 32,
+    JSON.stringify(boxes.composerHead));
   check("input visible", visible(boxes.input, 80, 38), JSON.stringify(boxes.input));
   check("tool center toggle visible", visible(boxes.toolsToggle, 90, 28), JSON.stringify(boxes.toolsToggle));
   check("tool center opens", visible(boxes.toolsPanel, 160, 120), JSON.stringify(boxes.toolsPanel));
@@ -401,6 +408,12 @@ PROBE_SCRIPT = """
   check("hotbar chips stay compact", hotbarOversized.length === 0, JSON.stringify(hotbarOversized));
   if (shell) shell.open = false;
   await wait(120);
+  boxes.emojiButton = rect("#emojiPickerButton");
+  boxes.cultivationButton = rect("#openCultivationButton");
+  check("emoji button clickable", visible(boxes.emojiButton, 36, 24) && centerHit("#emojiPickerButton"),
+    JSON.stringify(boxes.emojiButton));
+  check("cultivation button clickable", visible(boxes.cultivationButton, 54, 24) && centerHit("#openCultivationButton"),
+    JSON.stringify(boxes.cultivationButton));
   boxes.dungeonTrigger = rect("#dungeonStatusButton");
   check("dungeon status trigger visible", visible(boxes.dungeonTrigger, 60, 28), JSON.stringify(boxes.dungeonTrigger));
   check("dungeon status trigger clickable", centerHit("#dungeonStatusButton"), hitDetail("#dungeonStatusButton"));
