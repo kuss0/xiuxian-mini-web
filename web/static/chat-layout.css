@@ -374,6 +374,17 @@ body {
   z-index: 120;
   width: min(920px, calc(100vw - 28px));
   max-width: calc(100vw - 28px);
+  max-height: calc(100dvh - 64px);
+  align-content: start;
+  overflow: auto;
+}
+
+.chat-client-shell .workspace-tools-panel .tool-panel {
+  order: -1;
+}
+
+.chat-client-shell .workspace-tools-panel .tool-panel .sidebar-toolbox {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 /* Keep channel switching as the full-width primary header. Utility controls
@@ -399,6 +410,11 @@ body {
 
 .chat-client-shell .workspace-tools-toggle small {
   display: none;
+}
+
+.chat-client-shell .workspace-tools-toggle {
+  justify-content: center;
+  min-width: 96px;
 }
 
 .chat-client-shell .chat-pane .section-head > .stream-filter-inline {
@@ -433,6 +449,11 @@ body {
     right: 12px;
     flex-wrap: nowrap;
   }
+
+  .chat-client-shell .workspace-tools-panel {
+    grid-template-columns: minmax(0, 1fr);
+    max-height: calc(100dvh - 64px);
+  }
 }
 
 @media (max-width: 900px) {
@@ -443,5 +464,9 @@ body {
 
   .chat-client-shell .chat-pane .section-head {
     padding-right: 110px;
+  }
+
+  .chat-client-shell .workspace-tools-panel .tool-panel .sidebar-toolbox {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

@@ -165,6 +165,11 @@ def test_chat_viewport_layout_contract_keeps_composer_visible():
         ".chat-client-shell .stream-channel-tools {\n    justify-content: flex-start;",
         "scrollbar-width: none;",
         ".chat-client-shell .direct-send-row {\n    grid-template-columns: minmax(96px, 28%) minmax(0, 1fr) 72px;",
+        ".chat-client-shell .workspace-tools-panel {\n  position: fixed;\n  top: 48px;\n  right: 14px;",
+        "max-height: calc(100dvh - 64px);\n  align-content: start;\n  overflow: auto;",
+        ".chat-client-shell .workspace-tools-panel .tool-panel {\n  order: -1;",
+        ".chat-client-shell .workspace-tools-panel .tool-panel .sidebar-toolbox {\n  grid-template-columns: repeat(3, minmax(0, 1fr));",
+        ".chat-client-shell .workspace-tools-toggle {\n  justify-content: center;\n  min-width: 96px;",
     ]
     for fragment in required_fragments:
         assert fragment in final_contract
