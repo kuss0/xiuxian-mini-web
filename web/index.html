@@ -5,25 +5,42 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>修仙 Mini Web</title>
     <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/chat-layout.css" />
   </head>
   <body>
     <div class="app-shell chat-client-shell">
-      <aside class="sidebar conversation-rail">
+      <aside class="sidebar conversation-rail command-rail">
         <div class="sidebar-title">
           <strong>修仙群聊</strong>
           <span>Telegram 游戏客户端</span>
         </div>
 
-        <section class="panel channel-panel">
+        <section class="panel schedule-rail-panel">
           <div class="panel-head">
-            <h2>会话列表</h2>
+            <h2>官方定时</h2>
             <div class="panel-head-actions">
-              <button id="logsButton" type="button" title="按日期 / 类型筛选浏览全部采集到的消息">记录</button>
-              <button id="selectAllChannels" type="button">全部</button>
+              <button id="scheduleRailRefreshButton" type="button">刷新</button>
+              <button id="scheduleButton" type="button">新建</button>
             </div>
           </div>
-          <p id="activeChannelText" class="muted-line">重点</p>
-          <div id="channelFilters" class="channel-filters"></div>
+          <div id="scheduleRail" class="schedule-rail" aria-live="polite">
+            <p class="empty inline">正在读取官方定时...</p>
+          </div>
+        </section>
+
+        <section class="panel common-action-panel">
+          <div class="panel-head">
+            <h2>常用</h2>
+            <div class="panel-head-actions">
+              <button id="logsButton" type="button" title="按日期 / 类型筛选浏览全部采集到的消息">记录</button>
+            </div>
+          </div>
+          <div class="sidebar-toolbox primary-toolbox">
+            <button id="dungeonStatusButton" type="button" title="按副本 ID 汇总最近开房、加入、失败、解散和推进消息">副本状态</button>
+            <button id="resourceStatsButton" type="button" title="野外历练和非血色副本的全服收益统计">资源统计</button>
+            <button id="inventoryButton" type="button" title="查看最近储物袋快照并生成批量转移命令">库存/转移</button>
+            <button id="outboxButton" type="button">草稿箱</button>
+          </div>
         </section>
 
         <!-- 隐藏面板(功能未完成):当前角色 -->
@@ -35,19 +52,14 @@
         <section class="layout-grid detail-closed">
           <section class="stream chat-pane">
             <div class="section-head">
-              <div class="stream-title">
-                <strong>群聊</strong>
-                <span id="streamActiveChannelText">重点</span>
+              <div class="stream-filter-inline" aria-label="频道筛选">
+                <div id="quickFilters" class="quick-filters"></div>
               </div>
               <div class="stream-channel-tools">
                 <label class="message-search" title="只搜索当前已选频道中的消息">
                   <span>搜索</span>
                   <input id="messageSearchInput" type="search" placeholder="当前频道" autocomplete="off" />
                 </label>
-                <details class="stream-filter-drawer">
-                  <summary>频道</summary>
-                  <div id="quickFilters" class="quick-filters"></div>
-                </details>
                 <span id="messageCount" class="message-count-pill">0 条</span>
                 <button id="refreshButton" type="button" class="stream-tool-button">刷新</button>
                 <button id="healthButton" type="button" class="stream-tool-button" title="查看监听、消息水位和断层审计">健康</button>
@@ -95,18 +107,37 @@
                           <div id="cockpitInbox" class="cockpit-inbox"></div>
                         </section>
                       </div>
+                      <details class="game-secondary-shell">
+                        <summary>
+                          <span>状态总览</span>
+                          <small>态势 / 地图 / 任务 / 常用面板</small>
+                        </summary>
+                        <div class="game-secondary-panels">
+                          <section id="gameHud" class="game-hud" aria-label="当前修仙状态">
+                            <div id="hudIdentity" class="hud-panel hud-identity"></div>
+                            <div class="hud-panel hud-modules-shell">
+                              <div class="hud-panel-head">
+                                <span>关键冷却</span>
+                              </div>
+                              <div id="hudModules" class="hud-modules"></div>
+                            </div>
+                            <div id="hudInbox" class="hud-panel hud-inbox"></div>
+                          </section>
+                          <section id="liveSituationBoard" class="live-situation-board" aria-label="当前态势"></section>
+                          <section id="worldEventStrip" class="world-event-strip" aria-label="世界事件"></section>
+                          <section id="gameSceneBoard" class="game-scene-board" aria-label="修仙地图"></section>
+                          <section id="questTracker" class="quest-tracker" aria-label="任务追踪"></section>
+                          <section id="gameActionDock" class="game-action-dock" aria-label="常用面板"></section>
+                        </div>
+                      </details>
                     </section>
 
                     <section class="panel tool-panel">
                       <div class="drawer-summary tool-panel-summary">
                         <span>工具</span>
-                        <small>副本 / 统计 / 库存 / 设置</small>
+                        <small>设置 / 通知 / Bot</small>
                       </div>
                       <div class="sidebar-toolbox">
-                        <button id="dungeonStatusButton" type="button" title="按副本 ID 汇总最近开房、加入、失败、解散和推进消息">副本状态</button>
-                        <button id="resourceStatsButton" type="button" title="野外历练和非血色副本的全服收益统计">资源统计</button>
-                        <button id="inventoryButton" type="button" title="查看最近储物袋快照并生成批量转移命令">库存/转移</button>
-                        <button id="outboxButton" type="button">草稿箱</button>
                         <button id="settingsButton" type="button">接入配置</button>
                         <button id="filterSettingsButton" type="button">过滤设置</button>
                         <button id="gameBotsButton" type="button">游戏 Bot</button>
@@ -117,21 +148,7 @@
                 </details>
               </div>
             </div>
-            <section id="gameHud" class="game-hud" aria-label="当前修仙状态">
-              <div id="hudIdentity" class="hud-panel hud-identity"></div>
-              <div class="hud-panel hud-modules-shell">
-                <div class="hud-panel-head">
-                  <span>关键冷却</span>
-                </div>
-                <div id="hudModules" class="hud-modules"></div>
-              </div>
-              <div id="hudInbox" class="hud-panel hud-inbox"></div>
-            </section>
-            <section id="liveSituationBoard" class="live-situation-board" aria-label="当前态势"></section>
-            <section id="worldEventStrip" class="world-event-strip" aria-label="世界事件"></section>
-            <section id="gameSceneBoard" class="game-scene-board" aria-label="修仙地图"></section>
-            <section id="questTracker" class="quest-tracker" aria-label="任务追踪"></section>
-            <section id="gameActionDock" class="game-action-dock" aria-label="常用面板"></section>
+            <section id="gamePrimaryStrip" class="game-primary-strip" aria-label="当前操作状态"></section>
             <div id="messageList" class="message-list"></div>
             <button id="jumpToLatest" class="jump-to-latest" type="button" hidden>↓ 回到最新</button>
           </section>
@@ -161,15 +178,10 @@
               <strong>消息</strong>
               <span id="directSendIdentityLine">未选身份</span>
             </div>
-            <details class="direct-send-more">
-              <summary>工具</summary>
-              <div class="direct-send-tools">
-                <button id="emojiPickerButton" type="button" aria-controls="directSendEmojiPalette" aria-expanded="false">表情</button>
-                <button id="openSkillMenuButton" type="button" aria-controls="directSendSkillPanel" aria-expanded="false">快捷指令</button>
-                <button id="openCultivationButton" type="button">修炼状态</button>
-                <button id="scheduleButton" type="button">官方定时</button>
-              </div>
-            </details>
+            <div class="direct-send-actions">
+              <button id="emojiPickerButton" type="button" class="composer-tool-button" aria-controls="directSendEmojiPalette" aria-expanded="false">表情</button>
+              <button id="openCultivationButton" type="button" class="composer-tool-button">修炼状态</button>
+            </div>
           </div>
           <div id="directSendReplyContext" class="direct-send-reply-context" hidden></div>
           <div id="directSendSelectionContext" class="direct-send-selection-context" hidden></div>
@@ -186,15 +198,6 @@
             <button id="directSendSubmit" type="button">发送</button>
           </div>
           <div id="directSendEmojiPalette" class="emoji-palette direct-send-emoji-palette" hidden></div>
-          <div id="directSendSkillPanel" class="direct-send-skill-panel" hidden>
-            <div class="skill-bar-head">
-              <div class="skill-bar-tabs" id="skillBarTabs"></div>
-              <div class="skill-bar-meta">
-                <span id="skillBarIdentity" class="skill-bar-identity">未选身份</span>
-              </div>
-            </div>
-            <div id="skillBarChips" class="skill-bar-chips"></div>
-          </div>
           <p id="directSendStatus" class="direct-send-status" hidden></p>
         </footer>
       </main>
@@ -204,6 +207,23 @@
 
     <div id="modalRoot" class="modal-backdrop" hidden></div>
 
+    <script src="/static/state.js"></script>
+    <script src="/static/constants.js"></script>
+    <script src="/static/ui/format.js"></script>
+    <script src="/static/api.js"></script>
+    <script src="/static/ui/modal.js"></script>
+    <script src="/static/ui/toast.js"></script>
+    <script src="/static/views/logs.js"></script>
+    <script src="/static/views/outbox.js"></script>
+    <script src="/static/views/game_bots.js"></script>
+    <script src="/static/views/focus_archive.js"></script>
+    <script src="/static/views/leader_intel.js"></script>
+    <script src="/static/views/xutian_guide.js"></script>
+    <script src="/static/views/cangkun_guide.js"></script>
+    <script src="/static/views/filter_settings.js"></script>
+    <script src="/static/views/health.js"></script>
+    <script src="/static/views/inventory.js"></script>
+    <script src="/static/views/notify.js"></script>
     <script src="/static/app.js"></script>
   </body>
 </html>

@@ -1,70 +1,29 @@
 // MINIWEB-BUILD: chat-client-shell 2026-05-21T04:42
 
-const state = {
-  channels: [],
-  selectedChannels: new Set(),
-  messages: [],
-  selectedMessageId: null,
-  expandedMessages: new Set(),
-  messageSearch: "",
-  settings: null,
-  accounts: [],
-  identities: [],
-  identityPatches: [],
-  identityPatchesOwnerId: null,
-  identityPatchesLoading: false,
-  identityPatchesRequestSeq: 0,
-  accountLimit: 0,
-  identityLimit: 0,
-  listenerSummary: null,
-  messageAudit: null,
-  telegramDialogs: [],
-  telegramTopics: [],
-  settingsNotice: "",
-  outboxPlan: null,
-  outboxDrafts: [],
-  draftNoticeByMessageId: new Map(),
-  detailMode: "message",
-  refreshState: "idle",
-  activeIdentityId: null,
-  discoveredBots: [],
-  worldSnapshot: null,
-  worldSnapshotLoading: false,
-  lastMessageSeq: 0,
-  channelSummaryMessages: [],
-  channelSummarySeq: 0,
-  viewMode: "focus",
-  sendAs: {
-    peers: [],
-    accountLocalId: "",
-    selected: new Set(),
-  },
-  // 玩法状态机:Map<send_as_id(number), Array<{module_key,label,summary,state}>>
-  identityModuleStates: new Map(),
-  // 技能盘
-  skills: [],            // Skill[] from /api/skills
-  skillGroups: [],       // 分组顺序
-  skillBarTab: "日常",   // 当前激活 tab
-  skillBarBusyKeys: new Set(),  // 正在发送中的 key,临时禁用
-  directSendIdentityId: null,
-  directSendLastActiveId: null,
-  directSendReply: null,
-};
-
-const MESSAGE_PREVIEW_CHAR_LIMIT = 480;
-const MESSAGE_PREVIEW_LINE_LIMIT = 8;
-const CHANNEL_SUMMARY_LIMIT = 260;
-const NUMERIC_SOURCE_RE = /^-?\d{4,}$/;
-const EMOJI_PALETTE = [
-  "😀", "😂", "🤣", "😅", "🥹", "😎", "🙃", "😭",
-  "👍", "🙏", "👌", "👏", "🤝", "👀", "💤", "💢",
-  "🔥", "✨", "⚔️", "🧘‍♂️", "🍃", "💧", "🌙", "🎉",
-  "⚠️", "🚫", "✅", "❌", "❓", "💰", "📦", "🧩",
-];
-const GRAPHEME_SEGMENTER =
-  typeof Intl !== "undefined" && Intl.Segmenter
-    ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
-    : null;
+const { state } = window.MiniwebState;
+const {
+  ACCOUNT_POLL_INTERVAL_MS,
+  BOT_DISCOVERY_POLL_INTERVAL_MS,
+  CHANNEL_SUMMARY_LIMIT,
+  EMOJI_PALETTE,
+  HEALTH_POLL_INTERVAL_MS,
+  IDENTITY_STATE_POLL_INTERVAL_MS,
+  MESSAGE_PREVIEW_CHAR_LIMIT,
+  MESSAGE_PREVIEW_LINE_LIMIT,
+  NUMERIC_SOURCE_RE,
+  POLL_INTERVAL_MS,
+  WORLD_SNAPSHOT_POLL_INTERVAL_MS,
+} = window.MiniwebConstants;
+const { apiFetch, fetchJson, postJson } = window.MiniwebApi;
+const { closeModal, openModal } = window.MiniwebModal;
+const {
+  clipGraphemes,
+  countGraphemes,
+  escapeAttr,
+  escapeHtml,
+  firstGrapheme,
+  formatNumber,
+} = window.MiniwebFormat;
 
 const channelFilters = document.querySelector("#channelFilters");
 const selectAllChannels = document.querySelector("#selectAllChannels");
@@ -97,6 +56,8 @@ const openSkillMenuButton = document.querySelector("#openSkillMenuButton");
 const openCultivationButton = document.querySelector("#openCultivationButton");
 const outboxButton = document.querySelector("#outboxButton");
 const scheduleButton = document.querySelector("#scheduleButton");
+const scheduleRail = document.querySelector("#scheduleRail");
+const scheduleRailRefreshButton = document.querySelector("#scheduleRailRefreshButton");
 const logsButton = document.querySelector("#logsButton");
 const dungeonStatusButton = document.querySelector("#dungeonStatusButton");
 const resourceStatsButton = document.querySelector("#resourceStatsButton");
@@ -108,7 +69,6 @@ const logoutAccountButton = document.querySelector("#logoutAccountButton");
 const skillBarTabs = document.querySelector("#skillBarTabs");
 const skillBarChips = document.querySelector("#skillBarChips");
 const skillBarIdentity = document.querySelector("#skillBarIdentity");
-const skillToast = document.querySelector("#skillToast");
 const gameCockpit = document.querySelector("#gameCockpit");
 const cockpitIdentity = document.querySelector("#cockpitIdentity");
 const cockpitModules = document.querySelector("#cockpitModules");
@@ -117,6 +77,7 @@ const gameHud = document.querySelector("#gameHud");
 const hudIdentity = document.querySelector("#hudIdentity");
 const hudModules = document.querySelector("#hudModules");
 const hudInbox = document.querySelector("#hudInbox");
+const gamePrimaryStrip = document.querySelector("#gamePrimaryStrip");
 const liveSituationBoard = document.querySelector("#liveSituationBoard");
 const worldEventStrip = document.querySelector("#worldEventStrip");
 const gameSceneBoard = document.querySelector("#gameSceneBoard");
@@ -133,56 +94,49 @@ const viewModeAllButton = null;
 const viewModeSoloButton = null;
 const jumpToLatestButton = document.querySelector("#jumpToLatest");
 const modalRoot = document.querySelector("#modalRoot");
-const AUTH_TOKEN_STORAGE_KEY = "xiuxianMiniwebAccessToken";
 
-let modalCloseHandler = null;
-
-function openModal({ title, body, footer }) {
-  if (!modalRoot) return;
-  modalRoot.innerHTML = `
-    <div class="modal-dialog" role="dialog" aria-modal="true">
-      <div class="modal-head">
-        <h3>${escapeHtml(title || "")}</h3>
-        <button type="button" class="modal-close" data-modal-close aria-label="关闭">×</button>
-      </div>
-      <div class="modal-body">${body || ""}</div>
-      ${footer ? `<div class="modal-actions">${footer}</div>` : ""}
-    </div>
-  `;
-  modalRoot.hidden = false;
-  modalCloseHandler = (event) => {
-    if (event.key === "Escape") {
-      closeModal();
-    }
-  };
-  document.addEventListener("keydown", modalCloseHandler);
-  modalRoot.querySelectorAll("[data-modal-close]").forEach((button) => {
-    button.addEventListener("click", () => closeModal());
-  });
-  modalRoot.addEventListener("click", (event) => {
-    if (event.target === modalRoot) {
-      closeModal();
-    }
-  });
-  return modalRoot.querySelector(".modal-dialog");
+function messageTimeValue(message) {
+  const parsed = Date.parse(String(message?.time || ""));
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function closeModal() {
-  if (!modalRoot) return;
-  modalRoot.hidden = true;
-  modalRoot.innerHTML = "";
-  if (modalCloseHandler) {
-    document.removeEventListener("keydown", modalCloseHandler);
-    modalCloseHandler = null;
-  }
+function numericMessageField(message, key) {
+  const value = Number(message?.[key] || 0);
+  return Number.isFinite(value) ? value : 0;
 }
 
-async function fetchJson(url) {
-  const response = await apiFetch(url);
-  if (!response.ok) {
-    throw new Error(`请求失败：${response.status}`);
+function compareMessagesByRecency(a, b) {
+  const timeDiff = messageTimeValue(b) - messageTimeValue(a);
+  if (timeDiff) return timeDiff;
+  const msgDiff = numericMessageField(b, "msg_id") - numericMessageField(a, "msg_id");
+  if (msgDiff) return msgDiff;
+  return numericMessageField(b, "seq") - numericMessageField(a, "seq");
+}
+
+function compareRankThenRecency(rankFn) {
+  return (a, b) => rankFn(a) - rankFn(b) || compareMessagesByRecency(a, b);
+}
+
+function sortMessagesByRecency(messages) {
+  return [...(messages || [])].sort(compareMessagesByRecency);
+}
+
+function mergeMessagesById(existing, incoming) {
+  const byId = new Map((existing || []).map((message) => [message.id, message]));
+  for (const message of incoming || []) {
+    if (message?.id) byId.set(message.id, message);
   }
-  return response.json();
+  return sortMessagesByRecency(Array.from(byId.values()));
+}
+
+function compareDungeonSummariesByRecency(a, b) {
+  const aLatest = a?.latestMessage || {};
+  const bLatest = b?.latestMessage || {};
+  const timeDiff = messageTimeValue(bLatest) - messageTimeValue(aLatest);
+  if (timeDiff) return timeDiff;
+  const msgDiff = numericMessageField(bLatest, "msg_id") - numericMessageField(aLatest, "msg_id");
+  if (msgDiff) return msgDiff;
+  return Number(b?.latestSeq || bLatest.seq || 0) - Number(a?.latestSeq || aLatest.seq || 0);
 }
 
 async function loadMessageAudit({ silent = false, deep = false } = {}) {
@@ -236,33 +190,6 @@ async function loadWorldSnapshot({ silent = false } = {}) {
   }
 }
 
-async function apiFetch(url, options = {}, allowRetry = true) {
-  const response = await fetch(url, {
-    ...options,
-    headers: authHeaders(options.headers),
-  });
-  if (response.status !== 401 || !allowRetry) {
-    return response;
-  }
-
-  sessionStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-  const token = window.prompt("请输入 Mini Web 访问口令");
-  if (!token) {
-    return response;
-  }
-  sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token.trim());
-  return apiFetch(url, options, false);
-}
-
-function authHeaders(headers = {}) {
-  const merged = { ...headers };
-  const token = sessionStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
-  if (token) {
-    merged["X-Miniweb-Token"] = token;
-  }
-  return merged;
-}
-
 async function loadChannels() {
   const payload = await fetchJson("/api/channels");
   state.channels = payload.channels;
@@ -297,7 +224,7 @@ async function loadChannelSummary({ incremental = false } = {}) {
     byId.set(card.id, card);
   }
   state.channelSummaryMessages = Array.from(byId.values())
-    .sort((a, b) => (b.seq || 0) - (a.seq || 0))
+    .sort(compareMessagesByRecency)
     .slice(0, CHANNEL_SUMMARY_LIMIT);
   state.channelSummarySeq = incremental ? Math.max(state.channelSummarySeq, serverMax) : serverMax;
   renderChannelFilters();
@@ -352,7 +279,9 @@ async function loadMessages({ incremental = false } = {}) {
   } else {
     params.set("limit", "200");
   }
-  params.set("compact", "1");
+  if (!selectedChannelKeys().includes("focus")) {
+    params.set("compact", "1");
+  }
   const payload = await fetchJson(`/api/messages?${params.toString()}`);
   const incoming = payload.messages || [];
   const serverMax = Number(payload.max_seq || 0);
@@ -376,11 +305,10 @@ async function loadMessages({ incremental = false } = {}) {
     for (const card of incoming) {
       byId.set(card.id, card);  // 同 id 的会被新版本覆盖(支持 edit)
     }
-    // 按 seq 倒序(新的在前) — 跟初始化一致
-    state.messages = Array.from(byId.values()).sort((a, b) => (b.seq || 0) - (a.seq || 0));
+    state.messages = sortMessagesByRecency(Array.from(byId.values()));
   } else {
     // 初始化:直接替换
-    state.messages = incoming;
+    state.messages = sortMessagesByRecency(incoming);
   }
   state.lastMessageSeq = incremental ? Math.max(state.lastMessageSeq, serverMax) : serverMax;
 
@@ -412,6 +340,7 @@ async function loadOutboxDrafts() {
 async function loadSettings() {
   const payload = await fetchJson("/api/settings");
   state.settings = payload.settings;
+  updateGlobalBanner();
   return state.settings;
 }
 
@@ -574,14 +503,201 @@ function updateGlobalBanner() {
 }
 
 function renderGameCockpit() {
-  if (!gameCockpit && !gameHud && !gameActionDock) return;
+  if (!gameCockpit && !gameHud && !gameActionDock && !gamePrimaryStrip) return;
   renderCockpitIdentity();
   renderCockpitModules();
   renderCockpitInbox();
+  renderGamePrimaryStrip();
   renderLiveSituationBoard();
   renderGameActionDock();
   renderGameSceneBoard();
   renderQuestTracker();
+}
+
+function renderGamePrimaryStrip() {
+  if (!gamePrimaryStrip) return;
+  const focus = primaryFocusStripModel();
+  const dungeon = primaryDungeonStripModel();
+  const status = primaryStatusStripModel();
+  gamePrimaryStrip.innerHTML = `
+    <button type="button" class="game-primary-item focus ${escapeAttr(focus.kind)}" data-primary-strip-action="${escapeAttr(focus.action)}">
+      <span>${escapeHtml(focus.label)}</span>
+      <strong>${escapeHtml(focus.title)}</strong>
+      <small>${escapeHtml(focus.meta)}</small>
+    </button>
+    <button type="button" class="game-primary-item dungeon ${escapeAttr(dungeon.kind)}" data-primary-strip-action="dungeon">
+      <span>${escapeHtml(dungeon.label)}</span>
+      <strong>${escapeHtml(dungeon.title)}</strong>
+      <small>${escapeHtml(dungeon.meta)}</small>
+    </button>
+    <button type="button" class="game-primary-item status ${escapeAttr(status.kind)}" data-primary-strip-action="status">
+      <span>${escapeHtml(status.label)}</span>
+      <strong>${escapeHtml(status.title)}</strong>
+      <small>${escapeHtml(status.meta)}</small>
+    </button>
+    <button type="button" class="game-primary-more" data-primary-strip-action="secondary">工具</button>
+  `;
+  gamePrimaryStrip.querySelectorAll("[data-primary-strip-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      handlePrimaryStripAction(button.dataset.primaryStripAction || "").catch((error) => showError(error));
+    });
+  });
+}
+
+function primaryFocusStripModel() {
+  const auditStatus = state.messageAudit?.status || "";
+  if (auditStatus && auditStatus !== "ok") {
+    return {
+      label: "重点",
+      title: "消息箱异常",
+      meta: healthStatusLabel(auditStatus),
+      kind: "warn",
+      action: "health",
+    };
+  }
+  const message = primaryFocusMessage();
+  if (!message) {
+    return {
+      label: "重点",
+      title: "暂无重点回复",
+      meta: collectorLiveStatus() || "风险、@我和重点频道会显示在这里",
+      kind: "muted",
+      action: "overview",
+    };
+  }
+  const meta = worldEventMeta(message);
+  const actionCount = (message.actions || []).filter((item) => String(item.command || "").trim()).length;
+  const preview = liveMessagePreview(message, 44);
+  return {
+    label: meta.label === "我的" ? "重点 / 我的" : "重点",
+    title: String(message.title || displaySource(message.source) || "重点回复").trim(),
+    meta: [
+      formatChatTime(message.time) || "最近",
+      displaySource(message.source),
+      actionCount ? `${actionCount} 个候选` : preview,
+    ].filter(Boolean).join("｜"),
+    kind: meta.kind || "focus",
+    action: "focus",
+  };
+}
+
+function primaryFocusMessage() {
+  const seen = new Set();
+  return summarySignalMessages()
+    .filter((message) => {
+      if (!message?.id || seen.has(message.id)) return false;
+      seen.add(message.id);
+      const channels = message.channels || [message.channel];
+      const tags = message.tags || [];
+      if (channels.includes("dungeon")) return false;
+      if (message.severity === "risk" || channels.includes("risk")) return true;
+      if (isPersonalSignal(message)) return true;
+      if (channels.includes("leader") || channels.includes("focus")) return true;
+      if ((tags.includes("会长") || tags.includes("重点")) && messageKind(message) === "bot") return true;
+      return false;
+    })
+    .sort(compareRankThenRecency(primaryFocusRank))[0] || null;
+}
+
+function primaryFocusRank(message) {
+  const channels = message.channels || [message.channel];
+  const hasCommand = (message.actions || []).some((item) => String(item.command || "").trim());
+  if (message.severity === "risk" || channels.includes("risk")) return 1;
+  if (hasCommand) return 2;
+  if (isPersonalSignal(message)) return 3;
+  if (channels.includes("leader")) return 4;
+  if (channels.includes("focus")) return 5;
+  return 9;
+}
+
+function primaryDungeonStripModel() {
+  const summary = actionableDungeonSnapshot() || currentDungeonSnapshot();
+  if (!summary) {
+    return {
+      label: "副本",
+      title: "暂无副本线索",
+      meta: "苍坤洞府、虚天殿等副本会在这里置顶",
+      kind: "muted",
+    };
+  }
+  const actions = visibleDungeonActions(summary).filter((action) => String(action.command || "").trim());
+  const meta = [
+    summary.status || "副本",
+    summary.latestStage || "",
+    actions.length ? `${actions.length} 个动作` : "",
+    formatChatTime(summary.latestMessage?.time) || "",
+  ].filter(Boolean).join("｜");
+  return {
+    label: "副本",
+    title: dungeonSummaryDisplayLabel(summary),
+    meta: meta || summary.advice || summary.routeVerdict || "点击查看副本面板",
+    kind: summary.statusKind || "dungeon",
+  };
+}
+
+function primaryStatusStripModel() {
+  const activeId = Number(state.activeIdentityId || 0) || null;
+  const identity = activeId ? identityById(activeId) : null;
+  const patchMap = new Map(activeIdentityPatches().map((item) => [item.key, item.value]));
+  const identityName =
+    patchMap.get("角色名") ||
+    patchMap.get("道号") ||
+    identity?.label ||
+    identity?.username ||
+    (activeId ? String(activeId) : "未选角色");
+  const identityMeta = [
+    patchMap.get("境界"),
+    String(patchMap.get("宗门") || "").replace(/^【|】$/g, ""),
+  ].filter(Boolean).join("｜") || (identity ? "资料待补全" : "先选身份");
+  const moduleRow = overviewModuleRows(activeId).find((row) => ["warn", "ready", "running", "cooling"].includes(row.view?.cls)) || null;
+  return {
+    label: "角色 / CD",
+    title: String(identityName),
+    meta: moduleRow ? `${moduleRow.view.label} ${moduleRow.view.time}`.trim() : identityMeta,
+    kind: moduleRow?.view?.cls || (activeId ? "ready" : "muted"),
+  };
+}
+
+async function handlePrimaryStripAction(action) {
+  if (action === "secondary") {
+    openSecondaryGamePanel();
+    return;
+  }
+  if (action === "focus") {
+    const signal = primaryFocusMessage();
+    const message = signal?.id ? await findOrFetchMessage(signal.id) : null;
+    if (message) {
+      jumpToMessage(message);
+    } else {
+      openOverviewDetailPanel();
+    }
+    return;
+  }
+  if (action === "overview") {
+    openOverviewDetailPanel();
+    return;
+  }
+  if (action === "dungeon") {
+    await openDungeonStatusModal();
+    return;
+  }
+  if (action === "health") {
+    await openHealthModal();
+    return;
+  }
+  openIdentityStatusModal();
+}
+
+function openSecondaryGamePanel() {
+  const shell = document.querySelector(".workspace-tools-shell");
+  const secondary = document.querySelector(".game-secondary-shell");
+  if (shell) shell.open = true;
+  if (secondary) {
+    secondary.open = true;
+    secondary.scrollIntoView({ block: "nearest" });
+  } else {
+    openOverviewDetailPanel();
+  }
 }
 
 function renderCockpitIdentity() {
@@ -1260,144 +1376,20 @@ function bindWorldReport(dialog, payload) {
 }
 
 async function openLeaderIntelModal() {
-  const dialog = openModal({
-    title: "情报频道",
-    body: `
-      <section class="modal-section leader-intel-modal">
-        <div class="leader-intel-head">
-          <div>
-            <strong>会长 / 天尊普通发言</strong>
-            <span>只读聚合，不自动发送；用于快速看新玩法线索和公告。</span>
-          </div>
-          <div class="quick-filters leader-intel-filters">
-            <button type="button" class="quick-filter-chip active" data-leader-intel-filter="all">全部</button>
-            <button type="button" class="quick-filter-chip" data-leader-intel-filter="owner">本人上号</button>
-            <button type="button" class="quick-filter-chip" data-leader-intel-filter="tianzun">天尊普通</button>
-            <button type="button" class="quick-filter-chip" data-leader-intel-filter="keyword">关键词</button>
-            <button type="button" class="quick-filter-chip" data-leader-intel-filter="reply">回复链</button>
-          </div>
-        </div>
-        <div id="leaderIntelSummary" class="leader-intel-summary">加载中...</div>
-        <div id="leaderIntelList" class="leader-intel-list">
-          <p class="empty inline">加载中...</p>
-        </div>
-      </section>
-    `,
-    footer: `
-      <button type="button" id="leaderIntelOpenChannel">切到会长频道</button>
-      <button type="button" id="leaderIntelRefresh">刷新情报</button>
-      <button type="button" data-modal-close>关闭</button>
-    `,
+  await window.MiniwebViews.leaderIntel.openLeaderIntelModal({
+    applyChannelSelection,
+    displaySource,
+    findOrFetchMessage,
+    formatChatTime,
+    jumpToMessage,
   });
-  if (!dialog) return;
-  const local = { items: [], filter: "all", loading: false };
-  const load = async () => {
-    local.loading = true;
-    renderLeaderIntelModal(dialog, local);
-    try {
-      const payload = await fetchJson("/api/messages?channel=leader&limit=100");
-      local.items = payload.messages || [];
-    } catch (error) {
-      local.items = [];
-      const list = dialog.querySelector("#leaderIntelList");
-      if (list) list.innerHTML = `<p class="empty inline">情报读取失败：${escapeHtml(error.message || "未知错误")}</p>`;
-      const summary = dialog.querySelector("#leaderIntelSummary");
-      if (summary) summary.textContent = "读取失败";
-      return;
-    } finally {
-      local.loading = false;
-    }
-    renderLeaderIntelModal(dialog, local);
-  };
-  dialog.querySelectorAll("[data-leader-intel-filter]").forEach((button) => {
-    button.addEventListener("click", () => {
-      dialog.querySelectorAll("[data-leader-intel-filter]").forEach((item) => item.classList.remove("active"));
-      button.classList.add("active");
-      local.filter = button.dataset.leaderIntelFilter || "all";
-      renderLeaderIntelModal(dialog, local);
-    });
-  });
-  dialog.querySelector("#leaderIntelRefresh")?.addEventListener("click", () => load());
-  dialog.querySelector("#leaderIntelOpenChannel")?.addEventListener("click", async () => {
-    closeModal();
-    await applyChannelSelection(["leader"]);
-  });
-  await load();
-}
-
-function renderLeaderIntelModal(dialog, local) {
-  const summary = dialog.querySelector("#leaderIntelSummary");
-  const list = dialog.querySelector("#leaderIntelList");
-  if (!summary || !list) return;
-  if (local.loading) {
-    summary.textContent = "加载中...";
-    list.innerHTML = '<p class="empty inline">加载中...</p>';
-    return;
-  }
-  const items = leaderIntelFilteredItems(local.items, local.filter);
-  const ownerCount = local.items.filter((item) => (item.tags || []).includes("本人上号")).length;
-  const tianzunCount = local.items.filter((item) => (item.tags || []).includes("会长上号")).length;
-  const keywordCount = local.items.filter((item) => (item.tags || []).some((tag) => String(tag).startsWith("关键词:"))).length;
-  summary.innerHTML = `
-    <span>全部 <b>${escapeHtml(formatNumber(local.items.length))}</b></span>
-    <span>本人上号 <b>${escapeHtml(formatNumber(ownerCount))}</b></span>
-    <span>天尊普通 <b>${escapeHtml(formatNumber(tianzunCount))}</b></span>
-    <span>关键词 <b>${escapeHtml(formatNumber(keywordCount))}</b></span>
-    <span>当前可见 <b>${escapeHtml(formatNumber(items.length))}</b></span>
-  `;
-  if (!items.length) {
-    list.innerHTML = '<p class="empty inline">当前筛选下没有情报。</p>';
-    return;
-  }
-  list.innerHTML = items.map((message) => renderLeaderIntelCard(message)).join("");
-  list.querySelectorAll("[data-leader-intel-jump]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const id = button.dataset.leaderIntelJump || "";
-      if (!id) return;
-      const message = await findOrFetchMessage(id);
-      closeModal();
-      if (message) jumpToMessage(message);
-    });
-  });
-}
-
-function leaderIntelFilteredItems(items, filter) {
-  const source = items || [];
-  if (filter === "owner") return source.filter((item) => (item.tags || []).includes("本人上号"));
-  if (filter === "tianzun") return source.filter((item) => (item.tags || []).includes("会长上号"));
-  if (filter === "keyword") return source.filter((item) => (item.tags || []).some((tag) => String(tag).startsWith("关键词:")));
-  if (filter === "reply") return source.filter((item) => Number(item.reply_to_msg_id || 0));
-  return source;
 }
 
 function renderLeaderIntelCard(message) {
-  const tags = message.tags || [];
-  const kind = tags.includes("本人上号")
-    ? "本人上号"
-    : tags.includes("会长上号")
-      ? "天尊普通"
-      : "会长";
-  const keywordTags = tags.filter((tag) => String(tag).startsWith("关键词:")).slice(0, 3);
-  const preview = clipGraphemes(
-    String(message.raw || message.summary || message.title || "").replace(/\s+/g, " ").trim() || "（空消息）",
-    150
-  );
-  const replyText = message.reply_to_msg_id ? `回复 #${message.reply_to_msg_id}` : "非回复";
-  return `
-    <article class="leader-intel-card">
-      <div class="leader-intel-card-head">
-        <span class="leader-intel-kind">${escapeHtml(kind)}</span>
-        <strong>${escapeHtml(displaySource(message.source))}</strong>
-        <small>${escapeHtml(formatChatTime(message.time) || "")}</small>
-      </div>
-      <p>${escapeHtml(preview)}</p>
-      <div class="leader-intel-card-foot">
-        <span>${escapeHtml(replyText)}</span>
-        ${keywordTags.map((tag) => `<em>${escapeHtml(String(tag).replace(/^关键词:/, ""))}</em>`).join("")}
-        <button type="button" data-leader-intel-jump="${escapeAttr(message.id || "")}">定位</button>
-      </div>
-    </article>
-  `;
+  return window.MiniwebViews.leaderIntel.renderLeaderIntelCard(message, {
+    displaySource,
+    formatChatTime,
+  });
 }
 
 const IDENTITY_STATUS_GROUPS = [
@@ -1805,7 +1797,7 @@ function renderDirectSendReplyContext() {
   `;
   directSendReplyContext.querySelector("[data-direct-reply-clear]")?.addEventListener("click", () => {
     clearDirectSendReply();
-    directSendInput?.focus();
+    focusDirectSendInput();
   });
 }
 
@@ -1976,16 +1968,42 @@ function fillDirectSendComposer(command, opts = {}) {
   renderDirectSendComposer();
   if (directSendInput && text) {
     directSendInput.value = text;
+    resizeDirectSendInput();
   }
   if (opts.statusText) {
     setDirectSendStatus(opts.statusText, opts.statusKind || "info");
   }
   if (opts.focus !== false) {
-    window.setTimeout(() => {
-      directSendInput?.focus();
-      directSendInput?.setSelectionRange(directSendInput.value.length, directSendInput.value.length);
-    }, 0);
+    focusDirectSendInput();
   }
+}
+
+function resizeDirectSendInput() {
+  if (!directSendInput) return;
+  directSendInput.style.height = "auto";
+  const style = window.getComputedStyle(directSendInput);
+  const minHeight = Number.parseFloat(style.minHeight) || 44;
+  const cssMaxHeight = Number.parseFloat(style.maxHeight);
+  const maxHeight = Number.isFinite(cssMaxHeight) && cssMaxHeight > 0 ? cssMaxHeight : 140;
+  const nextHeight = Math.min(Math.max(directSendInput.scrollHeight, minHeight), maxHeight);
+  directSendInput.style.height = `${nextHeight}px`;
+  directSendInput.style.overflowY = directSendInput.scrollHeight > maxHeight + 1 ? "auto" : "hidden";
+}
+
+function focusDirectSendInput() {
+  window.requestAnimationFrame(() => {
+    if (!directSendInput) return;
+    resizeDirectSendInput();
+    if (window.innerWidth <= 900) {
+      directSendComposer?.scrollIntoView({ block: "nearest" });
+    }
+    try {
+      directSendInput.focus({ preventScroll: true });
+    } catch (_error) {
+      directSendInput.focus();
+    }
+    directSendInput.setSelectionRange(directSendInput.value.length, directSendInput.value.length);
+  });
 }
 
 function setDirectSendReplyFromMessage(message) {
@@ -2028,766 +2046,58 @@ function auditTimeLabel(value) {
 }
 
 async function openHealthModal() {
-  const dialog = openModal({
-    title: "运行健康",
-    body: `
-      <section class="modal-section">
-        <h4>消息箱审计</h4>
-        <p class="muted">这里直接读取消息箱水位、监听状态和近期 msg_id 断层。资源统计和副本页都以消息箱为事实来源。</p>
-        <div id="healthAuditBody" class="health-audit-body">
-          ${renderHealthAuditBody(state.messageAudit)}
-        </div>
-      </section>
-    `,
-    footer: `
-      <button type="button" id="healthAuditRefresh">刷新审计</button>
-      <button type="button" data-modal-close>关闭</button>
-    `,
+  await window.MiniwebViews.health.openHealthModal({
+    auditTimeLabel,
+    formatChatTime,
+    getInitialAudit: () => state.messageAudit,
+    healthStatusLabel,
+    listenerStatusText,
+    loadMessageAudit,
+    renderResourceCoverage,
+    updateGlobalBanner,
   });
-  if (!dialog) return;
-  const refresh = dialog.querySelector("#healthAuditRefresh");
-  const body = dialog.querySelector("#healthAuditBody");
-  const refreshAudit = async () => {
-    if (!refresh || !body) return;
-    refresh.disabled = true;
-    body.innerHTML = '<p class="empty inline">深度审计中…</p>';
-    try {
-      const payload = await loadMessageAudit({ silent: true, deep: true });
-      body.innerHTML = renderHealthAuditBody(payload);
-      updateGlobalBanner();
-    } catch (error) {
-      body.innerHTML = `<p class="empty inline">审计失败：${escapeHtml(error.message || "未知错误")}</p>`;
-    } finally {
-      refresh.disabled = false;
-    }
-  };
-  refresh?.addEventListener("click", refreshAudit);
-  if (!state.messageAudit?.deep) {
-    refreshAudit();
-  }
-}
-
-function renderHealthAuditBody(audit) {
-  if (!audit) {
-    return '<p class="empty inline">尚未读取健康审计。</p>';
-  }
-  const messages = audit.messages || {};
-  const listener = audit.listener || {};
-  const running = listener.running || {};
-  const runningRows = Object.entries(running).map(([key, value]) => ({
-    key,
-    status: value?.status || "",
-    message: value?.message || "",
-  }));
-  const gaps = audit.gaps || [];
-  const advice = healthAuditAdvice(audit, runningRows);
-  const target = audit.target_chat
-    ? `${audit.target_chat}${audit.target_topic_id ? ` / topic ${audit.target_topic_id}` : ""}`
-    : "未配置";
-  return `
-    <div class="resource-stats-summary health-summary">
-      <div class="resource-stat-card">
-        <span>状态</span>
-        <strong>${escapeHtml(healthStatusLabel(audit.status || "ok"))}</strong>
-        <small>${escapeHtml(listenerStatusText(listener, runningRows.length))}</small>
-      </div>
-      <div class="resource-stat-card">
-        <span>目标</span>
-        <strong>${escapeHtml(target)}</strong>
-        <small>监听群 / 话题</small>
-      </div>
-      <div class="resource-stat-card">
-        <span>最新水位</span>
-        <strong>#${escapeHtml(formatNumber(audit.latest_target_msg_id || messages.latest_msg_id || 0))}</strong>
-        <small>${escapeHtml(auditTimeLabel(messages.latest_message_time || ""))}</small>
-      </div>
-      <div class="resource-stat-card ${Number(audit.gap_count || 0) ? "warn" : ""}">
-        <span>近期断层</span>
-        <strong>${escapeHtml(formatNumber(audit.gap_count || 0))}</strong>
-        <small>近 ${escapeHtml(String(audit.since_hours || 24))} 小时 / ${escapeHtml(String(audit.min_gap_seconds || 300))} 秒阈值</small>
-      </div>
-      <div class="resource-stat-card">
-        <span>消息/卡片</span>
-        <strong>${escapeHtml(formatNumber(messages.real_raw_total || messages.raw_total || 0))}</strong>
-        <small>卡片 ${escapeHtml(formatNumber(messages.parsed_cards || 0))}｜资源 ${escapeHtml(formatNumber(messages.resource_events || 0))}</small>
-      </div>
-    </div>
-    ${advice.length ? `
-      <div class="health-advice">
-        <strong>建议检查</strong>
-        ${advice.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
-      </div>
-    ` : ""}
-    ${runningRows.length ? `
-      <div class="resource-stats-subtitle">监听</div>
-      <div class="health-list">
-        ${runningRows.map((row) => `
-          <div>
-            <strong>${escapeHtml(row.key)}</strong>
-            <span>${escapeHtml(row.status || "unknown")}</span>
-            <small>${escapeHtml(row.message || "")}</small>
-          </div>
-        `).join("")}
-      </div>
-    ` : '<p class="modal-status-line error">没有运行中的只读监听。</p>'}
-    ${gaps.length ? `
-      <div class="resource-stats-subtitle">近期断层</div>
-      <table class="resource-stats-table health-gap-table">
-        <thead>
-          <tr>
-            <th>起点</th>
-            <th>终点</th>
-            <th>缺失 msg_id</th>
-            <th>间隔</th>
-            <th>时间</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${gaps.map((gap) => gap.error ? `
-            <tr><td colspan="5">${escapeHtml(gap.error)}</td></tr>
-          ` : `
-            <tr>
-              <td>#${escapeHtml(formatNumber(gap.after_msg_id || 0))}</td>
-              <td>#${escapeHtml(formatNumber(gap.before_msg_id || 0))}</td>
-              <td class="num">${escapeHtml(formatNumber(gap.missing_msg_ids || 0))}</td>
-              <td class="num">${escapeHtml(formatDurationShort(gap.gap_seconds || 0))}</td>
-              <td>${escapeHtml(auditTimeLabel(gap.after_date || ""))} → ${escapeHtml(auditTimeLabel(gap.before_date || ""))}</td>
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    ` : '<p class="modal-status-line ok">近期没有命中明显断层。</p>'}
-    ${Array.isArray(audit.notes) && audit.notes.length ? `<div class="resource-stats-notes">${audit.notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>` : ""}
-    ${audit.deep ? renderHealthDeepSections(audit) : ""}
-  `;
-}
-
-function renderHealthDeepSections(audit) {
-  const resourceCoverage = audit.resource_coverage || {};
-  const filterDiagnostics = audit.filter_diagnostics || {};
-  const dungeonAudit = audit.dungeon_audit || {};
-  const deepNotes = audit.deep_notes || [];
-  return `
-    <section class="health-deep-section">
-      <div class="resource-stats-subtitle">深度复盘</div>
-      <div class="health-deep-grid">
-        <div class="health-deep-block">
-          <strong>资源覆盖</strong>
-          ${renderHealthResourceCoverage(resourceCoverage)}
-        </div>
-        <div class="health-deep-block">
-          <strong>过滤分流</strong>
-          ${renderHealthFilterDiagnostics(filterDiagnostics)}
-        </div>
-        <div class="health-deep-block">
-          <strong>副本跳号</strong>
-          ${renderHealthDungeonAudit(dungeonAudit)}
-        </div>
-      </div>
-      ${deepNotes.length ? `
-        <div class="health-deep-notes">
-          ${deepNotes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}
-        </div>
-      ` : ""}
-    </section>
-  `;
-}
-
-function renderHealthResourceCoverage(payload) {
-  if (!payload || !payload.ok) {
-    return '<p class="empty inline">资源覆盖数据不可用。</p>';
-  }
-  const rows = payload.rows || [];
-  return `
-    <div class="health-mini-summary">
-      <span>候选 ${escapeHtml(formatNumber(payload.candidate_rows || 0))}</span>
-      <span>已扫 ${escapeHtml(formatNumber(payload.scanned || 0))}</span>
-      <span>已解析 ${escapeHtml(formatNumber(payload.parsed || 0))}</span>
-      <span>漏样 ${escapeHtml(formatNumber(payload.missing || 0))}</span>
-    </div>
-    ${renderResourceCoverage(payload)}
-    ${rows.length ? `<p class="health-deep-hint">资源统计页遇到漏样时，先看覆盖诊断，再决定是否补解析。</p>` : ""}
-  `;
-}
-
-function renderHealthFilterDiagnostics(payload) {
-  if (!payload || !payload.ok) {
-    return '<p class="empty inline">过滤分流数据不可用。</p>';
-  }
-  const reasons = payload.reason_rows || [];
-  const senders = payload.focus_sender_rows || [];
-  const samples = payload.samples || [];
-  return `
-    <div class="health-mini-summary">
-      <span>重点 ${escapeHtml(formatNumber(payload.focus_count || 0))}</span>
-      <span>归档 ${escapeHtml(formatNumber(payload.archive_count || 0))}</span>
-      <span>会长 ${escapeHtml(formatNumber(payload.leader_count || 0))}</span>
-    </div>
-    <div class="health-inline-columns">
-      <div>
-        <small>入流原因</small>
-        <ul class="health-mini-list">
-          ${reasons.slice(0, 6).map((item) => `<li><span>${escapeHtml(item.reason || "")}</span><small>${escapeHtml(formatNumber(item.count || 0))}</small></li>`).join("") || "<li><span>暂无</span><small>0</small></li>"}
-        </ul>
-      </div>
-      <div>
-        <small>重点发送者</small>
-        <ul class="health-mini-list">
-          ${senders.slice(0, 6).map((item) => `<li><span>${escapeHtml(item.sender || "")}</span><small>${escapeHtml(formatNumber(item.count || 0))}</small></li>`).join("") || "<li><span>暂无</span><small>0</small></li>"}
-        </ul>
-      </div>
-    </div>
-    ${samples.length ? `
-      <div class="health-deep-samples">
-        ${samples.slice(0, 4).map((item) => `
-          <p>
-            <b>#${escapeHtml(String(item.seq || ""))}</b>
-            <span>${escapeHtml((item.channels || []).join("/"))}</span>
-            <small>${escapeHtml((item.reasons || []).join("、") || "无理由")}</small>
-          </p>
-        `).join("")}
-      </div>
-    ` : ""}
-  `;
-}
-
-function renderHealthDungeonAudit(payload) {
-  if (!payload || !payload.ok) {
-    return '<p class="empty inline">副本状态数据不可用。</p>';
-  }
-  const summaries = payload.summaries || [];
-  const gaps = payload.gap_notes || [];
-  return `
-    <div class="health-mini-summary">
-      <span>总计 ${escapeHtml(formatNumber(payload.total_summaries || 0))}</span>
-      <span>可见 ${escapeHtml(formatNumber(summaries.length || 0))}</span>
-      <span>${escapeHtml(String(payload.context_mode || ""))}</span>
-    </div>
-    ${gaps.length ? `<div class="health-deep-notes">${gaps.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>` : '<p class="health-deep-hint">最近没有明显副本跳号。</p>'}
-    <div class="health-dungeon-preview">
-      ${summaries.slice(0, 3).map((summary) => `
-        <article class="health-dungeon-card">
-          <strong>${escapeHtml(summary.dungeon_name || "副本")} #${escapeHtml(summary.dungeon_id || "—")}</strong>
-          <small>${escapeHtml(summary.status || summary.status_kind || "")}</small>
-          <span>${escapeHtml(formatChatTime(summary.latest_time || summary.latestMessage?.time || "") || summary.latest_time || "")}</span>
-        </article>
-      `).join("")}
-    </div>
-  `;
-}
-
-function healthAuditAdvice(audit, runningRows) {
-  const messages = audit.messages || {};
-  const advice = [];
-  if (!audit.target_chat) {
-    advice.push("监听目标群未配置，消息箱不会有稳定水位。");
-  }
-  if (!runningRows.length || audit.status === "error") {
-    advice.push("没有运行中的监听，先在接入配置里恢复只读采集。");
-  }
-  if (Number(audit.gap_count || 0) > 0) {
-    advice.push("近期存在 msg_id 断层，副本和资源统计需要先看覆盖诊断。");
-  }
-  if (Number(messages.invalid_date_total || 0) > 0) {
-    advice.push("存在异常日期消息，可能影响按天/周/月统计。");
-  }
-  if (!Number(messages.resource_events || 0)) {
-    advice.push("资源事件为 0，资源统计页应先跑覆盖诊断。");
-  }
-  return advice;
-}
-
-function formatDurationShort(seconds) {
-  const n = Math.max(0, Number(seconds || 0));
-  if (n >= 3600) return `${Math.round(n / 360) / 10}h`;
-  if (n >= 60) return `${Math.round(n / 60)}m`;
-  return `${Math.round(n)}s`;
 }
 
 function openGameBotsModal() {
-  const settings = state.settings || {};
-  const currentList = (settings.game_bot_ids || []).map((x) => String(x));
-  const dialog = openModal({
-    title: "游戏 Bot 设置(谁是系统/韩天尊)",
-    body: `
-      <section class="modal-section">
-        <h4>当前的游戏 Bot sender 列表</h4>
-        <p class="muted">这些 sender 发出来的消息,chat UI 会标记成「系统消息」,跟玩家消息分开。多个 ID 用 <strong>逗号</strong> 分隔。负数 -100… 是频道身份,正数是 bot/用户。</p>
-        <textarea class="game-bot-modal-input" id="gameBotsInput" rows="3" placeholder="-1003983937918, 7900199668, ...">${escapeHtml(currentList.join(", "))}</textarea>
-      </section>
-
-      <section class="modal-section">
-        <h4>从消息箱里发现的可能 sender(辅助)</h4>
-        <p class="muted">这些是消息箱里 bot 类型 / 频道号 sender,而且**真的**发过包含游戏关键词(点卯/天梯/灵树/侍妾...)的消息。普通玩家闲聊不会被丢进来。点「+」加进上面输入框。</p>
-        <div id="gameBotsDiscoveredList" class="game-bot-discovered-list">
-          <p class="empty">还没在消息箱里发现「游戏 bot 风格」的发言。先开始采集,或在上面手动填 sender_id。</p>
-        </div>
-      </section>
-
-      <p class="modal-status-line info" id="gameBotsStatus" hidden></p>
-    `,
-    footer: `
-      <button type="button" data-modal-close>取消</button>
-      <button type="button" class="primary" id="gameBotsSaveBtn">保存</button>
-    `,
+  window.MiniwebViews.gameBots.openGameBotsModal({
+    discoveredBots: state.discoveredBots || [],
+    loadDiscoveredBots,
+    saveGameBotIds: async (gameBotIds) => {
+      const settings = state.settings || (await loadSettings());
+      await postJson("/api/settings", {
+        ...settings,
+        api_hash: "",
+        proxy_password: "",
+        game_bot_ids: gameBotIds,
+      });
+      state.settings = await loadSettings();
+      updateGlobalBanner();
+    },
+    settings: state.settings || {},
   });
-  if (!dialog) return;
-  bindGameBotsModal(dialog);
-  // 加载 discovered 列表
-  fetchJson("/api/discovered-bots")
-    .then((payload) => {
-      state.discoveredBots = payload.discovered || [];
-      renderGameBotsDiscoveredList(dialog);
-    })
-    .catch((error) => console.warn("[mini-web] discovered-bots fetch failed:", error));
 }
 
 function openFilterSettingsModal() {
-  const settings = state.settings || {};
-  const dialog = openModal({
-    title: "消息过滤设置",
-    body: `
-      <section class="modal-section">
-        <h4>重点流规则</h4>
-        <p class="muted">首页默认只看重点流。自己的发送一定显示;点命令和格式化天尊回复会进入归档;会长 sender ID 的非点命令发言会全部进入会长频道,已确认游戏 Bot/天尊 ID 仍只收非回复普通发言。</p>
-        <form id="filterSettingsForm" class="settings-form">
-          <label class="stacked-field">
-            <span>我的 @ 名称</span>
-            <textarea name="own_aliases" rows="2" placeholder="每行一个,例如 wa2000 或 @wa2000">${escapeHtml((settings.own_aliases || []).join("\n"))}</textarea>
-          </label>
-          <label class="stacked-field">
-            <span>会长 sender IDs（会长频道判定）</span>
-            <textarea name="leader_sender_ids" rows="2" placeholder="每行一个 sender_id">${escapeHtml((settings.leader_sender_ids || []).join("\n"))}</textarea>
-          </label>
-          <label class="stacked-field">
-            <span>会长昵称备注（不参与判定）</span>
-            <textarea name="leader_source_names" rows="2" placeholder="每行一个备注昵称；会长频道只按 sender_id 判定">${escapeHtml((settings.leader_source_names || []).join("\n"))}</textarea>
-          </label>
-          <label class="stacked-field">
-            <span>重点流静音 sender IDs</span>
-            <textarea name="focus_muted_sender_ids" rows="2" placeholder="每行一个 sender_id,只压普通玩家噪音">${escapeHtml((settings.focus_muted_sender_ids || []).join("\n"))}</textarea>
-          </label>
-          <label class="stacked-field">
-            <span>重点流静音昵称</span>
-            <textarea name="focus_muted_source_names" rows="2" placeholder="每行一个昵称片段,例如某个常刷屏玩家">${escapeHtml((settings.focus_muted_source_names || []).join("\n"))}</textarea>
-          </label>
-          <label class="stacked-field">
-            <span>关注关键词</span>
-            <textarea name="focus_keywords" rows="8" placeholder="每行一个关键词">${escapeHtml((settings.focus_keywords || []).join("\n"))}</textarea>
-          </label>
-          <div class="filter-helper-row" aria-label="关注关键词预设">
-            ${["虚天殿", "坠魔谷", "共历心劫", "第二元神", "天道审判"].map((item) => `
-              <button type="button" data-filter-keyword-preset="${escapeAttr(item)}">关注 ${escapeHtml(item)}</button>
-            `).join("")}
-          </div>
-          <label class="stacked-field">
-            <span>重点流排除规则（正则）</span>
-            <textarea name="focus_exclude_patterns" rows="3" placeholder="每行一条正则，例如 ^\\d{1,2}$">${escapeHtml((settings.focus_exclude_patterns || []).join("\n"))}</textarea>
-          </label>
-          <div class="filter-rule-helper">
-            <label class="stacked-field">
-              <span>新增排除短语 / 正则</span>
-              <input id="filterExcludeDraft" placeholder="例如 坠魔谷护持；只会压普通重点消息，不压 @我/风险/动作卡" />
-            </label>
-            <div class="filter-helper-row">
-              <button type="button" data-filter-exclude-preset="坠魔谷护持" data-mode="contains">排除 坠魔谷护持</button>
-              <button type="button" data-filter-exclude-preset="^\\d{1,2}$" data-mode="regex">排除单独数字</button>
-              <button type="button" id="filterExcludePreview">预览新增规则</button>
-              <button type="button" id="filterExcludeAddContains">按短语加入</button>
-              <button type="button" id="filterExcludeAddRegex">按正则加入</button>
-            </div>
-            <div id="filterRulePreview" class="focus-preview-box"></div>
-          </div>
-          <div class="filter-rule-helper">
-            <div class="filter-helper-row">
-              <button type="button" id="filterDiagnosticsButton">查看最近入流原因</button>
-            </div>
-            <div id="filterDiagnosticsBox" class="focus-preview-box"></div>
-          </div>
-          <label class="toggle-row">
-            <input type="checkbox" name="focus_include_player_plain" ${settings.focus_include_player_plain ? "checked" : ""} />
-            <span>普通玩家聊天也进入重点流（会明显增噪）</span>
-          </label>
-          <label class="toggle-row">
-            <input type="checkbox" name="archive_dot_commands" ${settings.archive_dot_commands === false ? "" : "checked"} />
-            <span>点命令进入归档</span>
-          </label>
-          <label class="toggle-row">
-            <input type="checkbox" name="archive_bot_replies" ${settings.archive_bot_replies === false ? "" : "checked"} />
-            <span>普通天尊回复进入归档</span>
-          </label>
-          <p class="modal-status-line info" id="filterSettingsStatus" hidden></p>
-        </form>
-      </section>
-    `,
-    footer: `
-      <button type="button" data-modal-close>取消</button>
-      <button type="button" class="primary" id="filterSettingsSave">保存并刷新</button>
-    `,
-  });
-  if (!dialog) return;
-  const status = dialog.querySelector("#filterSettingsStatus");
-  const form = dialog.querySelector("#filterSettingsForm");
-  const keywordTextarea = form?.querySelector('[name="focus_keywords"]');
-  const excludeTextarea = form?.querySelector('[name="focus_exclude_patterns"]');
-  const excludeDraft = dialog.querySelector("#filterExcludeDraft");
-  const previewBox = dialog.querySelector("#filterRulePreview");
-  const diagnosticsBox = dialog.querySelector("#filterDiagnosticsBox");
-  const setStatus = (kind, text) => {
-    if (!status) return;
-    status.hidden = !text;
-    status.className = `modal-status-line ${kind}`;
-    status.textContent = text || "";
-  };
-  dialog.querySelectorAll("[data-filter-keyword-preset]").forEach((button) => {
-    button.addEventListener("click", () => appendUniqueLine(keywordTextarea, button.dataset.filterKeywordPreset || ""));
-  });
-  dialog.querySelectorAll("[data-filter-exclude-preset]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const value = button.dataset.filterExcludePreset || "";
-      if (excludeDraft) excludeDraft.value = value;
-      await previewAndMaybeAppendFilterRule({
-        mode: button.dataset.mode || "contains",
-        input: excludeDraft,
-        target: excludeTextarea,
-        previewBox,
-        append: true,
-        setStatus,
-      });
-    });
-  });
-  dialog.querySelector("#filterExcludePreview")?.addEventListener("click", () => {
-    previewAndMaybeAppendFilterRule({
-      mode: looksLikeRegex(excludeDraft?.value || "") ? "regex" : "contains",
-      input: excludeDraft,
-      target: excludeTextarea,
-      previewBox,
-      append: false,
-      setStatus,
-    });
-  });
-  dialog.querySelector("#filterExcludeAddContains")?.addEventListener("click", () => {
-    previewAndMaybeAppendFilterRule({
-      mode: "contains",
-      input: excludeDraft,
-      target: excludeTextarea,
-      previewBox,
-      append: true,
-      setStatus,
-    });
-  });
-  dialog.querySelector("#filterExcludeAddRegex")?.addEventListener("click", () => {
-    previewAndMaybeAppendFilterRule({
-      mode: "regex",
-      input: excludeDraft,
-      target: excludeTextarea,
-      previewBox,
-      append: true,
-      setStatus,
-    });
-  });
-  dialog.querySelector("#filterDiagnosticsButton")?.addEventListener("click", async (event) => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    setStatus("info", "正在统计最近消息归类原因…");
-    if (diagnosticsBox) diagnosticsBox.innerHTML = '<p class="empty inline">统计中…</p>';
-    try {
-      const payload = await fetchJson("/api/filter/diagnostics?limit=1000");
-      if (!payload.ok) throw new Error(payload.error || "诊断失败");
-      if (diagnosticsBox) diagnosticsBox.innerHTML = renderFilterDiagnostics(payload);
-      bindFilterDiagnosticsActions({
-        diagnosticsBox,
-        excludeDraft,
-        excludeTextarea,
-        previewBox,
-        setStatus,
-      });
-      setStatus("ok", `最近 ${payload.scanned || 0} 条：重点 ${payload.focus_count || 0}｜归档 ${payload.archive_count || 0}｜会长 ${payload.leader_count || 0}`);
-    } catch (error) {
-      if (diagnosticsBox) diagnosticsBox.innerHTML = "";
-      setStatus("error", error.message || "诊断失败");
-    } finally {
-      button.disabled = false;
-    }
-  });
-  dialog.querySelector("#filterSettingsSave")?.addEventListener("click", async () => {
-    const data = new FormData(form);
-    setStatus("info", "保存中…");
-    try {
-      const saved = await postJson("/api/settings", {
-        own_aliases: splitLines(data.get("own_aliases")),
-        leader_sender_ids: splitLines(data.get("leader_sender_ids")),
-        leader_source_names: splitLines(data.get("leader_source_names")),
-        focus_muted_sender_ids: splitLines(data.get("focus_muted_sender_ids")),
-        focus_muted_source_names: splitLines(data.get("focus_muted_source_names")),
-        focus_keywords: splitLines(data.get("focus_keywords")),
-        focus_exclude_patterns: splitRows(data.get("focus_exclude_patterns")),
-        focus_include_player_plain: data.get("focus_include_player_plain") === "on",
-        archive_dot_commands: data.get("archive_dot_commands") === "on",
-        archive_bot_replies: data.get("archive_bot_replies") === "on",
-      });
+  window.MiniwebViews.filterSettings.openFilterSettingsModal({
+    fetchMessageById,
+    findMessageById: (id) => state.messages.find((message) => message.id === id),
+    jumpToMessage,
+    muteFocusSenderId,
+    renderFocusArchivePreview: (preview) => window.MiniwebViews.focusArchive.renderFocusArchivePreview(preview, { formatChatTime }),
+    saveFilterSettings: async (payload) => {
+      const saved = await postJson("/api/settings", payload);
       state.settings = saved.settings || state.settings;
       await loadSettings();
       state.lastMessageSeq = 0;
       state.messages = [];
       await loadMessages({ incremental: false });
-      setStatus("ok", `已保存。${saved.rebuilt_messages ? `已重分流 ${saved.rebuilt_messages} 条历史消息。` : "历史消息无需重分流。"}`);
       renderQuickFilters();
       renderMessages();
       renderDetail();
-    } catch (error) {
-      setStatus("error", error.message || "保存失败");
-    }
+      return saved;
+    },
+    settings: state.settings || {},
   });
-}
-
-function splitLines(value) {
-  return String(value || "")
-    .split(/\n|,/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function splitRows(value) {
-  return String(value || "")
-    .split(/\n/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function appendUniqueLine(textarea, value) {
-  if (!textarea) return false;
-  const item = String(value || "").trim();
-  if (!item) return false;
-  const rows = splitRows(textarea.value);
-  if (!rows.includes(item)) {
-    rows.push(item);
-    textarea.value = rows.join("\n");
-  }
-  textarea.focus();
-  return true;
-}
-
-function looksLikeRegex(value) {
-  const text = String(value || "").trim();
-  if (!text) return false;
-  return text.startsWith("^") || text.endsWith("$") || /[\\[\]().+*?|{}]/.test(text);
-}
-
-async function previewAndMaybeAppendFilterRule({ mode, input, target, previewBox, append, setStatus }) {
-  const value = String(input?.value || "").trim();
-  if (!value) {
-    setStatus?.("warn", "先输入要排除的短语或正则。");
-    return null;
-  }
-  setStatus?.("info", "正在预览规则影响…");
-  if (previewBox) previewBox.innerHTML = '<p class="empty inline">预览中…</p>';
-  try {
-    const preview = await postJson("/api/focus-exclude/preview", { mode, text: value });
-    if (!preview.ok) throw new Error(preview.error || "预览失败");
-    if (previewBox) previewBox.innerHTML = renderFocusArchivePreview(preview);
-    if (append && preview.pattern) {
-      appendUniqueLine(target, preview.pattern);
-      setStatus?.("ok", `已加入排除规则：${preview.pattern}。预览影响 ${preview.total || 0} 条，点击保存后才会重分流。`);
-    } else {
-      setStatus?.("ok", `预览完成：${preview.pattern}，影响 ${preview.total || 0} 条。`);
-    }
-    return preview;
-  } catch (error) {
-    if (previewBox) previewBox.innerHTML = "";
-    setStatus?.("error", error.message || "预览失败");
-    return null;
-  }
-}
-
-function renderFilterDiagnostics(payload) {
-  const reasons = payload.reason_rows || [];
-  const senders = payload.focus_sender_rows || [];
-  const samples = payload.samples || [];
-  return `
-    <div class="filter-diagnostics-grid">
-      <div>
-        <strong>入流原因 Top</strong>
-        <ul class="send-as-result-list">
-          ${reasons.slice(0, 8).map((item) => `<li class="ok"><span>${escapeHtml(item.reason || "")}</span><small>${escapeHtml(formatNumber(item.count || 0))} 条</small></li>`).join("") || "<li>(空)</li>"}
-        </ul>
-      </div>
-      <div>
-        <strong>重点发送者 Top</strong>
-        <ul class="send-as-result-list">
-          ${senders.slice(0, 8).map((item) => `
-            <li>
-              <span>${escapeHtml(item.sender || "")}</span>
-              <small>${escapeHtml(formatNumber(item.count || 0))} 条</small>
-              ${Number(item.sender_id || 0) ? `<button type="button" data-filter-mute-sender="${escapeAttr(String(item.sender_id))}">静音</button>` : ""}
-            </li>
-          `).join("") || "<li>(空)</li>"}
-        </ul>
-      </div>
-    </div>
-    ${samples.length ? `
-      <div class="filter-diagnostics-samples">
-        <strong>最近样本</strong>
-        ${samples.slice(0, 6).map((item) => `
-          <p>
-            <b>#${escapeHtml(String(item.seq || ""))} ${escapeHtml(item.source || "")}</b>
-            <small>${escapeHtml((item.channels || []).join("/"))}｜${escapeHtml((item.reasons || []).join("、") || "无理由")}</small>
-            <span>${escapeHtml(clipGraphemes(item.summary || item.title || "", 70))}</span>
-            <em>
-              ${item.id ? `<button type="button" data-filter-jump-id="${escapeAttr(String(item.id))}">定位</button>` : ""}
-              ${Number(item.sender_id || 0) ? `<button type="button" data-filter-mute-sender="${escapeAttr(String(item.sender_id))}">静音 sender</button>` : ""}
-              ${(item.summary || item.title) ? `<button type="button" data-filter-exclude-text="${escapeAttr(clipGraphemes(item.summary || item.title || "", 36))}">排除这类短语</button>` : ""}
-            </em>
-          </p>
-        `).join("")}
-      </div>
-    ` : ""}
-  `;
-}
-
-function bindFilterDiagnosticsActions({ diagnosticsBox, excludeDraft, excludeTextarea, previewBox, setStatus }) {
-  if (!diagnosticsBox) return;
-  diagnosticsBox.querySelectorAll("[data-filter-mute-sender]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const senderId = Number(button.dataset.filterMuteSender || 0);
-      if (!senderId) return;
-      try {
-        await muteFocusSenderId(senderId, button);
-        setStatus?.("ok", `已更新 sender ${senderId} 的重点流静音设置。`);
-      } catch (error) {
-        setStatus?.("error", error.message || "静音失败");
-      }
-    });
-  });
-  diagnosticsBox.querySelectorAll("[data-filter-exclude-text]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const text = String(button.dataset.filterExcludeText || "").trim();
-      if (!text) return;
-      if (excludeDraft) excludeDraft.value = text;
-      await previewAndMaybeAppendFilterRule({
-        mode: "contains",
-        input: excludeDraft,
-        target: excludeTextarea,
-        previewBox,
-        append: true,
-        setStatus,
-      });
-    });
-  });
-  diagnosticsBox.querySelectorAll("[data-filter-jump-id]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const id = String(button.dataset.filterJumpId || "");
-      if (!id) return;
-      let target = state.messages.find((message) => message.id === id);
-      if (!target) target = await fetchMessageById(id);
-      if (target) {
-        closeModal();
-        jumpToMessage(target);
-      }
-    });
-  });
-}
-
-function renderGameBotsDiscoveredList(dialog) {
-  const list = dialog.querySelector("#gameBotsDiscoveredList");
-  const input = dialog.querySelector("#gameBotsInput");
-  if (!list || !input) return;
-  const items = state.discoveredBots || [];
-  if (!items.length) {
-    list.innerHTML = '<p class="empty">还没在消息箱里发现「游戏 bot 风格」的发言(参考关键词命中)。让 listener 多采集一会儿,或者直接在上面手动填 sender_id。</p>';
-    return;
-  }
-  const inText = (id) => {
-    const tokens = (input.value || "").split(/[,，]/).map((s) => s.trim()).filter(Boolean);
-    return tokens.includes(String(id));
-  };
-  list.innerHTML = items.map((bot) => {
-    const id = String(bot.sender_id);
-    const inList = inText(id);
-    const kindLabel = bot.kind === "channel" ? "频道" : "bot";
-    const families = Array.isArray(bot.matched_families) ? bot.matched_families : [];
-    let meta;
-    if (bot.manual_only) {
-      meta = "手动添加,消息箱里还没采到过这个 sender 的游戏消息";
-    } else {
-      const familyText = families.length ? `命中 ${families.slice(0, 4).join("/")}${families.length > 4 ? "…" : ""}` : "暂无命中";
-      meta = `${kindLabel}｜${bot.hit_count || 0}/${bot.message_count} 条命中｜${familyText}｜sender ${id}`;
-    }
-    return `
-      <div class="game-bot-discovered-row${inList ? " in-list" : ""}" data-bot-row="${escapeAttr(id)}">
-        <div class="info">
-          <strong>${escapeHtml(bot.last_source || "(未知名)")}</strong>
-          <small>${escapeHtml(meta)}</small>
-        </div>
-        <button type="button" data-bot-add="${escapeAttr(id)}" ${inList ? "disabled" : ""}>${inList ? "已加入" : "+ 加入"}</button>
-      </div>
-    `;
-  }).join("");
-  list.querySelectorAll("[data-bot-add]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.dataset.botAdd;
-      const tokens = (input.value || "").split(/[,，]/).map((s) => s.trim()).filter(Boolean);
-      if (!tokens.includes(id)) tokens.push(id);
-      input.value = tokens.join(", ");
-      renderGameBotsDiscoveredList(dialog);
-    });
-  });
-}
-
-function bindGameBotsModal(dialog) {
-  const input = dialog.querySelector("#gameBotsInput");
-  const saveBtn = dialog.querySelector("#gameBotsSaveBtn");
-  const status = dialog.querySelector("#gameBotsStatus");
-  if (input) {
-    input.addEventListener("input", () => renderGameBotsDiscoveredList(dialog));
-  }
-  if (saveBtn) {
-    saveBtn.addEventListener("click", async () => {
-      const raw = (input?.value || "").replace(/，/g, ",");
-      const tokens = raw.split(",").map((s) => s.trim()).filter(Boolean);
-      const parsed = [];
-      const bad = [];
-      const seen = new Set();
-      for (const tok of tokens) {
-        const n = Number(tok);
-        if (!Number.isFinite(n) || n === 0) {
-          bad.push(tok);
-          continue;
-        }
-        if (seen.has(n)) continue;
-        seen.add(n);
-        parsed.push(n);
-      }
-      if (bad.length) {
-        status.hidden = false;
-        status.className = "modal-status-line error";
-        status.textContent = `不合法的 ID:${bad.join(", ")} (要非零整数)`;
-        return;
-      }
-      saveBtn.disabled = true;
-      status.hidden = false;
-      status.className = "modal-status-line info";
-      status.textContent = "正在保存…";
-      try {
-        const settings = state.settings || (await loadSettings());
-        await postJson("/api/settings", {
-          ...settings,
-          api_hash: "",
-          proxy_password: "",
-          game_bot_ids: parsed.sort((a, b) => a - b),
-        });
-        state.settings = await loadSettings();
-        status.className = "modal-status-line ok";
-        status.textContent = `已保存 ${parsed.length} 条游戏 Bot ID`;
-        updateGlobalBanner();
-        setTimeout(() => closeModal(), 600);
-      } catch (error) {
-        status.className = "modal-status-line error";
-        status.textContent = error.message || "保存失败";
-        saveBtn.disabled = false;
-      }
-    });
-  }
 }
 
 // ---------- 资源统计 ----------
@@ -3703,12 +3013,6 @@ function formatResourceAmount(value, unit) {
   return unit ? `${text} ${unit}` : text;
 }
 
-function formatNumber(value) {
-  const n = Number(value || 0);
-  if (!Number.isFinite(n)) return String(value || 0);
-  return new Intl.NumberFormat("zh-CN").format(n);
-}
-
 // ---------- 副本状态 ----------
 
 async function openDungeonStatusModal() {
@@ -3739,6 +3043,7 @@ async function openDungeonStatusModal() {
     `,
     footer: `
       <button type="button" id="xutianGuideButton">虚天攻略</button>
+      <button type="button" id="cangkunGuideButton">苍坤攻略</button>
       <button type="button" id="dungeonStatusRefresh">刷新</button>
       <button type="button" data-modal-close>关闭</button>
     `,
@@ -3757,6 +3062,9 @@ function bindDungeonStatusModal(dialog) {
   });
   dialog.querySelector("#xutianGuideButton")?.addEventListener("click", () => {
     openXutianOracleGuideModal().catch((error) => showError(error));
+  });
+  dialog.querySelector("#cangkunGuideButton")?.addEventListener("click", () => {
+    openCangkunGuideModal().catch((error) => showError(error));
   });
   dialog.querySelectorAll("[data-dungeon-status-filter]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -3802,6 +3110,7 @@ async function refreshDungeonStatusModal(dialog) {
 
 function normalizeDungeonStatusSummary(item) {
   const messages = (item.messages || []).map((message) => ({
+    seq: Number(message.seq || 0),
     id: message.id,
     title: message.title,
     summary: message.summary,
@@ -3812,6 +3121,7 @@ function normalizeDungeonStatusSummary(item) {
   }));
   return {
     key: item.key || "",
+    latestSeq: Number(item.latest_seq || 0),
     dungeonId: item.dungeon_id || "",
     dungeonName: item.dungeon_name || "副本",
     status: item.status || "副本消息",
@@ -3830,6 +3140,8 @@ function normalizeDungeonStatusSummary(item) {
     route: item.route || "",
     strategy: item.strategy || "",
     silenceOrder: item.silence_order || "",
+    cangkunState: item.cangkun_state || {},
+    cangkunAdvice: normalizeCangkunAdvice(item.cangkun_advice),
     contextSource: item.context_source || "",
     messageCount: Number(item.message_count || messages.length || 0),
     joinSuccess: item.join_success || [],
@@ -3837,6 +3149,19 @@ function normalizeDungeonStatusSummary(item) {
     actions: item.actions || [],
     messages,
     latestMessage: messages[0] || { id: item.latest_message_id || "", time: item.latest_time || "" },
+  };
+}
+
+function normalizeCangkunAdvice(value) {
+  if (!value || typeof value !== "object") return null;
+  const hasContent = Boolean(value.label || value.command || value.reason || value.stage || (value.state_rows || []).length);
+  if (!hasContent) return null;
+  return {
+    stage: value.stage || "",
+    label: value.label || "",
+    command: value.command || "",
+    reason: value.reason || "",
+    stateRows: Array.isArray(value.state_rows) ? value.state_rows : [],
   };
 }
 
@@ -3922,21 +3247,36 @@ function pickCurrentDungeonSummary(summaries) {
 
 function visibleDungeonActions(summary) {
   if (!summary || ["closed", "failed"].includes(summary.statusKind)) return [];
+  const latestCangkunChoiceSeq = latestCangkunChoiceActionSeq(summary);
   return (summary.actions || []).filter((action) => {
     const command = String(action?.command || "").trim();
     if (!command) return false;
-    if (/^\.加入副本(?:\s|$)/.test(command)) {
+    if (/^\.加入(?:副本|苍坤洞府)(?:\s|$)/.test(command)) {
       return summary.statusKind === "open";
+    }
+    if (/^\.苍坤抉择(?:\s|$)/.test(command) && latestCangkunChoiceSeq > 0) {
+      return Number(action.source_seq || 0) === latestCangkunChoiceSeq;
     }
     return true;
   });
+}
+
+function latestCangkunChoiceActionSeq(summary) {
+  if (!isCangkunDungeon(summary)) return 0;
+  return Math.max(
+    0,
+    ...(summary.actions || [])
+      .filter((action) => /^\.苍坤抉择(?:\s|$)/.test(String(action?.command || "").trim()))
+      .map((action) => Number(action.source_seq || 0))
+      .filter((seq) => Number.isFinite(seq))
+  );
 }
 
 function compareActionableDungeonSummary(a, b) {
   const liveRanks = { choice: 0, open: 1, active: 2, joined: 3 };
   return (
     (liveRanks[a?.statusKind] ?? 9) - (liveRanks[b?.statusKind] ?? 9)
-    || Number(b?.latestMessage?.seq || b?.latestSeq || 0) - Number(a?.latestMessage?.seq || a?.latestSeq || 0)
+    || compareDungeonSummariesByRecency(a, b)
   );
 }
 
@@ -3968,6 +3308,7 @@ function renderCurrentDungeonPanel(summary) {
   const contextText = dungeonContextLabel(summary.contextSource);
   const verdictText = dungeonRouteVerdictLabel(summary);
   const oracleRows = dungeonOracleRows(summary, verdictText);
+  const cangkunAdvice = summary.cangkunAdvice;
   const joins = summary.joinSuccess.length ? summary.joinSuccess.map((user) => `@${user}`).join("、") : "";
   const latestId = summary.latestMessage?.id || "";
   const title = `${summary.dungeonName || "副本"}${summary.dungeonId ? ` #${summary.dungeonId}` : ""}`;
@@ -3998,6 +3339,7 @@ function renderCurrentDungeonPanel(summary) {
           `).join("")}
         </div>
       ` : ""}
+      ${cangkunAdvice ? renderCangkunCurrentAdvice(cangkunAdvice) : ""}
       ${(joins || summary.failures.length) ? `
         <div class="dungeon-current-feedback">
           ${joins ? `<p class="dungeon-status-note ok">已加入：${escapeHtml(joins)}</p>` : ""}
@@ -4025,6 +3367,32 @@ function renderCurrentDungeonPanel(summary) {
         ${latestId ? `<button type="button" class="dungeon-current-open" data-dungeon-jump="${escapeAttr(latestId)}">查看最新消息</button>` : ""}
       </div>
     </article>
+  `;
+}
+
+function isCangkunDungeon(summary) {
+  const name = String(summary?.dungeonName || "");
+  return name.includes("苍坤");
+}
+
+function renderCangkunCurrentAdvice(advice) {
+  return `
+    <div class="dungeon-cangkun-advice">
+      <div class="dungeon-cangkun-advice-main">
+        <span>${escapeHtml(advice.stage || "苍坤")}</span>
+        <strong>${escapeHtml(advice.label || "看原文")}</strong>
+        <small>${escapeHtml(advice.reason || "")}</small>
+      </div>
+      ${advice.stateRows.length ? `
+        <div class="dungeon-cangkun-state">
+          ${advice.stateRows.map(([key, value]) => `<span><b>${escapeHtml(key)}</b>${escapeHtml(value)}</span>`).join("")}
+        </div>
+      ` : ""}
+      <div class="dungeon-cangkun-actions">
+        ${advice.command ? `<button type="button" data-cangkun-fill="${escapeAttr(advice.command)}">${escapeHtml(advice.command)}</button>` : ""}
+        <button type="button" data-cangkun-guide>苍坤攻略</button>
+      </div>
+    </div>
   `;
 }
 
@@ -4121,6 +3489,20 @@ function bindDungeonStatusCards(root, summaries) {
   root.onclick = async (event) => {
     const button = event.target?.closest?.("button");
     if (!button || !root.contains(button)) return;
+    if (button.dataset.cangkunFill !== undefined) {
+      const command = button.dataset.cangkunFill || "";
+      if (!command) return;
+      closeModal();
+      fillDirectSendComposer(command, {
+        statusText: "已填入苍坤洞府命令，请确认后发送。",
+        statusKind: "info",
+      });
+      return;
+    }
+    if (button.dataset.cangkunGuide !== undefined) {
+      await openCangkunGuideModal();
+      return;
+    }
     if (button.dataset.dungeonActionIndex !== undefined) {
       const key = button.dataset.dungeonKey || "";
       const summary = byKey.get(key);
@@ -4143,199 +3525,20 @@ function bindDungeonStatusCards(root, summaries) {
 }
 
 async function openXutianOracleGuideModal() {
-  const dialog = openModal({
-    title: "虚天攻略",
-    body: `
-      <section class="modal-section xutian-guide-modal">
-        <div class="xutian-guide-head">
-          <div>
-            <strong>卦象样本库</strong>
-            <span>只读参考，按钮只填入发送栏，不会自动发送。</span>
-          </div>
-          <label class="message-search xutian-guide-search">
-            <span>搜索</span>
-            <input id="xutianGuideSearch" type="search" placeholder="卦象 / 路线 / 来源" autocomplete="off" />
-          </label>
-        </div>
-        <div class="quick-filters xutian-guide-filters">
-          <button type="button" class="quick-filter-chip active" data-xutian-guide-filter="all">全部</button>
-          <button type="button" class="quick-filter-chip" data-xutian-guide-filter="explicit">明示</button>
-          <button type="button" class="quick-filter-chip" data-xutian-guide-filter="success">顺例</button>
-          <button type="button" class="quick-filter-chip" data-xutian-guide-filter="failure">反例</button>
-        </div>
-        <div id="xutianGuideSummary" class="xutian-guide-summary">加载中...</div>
-        <div id="xutianGuideList" class="xutian-guide-list">
-          <p class="empty inline">加载中...</p>
-        </div>
-      </section>
-    `,
-    footer: `
-      <button type="button" id="xutianGuideRefresh">刷新攻略</button>
-      <button type="button" data-modal-close>关闭</button>
-    `,
-  });
-  if (!dialog) return;
-  const local = { payload: null, filter: "all", query: "", loading: false };
-  const load = async () => {
-    local.loading = true;
-    renderXutianGuide(dialog, local);
-    try {
-      local.payload = await fetchJson("/api/xutian-oracle-guide");
-    } catch (error) {
-      local.payload = { ok: false, error: error.message || "读取失败", cases: {}, counts: {} };
-    } finally {
-      local.loading = false;
-    }
-    renderXutianGuide(dialog, local);
-  };
-  dialog.querySelectorAll("[data-xutian-guide-filter]").forEach((button) => {
-    button.addEventListener("click", () => {
-      dialog.querySelectorAll("[data-xutian-guide-filter]").forEach((item) => item.classList.remove("active"));
-      button.classList.add("active");
-      local.filter = button.dataset.xutianGuideFilter || "all";
-      renderXutianGuide(dialog, local);
-    });
-  });
-  dialog.querySelector("#xutianGuideSearch")?.addEventListener("input", (event) => {
-    local.query = event.target.value || "";
-    renderXutianGuide(dialog, local);
-  });
-  dialog.querySelector("#xutianGuideRefresh")?.addEventListener("click", () => load());
-  await load();
-}
-
-function renderXutianGuide(dialog, local) {
-  const summary = dialog.querySelector("#xutianGuideSummary");
-  const list = dialog.querySelector("#xutianGuideList");
-  if (!summary || !list) return;
-  if (local.loading) {
-    summary.textContent = "加载中...";
-    list.innerHTML = '<p class="empty inline">加载中...</p>';
-    return;
-  }
-  const payload = local.payload || {};
-  if (payload.ok === false) {
-    summary.textContent = "读取失败";
-    list.innerHTML = `<p class="empty inline">虚天攻略读取失败：${escapeHtml(payload.error || "未知错误")}</p>`;
-    return;
-  }
-  const counts = payload.counts || {};
-  const aliases = payload.element_aliases || [];
-  summary.innerHTML = `
-    <div class="xutian-guide-counts">
-      <span><strong>${escapeHtml(formatNumber(counts.explicit || 0))}</strong> 明示</span>
-      <span><strong>${escapeHtml(formatNumber(counts.success || 0))}</strong> 顺例</span>
-      <span><strong>${escapeHtml(formatNumber(counts.failure || 0))}</strong> 反例</span>
-    </div>
-    <div class="xutian-guide-aliases">
-      ${aliases.map((item) => `
-        <span><strong>${escapeHtml(item.label || "")}</strong>${escapeHtml((item.values || []).join(" / "))}</span>
-      `).join("")}
-    </div>
-  `;
-  const cases = xutianGuideVisibleCases(payload, local.filter, local.query);
-  if (!cases.length) {
-    list.innerHTML = '<p class="empty inline">没有匹配的卦象样本。</p>';
-    return;
-  }
-  list.innerHTML = cases.map(renderXutianGuideCase).join("");
-  bindXutianGuideCards(list);
-}
-
-function xutianGuideVisibleCases(payload, filter, query) {
-  const allCases = ["explicit", "success", "failure"].flatMap((kind) => (payload.cases?.[kind] || []));
-  const needle = cleanText(query).toLowerCase();
-  return allCases.filter((item) => {
-    if (filter && filter !== "all" && item.kind !== filter) return false;
-    if (!needle) return true;
-    const haystack = [
-      item.kind_label,
-      item.gua,
-      item.route,
-      item.strategy,
-      item.source,
-      item.advice,
-      item.basis,
-      item.confidence,
-      ...(item.positive_examples || []),
-      ...(item.negative_examples || []),
-      ...(item.examples || []).map((example) => `${example.route} ${example.strategy} ${example.source}`),
-    ].join(" ").toLowerCase();
-    return haystack.includes(needle);
+  await window.MiniwebViews.xutianGuide.openXutianOracleGuideModal({
+    fillCommand: (command) => fillDirectSendComposer(command, {
+      statusText: "已填入虚天殿命令，请确认后发送。",
+      statusKind: "info",
+    }),
   });
 }
 
-function renderXutianGuideCase(item) {
-  const commands = xutianGuideCommands(item);
-  const examples = [
-    ...(item.positive_examples || []).map((text) => ["顺例", text]),
-    ...(item.negative_examples || []).map((text) => ["反例", text]),
-  ].slice(0, 3);
-  const meta = [
-    item.route ? ["路线", item.route] : null,
-    item.strategy ? ["阵策", item.strategy] : null,
-    item.source ? ["来源", item.source] : null,
-    item.confidence ? ["置信", item.confidence] : null,
-  ].filter(Boolean);
-  return `
-    <article class="xutian-guide-card ${escapeAttr(item.kind || "")}">
-      <div class="xutian-guide-card-head">
-        <span class="xutian-guide-kind">${escapeHtml(item.kind_label || item.kind || "样本")}</span>
-        <strong>${escapeHtml(item.gua || "未知卦象")}</strong>
-      </div>
-      ${meta.length ? `<div class="xutian-guide-meta">${meta.map(([key, value]) => `<span><b>${escapeHtml(key)}</b>${escapeHtml(value)}</span>`).join("")}</div>` : ""}
-      ${(item.advice || item.basis) ? `
-        <p class="xutian-guide-advice">
-          ${item.advice ? `<strong>${escapeHtml(item.advice)}</strong>` : ""}
-          ${item.basis ? `<span>${escapeHtml(item.basis)}</span>` : ""}
-        </p>
-      ` : ""}
-      ${examples.length ? `
-        <div class="xutian-guide-examples">
-          ${examples.map(([label, text]) => `<span><b>${escapeHtml(label)}</b>${escapeHtml(text)}</span>`).join("")}
-        </div>
-      ` : ""}
-      ${commands.length ? `
-        <div class="xutian-guide-actions">
-          ${commands.map((command) => `<button type="button" data-xutian-command="${escapeAttr(command)}">${escapeHtml(command)}</button>`).join("")}
-        </div>
-      ` : ""}
-    </article>
-  `;
-}
-
-function xutianGuideCommands(item) {
-  const commands = [];
-  for (const route of xutianGuideSplitChoices(item.route)) {
-    if (route.includes("冰")) commands.push(".选择道路 冰");
-    if (route.includes("火")) commands.push(".选择道路 火");
-  }
-  for (const strategy of xutianGuideSplitChoices(item.strategy)) {
-    if (strategy.includes("稳")) commands.push(".阵策 稳");
-    if (strategy.includes("压")) commands.push(".阵策 压");
-    if (strategy.includes("势")) commands.push(".阵策 势");
-  }
-  return [...new Set(commands)];
-}
-
-function xutianGuideSplitChoices(value) {
-  return String(value || "")
-    .split(/[\/／、；,，\s]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function bindXutianGuideCards(root) {
-  root.querySelectorAll("[data-xutian-command]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const command = button.dataset.xutianCommand || "";
-      if (!command) return;
-      closeModal();
-      fillDirectSendComposer(command, {
-        statusText: "已填入虚天殿命令，请确认后发送。",
-        statusKind: "info",
-      });
-    });
+async function openCangkunGuideModal() {
+  await window.MiniwebViews.cangkunGuide.openCangkunGuideModal({
+    fillCommand: (command) => fillDirectSendComposer(command, {
+      statusText: "已填入苍坤洞府命令，请确认后发送。",
+      statusKind: "info",
+    }),
   });
 }
 
@@ -4369,496 +3572,17 @@ function cleanText(value) {
 // ---------- 储物袋 / 批量转移 ----------
 
 async function openInventoryModal() {
-  const dialog = openModal({
-    title: "库存 / 批量转移",
-    body: `
-      <section class="modal-section">
-        <h4>最近储物袋快照</h4>
-        <p class="muted">这里只展示已配置账号、身份或 own_aliases 对应的最近 .储物袋 回复。生成命令不会自动发送,也不会自动核减库存。</p>
-        <div class="form-grid">
-          <label>
-            <span>资源号</span>
-            <select id="inventoryOwnerSelect"></select>
-          </label>
-          <label>
-            <span>搜索物品</span>
-            <input id="inventorySearch" placeholder="例如 阴凝、残图、灵石" />
-          </label>
-          <label>
-            <span>购买方</span>
-            <input id="inventoryBuyer" placeholder="集中资源的 @username" />
-          </label>
-          <label>
-            <span>诱饵物品</span>
-            <input id="inventoryBaitName" value="凝血草" />
-          </label>
-          <label>
-            <span>诱饵数量</span>
-            <input id="inventoryBaitAmount" inputmode="numeric" value="1" />
-          </label>
-        </div>
-        <div class="form-actions">
-          <button type="button" id="inventoryRefresh">刷新快照</button>
-          <button type="button" class="primary" id="inventoryPlan">生成转移命令</button>
-        </div>
-        <p class="modal-status-line info" id="inventoryStatus" hidden></p>
-      </section>
-      <section class="modal-section">
-        <div id="inventorySnapshots" class="inventory-snapshots"></div>
-        <div id="inventoryBatchBar" class="inventory-batch-bar" hidden>
-          <span id="inventoryPickCount">未选择物品</span>
-          <button type="button" data-inventory-batch="select-visible">选择可见</button>
-          <button type="button" data-inventory-batch="clear">清空</button>
-          <button type="button" data-inventory-batch="qty-max">数量填满</button>
-          <button type="button" data-inventory-batch="qty-one">数量填 1</button>
-        </div>
-        <div id="inventoryItems" class="inventory-items"></div>
-        <div id="inventoryPlanResult" class="send-as-result" hidden></div>
-      </section>
-    `,
-    footer: `<button type="button" data-modal-close>关闭</button>`,
+  await window.MiniwebViews.inventory.openInventoryModal({
+    copyCommandToClipboard,
   });
-  if (!dialog) return;
-  bindInventoryModal(dialog);
-  await refreshInventorySnapshots(dialog);
-}
-
-function bindInventoryModal(dialog) {
-  dialog.querySelector("#inventoryRefresh")?.addEventListener("click", () => {
-    refreshInventorySnapshots(dialog).catch((error) => setInventoryStatus(dialog, "error", error.message));
-  });
-  dialog.querySelector("#inventoryOwnerSelect")?.addEventListener("change", () => {
-    renderInventoryItems(dialog).catch((error) => setInventoryStatus(dialog, "error", error.message));
-  });
-  dialog.querySelector("#inventorySearch")?.addEventListener("input", () => {
-    renderInventoryItems(dialog).catch((error) => setInventoryStatus(dialog, "error", error.message));
-  });
-  dialog.querySelector("#inventoryPlan")?.addEventListener("click", () => {
-    planInventoryTransfer(dialog).catch((error) => setInventoryStatus(dialog, "error", error.message));
-  });
-  dialog.querySelectorAll("[data-inventory-batch]").forEach((button) => {
-    button.addEventListener("click", () => {
-      applyInventoryBatchAction(dialog, button.dataset.inventoryBatch || "");
-    });
-  });
-}
-
-async function refreshInventorySnapshots(dialog) {
-  setInventoryStatus(dialog, "info", "读取最近储物袋快照…");
-  const payload = await fetchJson("/api/inventory?latest_only=1&limit=200&include_items=0");
-  dialog._inventorySnapshots = (payload.snapshots || []).map((snapshot) => ({
-    ...snapshot,
-    items: [],
-    items_loaded: false,
-  }));
-  renderInventoryOwnerSelect(dialog);
-  const count = dialog._inventorySnapshots.length;
-  setInventoryStatus(dialog, count ? "ok" : "warn", count ? `已载入 ${count} 个资源号的最近快照。` : "没有可见资源号快照。先确认账号/身份/own_aliases,再用 .储物袋 让消息箱采到。");
-  await renderInventoryItems(dialog);
-}
-
-function renderInventoryOwnerSelect(dialog) {
-  const select = dialog.querySelector("#inventoryOwnerSelect");
-  if (!select) return;
-  const snapshots = dialog._inventorySnapshots || [];
-  const prev = select.value;
-  select.innerHTML = snapshots.map((snapshot) => {
-    const label = `@${snapshot.owner}｜${formatNumber(snapshot.item_count)} 类｜${formatInventoryTime(snapshot.event_time)}`;
-    return `<option value="${escapeAttr(snapshot.owner)}">${escapeHtml(label)}</option>`;
-  }).join("") || '<option value="">暂无快照</option>';
-  if (prev && snapshots.some((snapshot) => snapshot.owner === prev)) {
-    select.value = prev;
-  }
-}
-
-async function renderInventoryItems(dialog) {
-  const owner = dialog.querySelector("#inventoryOwnerSelect")?.value || "";
-  const search = (dialog.querySelector("#inventorySearch")?.value || "").trim();
-  const snapshots = dialog._inventorySnapshots || [];
-  const snapshot = snapshots.find((item) => item.owner === owner) || snapshots[0] || null;
-  const snapshotBox = dialog.querySelector("#inventorySnapshots");
-  const itemBox = dialog.querySelector("#inventoryItems");
-  const resultBox = dialog.querySelector("#inventoryPlanResult");
-  if (resultBox) {
-    resultBox.hidden = true;
-    resultBox.innerHTML = "";
-  }
-  if (!snapshot) {
-    if (snapshotBox) snapshotBox.innerHTML = '<p class="empty inline">暂无储物袋快照。</p>';
-    if (itemBox) itemBox.innerHTML = "";
-    setInventoryBatchBarVisible(dialog, false);
-    return;
-  }
-  if (!snapshot.items_loaded) {
-    if (itemBox) itemBox.innerHTML = '<p class="empty inline">正在载入该角色物品…</p>';
-    await loadInventorySnapshotItems(dialog, snapshot.owner);
-    return renderInventoryItems(dialog);
-  }
-  if (snapshotBox) {
-    snapshotBox.innerHTML = `
-      <div class="inventory-summary">
-        <strong>@${escapeHtml(snapshot.owner)}</strong>
-        <span>${escapeHtml(formatNumber(snapshot.item_count))} 类 / ${escapeHtml(formatNumber(snapshot.total_amount))} 件</span>
-        <span>更新 ${escapeHtml(formatInventoryTime(snapshot.event_time))}</span>
-        <span>消息 #${escapeHtml(String(snapshot.msg_id || ""))}</span>
-      </div>
-    `;
-  }
-  const items = (snapshot.items || [])
-    .filter((item) => !search || `${item.name} ${item.section} ${item.extra}`.includes(search))
-    .sort((a, b) => String(a.section || "").localeCompare(String(b.section || ""), "zh-CN") || String(a.name || "").localeCompare(String(b.name || ""), "zh-CN"));
-  if (!itemBox) return;
-  if (!items.length) {
-    itemBox.innerHTML = '<p class="empty inline">没有匹配物品。</p>';
-    setInventoryBatchBarVisible(dialog, false);
-    return;
-  }
-  setInventoryBatchBarVisible(dialog, true);
-  itemBox.innerHTML = `
-    <table class="inventory-table">
-      <thead>
-        <tr>
-          <th>选</th>
-          <th>分组</th>
-          <th>物品</th>
-          <th>库存</th>
-          <th>转移数量</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${items.map((item, index) => `
-          <tr>
-            <td><input type="checkbox" data-inventory-pick="${index}" data-name="${escapeAttr(item.name)}" data-max="${escapeAttr(String(item.amount || 0))}" /></td>
-            <td>${escapeHtml(item.section || "")}</td>
-            <td>${escapeHtml(item.name || "")}${item.extra ? ` <small>${escapeHtml(item.extra)}</small>` : ""}</td>
-            <td class="num">${escapeHtml(formatNumber(item.amount || 0))}</td>
-            <td><input class="inventory-qty" data-inventory-qty="${index}" inputmode="numeric" min="1" max="${escapeAttr(String(item.amount || 0))}" value="${escapeAttr(String(Math.min(Number(item.amount || 1), 1)))}" /></td>
-          </tr>
-        `).join("")}
-      </tbody>
-    </table>
-  `;
-  itemBox.querySelectorAll("[data-inventory-qty]").forEach((input) => {
-    input.addEventListener("input", () => {
-      const idx = input.dataset.inventoryQty;
-      const pick = itemBox.querySelector(`[data-inventory-pick="${CSS.escape(idx)}"]`);
-      if (pick && String(input.value || "").trim()) pick.checked = true;
-      updateInventoryPickCount(dialog);
-    });
-  });
-  itemBox.querySelectorAll("[data-inventory-pick]").forEach((input) => {
-    input.addEventListener("change", () => updateInventoryPickCount(dialog));
-  });
-  updateInventoryPickCount(dialog);
-}
-
-function setInventoryBatchBarVisible(dialog, visible) {
-  const bar = dialog.querySelector("#inventoryBatchBar");
-  if (!bar) return;
-  bar.hidden = !visible;
-}
-
-function updateInventoryPickCount(dialog) {
-  const countEl = dialog.querySelector("#inventoryPickCount");
-  const itemBox = dialog.querySelector("#inventoryItems");
-  if (!countEl || !itemBox) return;
-  const picks = Array.from(itemBox.querySelectorAll("[data-inventory-pick]:checked"));
-  const totalQty = picks.reduce((total, pick) => {
-    const idx = pick.dataset.inventoryPick;
-    const qtyInput = itemBox.querySelector(`[data-inventory-qty="${CSS.escape(idx)}"]`);
-    return total + Math.max(0, Number(qtyInput?.value || 0));
-  }, 0);
-  countEl.textContent = picks.length
-    ? `已选 ${formatNumber(picks.length)} 类 / ${formatNumber(totalQty)} 件`
-    : "未选择物品";
-}
-
-function applyInventoryBatchAction(dialog, action) {
-  const itemBox = dialog.querySelector("#inventoryItems");
-  if (!itemBox) return;
-  const picks = Array.from(itemBox.querySelectorAll("[data-inventory-pick]"));
-  if (action === "select-visible") {
-    picks.forEach((pick) => { pick.checked = true; });
-  } else if (action === "clear") {
-    picks.forEach((pick) => { pick.checked = false; });
-  } else if (action === "qty-max") {
-    picks.forEach((pick) => {
-      const idx = pick.dataset.inventoryPick;
-      const qtyInput = itemBox.querySelector(`[data-inventory-qty="${CSS.escape(idx)}"]`);
-      if (qtyInput) qtyInput.value = String(Math.max(1, Number(pick.dataset.max || 1)));
-      pick.checked = true;
-    });
-  } else if (action === "qty-one") {
-    picks.forEach((pick) => {
-      const idx = pick.dataset.inventoryPick;
-      const qtyInput = itemBox.querySelector(`[data-inventory-qty="${CSS.escape(idx)}"]`);
-      if (qtyInput) qtyInput.value = "1";
-    });
-  }
-  updateInventoryPickCount(dialog);
-}
-
-async function loadInventorySnapshotItems(dialog, owner) {
-  const cleanOwner = String(owner || "").trim();
-  if (!cleanOwner) return null;
-  const params = new URLSearchParams({
-    latest_only: "1",
-    limit: "1",
-    owner: cleanOwner,
-    include_items: "1",
-  });
-  const payload = await fetchJson(`/api/inventory?${params.toString()}`);
-  const loaded = (payload.snapshots || [])[0] || null;
-  if (!loaded) return null;
-  dialog._inventorySnapshots = (dialog._inventorySnapshots || []).map((snapshot) => (
-    snapshot.owner === cleanOwner
-      ? { ...snapshot, ...loaded, items: loaded.items || [], items_loaded: true }
-      : snapshot
-  ));
-  return loaded;
-}
-
-async function planInventoryTransfer(dialog) {
-  const owner = dialog.querySelector("#inventoryOwnerSelect")?.value || "";
-  const buyer = (dialog.querySelector("#inventoryBuyer")?.value || "").trim().replace(/^@/, "");
-  const baitName = (dialog.querySelector("#inventoryBaitName")?.value || "").trim();
-  const baitAmount = Number(dialog.querySelector("#inventoryBaitAmount")?.value || 1);
-  const itemBox = dialog.querySelector("#inventoryItems");
-  const items = [];
-  itemBox?.querySelectorAll("[data-inventory-pick]:checked").forEach((pick) => {
-    const idx = pick.dataset.inventoryPick;
-    const qtyInput = itemBox.querySelector(`[data-inventory-qty="${CSS.escape(idx)}"]`);
-    const amount = Number(qtyInput?.value || 0);
-    if (pick.dataset.name && amount > 0) {
-      items.push({ name: pick.dataset.name, amount });
-    }
-  });
-  const payload = await postJson("/api/inventory/transfer-plan", {
-    provider: owner,
-    buyer,
-    bait_name: baitName,
-    bait_amount: baitAmount,
-    items,
-  });
-  if (!payload.ok) throw new Error(payload.error || "生成失败");
-  renderInventoryPlan(dialog, payload);
-  setInventoryStatus(dialog, "ok", `已生成 ${payload.commands.length} 条命令。`);
-}
-
-function renderInventoryPlan(dialog, plan) {
-  const box = dialog.querySelector("#inventoryPlanResult");
-  if (!box) return;
-  box.hidden = false;
-  box.innerHTML = `
-    <p><strong>转移计划</strong>｜资源号 @${escapeHtml(plan.provider || "未填")} → 购买方 @${escapeHtml(plan.buyer || "")}</p>
-    <ul class="send-as-result-list">
-      ${(plan.commands || []).map((item, index) => `
-        <li class="${item.template ? "warn" : "ok"}">
-          <code>${escapeHtml(item.command || "")}</code>
-          <small>${escapeHtml(item.note || "")}</small>
-          <button type="button" data-inventory-copy="${index}">复制</button>
-        </li>
-      `).join("")}
-    </ul>
-    ${(plan.notes || []).length ? `<div class="resource-stats-notes">${plan.notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>` : ""}
-  `;
-  box.querySelectorAll("[data-inventory-copy]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const idx = Number(button.dataset.inventoryCopy || 0);
-      const command = (plan.commands || [])[idx]?.command || "";
-      await copyCommandToClipboard(command, button);
-    });
-  });
-}
-
-function setInventoryStatus(dialog, kind, text) {
-  const status = dialog.querySelector("#inventoryStatus");
-  if (!status) return;
-  status.hidden = !text;
-  status.className = `modal-status-line ${kind || "info"}`;
-  status.textContent = text || "";
-}
-
-function formatInventoryTime(value) {
-  const raw = String(value || "");
-  if (!raw) return "未知";
-  return raw.replace("T", " ").replace(/\..+$/, "").replace(/\+.+$/, "");
 }
 
 // ---------- 通知设置 modal ----------
 
 async function openNotifySettingsModal() {
-  // 先把最新 settings 拉过来,确保 saved_secrets 是新鲜的
-  const settings = await loadSettings();
-  const savedSecrets = settings.saved_secrets || {};
-  const enabled = !!settings.notify_enabled;
-  const subscribed = new Set(settings.notify_card_titles || []);
-
-  const dialog = openModal({
-    title: "🔔 通知设置",
-    body: `
-      <section class="modal-section">
-        <h4>通道:Telegram Bot</h4>
-        <p class="muted">用一个独立的 Telegram bot(BotFather 申请),把关键事件推到指定 chat。
-        Bot 需要先被你加进 chat 一次(私聊就 /start 一下,群里把 bot 拉进去)。
-        后续会接 Bark / 钉钉 / 浏览器 push,接口已留好。</p>
-
-        <label class="notify-toggle">
-          <input type="checkbox" id="notifyEnabled" ${enabled ? "checked" : ""} />
-          <span>启用通知</span>
-        </label>
-
-        <div class="form-grid" style="margin-top:8px;">
-          <label>
-            <span>Bot Token</span>
-            <input id="notifyTgBotToken" type="text" value=""
-              placeholder="${savedSecrets.notify_tg_bot_token ? "已保存,留空不变;重新填写则覆盖" : "BotFather 给的 token,形如 1234567:ABC..."}"
-              autocomplete="off" />
-          </label>
-          <label>
-            <span>Chat ID</span>
-            <input id="notifyTgChatId" type="text" value="${escapeAttr(settings.notify_tg_chat_id || "")}"
-              placeholder="私聊 = 你的 user_id;群 = -100xxx" />
-          </label>
-        </div>
-      </section>
-
-      <section class="modal-section">
-        <h4>订阅哪些事件</h4>
-        <p class="muted">命中订阅清单的卡片才会推。同一条消息 60s 内不会重复推(防 NewMessage+Edit 双触发)。</p>
-        <div id="notifyEventGrid" class="notify-event-grid">
-          <p class="muted">加载中…</p>
-        </div>
-      </section>
-
-      <p class="modal-status-line info" id="notifyStatus" hidden></p>
-    `,
-    footer: `
-      <button type="button" data-modal-close>关闭</button>
-      <button type="button" id="notifyTestBtn">发测试通知</button>
-      <button type="button" class="primary" id="notifySaveBtn">保存</button>
-    `,
+  await window.MiniwebViews.notify.openNotifySettingsModal({
+    loadSettings,
   });
-  if (!dialog) return;
-
-  // 加载可订阅事件清单
-  try {
-    const data = await fetchJson("/api/notify/card-titles");
-    const titles = data.titles || [];
-    const grid = dialog.querySelector("#notifyEventGrid");
-    const groups = [
-      { name: "🚨 高危", keys: ["风险提醒", "天道审判"] },
-      { name: "🎯 prompt", keys: ["玄骨考校", "天机考验", "极阴祖师", "南陇侯", "共历心劫", "第二元神归位"] },
-      { name: "🎉 里程碑", keys: ["境界突破", "赐予道号", "试炼古塔战报", "深度闭关总结", "闭关成功"] },
-      { name: "📦 副本/物品", keys: ["虚天殿开启", "加入副本成功", "加入副本失败", "副本房间解散", "储物袋快照", "灵树采摘"] },
-    ];
-    const used = new Set();
-    let html = "";
-    for (const g of groups) {
-      const present = g.keys.filter((k) => titles.includes(k));
-      if (!present.length) continue;
-      present.forEach((k) => used.add(k));
-      html += `<div class="notify-group"><span class="notify-group-name">${escapeHtml(g.name)}</span>`;
-      for (const k of present) {
-        html += `<label class="notify-event"><input type="checkbox" data-notify-event="${escapeAttr(k)}" ${subscribed.has(k) ? "checked" : ""} /> <span>${escapeHtml(k)}</span></label>`;
-      }
-      html += "</div>";
-    }
-    const leftover = titles.filter((k) => !used.has(k));
-    if (leftover.length) {
-      html += `<div class="notify-group"><span class="notify-group-name">其它</span>`;
-      for (const k of leftover) {
-        html += `<label class="notify-event"><input type="checkbox" data-notify-event="${escapeAttr(k)}" ${subscribed.has(k) ? "checked" : ""} /> <span>${escapeHtml(k)}</span></label>`;
-      }
-      html += "</div>";
-    }
-    grid.innerHTML = html || '<p class="muted">没有可订阅的事件</p>';
-  } catch (err) {
-    const grid = dialog.querySelector("#notifyEventGrid");
-    if (grid) grid.innerHTML = `<p class="muted">事件列表加载失败:${escapeHtml(String(err))}</p>`;
-  }
-
-  bindNotifySettingsModal(dialog);
-}
-
-function bindNotifySettingsModal(dialog) {
-  const status = dialog.querySelector("#notifyStatus");
-  const setStatus = (kind, text) => {
-    if (!status) return;
-    status.hidden = false;
-    status.className = `modal-status-line ${kind}`;
-    status.textContent = text;
-  };
-  const collectPayload = () => {
-    const enabledEl = dialog.querySelector("#notifyEnabled");
-    const tokenEl = dialog.querySelector("#notifyTgBotToken");
-    const chatEl = dialog.querySelector("#notifyTgChatId");
-    const titles = Array.from(
-      dialog.querySelectorAll('[data-notify-event]:checked')
-    ).map((el) => el.dataset.notifyEvent);
-    return {
-      notify_enabled: !!(enabledEl && enabledEl.checked),
-      notify_tg_bot_token: (tokenEl && tokenEl.value) || "",
-      notify_tg_chat_id: (chatEl && chatEl.value) || "",
-      notify_card_titles: titles,
-    };
-  };
-  const saveSettingsPatch = async () => {
-    const settings = state.settings || (await loadSettings());
-    // 注意:把当前 settings 整体回传时,要置空已保存的 secret 输入,
-    // 否则 preserve_existing_secrets 会误以为用户重新输入了 ""。
-    const patch = {
-      ...settings,
-      api_hash: "",        // 已保存,留空不变
-      proxy_password: "",  // 同上
-      ...collectPayload(),
-    };
-    // notify_tg_bot_token 同理:为空就别覆盖
-    if (!patch.notify_tg_bot_token) {
-      delete patch.notify_tg_bot_token;
-    }
-    await postJson("/api/settings", patch);
-    state.settings = await loadSettings();
-  };
-
-  const saveBtn = dialog.querySelector("#notifySaveBtn");
-  if (saveBtn) {
-    saveBtn.addEventListener("click", async () => {
-      saveBtn.disabled = true;
-      setStatus("info", "保存中…");
-      try {
-        await saveSettingsPatch();
-        setStatus("ok", "已保存");
-        setTimeout(() => closeModal(), 600);
-      } catch (error) {
-        setStatus("error", error.message || "保存失败");
-        saveBtn.disabled = false;
-      }
-    });
-  }
-
-  const testBtn = dialog.querySelector("#notifyTestBtn");
-  if (testBtn) {
-    testBtn.addEventListener("click", async () => {
-      testBtn.disabled = true;
-      setStatus("info", "保存当前配置 + 发测试通知…");
-      try {
-        await saveSettingsPatch();
-        const data = await postJson("/api/notify/test", {});
-        if (data.ok) {
-          const channels = (data.results || []).map((r) => r.channel).join(", ");
-          setStatus("ok", `✅ 已发(${channels || "无 channel"}),去 chat 看一下`);
-        } else {
-          const errs = (data.results || []).filter((r) => !r.ok).map((r) => `${r.channel}: ${r.error}`).join("; ");
-          setStatus("error", `❌ ${errs || data.error || "未知错误"}`);
-        }
-      } catch (error) {
-        setStatus("error", `❌ ${error.message || error}`);
-      } finally {
-        testBtn.disabled = false;
-      }
-    });
-  }
 }
 
 async function loadListenerStatus() {
@@ -5130,7 +3854,7 @@ async function fetchMessageById(id) {
     // merge 进 state,后续重渲能看见
     const byId = new Map(state.messages.map((m) => [m.id, m]));
     byId.set(card.id, card);
-    state.messages = Array.from(byId.values()).sort((a, b) => (b.seq || 0) - (a.seq || 0));
+    state.messages = sortMessagesByRecency(Array.from(byId.values()));
     return card;
   } catch (error) {
     console.warn("[mini-web] fetchMessageById failed:", error);
@@ -5144,6 +3868,10 @@ async function ensureFullMessage(message) {
 }
 
 function renderChannelFilters() {
+  if (!channelFilters) {
+    renderActiveChannelText();
+    return;
+  }
   const counts = channelMessageCounts();
   const latestByChannel = latestMessagesByChannel();
   channelFilters.replaceChildren(
@@ -5191,8 +3919,10 @@ function renderChannelFilters() {
     })
   );
 
-  selectAllChannels.textContent =
-    state.selectedChannels.size === state.channels.length ? "重点" : "全部";
+  if (selectAllChannels) {
+    selectAllChannels.textContent =
+      state.selectedChannels.size === state.channels.length ? "重点" : "全部";
+  }
   renderActiveChannelText();
 }
 
@@ -5202,12 +3932,8 @@ function orderedChannelsForConversationList(latestByChannel = null) {
   return [...state.channels].sort((a, b) => {
     const aLatest = latestMap.get(a.key);
     const bLatest = latestMap.get(b.key);
-    const aSeq = Number(aLatest?.seq || 0);
-    const bSeq = Number(bLatest?.seq || 0);
-    if (aSeq !== bSeq) return bSeq - aSeq;
-    const aTime = Date.parse(aLatest?.time || "") || 0;
-    const bTime = Date.parse(bLatest?.time || "") || 0;
-    if (aTime !== bTime) return bTime - aTime;
+    const recency = compareMessagesByRecency(aLatest, bLatest);
+    if (recency) return recency;
     return (originalIndex.get(a.key) || 0) - (originalIndex.get(b.key) || 0);
   });
 }
@@ -5270,16 +3996,16 @@ function channelIcon(key, label) {
   return icons[key] || firstGrapheme(label || key || "?");
 }
 
-// 快速滤镜:修仙频道标题旁的 3-4 个游戏化 chip。
-// 「全部」清回 all,其它 chip 排他切换到单一 channel。
+// 频道筛选:主界面展示的是“视图”,不是后端频道枚举。
+// 低频的 archive/system/console/world 不直接露在主栏,需要时走“全部/记录”。
 const QUICK_FILTER_PRESETS = [
-  { key: "focus", label: "重点", icon: "◎", title: "被 @、会长、关键词和需要处理的消息" },
-  { key: "leader", label: "会长", icon: "◇", title: "只看配置为会长/情报源的消息" },
-  { key: "risk", label: "风险", icon: "!", title: "只看风险提醒 / 自证类消息", className: "risk" },
-  { key: "dungeon", label: "副本", icon: "#", title: "只看副本开启 / 加入" },
-  { key: "resource", label: "资源", icon: "$", title: "只看储物袋 / 资源" },
-  { key: "archive", label: "归档", icon: "A", title: "查看点命令和普通 bot 回复" },
-  { key: "__all", label: "全部", icon: "*", title: "显示全部频道" },
+  { key: "focus", label: "重点", icon: "!", channels: ["focus"], title: "需要优先处理的消息" },
+  { key: "dungeon", label: "副本", icon: "#", channels: ["dungeon"], title: "副本开启、加入和队伍状态" },
+  { key: "leader", label: "会长", icon: "◇", channels: ["leader"], title: "会长/情报源消息" },
+  { key: "mine", label: "我的", icon: "@", channels: ["mine"], title: "当前角色相关消息" },
+  { key: "__daily", label: "日常", icon: "↻", channels: ["training", "resource", "home"], title: "修炼、资源、洞府和日常玩法" },
+  { key: "risk", label: "风险", icon: "!", channels: ["risk"], title: "举报、自证、禁言、虚弱和封禁", className: "risk", showWhenCount: true },
+  { key: "__all", label: "全部", icon: "≡", channels: "__all", title: "显示全部频道", className: "all" },
 ];
 
 function quickFilterIsAll() {
@@ -5288,7 +4014,14 @@ function quickFilterIsAll() {
 
 function quickFilterActiveKey() {
   if (quickFilterIsAll()) return "__all";
-  if (state.selectedChannels.size === 1) return [...state.selectedChannels][0];
+  const selected = [...state.selectedChannels].sort();
+  for (const preset of QUICK_FILTER_PRESETS) {
+    if (!Array.isArray(preset.channels)) continue;
+    const keys = quickFilterKnownChannels(preset).sort();
+    if (keys.length && keys.length === selected.length && keys.every((key, index) => key === selected[index])) {
+      return preset.key;
+    }
+  }
   return "";  // 自定义多选状态,啥都不亮
 }
 
@@ -5296,9 +4029,23 @@ function renderQuickFilters() {
   const container = document.querySelector("#quickFilters");
   if (!container || !state.channels.length) return;
   const activeKey = quickFilterActiveKey();
-  const knownKeys = new Set(state.channels.map((c) => c.key));
-  container.innerHTML = QUICK_FILTER_PRESETS
-    .filter((p) => p.key === "__all" || knownKeys.has(p.key))
+  const counts = channelMessageCounts();
+  const presets = QUICK_FILTER_PRESETS
+    .map((preset) => {
+      const channels = quickFilterKnownChannels(preset);
+      return {
+        ...preset,
+        channels,
+        count: quickFilterCount(preset, counts),
+      };
+    })
+    .filter((preset) => {
+      if (preset.key === "__all") return true;
+      if (!preset.channels.length) return false;
+      if (preset.showWhenCount) return preset.count > 0 || activeKey === preset.key;
+      return true;
+    });
+  container.innerHTML = presets
     .map((p) => {
       const isActive = activeKey === p.key;
       const cls = [
@@ -5311,8 +4058,9 @@ function renderQuickFilters() {
         <button type="button" class="${cls}"
                 data-quick-filter="${escapeAttr(p.key)}"
                 title="${escapeAttr(p.title || p.label)}">
-          <span aria-hidden="true">${p.icon}</span>
-          <span>${escapeHtml(p.label)}</span>
+          <span class="quick-filter-icon" aria-hidden="true">${escapeHtml(p.icon)}</span>
+          <span class="quick-filter-label">${escapeHtml(p.label)}</span>
+          ${p.count ? `<span class="quick-filter-count">${escapeHtml(formatNumber(p.count))}</span>` : ""}
         </button>
       `;
     })
@@ -5326,15 +4074,34 @@ function renderQuickFilters() {
 }
 
 async function applyQuickFilter(key) {
+  const preset = QUICK_FILTER_PRESETS.find((item) => item.key === key);
   let nextChannels;
-  if (key === "__all") {
+  if (!preset || preset.channels === "__all") {
     nextChannels = state.channels.map((c) => c.key);
-  } else if (quickFilterActiveKey() === key) {
+  } else if (activeQuickFilterKeyForSelection() === key) {
     nextChannels = ["focus"];
   } else {
-    nextChannels = [key];
+    nextChannels = quickFilterKnownChannels(preset);
   }
   await applyChannelSelection(nextChannels);
+}
+
+function activeQuickFilterKeyForSelection() {
+  return quickFilterActiveKey();
+}
+
+function quickFilterKnownChannels(preset) {
+  if (!preset || preset.channels === "__all") {
+    return state.channels.map((channel) => channel.key);
+  }
+  const known = new Set(state.channels.map((channel) => channel.key));
+  return (preset.channels || []).filter((key) => known.has(key));
+}
+
+function quickFilterCount(preset, counts) {
+  if (!preset || preset.key === "__all") return 0;
+  return quickFilterKnownChannels(preset)
+    .reduce((total, key) => total + Number(counts.get(key) || 0), 0);
 }
 
 function channelMessageCounts() {
@@ -5493,12 +4260,8 @@ function renderMessages() {
   }
 
   // 聊天客户端顺序:旧消息在上,最新消息在底部发送栏上方。
-  // 重建 DOM 时保住用户正在看的位置;只有用户本来就在最新位置时才自动贴底。
-  const prevScrollTop = messageList.scrollTop;
-  const prevScrollHeight = messageList.scrollHeight;
-  const prevClientHeight = messageList.clientHeight;
-  const distanceFromBottom = Math.max(0, prevScrollHeight - prevScrollTop - prevClientHeight);
-  const nearLatest = prevScrollHeight === 0 || distanceFromBottom <= 96;
+  // 重建 DOM 时锚住当前可见消息;只有用户本来就在最新位置时才自动贴底。
+  const scrollSnapshot = captureMessageScrollSnapshot();
 
   const groups = groupMessagesByDate([...messages].reverse());
   const fragment = document.createDocumentFragment();
@@ -5513,15 +4276,66 @@ function renderMessages() {
   });
   messageList.replaceChildren(fragment);
 
-  if (nearLatest) {
-    messageList.scrollTop = messageList.scrollHeight;
-  } else {
-    messageList.scrollTop = Math.max(0, messageList.scrollHeight - prevClientHeight - distanceFromBottom);
+  restoreMessageScrollSnapshot(scrollSnapshot);
+}
+
+function isMessageListNearLatest(threshold = 120) {
+  if (!messageList) return true;
+  return messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight <= threshold;
+}
+
+function updateJumpToLatestVisibility() {
+  if (!jumpToLatestButton || !messageList) return;
+  jumpToLatestButton.hidden = isMessageListNearLatest();
+}
+
+function scrollMessageListToLatest({ behavior = "auto" } = {}) {
+  if (!messageList) return;
+  messageList.scrollTo({ top: messageList.scrollHeight, behavior });
+  updateJumpToLatestVisibility();
+}
+
+function captureMessageScrollSnapshot() {
+  if (!messageList) return { nearLatest: true };
+  if (messageList.scrollHeight === 0 || isMessageListNearLatest(96)) {
+    return { nearLatest: true };
   }
-  if (jumpToLatestButton) {
-    jumpToLatestButton.hidden =
-      messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight <= 120;
+
+  const listRect = messageList.getBoundingClientRect();
+  const topGuard = listRect.top + 1;
+  const nodes = messageList.querySelectorAll("[data-message-id]");
+  for (const node of nodes) {
+    const rect = node.getBoundingClientRect();
+    if (rect.bottom >= topGuard) {
+      return {
+        nearLatest: false,
+        anchorId: node.dataset.messageId || "",
+        anchorOffset: rect.top - listRect.top,
+        scrollTop: messageList.scrollTop,
+      };
+    }
   }
+  return { nearLatest: false, scrollTop: messageList.scrollTop };
+}
+
+function restoreMessageScrollSnapshot(snapshot) {
+  if (!messageList || !snapshot) return;
+  if (snapshot.nearLatest) {
+    scrollMessageListToLatest();
+    return;
+  }
+  if (snapshot.anchorId) {
+    const node = messageList.querySelector(`[data-message-id="${CSS.escape(snapshot.anchorId)}"]`);
+    if (node) {
+      const listRect = messageList.getBoundingClientRect();
+      const rect = node.getBoundingClientRect();
+      messageList.scrollTop += rect.top - listRect.top - snapshot.anchorOffset;
+      updateJumpToLatestVisibility();
+      return;
+    }
+  }
+  messageList.scrollTop = Math.max(0, snapshot.scrollTop || 0);
+  updateJumpToLatestVisibility();
 }
 
 function renderLiveSituationBoard() {
@@ -5543,7 +4357,7 @@ function liveSituationModel() {
   const source = summarySignalMessages();
   const sorted = [...source]
     .filter((message) => message?.id)
-    .sort((a, b) => worldEventRank(a) - worldEventRank(b) || Number(b.seq || 0) - Number(a.seq || 0));
+    .sort(compareRankThenRecency(worldEventRank));
   const withAction = sorted.find((message) => (message.actions || []).some((item) => String(item.command || "").trim())) || null;
   const withActionChannels = withAction ? (withAction.channels || [withAction.channel]) : [];
   const mine = sorted.find((message) => {
@@ -6113,7 +4927,7 @@ function gameSceneSummaries() {
   return gameSceneDefs().map((def) => {
     const messages = source
       .filter((message) => gameSceneMatch(def, message))
-      .sort((a, b) => Number(b.seq || 0) - Number(a.seq || 0));
+      .sort(compareMessagesByRecency);
     const message = messages[0] || null;
     const snapshot = gameSceneSnapshot(def);
     if (snapshot) {
@@ -6413,12 +5227,12 @@ function questTrackerItems() {
       seen.add(message.id);
       return questTrackerRank(message) < 90;
     })
-    .sort((a, b) => questTrackerRank(a) - questTrackerRank(b) || Number(b.seq || 0) - Number(a.seq || 0));
+    .sort(compareRankThenRecency(questTrackerRank));
   const moduleQuests = currentModuleQuestItems(items);
   const dungeonQuest = currentDungeonQuestItem(items);
   return [dungeonQuest, ...moduleQuests, ...items]
     .filter(Boolean)
-    .sort((a, b) => questTrackerRank(a) - questTrackerRank(b) || Number(b.seq || 0) - Number(a.seq || 0));
+    .sort(compareRankThenRecency(questTrackerRank));
 }
 
 function currentDungeonQuestItem(existingItems = []) {
@@ -6891,7 +5705,7 @@ function worldEventSlotDefs() {
 
 function worldEventSlots() {
   const source = summarySignalMessages();
-  const sorted = [...source].sort((a, b) => worldEventRank(a) - worldEventRank(b) || Number(b.seq || 0) - Number(a.seq || 0));
+  const sorted = [...source].sort(compareRankThenRecency(worldEventRank));
   const used = new Set();
   return worldEventSlotDefs().map((def) => {
     const matches = sorted.filter((message) => worldEventSlotMatch(def, message));
@@ -6959,7 +5773,7 @@ function worldEventSlotMatch(def, message) {
   if (def.key === "dungeon") return channels.includes("dungeon");
   if (def.key === "resource") return channels.includes("resource") || channels.includes("training") || channels.includes("home");
   if (def.key === "leader") return channels.includes("leader") || tags.includes("会长");
-  if (def.key === "focus") return channels.includes("focus") || (message.actions || []).length > 0;
+  if (def.key === "focus") return channels.includes("focus");
   return false;
 }
 
@@ -6974,7 +5788,7 @@ async function findOrFetchMessage(id) {
   if (message && !state.messages.some((item) => item.id === message.id)) {
     const byId = new Map(state.messages.map((item) => [item.id, item]));
     byId.set(message.id, message);
-    state.messages = Array.from(byId.values()).sort((a, b) => (b.seq || 0) - (a.seq || 0));
+    state.messages = sortMessagesByRecency(Array.from(byId.values()));
   }
   return message;
 }
@@ -6988,7 +5802,7 @@ function worldEventCandidates() {
       seen.add(message.id);
       return worldEventRank(message) < 90;
     })
-    .sort((a, b) => worldEventRank(a) - worldEventRank(b) || Number(b.seq || 0) - Number(a.seq || 0));
+    .sort(compareRankThenRecency(worldEventRank));
 }
 
 function worldEventRank(message) {
@@ -8334,107 +7148,12 @@ function bindDetailActions(message) {
 }
 
 function openFocusArchiveModal(message, mode) {
-  const text = focusArchiveBaseText(message);
-  const title = mode === "contains" ? "归档包含短语" : "归档这句话";
-  const help = mode === "contains"
-    ? "输入一个短语；命中该短语的普通重点消息会转入归档。关键词关注仍可对其他消息生效。"
-    : "按完整文本生成精确规则；只会归档完全相同的普通重点消息。";
-  const dialog = openModal({
-    title,
-    body: `
-      <section class="modal-section">
-        <p class="muted">${escapeHtml(help)}</p>
-        <label class="stacked-field">
-          <span>${mode === "contains" ? "短语" : "完整文本"}</span>
-          <textarea id="focusArchiveText" rows="${mode === "contains" ? "2" : "4"}">${escapeHtml(text)}</textarea>
-        </label>
-        <p class="modal-status-line info" id="focusArchiveStatus">先预览影响范围，再确认保存规则。</p>
-        <div id="focusArchivePreview" class="focus-preview-box"></div>
-      </section>
-    `,
-    footer: `
-      <button type="button" data-modal-close>取消</button>
-      <button type="button" id="focusArchivePreviewButton">预览影响</button>
-      <button type="button" class="primary" id="focusArchiveApplyButton" disabled>确认归档此类</button>
-    `,
+  window.MiniwebViews.focusArchive.openFocusArchiveModal({
+    applyFocusExcludePattern,
+    formatChatTime,
+    message,
+    mode,
   });
-  if (!dialog) return;
-  let lastPreview = null;
-  const input = dialog.querySelector("#focusArchiveText");
-  const status = dialog.querySelector("#focusArchiveStatus");
-  const previewBox = dialog.querySelector("#focusArchivePreview");
-  const applyButton = dialog.querySelector("#focusArchiveApplyButton");
-  const previewButton = dialog.querySelector("#focusArchivePreviewButton");
-  const setStatus = (kind, value) => {
-    status.className = `modal-status-line ${kind}`;
-    status.textContent = value;
-  };
-  previewButton?.addEventListener("click", async () => {
-    const value = String(input?.value || "").trim();
-    if (!value) {
-      setStatus("warn", "内容为空，不能生成规则。");
-      return;
-    }
-    previewButton.disabled = true;
-    applyButton.disabled = true;
-    setStatus("info", "正在预览…");
-    try {
-      lastPreview = await postJson("/api/focus-exclude/preview", { mode, text: value });
-      if (!lastPreview.ok) throw new Error(lastPreview.error || "预览失败");
-      previewBox.innerHTML = renderFocusArchivePreview(lastPreview);
-      setStatus("ok", `规则已生成：${lastPreview.pattern}`);
-      applyButton.disabled = false;
-    } catch (error) {
-      lastPreview = null;
-      previewBox.innerHTML = "";
-      setStatus("error", error.message || "预览失败");
-    } finally {
-      previewButton.disabled = false;
-    }
-  });
-  applyButton?.addEventListener("click", async () => {
-    if (!lastPreview || !lastPreview.pattern) return;
-    applyButton.disabled = true;
-    setStatus("info", "正在保存规则并重分流…");
-    try {
-      await applyFocusExcludePattern(lastPreview.pattern);
-      closeModal();
-    } catch (error) {
-      applyButton.disabled = false;
-      setStatus("error", error.message || "保存失败");
-    }
-  });
-}
-
-function focusArchiveBaseText(message) {
-  const raw = String(message.raw || message.summary || "").trim();
-  if (!raw) return "";
-  return clipGraphemes(raw, 500);
-}
-
-function renderFocusArchivePreview(preview) {
-  const samples = preview.samples || [];
-  const sampleHtml = samples.length
-    ? samples.map((item) => `
-        <li>
-          <strong>${escapeHtml(item.source || String(item.sender_id || "未知"))}</strong>
-          <span>${escapeHtml(formatChatTime(item.time) || item.time || "")}</span>
-          <p>${escapeHtml(item.text || "")}</p>
-        </li>
-      `).join("")
-    : '<li><p>当前历史里没有会被这条规则影响的普通重点消息。</p></li>';
-  const regexWarn = preview.invalid_regex
-    ? `<p class="modal-status-line warn">正则无效，已按纯文本完全相等预览：${escapeHtml(preview.invalid_regex)}</p>`
-    : "";
-  return `
-    <div class="focus-preview-counts">
-      <span>近 24 小时：<strong>${Number(preview.last_24h || 0)}</strong></span>
-      <span>近 7 天：<strong>${Number(preview.last_7d || 0)}</strong></span>
-      <span>全部历史：<strong>${Number(preview.total || 0)}</strong></span>
-    </div>
-    ${regexWarn}
-    <ul class="focus-preview-samples">${sampleHtml}</ul>
-  `;
 }
 
 async function applyFocusExcludePattern(pattern) {
@@ -8521,110 +7240,14 @@ async function deleteOutboxDraft(draftId) {
 async function renderOutboxDraftsView() {
   state.detailMode = "message";
   closeWorkspacePanel({ clearSelection: false });
-  const dialog = openModal({
-    title: "草稿箱",
-    body: '<p class="empty">正在读取草稿箱...</p>',
-  });
-  if (!dialog) return;
-  const root = dialog.querySelector(".modal-body") || dialog;
-  await loadOutboxDrafts();
-  const drafts = state.outboxDrafts || [];
-  if (drafts.length === 0) {
-    root.innerHTML = `
-      <div class="detail-block">
-        <h4>草稿箱</h4>
-        <p>当前没有等待人工确认的动作草稿。可以在某条消息的「动作草稿」区里点「确认入队」,把命令放进这里。</p>
-      </div>
-    `;
-    return;
-  }
-  const items = drafts
-    .map((draft) => {
-      const status = draft.resolved ? "已解析" : "上下文未补齐";
-      const statusClass = draft.resolved ? "ok" : "warn";
-      const meta = [
-        draft.target_chat ? `群 ${draft.target_chat}` : draft.chat_id ? `群 ${draft.chat_id}` : "",
-        draft.identity_id ? `身份 ${draft.identity_id}` : "",
-        draft.account_local_id ? `账号 ${draft.account_local_id}` : "",
-        draft.reply_to_msg_id ? `回复 ${draft.reply_to_msg_id}` : "",
-        draft.created_at ? `入队 ${draft.created_at}` : "",
-      ]
-        .filter(Boolean)
-        .join("｜");
-      return `
-        <article class="draft-item" data-draft-id="${escapeAttr(draft.id)}">
-          <div class="draft-head">
-            <code class="draft-command">${escapeHtml(draft.command || "（空命令）")}</code>
-            <span class="status-pill ${statusClass}">${escapeHtml(status)}</span>
-          </div>
-          ${meta ? `<p class="draft-meta">${escapeHtml(meta)}</p>` : ""}
-          ${draft.source_message_id ? `<p class="draft-meta">来源 ${escapeHtml(draft.source_message_id)}</p>` : ""}
-          <div class="draft-buttons">
-            <button type="button" data-draft-action="copy">复制命令</button>
-            <button type="button" data-draft-action="open" data-source-id="${escapeAttr(draft.source_message_id || "")}">查看原消息</button>
-            <button type="button" class="danger" data-draft-action="delete">删除草稿</button>
-          </div>
-        </article>
-      `;
-    })
-    .join("");
-  root.innerHTML = `
-    <div class="detail-block">
-      <div class="draft-head-row">
-        <h4>草稿箱</h4>
-        <span>${drafts.length} 条等待人工确认</span>
-      </div>
-      <p>这些是已经入队、等待你人工确认或删除的命令草稿。本工具不会自动发出去。</p>
-      <div class="draft-list">${items}</div>
-    </div>
-  `;
-  bindOutboxDraftButtons(root);
-}
-
-function bindOutboxDraftButtons(root = document) {
-  root.querySelectorAll(".draft-item").forEach((article) => {
-    const draftId = article.dataset.draftId;
-    article.querySelectorAll("[data-draft-action]").forEach((button) => {
-      button.addEventListener("click", async () => {
-        const action = button.dataset.draftAction;
-        const draft = state.outboxDrafts.find((item) => item.id === draftId);
-        if (!draft) {
-          return;
-        }
-        if (action === "copy") {
-          await copyCommandToClipboard(draft.command || "", button);
-          return;
-        }
-        if (action === "open") {
-          const sourceId = button.dataset.sourceId;
-          if (!sourceId) {
-            return;
-          }
-          let message = state.messages.find((item) => item.id === sourceId);
-          if (!message) {
-            message = await fetchMessageById(sourceId);
-          }
-          if (message) {
-            closeModal();
-            setWorkspaceSelectedMessage(message, { rerenderList: true });
-          }
-          return;
-        }
-        if (action === "delete") {
-          if (!window.confirm("删除这条草稿?")) {
-            return;
-          }
-          button.disabled = true;
-          const result = await deleteOutboxDraft(draftId);
-          if (result.ok) {
-            await renderOutboxDraftsView();
-          } else {
-            button.disabled = false;
-            window.alert(result.error || "删除失败");
-          }
-        }
-      });
-    });
+  await window.MiniwebViews.outbox.openDraftsModal({
+    copyCommandToClipboard,
+    deleteOutboxDraft,
+    fetchMessageById,
+    findMessageById: (sourceId) => state.messages.find((item) => item.id === sourceId),
+    getDrafts: () => state.outboxDrafts || [],
+    loadOutboxDrafts,
+    selectMessage: (message) => setWorkspaceSelectedMessage(message, { rerenderList: true }),
   });
 }
 
@@ -8813,42 +7436,6 @@ function showError(error) {
   const message = error?.message || String(error || "操作失败");
   showSkillToast(message, "err");
   console.error("[mini-web]", error);
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function escapeAttr(value) {
-  return escapeHtml(value).replaceAll("\n", "&#10;");
-}
-
-function graphemes(value) {
-  const text = String(value ?? "");
-  if (!text) return [];
-  if (GRAPHEME_SEGMENTER) {
-    return Array.from(GRAPHEME_SEGMENTER.segment(text), (part) => part.segment);
-  }
-  return Array.from(text);
-}
-
-function countGraphemes(value) {
-  return graphemes(value).length;
-}
-
-function clipGraphemes(value, limit) {
-  const parts = graphemes(value);
-  if (parts.length <= limit) return String(value ?? "");
-  return parts.slice(0, limit).join("");
-}
-
-function firstGrapheme(value) {
-  return graphemes(value)[0] || "";
 }
 
 function telegramTextEntities(message) {
@@ -9896,6 +8483,141 @@ function bindAddIdentityModal(dialog) {
 
 // ---------- 官方定时 ----------
 
+async function loadScheduleRail({ silent = false } = {}) {
+  if (!scheduleRail) return [];
+  if (!silent) {
+    state.scheduleLoading = true;
+    state.scheduleError = "";
+    renderScheduleRail();
+  }
+  try {
+    const payload = await fetchJson("/api/schedule");
+    return syncScheduleBatches(payload);
+  } catch (error) {
+    state.scheduleError = error.message || String(error);
+    if (!silent || !(state.scheduleBatches || []).length) {
+      renderScheduleRail();
+    }
+    throw error;
+  } finally {
+    state.scheduleLoading = false;
+    if (!silent) renderScheduleRail();
+  }
+}
+
+function syncScheduleBatches(payload) {
+  const batches = Array.isArray(payload?.batches) ? payload.batches : [];
+  state.scheduleBatches = batches;
+  state.scheduleError = "";
+  state.scheduleLoading = false;
+  renderScheduleRail();
+  return batches;
+}
+
+function renderScheduleRail() {
+  if (!scheduleRail) return;
+  const batches = state.scheduleBatches || [];
+  if (state.scheduleLoading && !batches.length) {
+    scheduleRail.innerHTML = '<p class="empty inline">正在读取官方定时...</p>';
+    return;
+  }
+  if (state.scheduleError && !batches.length) {
+    scheduleRail.innerHTML = `
+      <div class="schedule-rail-empty warn">
+        <strong>定时读取失败</strong>
+        <span>${escapeHtml(state.scheduleError)}</span>
+      </div>
+    `;
+    return;
+  }
+  if (!batches.length) {
+    scheduleRail.innerHTML = `
+      <div class="schedule-rail-empty">
+        <strong>还没有排班</strong>
+        <span>点“新建”把深闭、法宝、日常命令排进 Telegram 官方定时。</span>
+      </div>
+    `;
+    return;
+  }
+  const totals = batches.reduce((acc, batch) => {
+    const counts = batch.counts || {};
+    acc.planned += Number(counts.planned || 0);
+    acc.scheduled += Number(counts.scheduled || 0);
+    acc.failed += Number(counts.failed || 0);
+    acc.sending += batch.status === "sending" ? 1 : 0;
+    return acc;
+  }, { planned: 0, scheduled: 0, failed: 0, sending: 0 });
+  const visible = batches.slice(0, 4);
+  scheduleRail.innerHTML = `
+    <div class="schedule-rail-summary">
+      <strong>${escapeHtml(String(batches.length))} 批排班</strong>
+      <span>${totals.sending ? `${escapeHtml(String(totals.sending))} 批发送中｜` : ""}${escapeHtml(String(totals.scheduled))} 已排 / ${escapeHtml(String(totals.planned))} 待排${totals.failed ? `｜${escapeHtml(String(totals.failed))} 失败` : ""}</span>
+    </div>
+    <div class="schedule-rail-list">
+      ${visible.map((batch) => renderScheduleRailRow(batch)).join("")}
+    </div>
+    ${batches.length > visible.length ? `<button type="button" class="schedule-rail-more" data-schedule-open>查看全部 ${escapeHtml(String(batches.length))} 批</button>` : ""}
+  `;
+  scheduleRail.querySelectorAll("[data-schedule-open]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        await Promise.all([loadAccounts(), loadIdentities()]);
+        await openScheduleModal();
+      } catch (error) {
+        showError(error);
+      }
+    });
+  });
+}
+
+function renderScheduleRailRow(batch) {
+  const counts = batch.counts || {};
+  const total = (counts.planned || 0) + (counts.scheduled || 0) + (counts.failed || 0);
+  const done = (counts.scheduled || 0) + (counts.failed || 0);
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  const statusKey = batch.status || "active";
+  const statusPill = scheduleStatusPill(statusKey) || `<span class="status-pill">${statusKey === "active" ? "活动" : escapeHtml(statusKey)}</span>`;
+  const identity = scheduleIdentityLabel(batch.send_as_id);
+  const snippets = (batch.items || []).slice(0, 2).map((item) => `
+    <span>
+      <code>${escapeHtml(item.command || "")}</code>
+      <small>${escapeHtml(item.schedule_text || "")}</small>
+    </span>
+  `).join("");
+  return `
+    <article class="schedule-rail-row ${escapeAttr(scheduleRailStatusClass(statusKey, counts))}">
+      <button type="button" class="schedule-rail-row-main" data-schedule-open title="打开官方定时排班">
+        <span class="schedule-rail-row-title">
+          <strong>${escapeHtml(batch.label || batch.preset_key || `排班 #${batch.id}`)}</strong>
+          ${statusPill}
+        </span>
+        <span class="schedule-rail-row-meta">${escapeHtml(identity)}｜${escapeHtml(batch.anchor_text || "未设锚点")}｜${escapeHtml(scheduleStatusText(statusKey, counts))}</span>
+        ${total ? `<span class="schedule-progress compact"><span class="schedule-progress-bar" style="width:${pct}%"></span></span>` : ""}
+        <span class="schedule-rail-snippets">
+          ${snippets || "<small>没有待展示命令</small>"}
+          ${(batch.items || []).length > 2 ? `<small>+${escapeHtml(String((batch.items || []).length - 2))} 条</small>` : ""}
+        </span>
+      </button>
+    </article>
+  `;
+}
+
+function scheduleRailStatusClass(statusKey, counts) {
+  if (statusKey === "failed") return "risk";
+  if (statusKey === "partial_failed" || Number(counts?.failed || 0) > 0) return "warn";
+  if (statusKey === "sending") return "live";
+  if (statusKey === "completed") return "done";
+  if (statusKey === "cancelled") return "muted";
+  return "active";
+}
+
+function scheduleIdentityLabel(sendAsId) {
+  const id = Number(sendAsId || 0);
+  const identity = state.identities.find((item) => Number(item.send_as_id || 0) === id);
+  const name = identity ? (identity.label || identity.username || identity.send_as_id) : id;
+  return name ? `send_as ${name}` : "未绑定身份";
+}
+
 async function openScheduleModal() {
   const [presetsPayload, batchesPayload, templatesPayload] = await Promise.all([
     fetchJson("/api/schedule/presets"),
@@ -9903,7 +8625,7 @@ async function openScheduleModal() {
     fetchJson("/api/schedule/templates"),
   ]);
   const presets = presetsPayload.presets || [];
-  const batches = batchesPayload.batches || [];
+  const batches = syncScheduleBatches(batchesPayload);
   const templates = templatesPayload.templates || [];
   const identityOptions = state.identities
     .map((id) => {
@@ -9968,8 +8690,8 @@ async function openScheduleModal() {
               <input name="trigger_command" placeholder="深闭默认「查看闭关」,留空走默认;其他 preset 留空 = 不发触发" />
             </label>
             <label data-show-when="horizon_days">
-              <span>排几天(1-21)</span>
-              <input name="horizon_days" inputmode="numeric" min="1" max="21" value="3" />
+              <span>排几天(1-7)</span>
+              <input name="horizon_days" inputmode="numeric" min="1" max="7" value="3" />
             </label>
             <label data-show-when="command">
               <span>自定义命令</span>
@@ -10119,6 +8841,18 @@ function scheduleStatusPill(statusKey) {
   if (statusKey === "failed") return `<span class="status-pill risk">失败</span>`;
   if (statusKey === "cancelled") return `<span class="status-pill">已取消</span>`;
   return "";
+}
+
+function scheduleManualMessages(result) {
+  const messages = [];
+  const push = (item) => {
+    if (!item || (!item.manual_required && item.status !== "quota_blocked")) return;
+    const text = item.manual_message || item.error || "官方定时已触发上限,请手动处理旧定时。";
+    if (text && !messages.includes(text)) messages.push(text);
+  };
+  push(result);
+  (result?.results || []).forEach(push);
+  return messages;
 }
 
 function bindScheduleModal(dialog, presets, _initialBatches, initialTemplates) {
@@ -10361,6 +9095,13 @@ function bindScheduleModal(dialog, presets, _initialBatches, initialTemplates) {
         setStatus("info", "创建中…");
         try {
           const result = await postJson("/api/schedule/create", collectPayload());
+          const manualMessages = scheduleManualMessages(result);
+          if (manualMessages.length && !result.batch_count) {
+            const text = manualMessages.join("\n\n");
+            window.alert(text);
+            setStatus("warn", text);
+            return;
+          }
           if (!result.ok && !result.batch_count) throw new Error(result.error || "创建失败");
           let stats;
           if (result.batch_count) {
@@ -10369,6 +9110,7 @@ function bindScheduleModal(dialog, presets, _initialBatches, initialTemplates) {
             const failN = result.failed || 0;
             const totalMin = Math.round((result.total_estimate_seconds || 0) / 60);
             stats = `批量创建 ${result.batch_count} 个身份｜成功 ${okN}${failN ? `｜失败 ${failN}` : ""}｜阶梯 ${result.offset_step_minutes}min｜总预估 ${totalMin}min`;
+            if (manualMessages.length) stats += `｜需手动处理 ${manualMessages.length}`;
             // 启动每个 sending batch 的进度轮询
             for (const r of (result.results || [])) {
               if (r.ok && r.status === "sending" && r.batch_id) {
@@ -10388,10 +9130,11 @@ function bindScheduleModal(dialog, presets, _initialBatches, initialTemplates) {
               stats += `｜TG 排上 ${result.created_official}`;
             }
           }
+          if (manualMessages.length) window.alert(manualMessages.join("\n\n"));
           setStatus(result.errors?.length || result.failed ? "warn" : "ok", stats);
           // 刷新批次列表
           const refreshed = await fetchJson("/api/schedule");
-          if (batchList) batchList.innerHTML = renderScheduleBatches(refreshed.batches || []);
+          if (batchList) batchList.innerHTML = renderScheduleBatches(syncScheduleBatches(refreshed));
           bindScheduleBatchActions(dialog);
         } catch (error) {
           setStatus("error", error.message);
@@ -10410,7 +9153,7 @@ function bindScheduleModal(dialog, presets, _initialBatches, initialTemplates) {
           if (!result.ok) throw new Error(result.error || "取消失败");
           setStatus("ok", `批次 #${batchId} 已取消(后台 loop 在下条时退出)`);
           const refreshed = await fetchJson("/api/schedule");
-          if (batchList) batchList.innerHTML = renderScheduleBatches(refreshed.batches || []);
+          if (batchList) batchList.innerHTML = renderScheduleBatches(syncScheduleBatches(refreshed));
           bindScheduleBatchActions(dialog);
         } catch (error) {
           setStatus("error", error.message);
@@ -10430,7 +9173,7 @@ function bindScheduleModal(dialog, presets, _initialBatches, initialTemplates) {
           if (!result.ok) throw new Error(result.error || "删除失败");
           setStatus("ok", `已删除批次 #${batchId}｜本地 ${result.local?.messages || 0} 条｜TG 取消 ${result.tg_deleted || 0} 条${result.tg_error ? `｜TG 错误:${result.tg_error}` : ""}`);
           const refreshed = await fetchJson("/api/schedule");
-          if (batchList) batchList.innerHTML = renderScheduleBatches(refreshed.batches || []);
+          if (batchList) batchList.innerHTML = renderScheduleBatches(syncScheduleBatches(refreshed));
           bindScheduleBatchActions(dialog);
         } catch (error) {
           setStatus("error", error.message);
@@ -10497,7 +9240,7 @@ function bindScheduleBatchActions(dialog) {
         if (!result.ok) throw new Error(result.error || "删除失败");
         const refreshed = await fetchJson("/api/schedule");
         const batchList = dialog.querySelector("#scheduleBatchList");
-        if (batchList) batchList.innerHTML = renderScheduleBatches(refreshed.batches || []);
+        if (batchList) batchList.innerHTML = renderScheduleBatches(syncScheduleBatches(refreshed));
         bindScheduleBatchActions(dialog);
       } catch (error) {
         window.alert(error.message || "删除失败");
@@ -10517,7 +9260,7 @@ function bindScheduleBatchActions(dialog) {
         if (!result.ok) throw new Error(result.error || "取消失败");
         const refreshed = await fetchJson("/api/schedule");
         const batchList = dialog.querySelector("#scheduleBatchList");
-        if (batchList) batchList.innerHTML = renderScheduleBatches(refreshed.batches || []);
+        if (batchList) batchList.innerHTML = renderScheduleBatches(syncScheduleBatches(refreshed));
         bindScheduleBatchActions(dialog);
       } catch (error) {
         window.alert(error.message || "取消失败");
@@ -10538,9 +9281,10 @@ function scheduleProgressPolling(dialog, batchId) {
     if (Date.now() - start > 60 * 60 * 1000) return; // 硬上限 1h
     try {
       const refreshed = await fetchJson("/api/schedule");
-      batchList.innerHTML = renderScheduleBatches(refreshed.batches || []);
+      const refreshedBatches = syncScheduleBatches(refreshed);
+      batchList.innerHTML = renderScheduleBatches(refreshedBatches);
       bindScheduleBatchActions(dialog);
-      const target = (refreshed.batches || []).find((b) => Number(b.id) === Number(batchId));
+      const target = refreshedBatches.find((b) => Number(b.id) === Number(batchId));
       if (target && target.status === "sending") {
         window.setTimeout(tick, 8000);
       }
@@ -11774,18 +10518,6 @@ async function _hydrateNotifySection(settings, root = document) {
   });
 }
 
-async function postJson(url, payload) {
-  const response = await apiFetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    throw new Error(`请求失败：${response.status}`);
-  }
-  return response.json();
-}
-
 function identityById(identityId) {
   const id = Number(identityId || 0);
   return (state.identities || []).find((identity) => Number(identity.send_as_id || 0) === id) || null;
@@ -11926,6 +10658,7 @@ function renderDirectSendComposer() {
       directSendIdentityLine.textContent = canSend ? `当前: ${name}` : `当前身份暂不能发送: ${name}`;
     }
   }
+  resizeDirectSendInput();
 }
 
 function setDirectSendStatus(text, kind = "info") {
@@ -11953,7 +10686,7 @@ async function sendDirectComposerMessage() {
   }
   if (!command) {
     setDirectSendStatus("发送内容不能为空。", "error");
-    directSendInput.focus();
+    focusDirectSendInput();
     return;
   }
 
@@ -11974,6 +10707,7 @@ async function sendDirectComposerMessage() {
       setDirectSendStatus(sentStatusText(result, { skillKey: "manual_send", command }), "ok");
       showSkillToast(sentToastText(result, { skillKey: "manual_send", command }), "ok");
       directSendInput.value = "";
+      resizeDirectSendInput();
       clearDirectSendReply();
       await refreshChatViewport().catch((err) => console.warn("[direct-send] refresh failed:", err));
     } else {
@@ -11998,15 +10732,17 @@ function manualMessagePreview(message) {
   return `${source} ${msgId}${compact ? `：${compact}` : ""}`;
 }
 
-selectAllChannels.addEventListener("click", () => {
-  const next = state.selectedChannels.size === state.channels.length
-    ? defaultConversationChannels()
-    : state.channels.map((channel) => channel.key);
-  applyChannelSelection(next).catch((error) => {
-    console.warn("[mini-web] select all channels failed:", error);
-    showSkillToast(`频道加载失败: ${error.message || error}`, "err");
+if (selectAllChannels) {
+  selectAllChannels.addEventListener("click", () => {
+    const next = state.selectedChannels.size === state.channels.length
+      ? defaultConversationChannels()
+      : state.channels.map((channel) => channel.key);
+    applyChannelSelection(next).catch((error) => {
+      console.warn("[mini-web] select all channels failed:", error);
+      showSkillToast(`频道加载失败: ${error.message || error}`, "err");
+    });
   });
-});
+}
 
 function defaultConversationChannels() {
   if (state.channels.some((channel) => channel.key === "focus")) {
@@ -12031,15 +10767,9 @@ function setViewMode(mode) {
 }
 
 if (jumpToLatestButton && messageList) {
-  const isNearLatest = () =>
-    messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight <= 120;
-  const updateJumpButton = () => {
-    if (!jumpToLatestButton) return;
-    jumpToLatestButton.hidden = isNearLatest();
-  };
-  messageList.addEventListener("scroll", updateJumpButton, { passive: true });
+  messageList.addEventListener("scroll", updateJumpToLatestVisibility, { passive: true });
   jumpToLatestButton.addEventListener("click", () => {
-    messageList.scrollTo({ top: messageList.scrollHeight, behavior: "smooth" });
+    scrollMessageListToLatest({ behavior: "smooth" });
   });
 }
 
@@ -12100,7 +10830,7 @@ refreshButton.addEventListener("click", async () => {
   refreshButton.textContent = "正在刷新…";
   refreshButton.disabled = true;
   try {
-    await Promise.all([refreshChatViewport(), loadIdentityPatches(), loadWorldSnapshot({ silent: true })]);
+    await Promise.all([refreshChatViewport(), loadIdentityPatches(), loadWorldSnapshot({ silent: true }), loadScheduleRail({ silent: true })]);
   } catch (error) {
     showError(error);
   } finally {
@@ -12128,6 +10858,8 @@ if (directSendIdentitySelect) {
 }
 
 if (directSendInput) {
+  resizeDirectSendInput();
+  directSendInput.addEventListener("input", resizeDirectSendInput);
   directSendInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -12154,7 +10886,7 @@ if (emojiPickerButton && directSendEmojiPalette) {
       openSkillMenuButton?.setAttribute("aria-expanded", "false");
     }
     if (!directSendEmojiPalette.hidden) {
-      directSendInput?.focus();
+      focusDirectSendInput();
     }
   });
 }
@@ -12173,7 +10905,7 @@ if (openSkillMenuButton) {
       if (!shouldOpen) {
         directSendSkillPanel.hidden = true;
         openSkillMenuButton.setAttribute("aria-expanded", "false");
-        directSendInput?.focus();
+        focusDirectSendInput();
         return;
       }
       await Promise.all([loadAccounts(), loadIdentities()]);
@@ -12185,7 +10917,7 @@ if (openSkillMenuButton) {
       directSendSkillPanel.hidden = false;
       openSkillMenuButton.setAttribute("aria-expanded", "true");
       renderSkillBar();
-      directSendInput?.focus();
+      focusDirectSendInput();
     } catch (error) {
       showError(error);
     }
@@ -12222,6 +10954,22 @@ scheduleButton.addEventListener("click", async () => {
     showError(error);
   }
 });
+
+if (scheduleRailRefreshButton) {
+  scheduleRailRefreshButton.addEventListener("click", async () => {
+    const original = scheduleRailRefreshButton.textContent;
+    scheduleRailRefreshButton.textContent = "读取中";
+    scheduleRailRefreshButton.disabled = true;
+    try {
+      await loadScheduleRail();
+    } catch (error) {
+      showError(error);
+    } finally {
+      scheduleRailRefreshButton.textContent = original;
+      scheduleRailRefreshButton.disabled = false;
+    }
+  });
+}
 
 if (resourceStatsButton) {
   resourceStatsButton.addEventListener("click", async () => {
@@ -12338,208 +11086,48 @@ if (logsButton) {
   logsButton.addEventListener("click", () => openLogsModal());
 }
 
-// 「日志」按钮 — 老脚本风格的全量消息浏览。
-// 主界面默认 solo 视图(只我和天尊),全部消息靠这个 modal 看。
-// 接口直接打 /api/messages?channel=...,不带 mode → server 返完整列表。
 async function openLogsModal() {
-  const dialog = openModal({
-    title: "消息日志(全部采集)",
-    body: `
-      <section class="modal-section">
-        <div class="form-grid">
-          <label class="span-2">
-            <span>频道</span>
-            <select id="logsChannelSelect">
-              <option value="all" selected>全部频道</option>
-              ${(state.channels || []).map((c) => `<option value="${escapeAttr(c.key)}">${escapeHtml(c.label || c.key)}</option>`).join("")}
-            </select>
-          </label>
-          <label>
-            <span>关键字过滤</span>
-            <input id="logsSearch" placeholder="文本子串,空 = 不过滤" />
-          </label>
-          <label>
-            <span>每页</span>
-            <select id="logsPageSize">
-              <option value="100">100 条</option>
-              <option value="200" selected>200 条</option>
-              <option value="500">500 条</option>
-            </select>
-          </label>
-        </div>
-        <div class="form-actions">
-          <button type="button" id="logsRefresh">重新加载</button>
-          <button type="button" id="logsLoadMore">加载更早</button>
-          <span class="muted" style="flex:1"></span>
-          <select id="logsExportFmt" title="导出格式">
-            <option value="jsonl" selected>jsonl</option>
-            <option value="csv">csv</option>
-            <option value="txt">txt</option>
-          </select>
-          <button type="button" id="logsExport" title="导出当前频道全部消息(无 limit)">导出</button>
-          <span id="logsStatus" class="muted"></span>
-        </div>
-      </section>
-      <section class="modal-section">
-        <div id="logsList" class="logs-modal-list"></div>
-      </section>
-    `,
-    footer: `<button type="button" data-modal-close>关闭</button>`,
+  window.MiniwebViews.logs.openLogsModal({
+    channels: state.channels || [],
+    renderTelegramTextHtml,
   });
-  if (!dialog) return;
-  bindLogsModal(dialog);
 }
 
-function bindLogsModal(dialog) {
-  const channelSelect = dialog.querySelector("#logsChannelSelect");
-  const searchInput = dialog.querySelector("#logsSearch");
-  const pageSizeSelect = dialog.querySelector("#logsPageSize");
-  const refreshBtn = dialog.querySelector("#logsRefresh");
-  const loadMoreBtn = dialog.querySelector("#logsLoadMore");
-  const statusEl = dialog.querySelector("#logsStatus");
-  const listEl = dialog.querySelector("#logsList");
-  if (!listEl) return;
-
-  // 内部状态:游标用「最早一条 seq」往下翻
-  const local = { items: [], oldestSeq: 0, loading: false };
-
-  const setStatus = (text) => { statusEl.textContent = text || ""; };
-
-  const fetchPage = async ({ reset = false } = {}) => {
-    if (local.loading) return;
-    local.loading = true;
-    refreshBtn.disabled = true;
-    loadMoreBtn.disabled = true;
-    setStatus("加载中…");
-    try {
-      const params = new URLSearchParams({ channel: channelSelect.value || "all" });
-      const limit = pageSizeSelect.value || "200";
-      params.set("limit", limit);
-      if (!reset && local.oldestSeq > 0) {
-        params.set("before_seq", String(local.oldestSeq));
-      }
-      const result = await fetchJson(`/api/messages?${params.toString()}`);
-      let incoming = result.messages || [];
-      const q = (searchInput.value || "").trim();
-      if (q) incoming = incoming.filter((m) => (m.raw || m.summary || "").includes(q));
-      if (reset) {
-        local.items = incoming;
-      } else {
-        local.items = local.items.concat(incoming);
-      }
-      const oldest = incoming.reduce((min, m) => (min === 0 || (m.seq && m.seq < min) ? m.seq : min), 0);
-      if (oldest > 0) local.oldestSeq = oldest;
-      renderLogs(listEl, local.items);
-      setStatus(`已加载 ${local.items.length} 条${incoming.length === 0 && !reset ? "(无更早)" : ""}`);
-    } catch (err) {
-      setStatus(`错误:${err.message}`);
-    } finally {
-      local.loading = false;
-      refreshBtn.disabled = false;
-      loadMoreBtn.disabled = false;
-    }
-  };
-
-  refreshBtn.addEventListener("click", () => {
-    local.oldestSeq = 0;
-    fetchPage({ reset: true });
-  });
-  loadMoreBtn.addEventListener("click", () => fetchPage({ reset: false }));
-  channelSelect.addEventListener("change", () => {
-    local.oldestSeq = 0;
-    fetchPage({ reset: true });
-  });
-  pageSizeSelect.addEventListener("change", () => {
-    local.oldestSeq = 0;
-    fetchPage({ reset: true });
-  });
-  searchInput.addEventListener("input", () => {
-    // 只 client side 过滤已加载内容,避免 server 频繁查
-    let items = local.items;
-    const q = (searchInput.value || "").trim();
-    if (q) items = items.filter((m) => (m.raw || m.summary || "").includes(q));
-    renderLogs(listEl, items);
-  });
-
-  // 导出当前频道全部(无 limit) — 浏览器走 fetch + Blob → a.download。
-  // 没在 modal 里再过滤 search/pageSize,因为「谁爱看谁自己拿出来读」 — 全量交付。
-  const exportBtn = dialog.querySelector("#logsExport");
-  const exportFmt = dialog.querySelector("#logsExportFmt");
-  if (exportBtn) {
-    exportBtn.addEventListener("click", async () => {
-      const fmt = exportFmt.value || "jsonl";
-      const params = new URLSearchParams({
-        channel: channelSelect.value || "all",
-        fmt,
-      });
-      exportBtn.disabled = true;
-      const oldText = exportBtn.textContent;
-      exportBtn.textContent = "导出中…";
-        setStatus("拉取全量数据,大批可能要几秒…");
-      try {
-        const url = `/api/messages/export?${params.toString()}`;
-        const headers = authHeaders();
-        const res = await fetch(url, { headers });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const blob = await res.blob();
-        const cd = res.headers.get("Content-Disposition") || "";
-        const m = cd.match(/filename="([^"]+)"/);
-        const filename = m ? m[1] : `xiuxian-messages.${fmt}`;
-        const downloadUrl = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = downloadUrl;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(downloadUrl);
-        setStatus(`已导出 ${filename}｜${(blob.size / 1024).toFixed(1)} KB`);
-      } catch (err) {
-        setStatus(`导出失败:${err.message}`);
-      } finally {
-        exportBtn.disabled = false;
-        exportBtn.textContent = oldText;
-      }
+function startupTask(label, task) {
+  return Promise.resolve()
+    .then(task)
+    .catch((err) => {
+      console.warn(`[mini-web] ${label} failed:`, err);
+      return null;
     });
-  }
-
-  fetchPage({ reset: true });
 }
 
-function renderLogs(container, items) {
-  if (!items.length) {
-    container.innerHTML = '<p class="empty inline">无匹配消息</p>';
+async function bootstrapApp() {
+  try {
+    await loadChannels();
+    await refreshChatViewport({ incremental: false });
+  } catch (error) {
+    showError(error);
     return;
   }
-  container.innerHTML = items.map((m) => {
-    const time = (m.time || "").replace("T", " ").replace(/\..+$/, "").replace(/\+.+$/, "");
-    const sender = m.sender_id || "";
-    const channel = m.channel || "";
-    const raw = (m.raw || m.summary || "").trim();
-    return `
-      <article class="logs-row">
-        <div class="logs-row-meta">
-          <small>${escapeHtml(time)}</small>
-          <span class="logs-row-channel">${escapeHtml(channel)}</span>
-          <small>from ${escapeHtml(String(sender))}</small>
-        </div>
-        <pre class="logs-row-text">${renderTelegramTextHtml(raw, m)}</pre>
-      </article>
-    `;
-  }).join("");
+
+  const settingsReady = startupTask("initial settings", async () => {
+    await loadSettings();
+    renderMessages();
+    renderGameCockpit();
+  });
+  const accountsReady = startupTask("initial accounts", loadAccounts);
+  const identitiesReady = accountsReady.then(() => startupTask("initial identities", loadIdentities));
+
+  startupTask("initial schedule rail", () => loadScheduleRail({ silent: true }));
+  startupTask("initial world snapshot", () => loadWorldSnapshot({ silent: true }));
+  settingsReady.then(() => startupTask("initial bot discovery", loadDiscoveredBots));
+  settingsReady.then(() => startupTask("initial message audit", () => loadMessageAudit({ silent: true })));
+  identitiesReady.then(() => startupTask("initial identity patches", () => loadIdentityPatches({ reset: true })));
+  identitiesReady.then(() => startupTask("initial skills", loadSkills));
 }
 
-loadChannels()
-  .then(loadSettings)
-  .then(loadAccounts)
-  .then(loadIdentities)
-  .then(loadIdentityPatches)
-  .then(loadDiscoveredBots)
-  .then(loadSkills)
-  .then(refreshChatViewport)
-  .then(() => loadWorldSnapshot({ silent: true }))
-  .then(() => loadMessageAudit({ silent: true }))
-  .catch(showError);
+bootstrapApp();
 
 // ---------- 技能盘(底栏)----------
 
@@ -12833,26 +11421,12 @@ function fillSkillIntoComposer(skillKey, button = null) {
   }
 }
 
-let _skillToastTimer = null;
 function showSkillToast(text, kind) {
-  if (!skillToast) return;
-  skillToast.textContent = text;
-  skillToast.className = `skill-toast ${kind || ""}`.trim();
-  skillToast.hidden = false;
-  if (_skillToastTimer) clearTimeout(_skillToastTimer);
-  _skillToastTimer = window.setTimeout(() => {
-    skillToast.hidden = true;
-  }, 3200);
+  window.MiniwebToast.showToast(text, kind);
 }
 
 // 自动轮询消息流(只在 chat 视图 + 页面可见时拉,避免 tab 切走还在打)。
 // listener 持续 ingest 新消息进 SQLite,这里负责把它们端到 UI。
-const POLL_INTERVAL_MS = 5000;
-const ACCOUNT_POLL_INTERVAL_MS = 30000;
-const BOT_DISCOVERY_POLL_INTERVAL_MS = 60000;
-const IDENTITY_STATE_POLL_INTERVAL_MS = 30000;
-const HEALTH_POLL_INTERVAL_MS = 60000;
-const WORLD_SNAPSHOT_POLL_INTERVAL_MS = 90000;
 let pollTimer = null;
 let pollInflight = false;
 let nextAccountsPollAt = 0;
@@ -12860,6 +11434,7 @@ let nextBotDiscoveryPollAt = 0;
 let nextIdentityStatePollAt = 0;
 let nextHealthPollAt = 0;
 let nextWorldSnapshotPollAt = 0;
+let nextSchedulePollAt = 0;
 
 async function pollTick() {
   if (pollInflight) return;
@@ -12886,6 +11461,10 @@ async function pollTick() {
     if (now >= nextWorldSnapshotPollAt) {
       nextWorldSnapshotPollAt = now + WORLD_SNAPSHOT_POLL_INTERVAL_MS;
       tasks.push(loadWorldSnapshot({ silent: true }).catch((err) => console.warn("[mini-web] world snapshot poll failed:", err)));
+    }
+    if (now >= nextSchedulePollAt) {
+      nextSchedulePollAt = now + ACCOUNT_POLL_INTERVAL_MS;
+      tasks.push(loadScheduleRail({ silent: true }).catch((err) => console.warn("[mini-web] schedule rail poll failed:", err)));
     }
     const [messageResult] = await Promise.all(tasks);
     if ((messageResult && messageResult.changed) || now >= nextIdentityStatePollAt) {

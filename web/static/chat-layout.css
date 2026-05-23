@@ -1,0 +1,304 @@
+/* Final chat viewport stability contract.
+   Keep these rules last-loaded so older visual passes in styles.css cannot
+   push the message list or composer out of the viewport. */
+.chat-client-shell {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.chat-client-shell .conversation-rail,
+.chat-client-shell .chat-workspace {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-client-shell .chat-workspace {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.chat-client-shell .global-banner {
+  grid-row: 1;
+}
+
+.chat-client-shell .layout-grid,
+.chat-client-shell .layout-grid.detail-open,
+.chat-client-shell .layout-grid.detail-closed {
+  grid-row: 2;
+  display: grid;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.chat-client-shell .chat-pane {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.chat-client-shell .chat-pane .section-head {
+  grid-row: 1;
+}
+
+.chat-client-shell .game-primary-strip {
+  grid-row: 2;
+  min-height: 42px;
+  max-height: 72px;
+}
+
+.chat-client-shell .message-list {
+  grid-row: 3;
+  min-height: 0;
+  height: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chat-client-shell .chat-composer {
+  grid-row: 3;
+  align-self: stretch;
+  max-height: min(34dvh, 310px);
+  overflow: visible;
+}
+
+.chat-client-shell .quick-action-hotbar {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-height: 0;
+  max-height: 40px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 5px;
+}
+
+.chat-client-shell .quick-action-hotbar .skill-chip {
+  flex: 0 0 auto;
+  min-height: 32px;
+  max-width: 150px;
+  padding: 5px 10px;
+}
+
+.chat-client-shell .quick-action-hotbar .skill-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-client-shell .direct-send-row textarea {
+  overflow-y: auto;
+}
+
+@media (max-height: 760px) and (min-width: 901px) {
+  .chat-client-shell .chat-composer {
+    max-height: min(32dvh, 250px);
+    padding: 5px 9px 7px;
+  }
+
+  .chat-client-shell .quick-action-hotbar {
+    max-height: 34px;
+  }
+
+  .chat-client-shell .quick-action-hotbar .skill-chip {
+    min-height: 28px;
+    padding: 4px 8px;
+  }
+
+  .chat-client-shell .direct-send-head {
+    margin-bottom: 4px;
+  }
+
+  .chat-client-shell .direct-send-row select,
+  .chat-client-shell .direct-send-row textarea,
+  .chat-client-shell #directSendSubmit {
+    min-height: 40px;
+  }
+}
+
+@media (max-width: 900px) {
+  .chat-client-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: clamp(112px, 20dvh, 170px) minmax(0, 1fr);
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+  }
+
+  .chat-client-shell .conversation-rail,
+  .chat-client-shell .chat-workspace {
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .chat-client-shell .conversation-rail {
+    grid-row: 1;
+    overflow: auto;
+    padding: 8px;
+    scrollbar-width: none;
+  }
+
+  .chat-client-shell .conversation-rail::-webkit-scrollbar {
+    display: none;
+  }
+
+  .chat-client-shell .chat-workspace {
+    grid-row: 2;
+    min-height: 0;
+  }
+
+  .chat-client-shell .chat-composer {
+    position: static;
+    bottom: auto;
+    max-height: min(42dvh, 220px);
+    overflow: auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .chat-client-shell {
+    grid-template-rows: clamp(112px, 19dvh, 160px) minmax(0, 1fr);
+  }
+
+  .chat-client-shell .conversation-rail {
+    padding: 6px 8px;
+  }
+
+  .chat-client-shell .chat-pane .section-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-items: stretch;
+    gap: 4px;
+    min-height: 0;
+    max-height: 94px;
+    overflow: hidden;
+    padding: 5px 8px;
+  }
+
+  .chat-client-shell .chat-pane .section-head > .stream-filter-inline,
+  .chat-client-shell .chat-pane .section-head > .stream-channel-tools {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .chat-client-shell .stream-filter-inline .quick-filters,
+  .chat-client-shell .stream-channel-tools {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .chat-client-shell .stream-filter-inline .quick-filters::-webkit-scrollbar,
+  .chat-client-shell .stream-channel-tools::-webkit-scrollbar,
+  .chat-client-shell .game-primary-strip::-webkit-scrollbar,
+  .chat-client-shell .quick-action-hotbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .chat-client-shell .stream-filter-inline .quick-filters {
+    max-height: 36px;
+    padding: 2px;
+  }
+
+  .chat-client-shell .stream-filter-inline .quick-filter-chip {
+    min-height: 30px;
+    padding: 3px 8px 3px 4px;
+    font-size: 12.5px;
+  }
+
+  .chat-client-shell .stream-filter-inline .quick-filter-icon {
+    width: 22px;
+    height: 22px;
+    font-size: 12px;
+  }
+
+  .chat-client-shell .stream-channel-tools {
+    justify-content: flex-start;
+    gap: 6px;
+    padding-bottom: 2px;
+  }
+
+  .chat-client-shell .message-search {
+    flex: 0 0 128px;
+    min-width: 128px;
+    max-width: 128px;
+  }
+
+  .chat-client-shell .message-search input,
+  .chat-client-shell .stream-tool-button,
+  .chat-client-shell .workspace-tools-toggle,
+  .chat-client-shell .message-count-pill {
+    min-height: 30px;
+    padding: 4px 9px;
+    font-size: 12px;
+  }
+
+  .chat-client-shell .workspace-tools-toggle small {
+    display: none;
+  }
+
+  .chat-client-shell .game-primary-strip {
+    min-height: 38px;
+    max-height: 46px;
+    scrollbar-width: none;
+  }
+
+  .chat-client-shell .chat-composer {
+    max-height: min(36dvh, 180px);
+    padding: 6px 8px 8px;
+  }
+
+  .chat-client-shell .quick-action-hotbar {
+    max-height: 34px;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+
+  .chat-client-shell .quick-action-hotbar .skill-chip {
+    min-height: 28px;
+    padding: 4px 8px;
+  }
+
+  .chat-client-shell .direct-send-head {
+    margin-bottom: 4px;
+  }
+
+  .chat-client-shell .direct-send-row {
+    grid-template-columns: minmax(96px, 28%) minmax(0, 1fr) 72px;
+  }
+
+  .chat-client-shell .direct-send-row select,
+  .chat-client-shell .direct-send-row textarea,
+  .chat-client-shell #directSendSubmit {
+    min-height: 42px;
+    font-size: 13px;
+  }
+
+  .chat-client-shell .direct-send-row textarea {
+    max-height: 78px;
+    padding-block: 7px;
+  }
+}
+
+.chat-client-shell .stream-filter-inline .quick-filters,
+.chat-client-shell .game-primary-strip,
+.chat-client-shell .quick-action-hotbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.chat-client-shell .stream-filter-inline .quick-filters::-webkit-scrollbar,
+.chat-client-shell .game-primary-strip::-webkit-scrollbar,
+.chat-client-shell .quick-action-hotbar::-webkit-scrollbar {
+  display: none;
+}
