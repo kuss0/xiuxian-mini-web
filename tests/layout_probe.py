@@ -258,11 +258,20 @@ def api_payload(path: str, query: dict[str, list[str]]) -> dict:
     if path == "/api/skills":
         return {
             "ok": True,
-            "groups": ["日常", "查询", "副本"],
+            "groups": ["日常", "玩法", "查询", "法宝", "副本"],
             "realm_order": ["炼气", "筑基", "结丹", "元婴"],
             "skills": [
-                {"key": "storage_bag", "label": "储物袋", "group": "查询", "command": ".储物袋", "icon": "包"},
                 {"key": "deep_retreat", "label": "深度闭关", "group": "日常", "command": ".深度闭关", "icon": "闭"},
+                {"key": "field_training", "label": "野外历练", "group": "日常", "command": ".野外历练", "icon": "历"},
+                {"key": "daily_checkin", "label": "点卯", "group": "日常", "command": ".点卯", "icon": "卯"},
+                {"key": "tower", "label": "闯塔", "group": "玩法", "command": ".闯塔", "icon": "塔"},
+                {"key": "nascent_soul", "label": "元婴", "group": "玩法", "command": ".元婴", "icon": "婴"},
+                {"key": "second_soul", "label": "第二元神", "group": "玩法", "command": ".第二元神", "icon": "神"},
+                {"key": "pet_touch", "label": "抚摸", "group": "玩法", "command": ".抚摸", "icon": "抚"},
+                {"key": "warm_nurture", "label": "温养", "group": "法宝", "command": ".温养", "icon": "养"},
+                {"key": "profile", "label": "我的", "group": "查询", "command": ".我的", "icon": "我"},
+                {"key": "power", "label": "战力", "group": "查询", "command": ".战力", "icon": "战"},
+                {"key": "storage_bag", "label": "储物袋", "group": "查询", "command": ".储物袋", "icon": "包"},
                 {"key": "dungeon_status", "label": "副本状态", "group": "副本", "command": ".副本状态", "icon": "副"},
             ],
         }
@@ -375,6 +384,21 @@ PROBE_SCRIPT = """
     JSON.stringify(boxes.health));
   check("hotbar does not cover composer", boxes.hotbar.bottom <= boxes.composer.bottom + 1,
     JSON.stringify({ hotbar: boxes.hotbar, composer: boxes.composer }));
+  var hotbarChips = Array.from(document.querySelectorAll("#quickActionHotbar .skill-chip"));
+  var hotbarRowTops = Array.from(new Set(hotbarChips.map(function(chip) {
+    return Math.round(chip.getBoundingClientRect().top);
+  }))).sort(function(a, b) { return a - b; });
+  var hotbarOversized = hotbarChips.filter(function(chip) {
+    var box = chip.getBoundingClientRect();
+    return box.height > 28 || box.width > 122;
+  }).map(function(chip) {
+    var box = chip.getBoundingClientRect();
+    return { text: chip.textContent.trim(), width: box.width, height: box.height };
+  });
+  check("hotbar renders enough shortcuts", hotbarChips.length >= 10, String(hotbarChips.length));
+  check("hotbar uses two compact rows", hotbarRowTops.length === 2 && boxes.hotbar.height <= 60,
+    JSON.stringify({ rows: hotbarRowTops, hotbar: boxes.hotbar }));
+  check("hotbar chips stay compact", hotbarOversized.length === 0, JSON.stringify(hotbarOversized));
   if (shell) shell.open = false;
   await wait(120);
   boxes.dungeonTrigger = rect("#dungeonStatusButton");

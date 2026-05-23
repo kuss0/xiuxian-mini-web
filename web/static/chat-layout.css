@@ -67,21 +67,29 @@
 }
 
 .chat-client-shell .quick-action-hotbar {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 6px;
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, auto));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(72px, max-content);
+  align-items: center;
+  align-content: start;
+  gap: 4px 5px;
   min-height: 0;
-  max-height: 40px;
+  max-height: 56px;
   overflow-x: auto;
   overflow-y: hidden;
-  padding-bottom: 5px;
+  padding: 0 0 3px;
 }
 
 .chat-client-shell .quick-action-hotbar .skill-chip {
-  flex: 0 0 auto;
-  min-height: 32px;
-  max-width: 150px;
-  padding: 5px 10px;
+  min-width: 0;
+  min-height: 24px;
+  max-width: 116px;
+  padding: 3px 7px;
+  gap: 4px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  line-height: 1.1;
 }
 
 .chat-client-shell .quick-action-hotbar .skill-chip-label {
@@ -89,6 +97,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-client-shell .quick-action-hotbar .skill-chip-icon {
+  font-size: 12px;
+}
+
+.chat-client-shell .quick-action-hotbar .skill-chip-cd {
+  font-size: 10.5px;
 }
 
 .chat-client-shell .direct-send-row textarea {
@@ -102,12 +118,16 @@
   }
 
   .chat-client-shell .quick-action-hotbar {
-    max-height: 34px;
+    grid-auto-columns: minmax(68px, max-content);
+    gap: 3px 4px;
+    max-height: 52px;
   }
 
   .chat-client-shell .quick-action-hotbar .skill-chip {
-    min-height: 28px;
-    padding: 4px 8px;
+    min-height: 23px;
+    max-width: 108px;
+    padding: 2px 6px;
+    font-size: 11px;
   }
 
   .chat-client-shell .direct-send-head {
@@ -259,14 +279,18 @@
   }
 
   .chat-client-shell .quick-action-hotbar {
-    max-height: 34px;
-    padding-bottom: 4px;
+    grid-auto-columns: minmax(64px, max-content);
+    gap: 3px 4px;
+    max-height: 54px;
+    padding-bottom: 3px;
     scrollbar-width: none;
   }
 
   .chat-client-shell .quick-action-hotbar .skill-chip {
-    min-height: 28px;
-    padding: 4px 8px;
+    min-height: 24px;
+    max-width: 104px;
+    padding: 2px 6px;
+    font-size: 11px;
   }
 
   .chat-client-shell .direct-send-head {
