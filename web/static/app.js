@@ -3035,6 +3035,7 @@ async function openDungeonStatusModal() {
         <p class="modal-status-line info" id="dungeonStatusLine">正在读取最近副本消息…</p>
       </section>
       <section class="modal-section">
+        <div id="dungeonPlaybookPanels" class="dungeon-playbook-panels"></div>
         <div id="dungeonStatusSummary" class="dungeon-status-summary"></div>
         <div id="dungeonStatusList" class="dungeon-status-list">
           <p class="empty inline">加载中…</p>
@@ -3089,19 +3090,29 @@ async function refreshDungeonStatusModal(dialog) {
   const refreshButton = dialog.querySelector("#dungeonStatusRefresh");
   const list = dialog.querySelector("#dungeonStatusList");
   const summary = dialog.querySelector("#dungeonStatusSummary");
+  const playbooks = dialog.querySelector("#dungeonPlaybookPanels");
   if (refreshButton) refreshButton.disabled = true;
   if (list) list.innerHTML = '<p class="empty inline">加载中…</p>';
   if (summary) summary.innerHTML = "";
+  if (playbooks) playbooks.innerHTML = "";
   setDungeonStatusLine(dialog, "info", "正在读取最近副本消息…");
   try {
     const summaryLimit = Number(dialog._dungeonSummaryLimit || 3) || 3;
     const scanLimit = summaryLimit <= 3 ? 90 : 300;
-    const payload = await fetchJson(`/api/dungeon-status?limit=${scanLimit}&summary_limit=${encodeURIComponent(summaryLimit)}&order=recent`);
+    const [payload, cangkunGuide, xutianGuide] = await Promise.all([
+      fetchJson(`/api/dungeon-status?limit=${scanLimit}&summary_limit=${encodeURIComponent(summaryLimit)}&order=recent`),
+      fetchJson("/api/cangkun-guide").catch((error) => ({ ok: false, error: error.message || "读取苍坤攻略失败" })),
+      fetchJson("/api/xutian-oracle-guide").catch((error) => ({ ok: false, error: error.message || "读取虚天攻略失败" })),
+    ]);
     const summaries = (payload.summaries || []).map(normalizeDungeonStatusSummary);
     dialog._dungeonSummaries = summaries;
     dialog._dungeonRawCount = payload.raw_count || 0;
     dialog._dungeonTotalCount = payload.total_summaries || summaries.length;
     dialog._dungeonContextMode = payload.context_mode || "";
+    dialog._dungeonGuides = {
+      cangkun: cangkunGuide?.ok === false ? null : cangkunGuide,
+      xutian: xutianGuide?.ok === false ? null : xutianGuide,
+    };
     renderDungeonStatusModal(dialog, summaries, payload.raw_count || 0, payload.total_summaries || summaries.length, payload.context_mode || "");
   } finally {
     if (refreshButton) refreshButton.disabled = false;
@@ -3168,6 +3179,7 @@ function normalizeCangkunAdvice(value) {
 function renderDungeonStatusModal(dialog, summaries, rawCount, totalCount = summaries.length, contextMode = "") {
   const list = dialog.querySelector("#dungeonStatusList");
   const summary = dialog.querySelector("#dungeonStatusSummary");
+  const playbooks = dialog.querySelector("#dungeonPlaybookPanels");
   const filter = dialog.querySelector("[data-dungeon-status-filter].active")?.dataset.dungeonStatusFilter || "all";
   const visible = filterDungeonStatusSummaries(summaries, filter);
   const liveCount = summaries.filter((item) => ["open", "joined", "choice", "active"].includes(item.statusKind)).length;
@@ -3197,6 +3209,10 @@ function renderDungeonStatusModal(dialog, summaries, rawCount, totalCount = summ
         <small>${contextMode === "fast_window" ? "最近3次默认加速" : "含历史关联回填"}</small>
       </div>
     `;
+  }
+  if (playbooks) {
+    playbooks.innerHTML = renderDungeonPlaybookPanels(summaries, dialog._dungeonGuides || {});
+    bindDungeonPlaybookPanels(playbooks, summaries);
   }
   if (!list) return;
   if (!summaries.length) {
@@ -3302,6 +3318,193 @@ function dungeonIdGapNotes(summaries) {
     if (notes.length >= 3) break;
   }
   return notes;
+}
+
+function renderDungeonPlaybookPanels(summaries, guides = {}) {
+  const cangkun = latestDungeonByName(summaries, "苍坤");
+  const xutian = latestDungeonByName(summaries, "虚天");
+  return `
+    ${renderDungeonPlaybookCard({
+      key: "xutian",
+      label: "虚天殿",
+      subtitle: "卦象 / 路线 / 后殿",
+      summary: xutian,
+      statusText: xutian ? dungeonPlaybookStatusText(xutian) : "等待近期虚天线索",
+      mainAdvice: xutianPlaybookAdvice(xutian, guides.xutian),
+      chips: xutianPlaybookChips(xutian, guides.xutian),
+      commands: xutianPlaybookCommands(xutian),
+      guideLabel: "虚天攻略",
+    })}
+    ${renderDungeonPlaybookCard({
+      key: "cangkun",
+      label: "苍坤上人洞府",
+      subtitle: "阶段 / 路线 / 113 边界",
+      summary: cangkun,
+      statusText: cangkun ? dungeonPlaybookStatusText(cangkun) : "等待近期苍坤线索",
+      mainAdvice: cangkunPlaybookAdvice(cangkun, guides.cangkun),
+      chips: cangkunPlaybookChips(cangkun, guides.cangkun),
+      commands: cangkunPlaybookCommands(cangkun, guides.cangkun),
+      guideLabel: "苍坤攻略",
+    })}
+  `;
+}
+
+function renderDungeonPlaybookCard({ key, label, subtitle, summary, statusText, mainAdvice, chips, commands, guideLabel }) {
+  const latestId = summary?.latestMessage?.id || "";
+  const live = summary && ["open", "joined", "choice", "active"].includes(summary.statusKind);
+  return `
+    <article class="dungeon-playbook-card ${escapeAttr(key)} ${live ? "live" : ""}" data-dungeon-playbook="${escapeAttr(key)}">
+      <div class="dungeon-playbook-head">
+        <div>
+          <span>${escapeHtml(subtitle || "")}</span>
+          <strong>${escapeHtml(label || "副本")}</strong>
+        </div>
+        <small>${escapeHtml(statusText || "")}</small>
+      </div>
+      ${mainAdvice ? `
+        <p class="dungeon-playbook-advice">
+          <strong>${escapeHtml(mainAdvice.title || "")}</strong>
+          <span>${escapeHtml(mainAdvice.text || "")}</span>
+        </p>
+      ` : ""}
+      ${chips.length ? `
+        <div class="dungeon-playbook-chips">
+          ${chips.map(([chipLabel, value]) => `<span><b>${escapeHtml(chipLabel)}</b>${escapeHtml(value)}</span>`).join("")}
+        </div>
+      ` : ""}
+      <div class="dungeon-playbook-actions">
+        ${(commands || []).slice(0, 4).map((command) => `<button type="button" data-playbook-command="${escapeAttr(command)}">${escapeHtml(command)}</button>`).join("")}
+        <button type="button" data-playbook-guide="${escapeAttr(key)}">${escapeHtml(guideLabel || "攻略")}</button>
+        ${latestId ? `<button type="button" data-playbook-jump="${escapeAttr(latestId)}">最新消息</button>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function latestDungeonByName(summaries, keyword) {
+  const needle = String(keyword || "");
+  return (summaries || []).find((item) => String(item.dungeonName || "").includes(needle)) || null;
+}
+
+function dungeonPlaybookStatusText(summary) {
+  const parts = [
+    summary.status || "",
+    summary.dungeonId ? `#${summary.dungeonId}` : "",
+    formatChatTime(summary.latestMessage?.time) || "",
+  ].filter(Boolean);
+  return parts.join(" / ");
+}
+
+function xutianPlaybookAdvice(summary, guide) {
+  if (summary?.advice || summary?.adviceBasis) {
+    return {
+      title: summary.advice || summary.routeVerdict || "看卦象",
+      text: summary.adviceBasis || summary.adviceConfidence || "按当前副本消息里的卦象和队伍契合判断。",
+    };
+  }
+  const counts = guide?.counts || {};
+  const total = Number(counts.explicit || 0) + Number(counts.success || 0) + Number(counts.failure || 0);
+  return {
+    title: "先看明示,再看顺例/反例",
+    text: total ? `样本库已有 ${formatNumber(total)} 条,优先明示,反例只用于避坑。` : "暂无样本统计,等虚天消息出现后再判断。",
+  };
+}
+
+function cangkunPlaybookAdvice(summary, guide) {
+  if (summary?.cangkunAdvice) {
+    return {
+      title: `${summary.cangkunAdvice.stage || "苍坤"}: ${summary.cangkunAdvice.label || "看原文"}`,
+      text: summary.cangkunAdvice.reason || "按当前阶段建议处理。",
+    };
+  }
+  return {
+    title: `默认 ${guide?.default_route || "1 -> 1 -> 2"}`,
+    text: "主线按 112 收束;113/五幕 3 是明确高风险贪法。",
+  };
+}
+
+function xutianPlaybookChips(summary, guide) {
+  return [
+    ["卦象", summary?.oracle || "未读"],
+    ["路线", summary?.route || "待定"],
+    ["阵策", summary?.strategy || "待定"],
+    ["明示", formatNumber(guide?.counts?.explicit || 0)],
+    ["反例", formatNumber(guide?.counts?.failure || 0)],
+  ].filter(([, value]) => value);
+}
+
+function cangkunPlaybookChips(summary, guide) {
+  const stateRows = summary?.cangkunAdvice?.stateRows || [];
+  const state = new Map(stateRows);
+  return [
+    ["默认线", guide?.default_route || "1 -> 1 -> 2"],
+    ["阶段", summary?.latestStage || summary?.cangkunAdvice?.stage || "待定"],
+    ["推荐", summary?.cangkunAdvice?.label || "夺图先遁"],
+    ["裂隙", state.get("禁制裂隙") || ""],
+    ["卷轴", state.get("卷轴线索") || ""],
+  ].filter(([, value]) => value);
+}
+
+function xutianPlaybookCommands(summary) {
+  const commands = [];
+  for (const route of splitDungeonChoices(summary?.route)) {
+    if (route.includes("冰")) commands.push(".选择道路 冰");
+    if (route.includes("火")) commands.push(".选择道路 火");
+  }
+  for (const strategy of splitDungeonChoices(summary?.strategy)) {
+    if (strategy.includes("稳")) commands.push(".阵策 稳");
+    if (strategy.includes("压")) commands.push(".阵策 压");
+    if (strategy.includes("势")) commands.push(".阵策 势");
+  }
+  return [...new Set(commands)];
+}
+
+function cangkunPlaybookCommands(summary, guide) {
+  const commands = [];
+  if (summary?.cangkunAdvice?.command) commands.push(summary.cangkunAdvice.command);
+  for (const command of guide?.default_commands || []) commands.push(command);
+  return [...new Set(commands)];
+}
+
+function splitDungeonChoices(value) {
+  return String(value || "")
+    .split(/[\/／、；,，\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function bindDungeonPlaybookPanels(root) {
+  root.onclick = async (event) => {
+    const button = event.target?.closest?.("button");
+    if (!button || !root.contains(button)) return;
+    if (button.dataset.playbookCommand !== undefined) {
+      const command = button.dataset.playbookCommand || "";
+      if (!command) return;
+      closeModal();
+      fillDirectSendComposer(command, {
+        statusText: "已填入副本命令，请确认后发送。",
+        statusKind: "info",
+      });
+      return;
+    }
+    if (button.dataset.playbookGuide === "xutian") {
+      await openXutianOracleGuideModal();
+      return;
+    }
+    if (button.dataset.playbookGuide === "cangkun") {
+      await openCangkunGuideModal();
+      return;
+    }
+    if (button.dataset.playbookJump !== undefined) {
+      const id = button.dataset.playbookJump || "";
+      let target = state.messages.find((message) => message.id === id);
+      if (!target) target = await fetchMessageById(id);
+      if (target) {
+        closeModal();
+        jumpToMessage(target);
+      }
+    }
+  };
 }
 
 function renderCurrentDungeonPanel(summary) {

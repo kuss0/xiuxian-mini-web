@@ -69,6 +69,95 @@ MESSAGES = [
 ]
 
 
+DUNGEON_SUMMARIES = [
+    {
+        "key": "虚天殿:777",
+        "latest_seq": 1002,
+        "dungeon_id": "777",
+        "dungeon_name": "虚天殿",
+        "status": "需要抉择",
+        "status_kind": "choice",
+        "latest_stage": "二阶段",
+        "opened_by": "MayaLing",
+        "capacity": "3/5",
+        "oracle": "兑泽上离火下 · 四爻转阵",
+        "advice": "冰路 / 稳策",
+        "route_verdict": "顺合",
+        "advice_basis": "明示优先,顺例辅助,反例只用于避坑。",
+        "advice_confidence": "实测顺合",
+        "team_fit": "顺卦",
+        "route": "冰",
+        "strategy": "稳",
+        "context_source": "cache",
+        "message_count": 1,
+        "join_success": [],
+        "failures": [],
+        "actions": [
+            {"command": ".选择道路 冰", "label": "冰路", "source_seq": 1002},
+            {"command": ".阵策 稳", "label": "稳策", "source_seq": 1002},
+        ],
+        "messages": [
+            {
+                "seq": 1002,
+                "id": "tg:-1:1002",
+                "title": "虚天殿二阶段",
+                "summary": "卦象顺合,建议冰路 / 稳策。",
+                "time": "2026-05-23T12:01:00+08:00",
+                "chat_id": -1,
+                "msg_id": 1002,
+            }
+        ],
+    },
+    {
+        "key": "苍坤上人洞府:16",
+        "latest_seq": 1003,
+        "dungeon_id": "16",
+        "dungeon_name": "苍坤上人洞府",
+        "status": "需要抉择",
+        "status_kind": "choice",
+        "latest_stage": "第五幕",
+        "opened_by": "MayaLing",
+        "capacity": "5/5",
+        "context_source": "cache",
+        "message_count": 1,
+        "join_success": [],
+        "failures": [],
+        "cangkun_state": {
+            "禁制裂隙": "106",
+            "神魂稳度": "104",
+            "慕兰警戒": "49",
+            "贪念": "18",
+            "卷轴线索": "3",
+        },
+        "cangkun_advice": {
+            "stage": "第五幕",
+            "command": ".苍坤抉择 2",
+            "choice": "2",
+            "label": "夺图先遁",
+            "stance": "default",
+            "reason": "历史成功路线均以五幕 2 收束,113/五幕 3 不作为常规打法。",
+            "avoid": ".苍坤抉择 3",
+            "state_rows": [["禁制裂隙", "106"], ["卷轴线索", "3"]],
+        },
+        "actions": [
+            {"command": ".苍坤抉择 2", "label": "夺图先遁", "source_seq": 1003},
+            {"command": ".苍坤抉择 3", "label": "暗藏后手", "source_seq": 1003},
+        ],
+        "messages": [
+            {
+                "seq": 1003,
+                "id": "tg:-1:1003",
+                "title": "苍坤上人洞府·第五幕",
+                "summary": "禁制裂隙106 / 卷轴线索3,默认夺图先遁。",
+                "time": "2026-05-23T12:02:00+08:00",
+                "chat_id": -1,
+                "msg_id": 1003,
+            }
+        ],
+    },
+]
+
+
 def api_payload(path: str, query: dict[str, list[str]]) -> dict:
     if path == "/api/channels":
         return {"ok": True, "channels": CHANNELS}
@@ -146,7 +235,22 @@ def api_payload(path: str, query: dict[str, list[str]]) -> dict:
     if path == "/api/message-audit":
         return {"ok": True, "status": "ok", "gap_count": 0, "gaps": []}
     if path == "/api/dungeon-status":
-        return {"ok": True, "summaries": [], "notes": [], "raw_count": 0, "total_summaries": 0}
+        return {
+            "ok": True,
+            "summaries": DUNGEON_SUMMARIES,
+            "notes": [],
+            "raw_count": len(DUNGEON_SUMMARIES),
+            "total_summaries": len(DUNGEON_SUMMARIES),
+            "context_mode": "cache",
+        }
+    if path == "/api/cangkun-guide":
+        return {
+            "ok": True,
+            "default_route": "1 -> 1 -> 2",
+            "default_commands": [".苍坤抉择 1", ".苍坤抉择 1", ".苍坤抉择 2"],
+        }
+    if path == "/api/xutian-oracle-guide":
+        return {"ok": True, "counts": {"explicit": 2, "success": 4, "failure": 2}}
     if path == "/api/resource-stats":
         return {"ok": True, "period": "day", "sources": [], "summary": {}, "rows": []}
     if path == "/api/health":
@@ -218,6 +322,23 @@ PROBE_SCRIPT = """
     var hit = document.elementFromPoint(x, y);
     return Boolean(hit && (hit === node || node.contains(hit)));
   }
+  function hitDetail(selector) {
+    var node = document.querySelector(selector);
+    if (!node) return JSON.stringify({ missing: true, selector: selector });
+    var box = node.getBoundingClientRect();
+    var x = Math.max(0, Math.min(window.innerWidth - 1, box.left + box.width / 2));
+    var y = Math.max(0, Math.min(window.innerHeight - 1, box.top + box.height / 2));
+    var hit = document.elementFromPoint(x, y);
+    return JSON.stringify({
+      target: selector,
+      point: [x, y],
+      hitTag: hit && hit.tagName,
+      hitId: hit && hit.id,
+      hitClass: hit && hit.className,
+      hitText: hit && String(hit.textContent || "").trim().slice(0, 80),
+      targetRect: box
+    });
+  }
   await wait(1600);
   var shell = document.querySelector(".workspace-tools-shell");
   if (shell) shell.open = true;
@@ -254,6 +375,33 @@ PROBE_SCRIPT = """
     JSON.stringify(boxes.health));
   check("hotbar does not cover composer", boxes.hotbar.bottom <= boxes.composer.bottom + 1,
     JSON.stringify({ hotbar: boxes.hotbar, composer: boxes.composer }));
+  if (shell) shell.open = false;
+  await wait(120);
+  boxes.dungeonTrigger = rect("#dungeonStatusButton");
+  check("dungeon status trigger visible", visible(boxes.dungeonTrigger, 60, 28), JSON.stringify(boxes.dungeonTrigger));
+  check("dungeon status trigger clickable", centerHit("#dungeonStatusButton"), hitDetail("#dungeonStatusButton"));
+  var dungeonButton = document.querySelector("#dungeonStatusButton");
+  if (dungeonButton) dungeonButton.click();
+  await wait(800);
+  boxes.dungeonModal = rect(".dungeon-status-modal");
+  boxes.dungeonModalBody = rect(".dungeon-status-modal .modal-body");
+  boxes.dungeonPlaybooks = rect("#dungeonPlaybookPanels");
+  boxes.xutianPlaybook = rect('[data-dungeon-playbook="xutian"]');
+  boxes.cangkunPlaybook = rect('[data-dungeon-playbook="cangkun"]');
+  boxes.playbookCommand = rect("[data-playbook-command]");
+  boxes.playbookGuide = rect("[data-playbook-guide]");
+  var playbookOverflow = document.querySelector("#dungeonPlaybookPanels") ?
+    document.querySelector("#dungeonPlaybookPanels").scrollWidth - document.querySelector("#dungeonPlaybookPanels").clientWidth : 0;
+  check("dungeon modal visible", visible(boxes.dungeonModal, Math.min(300, window.innerWidth - 40), 260), JSON.stringify(boxes.dungeonModal));
+  check("dungeon modal within viewport", boxes.dungeonModal.left >= -1 && boxes.dungeonModal.right <= window.innerWidth + 1,
+    JSON.stringify(boxes.dungeonModal));
+  check("dungeon playbook panels visible", visible(boxes.dungeonPlaybooks, 240, 120), JSON.stringify(boxes.dungeonPlaybooks));
+  check("xutian playbook visible", visible(boxes.xutianPlaybook, 120, 90), JSON.stringify(boxes.xutianPlaybook));
+  check("cangkun playbook visible", visible(boxes.cangkunPlaybook, 120, 90), JSON.stringify(boxes.cangkunPlaybook));
+  check("dungeon playbooks do not overflow", playbookOverflow <= 1, String(playbookOverflow));
+  check("playbook command button clickable", visible(boxes.playbookCommand, 48, 26) && centerHit("[data-playbook-command]"),
+    hitDetail("[data-playbook-command]"));
+  check("playbook guide button exists", visible(boxes.playbookGuide, 48, 26), JSON.stringify(boxes.playbookGuide));
   var result = {
     ok: checks.every(function(item) { return item.ok; }) && window.__layoutProbeErrors.length === 0,
     viewport: { width: window.innerWidth, height: window.innerHeight },

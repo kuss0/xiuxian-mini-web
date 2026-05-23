@@ -175,6 +175,54 @@ def test_chat_viewport_layout_contract_keeps_composer_visible():
         assert fragment in final_contract
 
 
+def test_dungeon_playbook_panel_contract_is_read_only_until_composer_send():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    css = (root / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+
+    required_app_fragments = [
+        'id="dungeonPlaybookPanels"',
+        "/api/cangkun-guide",
+        "/api/xutian-oracle-guide",
+        "function renderDungeonPlaybookPanels",
+        "function renderDungeonPlaybookCard",
+        "function bindDungeonPlaybookPanels",
+        "data-playbook-command",
+        "data-playbook-guide",
+        "data-playbook-jump",
+        'label: "虚天殿"',
+        'label: "苍坤上人洞府"',
+        "113/五幕 3",
+        "默认 ${guide?.default_route || \"1 -> 1 -> 2\"}",
+        "fillDirectSendComposer(command",
+        "openXutianOracleGuideModal",
+        "openCangkunGuideModal",
+    ]
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+
+    handler_start = app_js.index("function bindDungeonPlaybookPanels(root)")
+    handler_end = app_js.index("function renderCurrentDungeonPanel", handler_start)
+    playbook_handler = app_js[handler_start:handler_end]
+    assert 'statusText: "已填入副本命令，请确认后发送。"' in playbook_handler
+    assert "postJson(" not in playbook_handler
+    assert "sendDirectComposerMessage" not in playbook_handler
+    assert '"/api/skills/send"' not in playbook_handler
+
+    required_css_fragments = [
+        ".dungeon-playbook-panels {\n  display: grid;\n  grid-template-columns: repeat(2, minmax(0, 1fr));",
+        ".dungeon-playbook-card.xutian",
+        ".dungeon-playbook-card.cangkun",
+        ".dungeon-playbook-actions button",
+        "@media (max-width: 720px)",
+        ".dungeon-playbook-panels {\n    grid-template-columns: 1fr;",
+        ".dungeon-playbook-head {\n    display: grid;",
+        ".dungeon-playbook-head small {\n    max-width: none;\n    text-align: left;",
+    ]
+    for fragment in required_css_fragments:
+        assert fragment in css
+
+
 def test_sample_store_filters_by_secondary_channel():
     messages = [card.to_api() for card in SampleStore().list_cards("dungeon")]
     assert len(messages) == 1

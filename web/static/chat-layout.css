@@ -460,6 +460,21 @@ body {
   .chat-client-shell {
     width: 100%;
     max-width: 100%;
+    grid-template-rows: clamp(140px, 24dvh, 190px) minmax(0, 1fr);
+  }
+
+  .chat-client-shell .conversation-rail {
+    grid-column: 1;
+    grid-row: 1;
+    position: relative;
+    z-index: 2;
+  }
+
+  .chat-client-shell .chat-workspace {
+    grid-column: 1;
+    grid-row: 2;
+    position: relative;
+    z-index: auto;
   }
 
   .chat-client-shell .chat-pane .section-head {
@@ -468,5 +483,11 @@ body {
 
   .chat-client-shell .workspace-tools-panel .tool-panel .sidebar-toolbox {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .chat-client-shell {
+    grid-template-rows: clamp(136px, 24dvh, 168px) minmax(0, 1fr);
   }
 }

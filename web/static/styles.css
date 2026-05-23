@@ -3497,6 +3497,123 @@ button.health-chip:hover {
   margin-bottom: 8px;
 }
 
+.dungeon-playbook-panels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.dungeon-playbook-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-left: 4px solid rgba(96, 165, 250, 0.7);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(15, 23, 42, 0.86), rgba(30, 41, 59, 0.66)),
+    var(--surface-2);
+  padding: 12px;
+}
+
+.dungeon-playbook-card.live {
+  border-left-color: #f59e0b;
+}
+
+.dungeon-playbook-card.cangkun {
+  border-left-color: rgba(34, 197, 94, 0.82);
+}
+
+.dungeon-playbook-card.xutian {
+  border-left-color: rgba(245, 158, 11, 0.82);
+}
+
+.dungeon-playbook-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dungeon-playbook-head > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dungeon-playbook-head span,
+.dungeon-playbook-head small,
+.dungeon-playbook-advice span,
+.dungeon-playbook-chips span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.dungeon-playbook-head strong {
+  min-width: 0;
+  color: var(--text);
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.dungeon-playbook-head small {
+  flex: 0 0 auto;
+  max-width: 45%;
+  text-align: right;
+}
+
+.dungeon-playbook-advice {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  border-left: 3px solid rgba(96, 165, 250, 0.5);
+  padding-left: 9px;
+}
+
+.dungeon-playbook-advice strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.dungeon-playbook-chips,
+.dungeon-playbook-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.dungeon-playbook-chips span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.46);
+  padding: 4px 8px;
+}
+
+.dungeon-playbook-chips b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.dungeon-playbook-actions button {
+  min-height: 30px;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.12);
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.dungeon-playbook-actions button:hover {
+  border-color: rgba(96, 165, 250, 0.54);
+  color: #bfdbfe;
+}
+
 .dungeon-current-panel {
   display: grid;
   gap: 12px;
@@ -4451,6 +4568,19 @@ button.health-chip:hover {
     grid-template-columns: 1fr;
   }
 
+  .dungeon-playbook-panels {
+    grid-template-columns: 1fr;
+  }
+
+  .dungeon-playbook-head {
+    display: grid;
+  }
+
+  .dungeon-playbook-head small {
+    max-width: none;
+    text-align: left;
+  }
+
   .dungeon-current-main {
     flex-direction: column;
   }
@@ -4508,6 +4638,7 @@ button.health-chip:hover {
   max-height: calc(100vh - 40px);
   display: flex;
   flex-direction: column;
+  min-height: 0;
   border-radius: 12px;
   background: var(--surface);
   box-shadow: 0 24px 60px rgba(15, 22, 32, 0.35);
@@ -4516,6 +4647,7 @@ button.health-chip:hover {
 
 .modal-head {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -4545,6 +4677,8 @@ button.health-chip:hover {
 }
 
 .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 16px 18px;
   overflow: auto;
   display: grid;
@@ -4553,6 +4687,7 @@ button.health-chip:hover {
 
 .modal-actions {
   display: flex;
+  flex: 0 0 auto;
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 18px;
