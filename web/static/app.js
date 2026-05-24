@@ -2666,7 +2666,6 @@ function settingsDeps() {
     loadSettings,
     loadTelegramDialogs,
     loadTelegramTopics,
-    renderAccountList,
     renderDialogOptions,
     renderTopicOptions,
     rerenderSettings: renderSettings,
@@ -2684,72 +2683,6 @@ function settingsDeps() {
 
 function renderSettings(settings) {
   return settingsView().renderSettings(settingsDeps(), settings);
-}
-
-function renderAccountList() {
-  if (!state.accounts.length) {
-    return `<p class="empty inline">还没有 Telegram 账号。点右上角「+ 登录账号」把账号挂上来,把消息搬进消息箱。</p>`;
-  }
-  const running = state.listenerSummary?.running || {};
-  const collector = state.listenerSummary?.collector || "";
-  return state.accounts
-    .map((account) => {
-      const listener = running[account.local_id] || {};
-      const listenerStatus = listener.status || account.listener_status || "stopped";
-      const isCollecting = collector === account.local_id || listenerStatus === "running" || listenerStatus === "starting" || listenerStatus === "reconnecting";
-      const loginStatus = account.login_status || "idle";
-      const loginPill = renderAccountStatusPill(loginStatus);
-      const collectPill = isCollecting
-        ? (listenerStatus === "reconnecting"
-          ? '<span class="status-pill warn">重连中</span>'
-          : '<span class="status-pill ok">采集中</span>')
-        : listenerStatus === "error"
-          ? `<span class="status-pill risk">采集出错</span>`
-          : '<span class="status-pill">未采集</span>';
-      const subtitle = [
-        account.phone || "未填手机号",
-        account.account_id ? `account_id ${account.account_id}` : "",
-      ]
-        .filter(Boolean)
-        .join("｜");
-      return `
-        <article class="account-row" data-account-id="${escapeAttr(account.local_id)}">
-          <span class="account-row-dot ${isCollecting ? "live" : loginStatus === "done" ? "ok" : loginStatus === "error" ? "warn" : "idle"}" aria-hidden="true"></span>
-          <div class="account-row-body">
-            <div class="account-row-title">
-              <strong>${escapeHtml(account.label || account.local_id)}</strong>
-              <span class="account-row-meta">${escapeHtml(subtitle)}</span>
-            </div>
-            <div class="account-row-pills">
-              ${loginPill}
-              ${collectPill}
-            </div>
-          </div>
-          <div class="account-row-actions">
-            <label class="switch" title="切到这个账号采集消息;同时只能一个">
-              <input type="checkbox" data-account-action="toggle-collect" data-account-id="${escapeAttr(account.local_id)}" ${isCollecting ? "checked" : ""} />
-              <span></span>
-            </label>
-            <button type="button" data-account-action="open-edit" data-account-id="${escapeAttr(account.local_id)}">${loginStatus === "done" ? "编辑" : "登录"}</button>
-            <button type="button" class="danger-link" data-account-action="delete" data-account-id="${escapeAttr(account.local_id)}" title="删除账号">删除</button>
-          </div>
-        </article>
-      `;
-    })
-    .join("");
-}
-
-function renderAccountStatusPill(status) {
-  if (status === "done") {
-    return '<span class="status-pill ok">已登录</span>';
-  }
-  if (status === "waiting_code" || status === "need_2fa") {
-    return `<span class="status-pill warn">${status === "need_2fa" ? "需要 2FA" : "等验证码"}</span>`;
-  }
-  if (status === "error") {
-    return '<span class="status-pill risk">登录出错</span>';
-  }
-  return '<span class="status-pill">未登录</span>';
 }
 
 function renderIdentityList() {

@@ -157,7 +157,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "direct composer, emoji palette, and quick command hotbar live in `web/static/views/direct_composer.js`" in normalized_work_plan
     assert "detail rich cards and field formatting live in `web/static/views/detail_cards.js`" in normalized_work_plan
     assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
-    assert "access settings modal and automation guard form live in `web/static/views/settings.js`" in normalized_work_plan
+    assert "access settings modal, automation guard form, and read-only Telegram account list live in `web/static/views/settings.js`" in normalized_work_plan
     assert "Outbox automation guard logic lives in `backend/outbox/automation.py`" in normalized_work_plan
     assert "sender adapters live in `backend/outbox/adapters.py`" in normalized_work_plan
     assert "optional queue worker lives in `backend/outbox/worker.py`" in normalized_work_plan
@@ -188,7 +188,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "Unknown commands, empty skill allowlists, non-allowlisted skills" in audit
     assert "unsupported adapters" in audit
     assert "`web/static/views/outbox.js` renders outbox drafts, send plans, backend automation decisions" in audit
-    assert "access settings modal and automation guard form are isolated in `web/static/views/settings.js`" in audit
+    assert "access settings modal, automation guard form, and read-only Telegram account list are isolated in `web/static/views/settings.js`" in audit
     assert "`web/static/app.js` keeps `/api/settings`, login, notification-test, and outbox automation API wrappers" in audit
     assert "`backend/outbox/adapters.py` owns sender adapter dispatch" in audit
     assert "`backend/outbox/worker.py` consumes only `auto_pending` drafts" in audit
@@ -860,7 +860,6 @@ def test_settings_view_module_keeps_wrappers_and_api_boundary_contract():
         'loadNotifyCardTitles: () => fetchJson("/api/notify/card-titles")',
         "loadTelegramDialogs,",
         "loadTelegramTopics,",
-        "renderAccountList,",
         "renderDialogOptions,",
         "renderTopicOptions,",
         "saveCurrentSettingsFromForm,",
@@ -873,6 +872,9 @@ def test_settings_view_module_keeps_wrappers_and_api_boundary_contract():
         "function settingsState(deps = {})",
         "function renderSettings(deps = {}, settings = {})",
         "function renderSettingsBody(deps = {}, state = {}, settings = {})",
+        "${renderAccountList(deps)}",
+        "function renderAccountList(deps = {})",
+        "function renderAccountStatusPill(status)",
         "function bindSettingsModal(deps = {}, dialog, settings = {})",
         "function settingsPayloadFromForm(form)",
         "function hydrateNotifySection(deps = {}, settings = {}, root = document)",
@@ -887,11 +889,15 @@ def test_settings_view_module_keeps_wrappers_and_api_boundary_contract():
         "deps.bindAccountControls?.(root)",
         "window.MiniwebViews.settings = {",
         "renderSettings,",
+        "renderAccountList,",
+        "renderAccountStatusPill,",
         "settingsPayloadFromForm,",
         "hydrateNotifySection,",
     ]
     forbidden_app_fragments = [
         "async function _hydrateNotifySection(",
+        "function renderAccountList()",
+        "function renderAccountStatusPill(status)",
         "const botIds = (settings.game_bot_ids || []).join",
         "const automationSkillKeys = (settings.automation_allowed_skill_keys || []).join",
     ]
