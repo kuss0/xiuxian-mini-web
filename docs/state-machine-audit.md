@@ -121,8 +121,8 @@ do not prove success.
 | --- | --- |
 | State source | The selected message card, current detail mode, focus archive settings, and the draft notice map. |
 | Trigger | Selecting a message or opening overview renders the detail panel; action buttons can fill the composer, copy, generate a send plan, enqueue a draft, or open focus archive tools. |
-| Refresh path | The message detail panel and manual action controls are isolated in `web/static/views/detail_panel.js`, with `web/static/app.js` keeping API and composer dependencies as injected callbacks. |
-| Failure/manual fallback | Detail panel actions fill the composer or create manual plans/drafts only. The module does not call send APIs or create direct API requests; `/api/skills/send` remains reachable only through the bottom composer confirmation path. |
+| Refresh path | The message detail panel and manual action controls are isolated in `web/static/views/detail_panel.js`; the focus archive rule modal is isolated in `web/static/views/focus_archive.js`, with `/api/focus-exclude/preview` injected from `web/static/app.js`. |
+| Failure/manual fallback | Detail panel actions fill the composer or create manual plans/drafts only. The detail and focus-archive modules do not call send APIs or create direct API requests; `/api/skills/send` remains reachable only through the bottom composer confirmation path. |
 | Current gap | Detail action behavior still depends on the parsed action suggestions attached to each message, so ambiguous game replies should remain visible for manual review. |
 | Next action | Keep new detail actions dependency-injected and test that no direct send or API call enters the detail panel module. |
 

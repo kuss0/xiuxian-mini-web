@@ -106,7 +106,9 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      quick command hotbar live in `web/static/views/direct_composer.js`; detail
      rich cards and field formatting live in `web/static/views/detail_cards.js`;
      the message detail panel and manual action controls live in
-     `web/static/views/detail_panel.js`; the access settings modal, automation
+     `web/static/views/detail_panel.js`; the focus archive rule modal lives in
+     `web/static/views/focus_archive.js` with preview API injected from
+     `web/static/app.js`; the access settings modal, automation
      guard form, Telegram dialog/topic option renderers, and read-only
      Telegram account list live in
      `web/static/views/settings.js`; the Telegram account login/logout modals,

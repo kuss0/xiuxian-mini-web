@@ -2372,6 +2372,7 @@ function openFocusArchiveModal(message, mode) {
     formatChatTime,
     message,
     mode,
+    previewFocusExcludePattern: (payload) => postJson("/api/focus-exclude/preview", payload),
   });
 }
 

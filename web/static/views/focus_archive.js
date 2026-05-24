@@ -2,7 +2,6 @@
 (function () {
   "use strict";
 
-  const { postJson } = window.MiniwebApi;
   const { closeModal, openModal } = window.MiniwebModal;
   const { clipGraphemes, escapeHtml } = window.MiniwebFormat;
 
@@ -11,6 +10,7 @@
     formatChatTime,
     message,
     mode,
+    previewFocusExcludePattern,
   }) {
     const text = focusArchiveBaseText(message);
     const title = mode === "contains" ? "归档包含短语" : "归档这句话";
@@ -59,7 +59,10 @@
       applyButton.disabled = true;
       setStatus("info", "正在预览…");
       try {
-        lastPreview = await postJson("/api/focus-exclude/preview", { mode, text: value });
+        if (typeof previewFocusExcludePattern !== "function") {
+          throw new Error("focusArchive missing dependency: previewFocusExcludePattern");
+        }
+        lastPreview = await previewFocusExcludePattern({ mode, text: value });
         if (!lastPreview.ok) throw new Error(lastPreview.error || "预览失败");
         previewBox.innerHTML = renderFocusArchivePreview(lastPreview, { formatChatTime });
         setStatus("ok", `规则已生成：${lastPreview.pattern}`);
