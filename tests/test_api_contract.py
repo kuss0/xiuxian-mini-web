@@ -146,6 +146,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "cultivation status modal and timers live in `web/static/views/cultivation.js`" in normalized_work_plan
     assert "overview detail panel lives in `web/static/views/overview.js`" in normalized_work_plan
     assert "quest tracker and manual action-fill flow live in `web/static/views/quest_tracker.js`" in normalized_work_plan
+    assert "game scene board and manual scene actions live in `web/static/views/game_scene.js`" in normalized_work_plan
     assert "resource stats modal and coverage renderer live in `web/static/views/resource_stats.js`" in normalized_work_plan
     assert "world report modal lives in `web/static/views/world_report.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
@@ -404,6 +405,59 @@ def test_quest_tracker_view_module_keeps_wrappers_and_manual_fill_contract():
         assert fragment in quest_tracker_js
     for fragment in forbidden_module_fragments:
         assert fragment not in quest_tracker_js
+
+
+def test_game_scene_view_module_keeps_wrappers_and_manual_action_contract():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    game_scene_js = (root / "web" / "static" / "views" / "game_scene.js").read_text(encoding="utf-8")
+
+    required_app_fragments = [
+        "function gameSceneDeps()",
+        "function gameSceneView()",
+        "function renderGameSceneBoard()",
+        "return gameSceneView().renderGameSceneBoard(gameSceneDeps())",
+        "function gameSceneSummaries()",
+        "return gameSceneView().gameSceneSummaries(gameSceneDeps())",
+        "function gameSceneCommandActions(def)",
+        "return gameSceneView().gameSceneCommandActions(gameSceneDeps(), def)",
+        "function actionableDungeonSnapshot()",
+        "return gameSceneView().actionableDungeonSnapshot(gameSceneDeps())",
+        "async function openGameScenePanel(panel)",
+        "return gameSceneView().openGameScenePanel(gameSceneDeps(), panel)",
+        "fillSkillIntoComposer,",
+        "fillDirectSendComposer,",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: game scene board and manual scene actions",
+        "function renderGameSceneBoard(deps = {})",
+        "function bindGameSceneBoard(deps = {}, gameSceneBoard)",
+        "function gameSceneDefs()",
+        "function gameSceneSummaries(deps = {})",
+        "function gameSceneSnapshot(deps = {}, def)",
+        "function gameSceneSkillActions(deps = {}, def)",
+        "function gameSceneCommandActions(deps = {}, def)",
+        "function actionableDungeonSnapshot(deps = {})",
+        "async function openGameScenePanel(deps = {}, panel)",
+        "window.MiniwebViews.gameScene = {",
+        "renderGameSceneBoard,",
+        "gameSceneSummaries,",
+        "openGameScenePanel,",
+        "deps.fillSkillIntoComposer?.(button.dataset.sceneSkill || \"\", button)",
+        "deps.fillDirectSendComposer?.(action.command, {",
+        "statusText: \"已填入副本动作，请确认原文后发送。\"",
+    ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "sendDirectComposerMessage",
+        '"/api/skills/send"',
+    ]
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in game_scene_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in game_scene_js
 
 
 def test_frontend_identity_state_refresh_is_first_class():

@@ -3119,417 +3119,95 @@ function renderWorldEventStrip() {
   });
 }
 
+function gameSceneDeps() {
+  return {
+    state,
+    gameSceneBoard,
+    compareMessagesByRecency,
+    summarySignalMessages,
+    formatChatTime,
+    displaySource,
+    identityById,
+    activeIdentityPatches,
+    identityProfileSourceRows,
+    liveResourceSnapshot,
+    formatResourceAmount,
+    normalizeDungeonStatusSummary,
+    pickCurrentDungeonSummary,
+    visibleDungeonActions,
+    compareActionableDungeonSummary,
+    liveMessagePreview,
+    overviewModuleRows,
+    skillByKey,
+    skillIsUnlocked,
+    fmtCountdown,
+    applyChannelSelection,
+    showSkillToast,
+    openIdentityStatusModal,
+    openResourceStatsModal,
+    openDungeonStatusModal,
+    openXutianOracleGuideModal,
+    openLeaderIntelModal,
+    openHealthModal,
+    showError,
+    fillSkillIntoComposer,
+    findOrFetchMessage,
+    fillDirectSendComposer,
+    directReplyContextFromAction,
+    jumpToMessage,
+  };
+}
+
+function gameSceneView() {
+  return window.MiniwebViews.gameScene;
+}
+
 function renderGameSceneBoard() {
-  if (!gameSceneBoard) return;
-  const scenes = gameSceneSummaries();
-  gameSceneBoard.innerHTML = scenes.map((scene) => `
-    <article class="game-scene-card ${escapeAttr(scene.kind)} ${scene.message ? "" : "empty"}">
-      <button type="button" class="game-scene-main" data-scene-channel="${escapeAttr(scene.channel)}">
-        <span class="game-scene-icon">${escapeHtml(scene.icon)}</span>
-        <span class="game-scene-title">
-          <strong>${escapeHtml(scene.title)}</strong>
-          <small>${escapeHtml(scene.subtitle)}</small>
-        </span>
-        <span class="game-scene-count">${escapeHtml(formatNumber(scene.count))}</span>
-        <em>${escapeHtml(scene.preview)}</em>
-        ${scene.badges && scene.badges.length ? `
-          <span class="game-scene-badges">
-            ${scene.badges.map((badge) => `
-              <span class="${escapeAttr(badge.kind || "")}">
-                <b>${escapeHtml(badge.label)}</b>${escapeHtml(String(badge.value))}
-              </span>
-            `).join("")}
-          </span>
-        ` : ""}
-      </button>
-      ${scene.skillActions && scene.skillActions.length ? `
-        <div class="game-scene-skill-actions">
-          ${scene.skillActions.map((action) => `
-            <button type="button" class="${escapeAttr(action.cls)}"
-                    ${action.disabled ? "disabled" : ""}
-                    data-scene-skill="${escapeAttr(action.key)}"
-                    title="${escapeAttr(action.title)}">
-              ${action.icon ? `<span>${escapeHtml(action.icon)}</span>` : ""}
-              <strong>${escapeHtml(action.label)}</strong>
-              ${action.meta ? `<small>${escapeHtml(action.meta)}</small>` : ""}
-            </button>
-          `).join("")}
-        </div>
-      ` : ""}
-      ${scene.commandActions && scene.commandActions.length ? `
-        <div class="game-scene-skill-actions game-scene-command-actions">
-          ${scene.commandActions.map((action, index) => `
-            <button type="button" class="${escapeAttr(action.cls || "")}"
-                    data-scene-command-action="${index}"
-                    title="${escapeAttr(action.command || "")}">
-              <span>${escapeHtml(action.icon || "令")}</span>
-              <strong>${escapeHtml(action.label || action.command || "动作")}</strong>
-              ${action.meta ? `<small>${escapeHtml(action.meta)}</small>` : ""}
-            </button>
-          `).join("")}
-        </div>
-      ` : ""}
-      <div class="game-scene-actions">
-        ${scene.actions.map((action) => `
-          <button type="button" data-scene-panel="${escapeAttr(action.panel)}">${escapeHtml(action.label)}</button>
-        `).join("")}
-      </div>
-    </article>
-  `).join("");
-  gameSceneBoard.querySelectorAll("[data-scene-channel]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const channel = button.dataset.sceneChannel || "focus";
-      applyChannelSelection([channel]).catch((error) => showSkillToast(`频道加载失败: ${error.message || error}`, "err"));
-    });
-  });
-  gameSceneBoard.querySelectorAll("[data-scene-panel]").forEach((button) => {
-    button.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      await openGameScenePanel(button.dataset.scenePanel || "");
-    });
-  });
-  gameSceneBoard.querySelectorAll("[data-scene-skill]").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (button.disabled) return;
-      fillSkillIntoComposer(button.dataset.sceneSkill || "", button);
-    });
-  });
-  gameSceneBoard.querySelectorAll("[data-scene-command-action]").forEach((button) => {
-    button.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      const action = gameSceneCommandActions({ key: "dungeon" })[Number(button.dataset.sceneCommandAction || 0)];
-      if (!action?.command || !action.rawAction) return;
-      const sourceId = action.rawAction.source_message_id || "";
-      const sourceMessage = sourceId ? await findOrFetchMessage(sourceId) : null;
-      fillDirectSendComposer(action.command, {
-        replyContext: directReplyContextFromAction(action.rawAction, sourceMessage),
-        statusText: "已填入副本动作，请确认原文后发送。",
-        statusKind: "info",
-      });
-      if (sourceMessage) jumpToMessage(sourceMessage);
-    });
-  });
+  return gameSceneView().renderGameSceneBoard(gameSceneDeps());
 }
 
 function gameSceneDefs() {
-  return [
-    {
-      key: "home",
-      kind: "home",
-      icon: "府",
-      title: "洞府",
-      channel: "home",
-      channels: ["home", "mine"],
-      fallback: "洞府、角色回复和个人状态会汇入这里。",
-      modules: ["pet_touch", "pet_warm", "pet_trial", "concubine_dream", "concubine_tianji", "concubine_heart"],
-      actionSkills: ["concubine_status", "pet_touch", "pet_warm", "pet_trial", "concubine_dream", "concubine_tianji"],
-      actions: [
-        { label: "状态", panel: "status" },
-        { label: "我的", panel: "mine" },
-      ],
-    },
-    {
-      key: "training",
-      kind: "training",
-      icon: "野",
-      title: "历练",
-      channel: "training",
-      channels: ["training", "resource"],
-      fallback: "野外历练、奇遇和资源结算会汇入这里。",
-      modules: ["wild_training", "checkin", "tower", "deep_retreat", "retreat_shallow", "yuanying", "second_soul", "ranch"],
-      actionSkills: ["wild_training", "deep_retreat", "tower", "checkin", "yuanying", "second_soul_train", "retreat_shallow", "ranch"],
-      actions: [
-        { label: "资源", panel: "resource" },
-        { label: "记录", panel: "training" },
-      ],
-    },
-    {
-      key: "dungeon",
-      kind: "dungeon",
-      icon: "副",
-      title: "副本",
-      channel: "dungeon",
-      channels: ["dungeon"],
-      fallback: "副本开房、加入、卦象和推进会汇入这里。",
-      modules: [],
-      actionSkills: [],
-      actions: [
-        { label: "状态", panel: "dungeon" },
-        { label: "攻略", panel: "guide" },
-      ],
-    },
-    {
-      key: "intel",
-      kind: "leader",
-      icon: "天",
-      title: "天机",
-      channel: "leader",
-      channels: ["leader", "focus", "risk"],
-      fallback: "会长、重点、风险和新玩法线索会汇入这里。",
-      modules: ["stargazer_guide", "stargazer_soothe", "stargazer_collect", "tianti_climb", "tianti_wenxin", "tianti_gangfeng", "taiyi_cycle"],
-      actionSkills: ["tianti_status", "tianti_climb", "tianti_wenxin", "tianti_gangfeng", "stargazer_panel", "stargazer_guide", "stargazer_soothe", "taiyi", "yindao", "node_search"],
-      actions: [
-        { label: "情报", panel: "intel" },
-        { label: "健康", panel: "health" },
-      ],
-    },
-  ];
+  return gameSceneView().gameSceneDefs();
 }
 
 function gameSceneSummaries() {
-  const source = summarySignalMessages();
-  return gameSceneDefs().map((def) => {
-    const messages = source
-      .filter((message) => gameSceneMatch(def, message))
-      .sort(compareMessagesByRecency);
-    const message = messages[0] || null;
-    const snapshot = gameSceneSnapshot(def);
-    if (snapshot) {
-      return {
-        ...def,
-        ...snapshot,
-        badges: snapshot.badges || gameSceneModuleBadges(def),
-        skillActions: gameSceneSkillActions(def),
-        commandActions: gameSceneCommandActions(def),
-        count: Number(snapshot.count ?? messages.length ?? 0),
-        message: snapshot.message || message || { id: "" },
-      };
-    }
-    const subtitle = message
-      ? `${formatChatTime(message.time) || "最近"}｜${displaySource(message.source)}`
-      : "等待消息箱";
-    const preview = message
-      ? clipGraphemes(String(message.summary || message.raw || message.title || "").replace(/\s+/g, " ").trim(), 86)
-      : def.fallback;
-    return {
-      ...def,
-      count: messages.length,
-      message,
-      subtitle,
-      preview: preview || def.fallback,
-      badges: gameSceneModuleBadges(def),
-      skillActions: gameSceneSkillActions(def),
-      commandActions: gameSceneCommandActions(def),
-    };
-  });
+  return gameSceneView().gameSceneSummaries(gameSceneDeps());
 }
 
 function gameSceneSnapshot(def) {
-  if (def.key === "home") {
-    const identity = identityById(state.activeIdentityId);
-    const patches = activeIdentityPatches();
-    const patchMap = new Map(patches.map((item) => [item.key, item.value]));
-    if (!identity && !patches.length) return null;
-    const realm = patchMap.get("境界") || patchMap.get("灵根") || "角色资料";
-    const sourceRows = identityProfileSourceRows(patches);
-    return {
-      subtitle: identity ? `${identity.label || identity.username || identity.send_as_id}` : "当前身份",
-      preview: `${realm}｜资料来源 ${sourceRows.length || 0} 项`,
-      count: sourceRows.length,
-      badges: gameSceneModuleBadges(def),
-      message: sourceRows.find((row) => row.sourceMessageId) ? { id: sourceRows.find((row) => row.sourceMessageId).sourceMessageId } : null,
-    };
-  }
-  if (def.key === "training") {
-    const resource = liveResourceSnapshot();
-    if (!resource) return null;
-    const attempts = resource.wild.success + resource.wild.failed;
-    const rate = attempts ? `${Math.round((resource.wild.success * 100) / attempts)}%` : "暂无";
-    const rare = resource.rareRows.length
-      ? resource.rareRows.map((row) => `${row.resource_name}${formatResourceAmount(row.total_amount, row.unit)}`).join(" / ")
-      : "暂无稀有";
-    return {
-      subtitle: `${resource.latestPeriod || "本期"}｜野外成功率 ${rate}`,
-      preview: rare,
-      count: resource.eventCount,
-      badges: gameSceneModuleBadges(def, [{ label: "成功率", value: rate, kind: attempts ? "ok" : "muted" }]),
-    };
-  }
-  if (def.key === "dungeon") {
-    const summaries = ((state.worldSnapshot?.dungeon || {}).summaries || []).map(normalizeDungeonStatusSummary);
-    const latestSummary = summaries[0] || null;
-    const actionSummary = actionableDungeonSnapshot();
-    const summary = actionSummary || pickCurrentDungeonSummary(summaries);
-    if (!summary) return null;
-    const title = dungeonSummaryDisplayLabel(summary);
-    const latestDiffers = latestSummary && summary.key !== latestSummary.key;
-    const actionCount = visibleDungeonActions(summary).length;
-    const previewParts = [summary.advice, summary.routeVerdict, summary.latestStage, summary.openedBy].filter(Boolean);
-    if (latestDiffers) {
-      previewParts.unshift(`最新 ${dungeonSummaryDisplayLabel(latestSummary)} ${latestSummary.status || ""}`.trim());
-    }
-    return {
-      title,
-      subtitle: `${actionSummary ? "可操作" : (summary.status || "副本")}｜${formatChatTime(summary.latestMessage?.time) || "最近"}`,
-      preview: previewParts.join("｜") || "副本状态已汇总。",
-      count: Number((state.worldSnapshot?.dungeon || {}).total_summaries || summary.messageCount || 0),
-      badges: [
-        { label: "状态", value: summary.status || "副本", kind: ["open", "joined"].includes(summary.statusKind) ? "ok" : ["choice", "active"].includes(summary.statusKind) ? "warn" : "muted" },
-        { label: "动作", value: actionCount, kind: actionCount ? "warn" : "muted" },
-        latestDiffers ? { label: "最新", value: latestSummary.status || "线索", kind: "muted" } : null,
-      ].filter(Boolean),
-      message: summary.latestMessage || null,
-    };
-  }
-  if (def.key === "intel") {
-    const leaderMessages = ((state.worldSnapshot?.leader || {}).messages || []);
-    if (!leaderMessages.length) return null;
-    const first = leaderMessages[0];
-    return {
-      subtitle: `${formatChatTime(first.time) || "最近"}｜${displaySource(first.source)}`,
-      preview: liveMessagePreview(first, 86) || "会长频道消息",
-      count: leaderMessages.length,
-      badges: gameSceneModuleBadges(def, [{ label: "情报", value: leaderMessages.length, kind: leaderMessages.length ? "ok" : "muted" }]),
-      message: first,
-    };
-  }
-  return null;
+  return gameSceneView().gameSceneSnapshot(gameSceneDeps(), def);
 }
 
 function gameSceneModuleBadges(def, extras = []) {
-  const stats = gameSceneModuleStats(def?.modules || []);
-  const badges = [];
-  if (stats.total) {
-    badges.push({ label: "就绪", value: stats.ready, kind: stats.ready ? "ok" : "muted" });
-    if (stats.warn) badges.push({ label: "异常", value: stats.warn, kind: "warn" });
-    if (stats.running) badges.push({ label: "进行", value: stats.running, kind: "running" });
-    badges.push({ label: "冷却", value: stats.cooling, kind: stats.cooling ? "cooling" : "muted" });
-  }
-  return [...extras, ...badges].slice(0, 4);
+  return gameSceneView().gameSceneModuleBadges(gameSceneDeps(), def, extras);
 }
 
 function gameSceneModuleStats(keys) {
-  const wanted = new Set((keys || []).filter(Boolean));
-  if (!wanted.size) return { total: 0, ready: 0, warn: 0, running: 0, cooling: 0, unknown: 0 };
-  const activeId = Number(state.activeIdentityId || 0) || null;
-  if (!activeId) return { total: wanted.size, ready: 0, warn: 0, running: 0, cooling: 0, unknown: wanted.size };
-  const rows = overviewModuleRows(activeId).filter((row) => wanted.has(row.spec.key));
-  const stats = { total: wanted.size, ready: 0, warn: 0, running: 0, cooling: 0, unknown: 0 };
-  for (const row of rows) {
-    const cls = String(row.view?.cls || "unknown");
-    if (cls === "ready") stats.ready += 1;
-    else if (cls === "warn") stats.warn += 1;
-    else if (cls === "running") stats.running += 1;
-    else if (cls === "cooling") stats.cooling += 1;
-    else stats.unknown += 1;
-  }
-  stats.unknown += Math.max(0, wanted.size - rows.length);
-  return stats;
+  return gameSceneView().gameSceneModuleStats(gameSceneDeps(), keys);
 }
 
 function gameSceneSkillActions(def) {
-  const keys = Array.isArray(def?.actionSkills) ? def.actionSkills : [];
-  if (!keys.length) return [];
-  const activeId = Number(state.activeIdentityId || 0) || null;
-  const now = Date.now() / 1000;
-  const modulesByKey = activeId
-    ? new Map((state.identityModuleStates.get(activeId) || []).map((item) => [item.module_key, item]))
-    : new Map();
-  const seen = new Set();
-  return keys
-    .map((key) => skillByKey(key))
-    .filter(Boolean)
-    .filter((skill) => {
-      if (seen.has(skill.key)) return false;
-      seen.add(skill.key);
-      return skill.reply_mode !== "required" && String(skill.command || "").trim() && skillIsUnlocked(skill);
-    })
-    .map((skill) => {
-      const moduleState = skill.cd_module ? modulesByKey.get(skill.cd_module) : null;
-      const cdUntil = moduleState
-        ? Number((moduleState.summary && moduleState.summary.next_at) || (moduleState.state && moduleState.state.cooldown_until) || 0)
-        : 0;
-      const cooling = cdUntil > now;
-      const busy = state.skillBarBusyKeys.has(skill.key);
-      const disabled = !activeId || busy || cooling;
-      return {
-        key: skill.key,
-        label: skill.label || skill.command || skill.key,
-        icon: skill.icon || "",
-        meta: cooling ? `剩 ${fmtCountdown(cdUntil - now)}` : busy ? "发送中" : "填入",
-        cls: [cooling ? "cooling" : "ready", busy ? "busy" : ""].filter(Boolean).join(" "),
-        disabled,
-        order: (cooling ? 2 : 0) + (busy ? 1 : 0),
-        title: skill.note || skill.command || skill.label || "",
-      };
-    })
-    .sort((a, b) => a.order - b.order || String(a.label).localeCompare(String(b.label), "zh-Hans-CN"))
-    .slice(0, 4);
+  return gameSceneView().gameSceneSkillActions(gameSceneDeps(), def);
 }
 
 function gameSceneCommandActions(def) {
-  if (def?.key !== "dungeon") return [];
-  const summary = actionableDungeonSnapshot();
-  if (!summary) return [];
-  const dungeonLabel = dungeonSummaryDisplayLabel(summary);
-  return visibleDungeonActions(summary)
-    .slice(0, 4)
-    .map((action) => ({
-      label: action.label || action.command || "动作",
-      command: action.command || "",
-      icon: "副",
-      meta: dungeonLabel,
-      cls: "dungeon",
-      rawAction: action,
-    }));
+  return gameSceneView().gameSceneCommandActions(gameSceneDeps(), def);
 }
 
 function dungeonSummaryDisplayLabel(summary) {
-  if (!summary) return "副本";
-  return `${summary.dungeonName || "副本"}${summary.dungeonId ? ` #${summary.dungeonId}` : ""}`;
+  return gameSceneView().dungeonSummaryDisplayLabel(summary);
 }
 
 function actionableDungeonSnapshot() {
-  const summaries = ((state.worldSnapshot?.dungeon || {}).summaries || []).map(normalizeDungeonStatusSummary);
-  return summaries
-    .filter((summary) => ["choice", "open", "active", "joined"].includes(summary.statusKind))
-    .filter((summary) => visibleDungeonActions(summary).length > 0)
-    .sort(compareActionableDungeonSummary)[0] || null;
+  return gameSceneView().actionableDungeonSnapshot(gameSceneDeps());
 }
 
 function gameSceneMatch(def, message) {
-  if (!message) return false;
-  const channels = message.channels || [message.channel];
-  return def.channels.some((channel) => channels.includes(channel));
+  return gameSceneView().gameSceneMatch(def, message);
 }
 
 async function openGameScenePanel(panel) {
-  try {
-    if (panel === "status") {
-      openIdentityStatusModal();
-      return;
-    }
-    if (panel === "mine") {
-      await applyChannelSelection(["mine"]);
-      return;
-    }
-    if (panel === "resource") {
-      await openResourceStatsModal();
-      return;
-    }
-    if (panel === "training") {
-      await applyChannelSelection(["training"]);
-      return;
-    }
-    if (panel === "dungeon") {
-      await openDungeonStatusModal();
-      return;
-    }
-    if (panel === "guide") {
-      await openXutianOracleGuideModal();
-      return;
-    }
-    if (panel === "intel") {
-      await openLeaderIntelModal();
-      return;
-    }
-    if (panel === "health") {
-      await openHealthModal();
-    }
-  } catch (error) {
-    showError(error);
-  }
+  return gameSceneView().openGameScenePanel(gameSceneDeps(), panel);
 }
 
 function questTrackerDeps() {
