@@ -16,7 +16,7 @@ from backend.features.dungeon_status import (
 )
 from backend.features.cangkun_guide import build_cangkun_guide_payload
 from backend.features.xutian_guide import build_xutian_oracle_guide_payload
-from backend.outbox import OutboxPlanner
+from backend.outbox import OutboxAutomation, OutboxPlanner
 from backend.outbox.schedule import (
     MAX_SCHEDULED_MESSAGES_PER_IDENTITY,
     OfficialScheduleService,
@@ -340,6 +340,7 @@ class MiniWebServer:
         )
         # 技能盘:登记好的常用命令 + 一键 send_message(reply_to 可选)
         self._skill_registry = SkillRegistry()
+        self._automation = OutboxAutomation(self._skill_registry, self._store)
         self._skill_send = SkillSendService(
             self._skill_registry,
             listener_lookup=lambda local_id: self._listeners.get_listener(local_id),
@@ -722,6 +723,7 @@ class MiniWebServer:
         }
 
     def outbox_payload(self) -> dict:
+        settings = self._store.get_settings()
         return {
             "items": [public_outbox_draft(item) for item in self._store.list_outbox_drafts()],
             "capabilities": {
@@ -730,8 +732,10 @@ class MiniWebServer:
                 "manual_api_reply": True,
                 "official_schedule": False,
                 "direct_send": False,
+                "auto_dispatch": bool(settings.get("automation_enabled")),
+                "auto_dispatch_dry_run": bool(settings.get("automation_dry_run", True)),
             },
-            "note": "发送出口未接入自动发送。动作会保留目标群、回复消息和建议身份上下文，UI 可先解析手动回复计划。",
+            "note": "动作会先进入 outbox 计划和策略守卫。默认自动发送为 dry-run;只有显式启用、命中白名单且通过幂等/限速后才会交给发送适配器。",
         }
 
     def outbox_plan_payload(self, payload: dict) -> dict:
@@ -740,6 +744,99 @@ class MiniWebServer:
             return plan.to_api(public_account=public_account, public_identity=public_identity)
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
+
+    def outbox_auto_plan_payload(self, payload: dict) -> dict:
+        try:
+            plan = self._outbox.plan(payload)
+            source_message_id = _source_message_id_from_payload(payload)
+            plan_payload = plan.to_api(public_account=public_account, public_identity=public_identity)
+            decision = self._automation.decision_for_plan(
+                plan,
+                settings=self._store.get_settings(),
+                source_message_id=source_message_id,
+            )
+            return {
+                **plan_payload,
+                "automation": decision.to_api(),
+                "source_message_id": source_message_id,
+            }
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def outbox_auto_dispatch_payload(self, payload: dict) -> dict:
+        try:
+            plan = self._outbox.plan(payload)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        source_message_id = _source_message_id_from_payload(payload)
+        plan_payload = plan.to_api(public_account=public_account, public_identity=public_identity)
+        decision = self._automation.decision_for_plan(
+            plan,
+            settings=self._store.get_settings(),
+            source_message_id=source_message_id,
+        )
+        automation_payload = decision.to_api()
+        base = {
+            **plan_payload,
+            "automation": automation_payload,
+            "source_message_id": source_message_id,
+        }
+
+        if not decision.can_auto_dispatch:
+            self._record_automation_log(
+                plan=plan,
+                decision=decision,
+                source_message_id=source_message_id,
+                status="blocked",
+                error=decision.message,
+            )
+            return {
+                **base,
+                "ok": False,
+                "manual_required": True,
+                "error": decision.message,
+            }
+
+        if decision.dry_run:
+            self._record_automation_log(
+                plan=plan,
+                decision=decision,
+                source_message_id=source_message_id,
+                status="dry_run",
+            )
+            return {
+                **base,
+                "ok": True,
+                "sent": False,
+                "dry_run": True,
+                "message": decision.message,
+            }
+
+        send_result, _send_context = self._send_skill_command(
+            {
+                "skill_key": decision.skill_key,
+                "identity_id": plan_payload.get("identity_id"),
+                "chat_id": plan_payload.get("chat_id") or plan_payload.get("target_chat"),
+                "reply_to_msg_id": plan_payload.get("reply_to_msg_id"),
+                "command_override": plan_payload.get("command"),
+                "source_message_id": source_message_id,
+            }
+        )
+        self._record_automation_log(
+            plan=plan,
+            decision=decision,
+            source_message_id=source_message_id,
+            status="success" if send_result.get("ok") else "failed",
+            tg_msg_id=int(send_result.get("sent_msg_id") or 0),
+            error=str(send_result.get("error") or ""),
+        )
+        return {
+            **base,
+            "ok": bool(send_result.get("ok")),
+            "sent": bool(send_result.get("ok")),
+            "send_result": send_result,
+            "error": send_result.get("error") or "",
+        }
 
     def outbox_drafts_payload(self, status: str = "draft") -> dict:
         return {
@@ -1838,44 +1935,69 @@ class MiniWebServer:
         return {"ok": True, "titles": titles}
 
     def skill_send_payload(self, payload: dict) -> dict:
+        api, context = self._send_skill_command(payload)
+        if context:
+            self._record_send_log(
+                {
+                    "kind": "manual_send",
+                    "status": "success" if api.get("ok") else "failed",
+                    "account_local_id": context["account_local_id"],
+                    "identity_id": context["identity_id"],
+                    "send_as_id": context["send_as_id"],
+                    "chat_id": context["chat_id"],
+                    "topic_id": context["topic_id"],
+                    "reply_to_msg_id": context["reply_to_msg_id"],
+                    "command": context["command"],
+                    "source_message_id": context["source_message_id"],
+                    "tg_msg_id": context["tg_msg_id"],
+                    "error": context["error"],
+                    "meta": {
+                        "skill_key": context["skill_key"],
+                        "reply_mode": context["reply_mode"],
+                    },
+                }
+            )
+        return api
+
+    def _send_skill_command(self, payload: dict) -> tuple[dict, dict]:
         payload = payload or {}
         skill_key = str(payload.get("skill_key") or "").strip()
         if not skill_key:
-            return {"ok": False, "error": "缺少 skill_key"}
+            return {"ok": False, "error": "缺少 skill_key"}, {}
         skill = self._skill_registry.get(skill_key)
         if skill is None:
-            return {"ok": False, "error": f"未知技能 key: {skill_key}"}
+            return {"ok": False, "error": f"未知技能 key: {skill_key}"}, {}
 
         try:
             identity_id = int(str(payload.get("identity_id") or 0).strip())
         except (TypeError, ValueError):
-            return {"ok": False, "error": "identity_id 必须是数字"}
+            return {"ok": False, "error": "identity_id 必须是数字"}, {}
 
         identity = self._store.get_identity(identity_id) if identity_id else None
         if identity is None:
-            return {"ok": False, "error": f"找不到 identity {identity_id},请先在身份列表里注册"}
+            return {"ok": False, "error": f"找不到 identity {identity_id},请先在身份列表里注册"}, {}
 
         account_local_id = str(identity.get("account_local_id") or "").strip()
         if not account_local_id:
-            return {"ok": False, "error": "identity 没绑定 account_local_id,无法定位 listener"}
+            return {"ok": False, "error": "identity 没绑定 account_local_id,无法定位 listener"}, {}
 
         account = self._store.get_account(account_local_id)
         if account is None:
-            return {"ok": False, "error": f"找不到 account {account_local_id}"}
+            return {"ok": False, "error": f"找不到 account {account_local_id}"}, {}
 
         try:
             account_id = int(str(account.get("account_id") or 0).strip())
         except (TypeError, ValueError):
             account_id = 0
         if account_id == 0:
-            return {"ok": False, "error": "account_id 为空,请先确认该 Telegram 账号已登录成功"}
+            return {"ok": False, "error": "account_id 为空,请先确认该 Telegram 账号已登录成功"}, {}
         send_as_id = 0 if identity_id == account_id else identity_id
 
         chat_id_raw = payload.get("chat_id") or account.get("target_chat") or ""
         try:
             chat_id = int(str(chat_id_raw).strip())
         except (TypeError, ValueError):
-            return {"ok": False, "error": "缺少 chat_id 或 account.target_chat"}
+            return {"ok": False, "error": "缺少 chat_id 或 account.target_chat"}, {}
 
         try:
             topic_id = int(str(payload.get("top_msg_id") or account.get("target_topic_id") or 0).strip())
@@ -1898,32 +2020,25 @@ class MiniWebServer:
             command_override=command_override,
         )
         api = result.to_api()
-        self._record_send_log(
-            {
-                "kind": "manual_send",
-                "status": "success" if result.ok else "failed",
-                "account_local_id": account_local_id,
-                "identity_id": identity_id,
-                "send_as_id": send_as_id,
-                "chat_id": chat_id,
-                "topic_id": topic_id,
-                "reply_to_msg_id": reply_to or 0,
-                "command": result.command or command_override or skill.command,
-                "source_message_id": payload.get("source_message_id") or "",
-                "tg_msg_id": result.sent_msg_id,
-                "error": result.error,
-                "meta": {
-                    "skill_key": skill_key,
-                    "reply_mode": skill.reply_mode,
-                },
-            }
-        )
         # 顺手把 client.get_me() 抓到的真名 hydrate 回 account.label / identity.label
         # —— 之前两者都是手机号,UI 显示 +44... 很丑
         display = self._skill_send.last_display()
         if result.ok and display and identity_id == account_id:
             self._maybe_hydrate_account_display(account, identity, display)
-        return api
+        return api, {
+            "skill_key": skill_key,
+            "reply_mode": skill.reply_mode,
+            "account_local_id": account_local_id,
+            "identity_id": identity_id,
+            "send_as_id": send_as_id,
+            "chat_id": chat_id,
+            "topic_id": topic_id,
+            "reply_to_msg_id": reply_to or 0,
+            "command": result.command or command_override or skill.command,
+            "source_message_id": payload.get("source_message_id") or "",
+            "tg_msg_id": result.sent_msg_id,
+            "error": result.error,
+        }
 
     def _maybe_hydrate_account_display(
         self,
@@ -1960,6 +2075,56 @@ class MiniWebServer:
             append(payload or {})
         except Exception as exc:
             print(f"[send-log] append failed: {exc}")
+
+    def _record_automation_log(
+        self,
+        *,
+        plan,
+        decision,
+        source_message_id: str = "",
+        status: str,
+        tg_msg_id: int = 0,
+        error: str = "",
+    ) -> None:
+        identity_id = 0
+        try:
+            identity_id = int((plan.identity or {}).get("send_as_id") if plan.identity else plan.action.identity_id or 0)
+        except (TypeError, ValueError):
+            identity_id = 0
+        send_as_id = 0
+        account_id = 0
+        try:
+            account_id = int((plan.account or {}).get("account_id") or 0)
+        except (TypeError, ValueError):
+            account_id = 0
+        if identity_id and account_id and identity_id != account_id:
+            send_as_id = identity_id
+        try:
+            chat_id = int(plan.action.chat_id or plan.target_chat or 0)
+        except (TypeError, ValueError):
+            chat_id = 0
+        self._record_send_log(
+            {
+                "kind": "auto_send",
+                "status": status,
+                "account_local_id": plan.account_local_id,
+                "identity_id": identity_id,
+                "send_as_id": send_as_id,
+                "chat_id": chat_id,
+                "reply_to_msg_id": plan.action.reply_to_msg_id or 0,
+                "command": plan.command,
+                "source_message_id": source_message_id,
+                "tg_msg_id": tg_msg_id,
+                "error": error,
+                "meta": {
+                    "skill_key": decision.skill_key,
+                    "reason": decision.reason,
+                    "dry_run": decision.dry_run,
+                    "idempotency_key": decision.idempotency_key,
+                    "adapter": decision.adapter,
+                },
+            }
+        )
 
     def schedule_preview_payload(self, payload: dict) -> dict:
         try:

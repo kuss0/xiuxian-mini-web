@@ -67,6 +67,17 @@ def _normalize_settings(payload: dict) -> dict:
                 continue
         return sorted(set(out))
 
+    def int_value(key: str, default: int, *, minimum: int, maximum: int) -> int:
+        raw = payload.get(key)
+        if raw is None or str(raw).strip() == "":
+            value = default
+        else:
+            try:
+                value = int(str(raw).strip())
+            except (TypeError, ValueError):
+                value = default
+        return max(minimum, min(maximum, value))
+
     return {
         "api_id": text("api_id"),
         "api_hash": text("api_hash"),
@@ -105,6 +116,11 @@ def _normalize_settings(payload: dict) -> dict:
         "notify_tg_chat_id": text("notify_tg_chat_id"),
         "notify_card_titles": notify_card_titles,
         "schedule_saved_templates": schedule_saved_templates,
+        "automation_enabled": bool_value("automation_enabled"),
+        "automation_dry_run": bool_value("automation_dry_run") if "automation_dry_run" in payload else True,
+        "automation_allowed_skill_keys": sorted(set(str_list("automation_allowed_skill_keys"))),
+        "automation_allowed_identity_ids": int_list("automation_allowed_identity_ids"),
+        "automation_max_per_minute": int_value("automation_max_per_minute", 6, minimum=1, maximum=60),
     }
 
 

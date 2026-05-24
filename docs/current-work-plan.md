@@ -35,6 +35,8 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      and manual fallback.
    - Automatic refresh reduces manual refresh pressure without removing the
      manual fallback.
+   - Outbox automation uses a guarded dry-run-first flow before any user-session
+     sender adapter can dispatch.
    - Official schedule creation respects the observed 100 scheduled-message
      per-identity boundary and refuses additional automation with a manual
      handling notice.
@@ -45,7 +47,10 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      the modal status line. The official schedule rail and modal live in
      `web/static/views/schedule.js`; the resource stats modal and coverage
      renderer live in `web/static/views/resource_stats.js`; identity state
-     refresh is part of the normal identity refresh path.
+     refresh is part of the normal identity refresh path. Outbox automation
+     guard logic lives in `backend/outbox/automation.py`; the send-plan panel in
+     `web/static/app.js` calls `/api/outbox/auto-plan` and
+     `/api/outbox/auto-dispatch` for guarded dry-run/dispatch checks.
 
 4. Tool center cleanup
    - Common workflows remain on the main page.
@@ -106,6 +111,8 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
   listing/delisting, gift, and tree harvest.
 - Treat official schedule Telegram-history sync as reconciliation only; never
   use it to exceed the local 100-message guard.
+- Keep automatic dispatch limited to explicit settings allowlists; unrecognized
+  commands, dungeon choices, and ambiguous actions stay manual.
 - Continue CSS/module cleanup opportunistically when a touched surface already
   has tests or layout-probe coverage.
 

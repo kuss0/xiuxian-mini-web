@@ -204,6 +204,9 @@ class SkillRegistry:
     def list(self) -> tuple[Skill, ...]:
         return self._public_skills
 
+    def all(self) -> tuple[Skill, ...]:
+        return tuple(self._skills_by_key.values())
+
     def get(self, key: str) -> Skill | None:
         return self._skills_by_key.get(str(key or "").strip())
 

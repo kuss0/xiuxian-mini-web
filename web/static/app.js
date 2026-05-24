@@ -1540,6 +1540,14 @@ async function planOutboxAction(action) {
   return data;
 }
 
+async function planOutboxAutomation(action) {
+  return postJson("/api/outbox/auto-plan", { action });
+}
+
+async function dispatchOutboxAutomation(action) {
+  return postJson("/api/outbox/auto-dispatch", { action });
+}
+
 function chatStreamDeps() {
   return {
     state,
@@ -2913,7 +2921,10 @@ function renderOutboxPlan(plan, action, container) {
       <div class="form-actions outbox-actions">
         <button type="button" data-plan-action="copy">复制命令</button>
         <button type="button" data-plan-action="replan">重新解析</button>
+        <button type="button" data-plan-action="auto-plan">自动策略</button>
+        <button type="button" data-plan-action="auto-dispatch">演练/调度</button>
       </div>
+      <div class="outbox-automation" data-plan-automation hidden></div>
       <p>${escapeHtml(plan.note || "动作只生成手动计划，不会自动发送。")}</p>
     </div>
   `;
@@ -2935,9 +2946,62 @@ function renderOutboxPlanError(error, container) {
   `;
 }
 
+function renderOutboxAutomationResult(result, container) {
+  const target = container?.querySelector("[data-plan-automation]");
+  if (!target) {
+    return;
+  }
+  const automation = result?.automation || {};
+  const ok = Boolean(result?.ok);
+  const dispatched = Boolean(result?.sent);
+  const canAuto = Boolean(automation.can_auto_dispatch);
+  const status = dispatched
+    ? "已自动调度"
+    : result?.dry_run
+      ? "演练通过"
+      : canAuto
+        ? "可自动"
+        : "需人工";
+  const statusClass = dispatched || result?.dry_run || canAuto ? "ok" : "warn";
+  const message = result?.error || result?.message || automation.message || "无自动策略信息";
+  target.hidden = false;
+  target.innerHTML = `
+    <div class="outbox-plan-head">
+      <h5>自动策略</h5>
+      <span class="status-pill ${statusClass}">${escapeHtml(status)}</span>
+    </div>
+    <div class="plan-grid compact">
+      <div><span>技能</span><strong>${escapeHtml(automation.skill_key || "未识别")}</strong></div>
+      <div><span>模式</span><strong>${automation.dry_run ? "dry-run" : "真实调度"}</strong></div>
+      <div><span>原因</span><strong>${escapeHtml(automation.reason || "unknown")}</strong></div>
+      <div><span>适配器</span><strong>${escapeHtml(automation.adapter || "user_session")}</strong></div>
+    </div>
+    <p>${escapeHtml(message)}</p>
+    ${automation.idempotency_key ? `<p class="draft-meta">幂等 ${escapeHtml(automation.idempotency_key)}</p>` : ""}
+  `;
+}
+
+function renderOutboxAutomationError(error, container) {
+  const target = container?.querySelector("[data-plan-automation]");
+  if (!target) {
+    renderOutboxPlanError(error, container);
+    return;
+  }
+  target.hidden = false;
+  target.innerHTML = `
+    <div class="outbox-plan-head">
+      <h5>自动策略</h5>
+      <span class="status-pill risk">失败</span>
+    </div>
+    <p class="error">${escapeHtml(error.message || String(error))}</p>
+  `;
+}
+
 function bindOutboxPlanControls(container, action) {
   const copyButton = container.querySelector('[data-plan-action="copy"]');
   const replanButton = container.querySelector('[data-plan-action="replan"]');
+  const autoPlanButton = container.querySelector('[data-plan-action="auto-plan"]');
+  const autoDispatchButton = container.querySelector('[data-plan-action="auto-dispatch"]');
   if (copyButton) {
     copyButton.addEventListener("click", async () => {
       try {
@@ -2962,6 +3026,38 @@ function bindOutboxPlanControls(container, action) {
         renderOutboxPlanError(error, container);
       } finally {
         replanButton.disabled = false;
+      }
+    });
+  }
+  if (autoPlanButton) {
+    autoPlanButton.addEventListener("click", async () => {
+      autoPlanButton.disabled = true;
+      try {
+        const nextAction = actionWithPlanOverrides(action, container);
+        const plan = await planOutboxAutomation(nextAction);
+        renderOutboxAutomationResult(plan, container);
+      } catch (error) {
+        renderOutboxAutomationError(error, container);
+      } finally {
+        autoPlanButton.disabled = false;
+      }
+    });
+  }
+  if (autoDispatchButton) {
+    autoDispatchButton.addEventListener("click", async () => {
+      autoDispatchButton.disabled = true;
+      try {
+        const nextAction = actionWithPlanOverrides(action, container);
+        const result = await dispatchOutboxAutomation(nextAction);
+        renderOutboxAutomationResult(result, container);
+        autoDispatchButton.textContent = result.sent ? "已调度" : result.dry_run ? "已演练" : "未调度";
+        setTimeout(() => {
+          autoDispatchButton.textContent = "演练/调度";
+        }, 1400);
+      } catch (error) {
+        renderOutboxAutomationError(error, container);
+      } finally {
+        autoDispatchButton.disabled = false;
       }
     });
   }
@@ -3099,6 +3195,8 @@ function renderTelegramTextHtml(value, message) {
 function renderSettings(settings) {
   state.detailMode = "message";
   const botIds = (settings.game_bot_ids || []).join("\n");
+  const automationSkillKeys = (settings.automation_allowed_skill_keys || []).join("\n");
+  const automationIdentityIds = (settings.automation_allowed_identity_ids || []).join("\n");
   const savedSecrets = settings.saved_secrets || {};
   const dialogOptions = renderDialogOptions(settings.target_chat);
   const topicOptions = renderTopicOptions(settings.target_topic_id);
@@ -3175,6 +3273,35 @@ function renderSettings(settings) {
         <span>已知天尊 sender IDs</span>
         <textarea name="game_bot_ids" rows="6" placeholder="-1003983937918&#10;7900199668">${escapeHtml(botIds)}</textarea>
       </label>
+
+      <div class="detail-block">
+        <h4>自动发送守卫</h4>
+        <p class="muted" style="font-size:12px;">默认只做 dry-run 演练。只有开启自动发送、命中技能/身份白名单、通过幂等和限速后，才会交给 user-session 发送适配器。</p>
+        <div class="form-grid">
+          <label class="toggle-field">
+            <input type="checkbox" name="automation_enabled" ${settings.automation_enabled ? "checked" : ""} />
+            <span>启用自动发送</span>
+          </label>
+          <label class="toggle-field">
+            <input type="checkbox" name="automation_dry_run" ${settings.automation_dry_run !== false ? "checked" : ""} />
+            <span>dry-run 演练</span>
+          </label>
+          <label>
+            <span>每分钟上限</span>
+            <input name="automation_max_per_minute" inputmode="numeric" value="${escapeAttr(settings.automation_max_per_minute || 6)}" />
+          </label>
+        </div>
+        <div class="form-grid">
+          <label>
+            <span>技能白名单</span>
+            <textarea name="automation_allowed_skill_keys" rows="5" placeholder="storage_bag&#10;battle_power">${escapeHtml(automationSkillKeys)}</textarea>
+          </label>
+          <label>
+            <span>身份白名单</span>
+            <textarea name="automation_allowed_identity_ids" rows="5" placeholder="留空=所有已解析身份">${escapeHtml(automationIdentityIds)}</textarea>
+          </label>
+        </div>
+      </div>
 
       <div class="form-grid">
         <label>
@@ -5218,6 +5345,17 @@ async function saveCurrentSettingsFromForm(form) {
     notify_tg_bot_token: data.get("notify_tg_bot_token"),
     notify_tg_chat_id: data.get("notify_tg_chat_id"),
     notify_card_titles: notifyTitles,
+    automation_enabled: !!form.querySelector('input[name="automation_enabled"]:checked'),
+    automation_dry_run: !!form.querySelector('input[name="automation_dry_run"]:checked'),
+    automation_allowed_skill_keys: String(data.get("automation_allowed_skill_keys") || "")
+      .split(/\n|,/)
+      .map((item) => item.trim())
+      .filter(Boolean),
+    automation_allowed_identity_ids: String(data.get("automation_allowed_identity_ids") || "")
+      .split(/\n|,/)
+      .map((item) => item.trim())
+      .filter(Boolean),
+    automation_max_per_minute: data.get("automation_max_per_minute"),
   });
 }
 

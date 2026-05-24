@@ -156,6 +156,9 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "chat message stream, scroll anchoring, and quick actions live in `web/static/views/chat_stream.js`" in normalized_work_plan
     assert "detail rich cards and field formatting live in `web/static/views/detail_cards.js`" in normalized_work_plan
     assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
+    assert "Outbox automation guard logic lives in `backend/outbox/automation.py`" in normalized_work_plan
+    assert "/api/outbox/auto-plan" in normalized_work_plan
+    assert "/api/outbox/auto-dispatch" in normalized_work_plan
 
     assert "/api/dungeon-status" in audit
     assert "/api/dungeons/status" not in audit
@@ -171,6 +174,9 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "Detail panel actions fill the composer or create manual plans/drafts only" in audit
     assert "Dungeon playbook actions fill the composer only" in audit
     assert "Xutian now exposes phase, route" in audit
+    assert "## Outbox Automation" in audit
+    assert "Automation is disabled and dry-run by default" in audit
+    assert "Unknown commands, empty skill allowlists, non-allowlisted skills" in audit
 
 
 def test_resource_stats_view_module_keeps_app_wrappers_and_health_renderer_contract():
@@ -2256,6 +2262,8 @@ def test_outbox_declares_context_but_no_direct_send():
     assert payload["capabilities"]["reply_context"] is True
     assert payload["capabilities"]["manual_api_reply"] is True
     assert payload["capabilities"]["direct_send"] is False
+    assert payload["capabilities"]["auto_dispatch"] is False
+    assert payload["capabilities"]["auto_dispatch_dry_run"] is True
 
 
 def test_sqlite_store_persists_cards(tmp_path):
@@ -2329,6 +2337,9 @@ def test_sqlite_settings_roundtrip(tmp_path):
     assert -1002049298748 in store.get_settings()["leader_sender_ids"]
     assert "@iosdo7" in store.get_settings()["leader_source_names"]
     assert store.get_settings()["focus_include_player_plain"] is True
+    assert store.get_settings()["automation_enabled"] is False
+    assert store.get_settings()["automation_dry_run"] is True
+    assert "storage_bag" in store.get_settings()["automation_allowed_skill_keys"]
 
     saved = store.save_settings(
         {
@@ -2337,12 +2348,22 @@ def test_sqlite_settings_roundtrip(tmp_path):
             "target_chat": "-1001",
             "game_bot_ids": ["7900199668", "bad", "8757550896"],
             "listen_enabled": True,
+            "automation_enabled": True,
+            "automation_dry_run": False,
+            "automation_allowed_skill_keys": "storage_bag\nbattle_power",
+            "automation_allowed_identity_ids": "123\nbad\n456",
+            "automation_max_per_minute": "99",
         }
     )
 
     assert saved["api_id"] == "123"
     assert saved["target_chat"] == "-1001"
     assert saved["game_bot_ids"] == [7900199668, 8757550896]
+    assert saved["automation_enabled"] is True
+    assert saved["automation_dry_run"] is False
+    assert saved["automation_allowed_skill_keys"] == ["battle_power", "storage_bag"]
+    assert saved["automation_allowed_identity_ids"] == [123, 456]
+    assert saved["automation_max_per_minute"] == 60
     assert -1002049298748 in saved["leader_sender_ids"]
     assert "@iosdo7" in saved["leader_source_names"]
     assert SQLiteStore(tmp_path / "miniweb.db").get_settings()["listen_enabled"] is True
@@ -3723,6 +3744,165 @@ def test_outbox_plan_uses_account_target_chat_when_action_has_no_chat(tmp_path):
     assert plan["resolved"] is True
     assert plan["target_chat"] == "-1001"
     assert plan["chat_id"] is None
+
+
+def _seed_automation_identity(server: MiniWebServer) -> int:
+    server.save_account_payload(
+        {
+            "local_id": "main",
+            "label": "主号",
+            "api_id": "123",
+            "api_hash": "hash",
+            "account_id": "8659059191",
+            "target_chat": "-1001",
+        }
+    )
+    server.save_identity_payload({"send_as_id": "8659059191", "account_local_id": "main", "label": "WA2000"})
+    return 8659059191
+
+
+def test_outbox_auto_plan_defaults_to_manual_required_until_enabled(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    identity_id = _seed_automation_identity(server)
+
+    plan = server.outbox_auto_plan_payload(
+        {"command": ".储物袋", "identity_id": identity_id, "source_message_id": "tg:-1001:1"}
+    )
+
+    assert plan["ok"] is True
+    assert plan["automation"]["skill_key"] == "storage_bag"
+    assert plan["automation"]["can_auto_dispatch"] is False
+    assert plan["automation"]["manual_required"] is True
+    assert plan["automation"]["reason"] == "automation_disabled"
+    assert plan["automation"]["dry_run"] is True
+
+
+def test_outbox_auto_dispatch_dry_run_records_audit_without_sending(tmp_path, monkeypatch):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    identity_id = _seed_automation_identity(server)
+    store.save_settings({
+        "automation_enabled": True,
+        "automation_dry_run": True,
+        "automation_allowed_skill_keys": ["storage_bag"],
+        "automation_allowed_identity_ids": [identity_id],
+    })
+    called = {"send": 0}
+
+    def fake_send(_payload):
+        called["send"] += 1
+        return {"ok": True, "sent_msg_id": 123}, {}
+
+    monkeypatch.setattr(server, "_send_skill_command", fake_send)
+
+    result = server.outbox_auto_dispatch_payload(
+        {"command": ".储物袋", "identity_id": identity_id, "source_message_id": "tg:-1001:2"}
+    )
+
+    assert result["ok"] is True
+    assert result["sent"] is False
+    assert result["dry_run"] is True
+    assert result["automation"]["reason"] == "dry_run"
+    assert called["send"] == 0
+    logs = server.outbox_logs_payload(kind="auto_send", identity_id=identity_id)["logs"]
+    assert len(logs) == 1
+    assert logs[0]["status"] == "dry_run"
+    assert logs[0]["command"] == ".储物袋"
+    assert logs[0]["chat_id"] == -1001
+    assert logs[0]["meta"]["skill_key"] == "storage_bag"
+    assert logs[0]["meta"]["dry_run"] is True
+
+
+def test_outbox_auto_dispatch_sends_only_when_guard_allows(tmp_path, monkeypatch):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    identity_id = _seed_automation_identity(server)
+    store.save_settings({
+        "automation_enabled": True,
+        "automation_dry_run": False,
+        "automation_allowed_skill_keys": ["storage_bag"],
+        "automation_allowed_identity_ids": [identity_id],
+    })
+    captured: dict = {}
+
+    def fake_send(payload):
+        captured.update(payload)
+        return {"ok": True, "sent_msg_id": 4242, "command": payload["command_override"]}, {
+            "skill_key": payload["skill_key"],
+        }
+
+    monkeypatch.setattr(server, "_send_skill_command", fake_send)
+
+    result = server.outbox_auto_dispatch_payload(
+        {"command": ".储物袋", "identity_id": identity_id, "source_message_id": "tg:-1001:3"}
+    )
+
+    assert result["ok"] is True
+    assert result["sent"] is True
+    assert captured["skill_key"] == "storage_bag"
+    assert captured["identity_id"] == identity_id
+    assert captured["command_override"] == ".储物袋"
+    assert captured["chat_id"] == "-1001"
+    logs = server.outbox_logs_payload(kind="auto_send", identity_id=identity_id)["logs"]
+    assert len(logs) == 1
+    assert logs[0]["status"] == "success"
+    assert logs[0]["tg_msg_id"] == 4242
+    assert logs[0]["meta"]["reason"] == "allowed"
+    assert server.outbox_logs_payload(kind="manual_send")["logs"] == []
+
+
+def test_outbox_auto_dispatch_blocks_duplicate_success_by_idempotency(tmp_path, monkeypatch):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    identity_id = _seed_automation_identity(server)
+    store.save_settings({
+        "automation_enabled": True,
+        "automation_dry_run": False,
+        "automation_allowed_skill_keys": ["storage_bag"],
+        "automation_allowed_identity_ids": [identity_id],
+    })
+    monkeypatch.setattr(
+        server,
+        "_send_skill_command",
+        lambda payload: ({"ok": True, "sent_msg_id": 111, "command": payload["command_override"]}, {}),
+    )
+    payload = {"command": ".储物袋", "identity_id": identity_id, "source_message_id": "tg:-1001:4"}
+
+    first = server.outbox_auto_dispatch_payload(payload)
+    second = server.outbox_auto_dispatch_payload(payload)
+
+    assert first["ok"] is True
+    assert first["sent"] is True
+    assert second["ok"] is False
+    assert second["manual_required"] is True
+    assert second["automation"]["reason"] == "duplicate_blocked"
+    logs = server.outbox_logs_payload(kind="auto_send", identity_id=identity_id)["logs"]
+    assert [log["status"] for log in logs] == ["blocked", "success"]
+
+
+def test_outbox_auto_plan_rejects_non_allowlisted_or_unknown_commands(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    identity_id = _seed_automation_identity(server)
+    store.save_settings({
+        "automation_enabled": True,
+        "automation_dry_run": False,
+        "automation_allowed_skill_keys": ["storage_bag"],
+        "automation_allowed_identity_ids": [identity_id],
+    })
+
+    dungeon = server.outbox_auto_plan_payload({
+        "command": ".加入副本 394",
+        "identity_id": identity_id,
+        "reply_to_msg_id": 7000,
+    })
+    chat = server.outbox_auto_plan_payload({"command": "今晚手动看看", "identity_id": identity_id})
+
+    assert dungeon["automation"]["reason"] == "skill_not_allowed"
+    assert dungeon["automation"]["manual_required"] is True
+    assert chat["automation"]["reason"] == "unknown_skill"
+    assert chat["automation"]["manual_required"] is True
 
 
 def test_outbox_draft_roundtrip_preserves_reply_context(tmp_path):

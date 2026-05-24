@@ -73,6 +73,8 @@ def build_post_routes(handlers: Mapping[str, Callable]) -> dict[str, PostRoute]:
         "/api/identities/batch": PostRoute(handlers["_post_identity_batch"], needs_payload=True),
         "/api/identities/delete": PostRoute(handlers["_post_identity_delete"], needs_payload=True),
         "/api/outbox/plan": PostRoute(handlers["_post_outbox_plan"], needs_payload=True),
+        "/api/outbox/auto-plan": PostRoute(handlers["_post_outbox_auto_plan"], needs_payload=True),
+        "/api/outbox/auto-dispatch": PostRoute(handlers["_post_outbox_auto_dispatch"], needs_payload=True),
         "/api/outbox/drafts": PostRoute(handlers["_post_outbox_draft"], needs_payload=True),
         "/api/outbox/drafts/delete": PostRoute(handlers["_post_outbox_draft_delete"], needs_payload=True),
         "/api/login/start": PostRoute(handlers["_post_login_start"]),

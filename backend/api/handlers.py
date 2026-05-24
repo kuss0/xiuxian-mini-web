@@ -310,6 +310,20 @@ def _post_outbox_plan(request: MiniWebRequest, payload: dict) -> dict:
         return {"ok": False, "error": str(exc)}
 
 
+def _post_outbox_auto_plan(request: MiniWebRequest, payload: dict) -> dict:
+    try:
+        return _app(request).outbox_auto_plan_payload(payload)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def _post_outbox_auto_dispatch(request: MiniWebRequest, payload: dict) -> dict:
+    try:
+        return _app(request).outbox_auto_dispatch_payload(payload)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 def _post_outbox_draft(request: MiniWebRequest, payload: dict) -> dict:
     try:
         return _app(request).create_outbox_draft_payload(payload)

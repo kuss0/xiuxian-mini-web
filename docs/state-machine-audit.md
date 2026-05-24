@@ -71,6 +71,17 @@ do not prove success.
 | Current gap | Health can show symptoms, but it cannot prove Telegram upstream completeness without active backfill or scheduled history reconciliation. |
 | Next action | Keep health in the tool center and use it as a diagnostic surface, not as a gameplay action surface. |
 
+## Outbox Automation
+
+| Field | Current contract |
+| --- | --- |
+| State source | `OutboxPlanner` resolves command, identity, account, reply context, and target chat; `backend/outbox/automation.py` derives `skill_key`, idempotency key, allowlist status, dry-run mode, and recent `auto_send` audit history. |
+| Trigger | A detail-panel send plan can call `/api/outbox/auto-plan` for policy inspection or `/api/outbox/auto-dispatch` for a guarded dry-run/dispatch attempt. Settings control `automation_enabled`, `automation_dry_run`, skill allowlist, identity allowlist, and per-minute limit. |
+| Refresh path | The send-plan panel in `web/static/app.js` renders the backend automation decision and idempotency key. `send_logs` stores `auto_send` rows with `dry_run`, `blocked`, `success`, or `failed` status, separate from `manual_send`. |
+| Failure/manual fallback | Automation is disabled and dry-run by default. Unknown commands, empty skill allowlists, non-allowlisted skills, missing identity/context, duplicate idempotency keys, and rate-limit hits all return `manual_required` instead of sending. Dungeon choices and ambiguous actions remain manual unless explicitly allowlisted later. |
+| Current gap | The active adapter is the existing user-session sender; AyuGram GUI/IPC can be added as a sender adapter later, but must reuse the same policy guard and audit log. |
+| Next action | Promote only low-risk query commands after observed use, keeping gameplay choices behind manual confirmation unless a separate fixture-backed policy exists. |
+
 ## Chat Stream
 
 | Field | Current contract |
