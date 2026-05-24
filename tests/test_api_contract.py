@@ -148,6 +148,28 @@ def test_frontend_identity_state_refresh_is_first_class():
     assert "loadIdentityModuleStates()" not in cultivation_handler
 
 
+def test_schedule_manual_required_details_persist_in_status_line():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    css = (root / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+
+    assert "function scheduleManualMessages(result)" in app_js
+    assert "(result?.results || []).forEach(push);" in app_js
+    assert "function scheduleStatusWithManualMessages(baseText, manualMessages)" in app_js
+    assert 'return `${baseText || "官方定时需要手动处理"}\\n需手动处理 ${messages.length} 条:\\n${detail}`;' in app_js
+
+    create_start = app_js.index('if (action === "create")')
+    cancel_start = app_js.index('if (action === "cancel")', create_start)
+    create_handler = app_js[create_start:cancel_start]
+    assert "scheduleStatusWithManualMessages(\"官方定时未创建\", manualMessages)" in create_handler
+    assert "scheduleStatusWithManualMessages(stats, manualMessages)" in create_handler
+    assert 'stats += `｜需手动处理 ${manualMessages.length}`' not in create_handler
+
+    modal_status = css[css.index(".modal-status-line {"):css.index(".modal-status-line.info")]
+    assert "white-space: pre-line;" in modal_status
+    assert "overflow-wrap: anywhere;" in modal_status
+
+
 def test_chat_viewport_layout_contract_keeps_composer_visible():
     root = Path(__file__).resolve().parents[1]
     html = (root / "web" / "index.html").read_text(encoding="utf-8")

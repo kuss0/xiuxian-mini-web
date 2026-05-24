@@ -5496,6 +5496,8 @@ button.health-chip:hover {
   padding: 8px 10px;
   border-radius: 6px;
   font-size: 13px;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 
 .modal-status-line.info {

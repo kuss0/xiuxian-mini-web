@@ -9059,6 +9059,13 @@ function scheduleManualMessages(result) {
   return messages;
 }
 
+function scheduleStatusWithManualMessages(baseText, manualMessages) {
+  const messages = (manualMessages || []).filter(Boolean);
+  if (!messages.length) return baseText || "";
+  const detail = messages.map((text, index) => `${index + 1}. ${text}`).join("\n\n");
+  return `${baseText || "官方定时需要手动处理"}\n需手动处理 ${messages.length} 条:\n${detail}`;
+}
+
 function bindScheduleModal(dialog, presets, _initialBatches, initialTemplates) {
   const form = dialog.querySelector("#scheduleForm");
   const status = dialog.querySelector("#scheduleStatus");
@@ -9301,8 +9308,8 @@ function bindScheduleModal(dialog, presets, _initialBatches, initialTemplates) {
           const result = await postJson("/api/schedule/create", collectPayload());
           const manualMessages = scheduleManualMessages(result);
           if (manualMessages.length && !result.batch_count) {
-            const text = manualMessages.join("\n\n");
-            window.alert(text);
+            const text = scheduleStatusWithManualMessages("官方定时未创建", manualMessages);
+            window.alert(manualMessages.join("\n\n"));
             setStatus("warn", text);
             return;
           }
@@ -9314,7 +9321,6 @@ function bindScheduleModal(dialog, presets, _initialBatches, initialTemplates) {
             const failN = result.failed || 0;
             const totalMin = Math.round((result.total_estimate_seconds || 0) / 60);
             stats = `批量创建 ${result.batch_count} 个身份｜成功 ${okN}${failN ? `｜失败 ${failN}` : ""}｜阶梯 ${result.offset_step_minutes}min｜总预估 ${totalMin}min`;
-            if (manualMessages.length) stats += `｜需手动处理 ${manualMessages.length}`;
             // 启动每个 sending batch 的进度轮询
             for (const r of (result.results || [])) {
               if (r.ok && r.status === "sending" && r.batch_id) {
@@ -9335,7 +9341,7 @@ function bindScheduleModal(dialog, presets, _initialBatches, initialTemplates) {
             }
           }
           if (manualMessages.length) window.alert(manualMessages.join("\n\n"));
-          setStatus(result.errors?.length || result.failed ? "warn" : "ok", stats);
+          setStatus(result.errors?.length || result.failed || manualMessages.length ? "warn" : "ok", scheduleStatusWithManualMessages(stats, manualMessages));
           // 刷新批次列表
           const refreshed = await fetchJson("/api/schedule");
           if (batchList) batchList.innerHTML = renderScheduleBatches(syncScheduleBatches(refreshed));
