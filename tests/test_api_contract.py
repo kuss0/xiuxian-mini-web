@@ -131,6 +131,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     root = Path(__file__).resolve().parents[1]
     work_plan = (root / "docs" / "current-work-plan.md").read_text(encoding="utf-8")
     audit = (root / "docs" / "state-machine-audit.md").read_text(encoding="utf-8")
+    normalized_work_plan = re.sub(r"\s+", " ", work_plan)
 
     assert "tests/layout_probe.py" in work_plan
     assert "two-row quick-command hotbar visibility" in work_plan
@@ -141,11 +142,13 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "playbook cards live in `web/static/views/dungeon_playbook.js`" in work_plan
     assert "status modal shell and refresh flow live in" in work_plan
     assert "`web/static/views/dungeon_status.js`" in work_plan
+    assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
 
     assert "/api/dungeon-status" in audit
     assert "/api/dungeons/status" not in audit
     assert "modal lists the affected owners and reason" in audit
     assert "detailed manual-handling messages in the modal status line" in audit
+    assert "official schedule rail and modal are isolated in `web/static/views/schedule.js`" in audit
     assert "Dungeon playbook actions fill the composer only" in audit
     assert "Xutian now exposes phase, route" in audit
 
@@ -174,19 +177,29 @@ def test_frontend_identity_state_refresh_is_first_class():
 def test_schedule_manual_required_details_persist_in_status_line():
     root = Path(__file__).resolve().parents[1]
     app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    schedule_js = (root / "web" / "static" / "views" / "schedule.js").read_text(encoding="utf-8")
     css = (root / "web" / "static" / "styles.css").read_text(encoding="utf-8")
 
     assert "function scheduleManualMessages(result)" in app_js
-    assert "(result?.results || []).forEach(push);" in app_js
     assert "function scheduleStatusWithManualMessages(baseText, manualMessages)" in app_js
-    assert 'return `${baseText || "官方定时需要手动处理"}\\n需手动处理 ${messages.length} 条:\\n${detail}`;' in app_js
+    assert "window.MiniwebViews.schedule.scheduleManualMessages(result)" in app_js
+    assert "window.MiniwebViews.schedule.scheduleStatusWithManualMessages(baseText, manualMessages)" in app_js
+    assert "function scheduleManualMessages(result)" in schedule_js
+    assert "(result?.results || []).forEach(push);" in schedule_js
+    assert "function scheduleStatusWithManualMessages(baseText, manualMessages)" in schedule_js
+    assert 'return `${baseText || "官方定时需要手动处理"}\\n需手动处理 ${messages.length} 条:\\n${detail}`;' in schedule_js
 
-    create_start = app_js.index('if (action === "create")')
-    cancel_start = app_js.index('if (action === "cancel")', create_start)
-    create_handler = app_js[create_start:cancel_start]
+    create_start = schedule_js.index('if (action === "create")')
+    cancel_start = schedule_js.index('if (action === "cancel")', create_start)
+    create_handler = schedule_js[create_start:cancel_start]
     assert "scheduleStatusWithManualMessages(\"官方定时未创建\", manualMessages)" in create_handler
     assert "scheduleStatusWithManualMessages(stats, manualMessages)" in create_handler
     assert 'stats += `｜需手动处理 ${manualMessages.length}`' not in create_handler
+
+    assert "function scheduleDeps()" in app_js
+    assert "scheduleRail," in app_js
+    assert "loadAccounts," in app_js
+    assert "loadIdentities," in app_js
 
     modal_status = css[css.index(".modal-status-line {"):css.index(".modal-status-line.info")]
     assert "white-space: pre-line;" in modal_status

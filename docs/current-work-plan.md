@@ -40,8 +40,9 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      handling notice.
    - Current state: inventory auto-refreshes while open and names the owners
      that need manual `.储物袋` calibration; official schedule manual handling
-     details persist in the modal status line; identity state refresh is part
-     of the normal identity refresh path.
+     details persist in the modal status line. The official schedule rail and
+     modal live in `web/static/views/schedule.js`; identity state refresh is
+     part of the normal identity refresh path.
 
 4. Tool center cleanup
    - Common workflows remain on the main page.
@@ -72,8 +73,9 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      playbook cards live in `web/static/views/dungeon_playbook.js`; the dungeon
      status modal shell and refresh flow live in
      `web/static/views/dungeon_status.js`, along with reusable status render
-     helpers, while `web/static/app.js` keeps compatibility wrappers and
-     orchestration callbacks.
+     helpers. The official schedule rail and modal live in
+     `web/static/views/schedule.js`, while `web/static/app.js` keeps
+     compatibility wrappers and orchestration callbacks.
 
 ## Remaining Work
 

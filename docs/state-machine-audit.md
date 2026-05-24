@@ -22,7 +22,7 @@ do not prove success.
 | --- | --- |
 | State source | `official_schedule_batches` and `official_scheduled_messages`; real Telegram scheduled messages are represented by local rows with `scheduled` status. |
 | Trigger | User opens an official schedule preset. `build_plan` clamps horizon to 7 days and expands the preset into scheduled commands. |
-| Refresh path | `/api/schedule` lists batch/message status. Background send updates each item to `scheduled` or `failed`; the UI polls active sending batches. |
+| Refresh path | `/api/schedule` lists batch/message status. Background send updates each item to `scheduled` or `failed`; the UI polls active sending batches. The official schedule rail and modal are isolated in `web/static/views/schedule.js`, with `web/static/app.js` only keeping orchestration wrappers. |
 | Failure/manual fallback | A single send-as identity is capped at 100 planned/scheduled official messages. If creation would exceed 100, the API returns `quota_blocked`, `manual_required`, and a manual handling message. If Telegram reports the same limit during background send, remaining items are marked failed and sending stops. The UI keeps the detailed manual-handling messages in the modal status line instead of relying only on an alert. |
 | Current gap | The local count is an estimate until scheduled history is reconciled against Telegram. Local deletion marks rows deleted, but externally deleted Telegram scheduled messages still need explicit sync. |
 | Next action | Keep the 100-message guard local and strict; add Telegram history sync only as a reconciliation tool, not as a reason to exceed the local guard. |
