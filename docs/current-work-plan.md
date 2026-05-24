@@ -110,7 +110,7 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      guard form, Telegram dialog/topic option renderers, and read-only
      Telegram account list live in
      `web/static/views/settings.js`; the Telegram account login/logout modals,
-     listen-target renderers, account status line, and account action guards live in
+     listen-target renderers, account login/listen-target event flow, account status line, and account action guards live in
      `web/static/views/account_management.js`; the sidebar identity list,
      identity snapshot,
      identity module chips,
@@ -118,7 +118,7 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      `web/static/views/identity_management.js`,
      while
      `web/static/app.js` keeps
-     compatibility wrappers and orchestration callbacks.
+     compatibility wrappers and account/send_as API orchestration callbacks.
 
 ## Remaining Work
 

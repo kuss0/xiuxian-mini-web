@@ -3083,6 +3083,15 @@ function accountManagementView() {
 function accountManagementDeps() {
   return {
     state,
+    saveAccount,
+    loadAccounts,
+    loadIdentities,
+    startAccountLogin: (localId) => postJson("/api/accounts/login/start", { local_id: localId }),
+    verifyAccountLogin: (payload) => postJson("/api/accounts/login/verify", payload),
+    loadAccountDialogs: (localId) => fetchJson(`/api/accounts/dialogs?local_id=${encodeURIComponent(localId)}`),
+    loadAccountTopics: (localId, chat) => fetchJson(`/api/accounts/topics?local_id=${encodeURIComponent(localId)}&chat=${encodeURIComponent(chat)}`),
+    saveAccountTarget: ensureSaveAccountTarget,
+    startAccountListener: (localId) => postJson("/api/accounts/listener/start", { local_id: localId }),
   };
 }
 
@@ -3118,34 +3127,6 @@ function renderAccountModalBody(account, settings, modalState) {
   return accountManagementView().renderAccountModalBody(accountManagementDeps(), account, settings, modalState);
 }
 
-function accountPayloadFromForm(form) {
-  return accountManagementView().accountPayloadFromForm(form);
-}
-
-function setAccountModalStatus(modalState, dialog, kind, text) {
-  return accountManagementView().setAccountModalStatus(modalState, dialog, kind, text);
-}
-
-function setAccountModalStep(modalState, dialog, step) {
-  return accountManagementView().setAccountModalStep(modalState, dialog, step);
-}
-
-function revealListenTarget(dialog) {
-  return accountManagementView().revealListenTarget(dialog);
-}
-
-function setListenTargetStatus(dialog, kind, text) {
-  return accountManagementView().setListenTargetStatus(dialog, kind, text);
-}
-
-function populateListenTargetSelect(select, items, currentValue, valueKey, labelFn) {
-  return accountManagementView().populateListenTargetSelect(select, items, currentValue, valueKey, labelFn);
-}
-
-function dialogKindLabel(kind) {
-  return accountManagementView().dialogKindLabel(kind);
-}
-
 async function openAccountModal(account) {
   const isNew = !account;
   const settings = state.settings || (await loadSettings());
@@ -3174,196 +3155,7 @@ async function openAccountModal(account) {
 }
 
 function bindAccountModal(dialog, account, settings, modalState) {
-  const form = dialog.querySelector("#accountModalForm");
-  if (!form) return;
-
-  const setStatus = (kind, text) => setAccountModalStatus(modalState, dialog, kind, text);
-  const setStep = (step) => setAccountModalStep(modalState, dialog, step);
-  const collectFormPayload = () => accountPayloadFromForm(form);
-
-  const ensureSaved = async () => {
-    try {
-      const saved = await saveAccount(collectFormPayload());
-      if (saved?.local_id) {
-        modalState.localId = saved.local_id;
-        const localIdInput = form.querySelector('[name="local_id"]');
-        if (localIdInput) localIdInput.value = saved.local_id;
-      }
-      return saved;
-    } catch (error) {
-      throw error;
-    }
-  };
-
-  dialog.querySelectorAll("[data-account-modal]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const action = button.dataset.accountModal;
-      try {
-        if (action === "save") {
-          button.disabled = true;
-          await ensureSaved();
-          setStatus("ok", "账号已保存");
-          await loadAccounts();
-          await loadIdentities();
-          return;
-        }
-        if (action === "send-code") {
-          button.disabled = true;
-          setStatus("info", "正在保存账号并发送验证码...");
-          await ensureSaved();
-          const result = await postJson("/api/accounts/login/start", { local_id: modalState.localId });
-          if (!result.ok) {
-            throw new Error(result.error || result.message || "发送验证码失败");
-          }
-          setStep("code");
-          setStatus("info", result.message || "验证码已发送,请在 Telegram 客户端查收");
-          dialog.querySelector('[name="login_code"]')?.focus();
-          await loadAccounts();
-          return;
-        }
-        if (action === "verify-code") {
-          button.disabled = true;
-          setStatus("info", "正在校验验证码...");
-          const code = form.querySelector('[name="login_code"]').value.trim();
-          if (!code) throw new Error("请填写验证码");
-          const result = await postJson("/api/accounts/login/verify", {
-            local_id: modalState.localId,
-            code,
-          });
-          if (result.status === "need_2fa") {
-            setStep("2fa");
-            setStatus("warn", result.message || "需要两步验证密码");
-            dialog.querySelector('[name="login_password"]')?.focus();
-            await loadAccounts();
-            return;
-          }
-          if (!result.ok) {
-            throw new Error(result.error || result.message || "验证失败");
-          }
-          setStep("done");
-          setStatus("ok", "登录成功,下面选要采集的群和话题。");
-          revealListenTarget(dialog);
-          await loadAccounts();
-          await loadIdentities();
-          return;
-        }
-        if (action === "verify-2fa") {
-          button.disabled = true;
-          setStatus("info", "正在校验两步验证密码...");
-          const password = form.querySelector('[name="login_password"]').value;
-          if (!password) throw new Error("请填写 2FA 密码");
-          const result = await postJson("/api/accounts/login/verify", {
-            local_id: modalState.localId,
-            password,
-          });
-          if (!result.ok) {
-            throw new Error(result.error || result.message || "2FA 验证失败");
-          }
-          setStep("done");
-          setStatus("ok", "登录成功,下面选要采集的群和话题。");
-          revealListenTarget(dialog);
-          await loadAccounts();
-          await loadIdentities();
-          return;
-        }
-      } catch (error) {
-        setStatus("error", error.message || "操作失败");
-      } finally {
-        button.disabled = false;
-      }
-    });
-  });
-
-  bindListenTargetControls(dialog, modalState);
-}
-
-function bindListenTargetControls(dialog, modalState) {
-  const setStatus = (kind, text) => setListenTargetStatus(dialog, kind, text);
-  // 群下拉 change 同步到 input
-  dialog.querySelectorAll("[data-listen-select]").forEach((select) => {
-    select.addEventListener("change", () => {
-      const target = select.dataset.listenSelect;
-      const input = dialog.querySelector(`[name="${target}"]`);
-      if (input) input.value = select.value;
-      // 切换群时清空话题
-      if (target === "target_chat") {
-        const topicInput = dialog.querySelector('[name="target_topic_id"]');
-        const topicSelect = dialog.querySelector('[data-listen-select="target_topic_id"]');
-        if (topicInput) topicInput.value = "";
-        if (topicSelect) topicSelect.value = "";
-      }
-    });
-  });
-  dialog.querySelectorAll("[data-listen-action]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const action = button.dataset.listenAction;
-      const localId = modalState.localId;
-      if (!localId) {
-        setStatus("warn", "先完成登录,系统才能用这个账号去 Telegram 拉数据");
-        return;
-      }
-      button.disabled = true;
-      try {
-        if (action === "load-dialogs") {
-          setStatus("info", "正在拉取该账号可见的群 / 频道…");
-          const result = await fetchJson(`/api/accounts/dialogs?local_id=${encodeURIComponent(localId)}`);
-          if (!result.ok) throw new Error(result.error || "拉取失败");
-          const dialogsList = result.dialogs || [];
-          const select = dialog.querySelector('[data-listen-select="target_chat"]');
-          const currentVal = dialog.querySelector('[name="target_chat"]')?.value || "";
-          populateListenTargetSelect(select, dialogsList, currentVal, "id",
-            (d) => `${d.title || d.id}｜${dialogKindLabel(d.kind)}｜${d.id}${d.username ? ` @${d.username}` : ""}`);
-          setStatus("ok", `共 ${dialogsList.length} 个群 / 频道,从下拉里选`);
-          return;
-        }
-        if (action === "load-topics") {
-          const chat = (dialog.querySelector('[name="target_chat"]')?.value || "").trim();
-          if (!chat) {
-            setStatus("warn", "先选群,才能读这个群的话题");
-            return;
-          }
-          setStatus("info", "正在拉取该群的话题…");
-          const result = await fetchJson(`/api/accounts/topics?local_id=${encodeURIComponent(localId)}&chat=${encodeURIComponent(chat)}`);
-          if (!result.ok) throw new Error(result.error || "拉取失败");
-          const topics = result.topics || [];
-          const select = dialog.querySelector('[data-listen-select="target_topic_id"]');
-          const currentVal = dialog.querySelector('[name="target_topic_id"]')?.value || "";
-          populateListenTargetSelect(select, topics, currentVal, "id",
-            (t) => `${t.title || t.id}｜${t.id}`);
-          setStatus("ok", topics.length ? `共 ${topics.length} 个话题` : "该群没有话题(普通群/频道)");
-          return;
-        }
-        if (action === "save-target") {
-          const chat = (dialog.querySelector('[name="target_chat"]')?.value || "").trim();
-          if (!chat) {
-            setStatus("warn", "请选群或手填 -100... 群 ID");
-            return;
-          }
-          const topic = (dialog.querySelector('[name="target_topic_id"]')?.value || "").trim();
-          setStatus("info", "正在保存采集来源…");
-          await ensureSaveAccountTarget(localId, chat, topic);
-          const collectNow = dialog.querySelector("[data-listen-collect-now]")?.checked;
-          if (collectNow) {
-            setStatus("info", "保存成功,正在切到采集账号…");
-            const result = await postJson("/api/accounts/listener/start", { local_id: localId });
-            if (!result.ok && result.listener?.status === "error") {
-              throw new Error(result.listener.message || "启动采集失败");
-            }
-            setStatus("ok", "已开始采集,新消息会落到消息箱");
-          } else {
-            setStatus("ok", "采集来源已保存。回到 sidebar 把账号开关打开就开始采集。");
-          }
-          await loadAccounts();
-          await loadIdentities();
-          return;
-        }
-      } catch (error) {
-        setStatus("error", error.message || "操作失败");
-      } finally {
-        button.disabled = false;
-      }
-    });
-  });
+  return accountManagementView().bindAccountModal(accountManagementDeps(), dialog, account, settings, modalState);
 }
 
 async function ensureSaveAccountTarget(localId, targetChat, targetTopicId) {
