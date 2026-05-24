@@ -70,14 +70,14 @@
 .chat-client-shell .quick-action-hotbar {
   display: grid;
   grid-template-columns: repeat(var(--hotbar-columns, 6), minmax(0, 1fr));
-  grid-template-rows: repeat(2, 20px);
+  grid-template-rows: repeat(2, 18px);
   grid-auto-flow: row;
   align-items: stretch;
   align-content: start;
   justify-content: start;
-  gap: 2px 3px;
+  gap: 2px 4px;
   min-height: 0;
-  max-height: 42px;
+  max-height: 38px;
   overflow-x: hidden;
   overflow-y: hidden;
   padding: 0;
@@ -87,13 +87,13 @@
   width: 100%;
   min-width: 0;
   min-height: 0;
-  height: 20px;
+  height: 18px;
   max-width: none;
   justify-content: flex-start;
-  padding: 1px 4px;
+  padding: 1px 3px;
   gap: 2px;
-  border-radius: 6px;
-  font-size: 10.5px;
+  border-radius: 5px;
+  font-size: 10px;
   line-height: 1.1;
 }
 
@@ -106,12 +106,12 @@
 
 .chat-client-shell .quick-action-hotbar .skill-chip-icon {
   flex: 0 0 auto;
-  font-size: 10.5px;
+  font-size: 10px;
 }
 
 .chat-client-shell .quick-action-hotbar .skill-chip-cd {
   flex: 0 0 auto;
-  font-size: 9.5px;
+  font-size: 9px;
   opacity: 0.86;
 }
 
@@ -168,14 +168,14 @@
   }
 
   .chat-client-shell .quick-action-hotbar {
-    gap: 2px 3px;
-    max-height: 42px;
+    gap: 2px 4px;
+    max-height: 38px;
   }
 
   .chat-client-shell .quick-action-hotbar .skill-chip {
-    height: 20px;
-    padding: 1px 4px;
-    font-size: 10.5px;
+    height: 18px;
+    padding: 1px 3px;
+    font-size: 10px;
   }
 
   .chat-client-shell .direct-send-row select,
@@ -323,16 +323,16 @@
   }
 
   .chat-client-shell .quick-action-hotbar {
-    gap: 2px 3px;
-    max-height: 42px;
+    gap: 2px 4px;
+    max-height: 38px;
     padding-bottom: 0;
     scrollbar-width: none;
   }
 
   .chat-client-shell .quick-action-hotbar .skill-chip {
-    height: 20px;
-    padding: 1px 4px;
-    font-size: 10.5px;
+    height: 18px;
+    padding: 1px 3px;
+    font-size: 10px;
   }
 
   .chat-client-shell .direct-send-row {

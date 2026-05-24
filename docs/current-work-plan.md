@@ -71,8 +71,9 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      inventory lives in `web/static/views/inventory.js`; dungeon Xutian/Cangkun
      playbook cards live in `web/static/views/dungeon_playbook.js`; the dungeon
      status modal shell and refresh flow live in
-     `web/static/views/dungeon_status.js`, with reusable status render helpers
-     still bridged through `web/static/app.js`.
+     `web/static/views/dungeon_status.js`, along with reusable status render
+     helpers, while `web/static/app.js` keeps compatibility wrappers and
+     orchestration callbacks.
 
 ## Remaining Work
 
