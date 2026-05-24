@@ -2,7 +2,6 @@
 (function () {
   "use strict";
 
-  const { fetchJson } = window.MiniwebApi;
   const { closeModal, openModal } = window.MiniwebModal;
   const { clipGraphemes, escapeAttr, escapeHtml, formatNumber } = window.MiniwebFormat;
 
@@ -97,10 +96,19 @@
     try {
       const summaryLimit = Number(dialog._dungeonSummaryLimit || 3) || 3;
       const scanLimit = summaryLimit <= 3 ? 90 : 300;
+      if (typeof deps.loadDungeonStatus !== "function") {
+        throw new Error("dungeonStatus missing dependency: loadDungeonStatus");
+      }
+      if (typeof deps.loadCangkunGuide !== "function") {
+        throw new Error("dungeonStatus missing dependency: loadCangkunGuide");
+      }
+      if (typeof deps.loadXutianOracleGuide !== "function") {
+        throw new Error("dungeonStatus missing dependency: loadXutianOracleGuide");
+      }
       const [payload, cangkunGuide, xutianGuide] = await Promise.all([
-        fetchJson(`/api/dungeon-status?limit=${scanLimit}&summary_limit=${encodeURIComponent(summaryLimit)}&order=recent`),
-        fetchJson("/api/cangkun-guide").catch((error) => ({ ok: false, error: error.message || "读取苍坤攻略失败" })),
-        fetchJson("/api/xutian-oracle-guide").catch((error) => ({ ok: false, error: error.message || "读取虚天攻略失败" })),
+        deps.loadDungeonStatus({ scanLimit, summaryLimit }),
+        deps.loadCangkunGuide().catch((error) => ({ ok: false, error: error.message || "读取苍坤攻略失败" })),
+        deps.loadXutianOracleGuide().catch((error) => ({ ok: false, error: error.message || "读取虚天攻略失败" })),
       ]);
       const summaries = (payload.summaries || []).map(normalizeDungeonStatusSummary);
       dialog._dungeonSummaries = summaries;

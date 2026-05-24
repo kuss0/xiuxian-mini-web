@@ -138,7 +138,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "dungeon panel" in work_plan and "clickability" in work_plan
     assert "official schedule manual handling" in normalized_work_plan
     assert "details persist in the modal status line" in normalized_work_plan
-    assert "standalone Xutian and Cangkun guide modals live in `web/static/views/xutian_guide.js` and `web/static/views/cangkun_guide.js` with guide loading injected from `web/static/app.js`" in normalized_work_plan
+    assert "dungeon status modal and standalone Xutian/Cangkun guide modals live in `web/static/views/dungeon_status.js`, `web/static/views/xutian_guide.js`, and `web/static/views/cangkun_guide.js` with status/guide loading injected from `web/static/app.js`" in normalized_work_plan
     assert "inventory lives in `web/static/views/inventory.js`" in work_plan
     assert "playbook cards live in `web/static/views/dungeon_playbook.js`" in work_plan
     assert "status modal shell and refresh flow live in" in work_plan
@@ -178,7 +178,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "/api/dungeons/status" not in audit
     assert "modal lists the affected owners and reason" in audit
     assert "detailed manual-handling messages in the modal status line" in audit
-    assert "Standalone Xutian/Cangkun guide modals are isolated in `web/static/views/xutian_guide.js` and `web/static/views/cangkun_guide.js`, with guide loading injected from `web/static/app.js`" in audit
+    assert "dungeon status modal and standalone Xutian/Cangkun guide modals are isolated in `web/static/views/dungeon_status.js`, `web/static/views/xutian_guide.js`, and `web/static/views/cangkun_guide.js`, with status and guide loading injected from `web/static/app.js`" in audit
     assert "Dungeon playbook and standalone guide actions fill the composer only" in audit
     assert "resource stats modal and coverage renderer are isolated in `web/static/views/resource_stats.js`" in audit
     assert "Global health/setup banner is isolated in `web/static/views/global_banner.js`" in audit
@@ -1797,6 +1797,9 @@ def test_dungeon_playbook_panel_contract_is_read_only_until_composer_send():
         "window.MiniwebViews.dungeonStatus.renderDungeonStatusModal",
         "window.MiniwebViews.dungeonStatus.normalizeDungeonStatusSummary",
         "dungeonStatusDeps",
+        "loadDungeonStatus: ({ scanLimit, summaryLimit }) => fetchJson(`/api/dungeon-status?limit=${scanLimit}&summary_limit=${encodeURIComponent(summaryLimit)}&order=recent`)",
+        'loadCangkunGuide: () => fetchJson("/api/cangkun-guide")',
+        'loadXutianOracleGuide: () => fetchJson("/api/xutian-oracle-guide")',
         "openXutianOracleGuideModal",
         "openCangkunGuideModal",
         "window.MiniwebViews.dungeonPlaybook.renderDungeonPlaybookPanels",
@@ -1805,11 +1808,15 @@ def test_dungeon_playbook_panel_contract_is_read_only_until_composer_send():
     ]
     required_status_fragments = [
         'id="dungeonPlaybookPanels"',
-        "/api/cangkun-guide",
-        "/api/xutian-oracle-guide",
         "function openDungeonStatusModal",
         "function bindDungeonStatusModal",
         "async function refreshDungeonStatusModal",
+        "dungeonStatus missing dependency: loadDungeonStatus",
+        "dungeonStatus missing dependency: loadCangkunGuide",
+        "dungeonStatus missing dependency: loadXutianOracleGuide",
+        "deps.loadDungeonStatus({ scanLimit, summaryLimit })",
+        "deps.loadCangkunGuide().catch",
+        "deps.loadXutianOracleGuide().catch",
         "function normalizeDungeonStatusSummary",
         "function renderDungeonStatusModal",
         "function renderCurrentDungeonPanel",
@@ -1823,6 +1830,13 @@ def test_dungeon_playbook_panel_contract_is_read_only_until_composer_send():
         "deps.fillCangkunCommand",
         "deps.copyCommandToClipboard",
         "window.MiniwebViews.dungeonStatus",
+    ]
+    forbidden_status_fragments = [
+        "fetchJson(",
+        "postJson(",
+        "apiFetch(",
+        "window.MiniwebApi",
+        '"/api/',
     ]
     required_playbook_fragments = [
         "function renderDungeonPlaybookPanels",
@@ -1847,6 +1861,8 @@ def test_dungeon_playbook_panel_contract_is_read_only_until_composer_send():
         assert fragment in app_js
     for fragment in required_status_fragments:
         assert fragment in status_js
+    for fragment in forbidden_status_fragments:
+        assert fragment not in status_js
     for fragment in required_playbook_fragments:
         assert fragment in playbook_js
 

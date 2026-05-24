@@ -1221,6 +1221,9 @@ async function openDungeonStatusModal() {
 function dungeonStatusDeps() {
   return {
     formatChatTime,
+    loadDungeonStatus: ({ scanLimit, summaryLimit }) => fetchJson(`/api/dungeon-status?limit=${scanLimit}&summary_limit=${encodeURIComponent(summaryLimit)}&order=recent`),
+    loadCangkunGuide: () => fetchJson("/api/cangkun-guide"),
+    loadXutianOracleGuide: () => fetchJson("/api/xutian-oracle-guide"),
     fillDungeonCommand: (command) => fillDirectSendComposer(command, {
       statusText: "已填入副本命令，请确认后发送。",
       statusKind: "info",
