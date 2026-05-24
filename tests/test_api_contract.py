@@ -149,7 +149,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "quest tracker and manual action-fill flow live in `web/static/views/quest_tracker.js`" in normalized_work_plan
     assert "game scene board and manual scene actions live in `web/static/views/game_scene.js`" in normalized_work_plan
     assert "resource stats modal and coverage renderer live in `web/static/views/resource_stats.js`" in normalized_work_plan
-    assert "world report modal lives in `web/static/views/world_report.js`" in normalized_work_plan
+    assert "world report modal lives in `web/static/views/world_report.js` with composite payload loading injected from `web/static/app.js`" in normalized_work_plan
     assert "world event strip and manual event actions live in `web/static/views/world_event.js`" in normalized_work_plan
     assert "live situation board and signal snapshot helpers live in `web/static/views/live_situation.js`" in normalized_work_plan
     assert "game cockpit, primary strip, and action dock live in `web/static/views/game_cockpit.js`" in normalized_work_plan
@@ -181,6 +181,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "dungeon status modal and standalone Xutian/Cangkun guide modals are isolated in `web/static/views/dungeon_status.js`, `web/static/views/xutian_guide.js`, and `web/static/views/cangkun_guide.js`, with status and guide loading injected from `web/static/app.js`" in audit
     assert "Dungeon playbook and standalone guide actions fill the composer only" in audit
     assert "resource stats modal and coverage renderer are isolated in `web/static/views/resource_stats.js`" in audit
+    assert "world report modal is isolated in `web/static/views/world_report.js`, with composite health/dungeon/resource/intel/priority loading injected from `web/static/app.js`" in audit
     assert "Global health/setup banner is isolated in `web/static/views/global_banner.js`" in audit
     assert "official schedule rail and modal are isolated in `web/static/views/schedule.js`" in audit
     assert "chat message stream, channel chips, quick filters, scroll anchoring, and quick-action renderer are isolated in `web/static/views/chat_stream.js`" in audit
@@ -266,11 +267,19 @@ def test_world_report_view_module_keeps_app_wrappers_and_read_only_action_contra
         "return window.MiniwebViews.worldReport.renderWorldReport(worldReportDeps(), payload)",
         "renderLiveSituationBoard,",
         "renderGameActionDock,",
+        "loadWorldReportPayload: async () => {",
+        'fetchJson("/api/health")',
+        'fetchJson("/api/dungeon-status?limit=90&summary_limit=3&order=recent")',
+        'fetchJson("/api/resource-stats?period=day&source_type=all&limit=120")',
+        'fetchJson("/api/messages?channel=leader&limit=6")',
+        'fetchJson("/api/messages?channels=risk,focus&limit=16&compact=1")',
         "fillQuestTrackerAction,",
     ]
     required_module_fragments = [
         "// MINIWEB-VIEW: world report modal",
         "async function openWorldReportModal(deps = {})",
+        "worldReport missing dependency: loadWorldReportPayload",
+        "const payload = await deps.loadWorldReportPayload()",
         "function renderWorldReport(deps = {}, payload)",
         "function renderWorldReportQuestCard(deps = {}, message)",
         "function bindWorldReport(deps = {}, dialog, payload)",
@@ -282,10 +291,21 @@ def test_world_report_view_module_keeps_app_wrappers_and_read_only_action_contra
         "await deps.openResourceStatsModal?.()",
         "await deps.openDungeonStatusModal?.()",
     ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "fetchJson(",
+        "apiFetch(",
+        "window.MiniwebApi",
+        '"/api/',
+        '"/api/skills/send"',
+        '"/api/outbox/drafts"',
+    ]
     for fragment in required_app_fragments:
         assert fragment in app_js
     for fragment in required_module_fragments:
         assert fragment in world_report_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in world_report_js
 
 
 def test_identity_status_view_module_keeps_shared_helpers_and_composer_fill_contract():

@@ -652,6 +652,16 @@ function worldReportDeps() {
     renderGameSceneBoard,
     renderQuestTracker,
     renderGameActionDock,
+    loadWorldReportPayload: async () => {
+      const [health, dungeon, resource, leader, priority] = await Promise.all([
+        fetchJson("/api/health"),
+        fetchJson("/api/dungeon-status?limit=90&summary_limit=3&order=recent"),
+        fetchJson("/api/resource-stats?period=day&source_type=all&limit=120"),
+        fetchJson("/api/messages?channel=leader&limit=6"),
+        fetchJson("/api/messages?channels=risk,focus&limit=16&compact=1"),
+      ]);
+      return { health, dungeon, resource, leader, priority };
+    },
     normalizeDungeonStatusSummary,
     pickCurrentDungeonSummary,
     latestResourcePeriod,

@@ -2,7 +2,6 @@
 (function () {
   "use strict";
 
-  const { fetchJson } = window.MiniwebApi;
   const { closeModal, openModal } = window.MiniwebModal;
   const { clipGraphemes, escapeAttr, escapeHtml, formatNumber } = window.MiniwebFormat;
 
@@ -28,14 +27,11 @@
       if (button) button.disabled = true;
       if (body) body.innerHTML = '<p class="empty inline">正在读取今日态势...</p>';
       try {
-        const [health, dungeon, resource, leader, priority] = await Promise.all([
-          fetchJson("/api/health"),
-          fetchJson("/api/dungeon-status?limit=90&summary_limit=3&order=recent"),
-          fetchJson("/api/resource-stats?period=day&source_type=all&limit=120"),
-          fetchJson("/api/messages?channel=leader&limit=6"),
-          fetchJson("/api/messages?channels=risk,focus&limit=16&compact=1"),
-        ]);
-        const payload = { health, dungeon, resource, leader, priority };
+        if (typeof deps.loadWorldReportPayload !== "function") {
+          throw new Error("worldReport missing dependency: loadWorldReportPayload");
+        }
+        const payload = await deps.loadWorldReportPayload();
+        const { dungeon, resource, leader, priority } = payload || {};
         if (deps.state) {
           deps.state.worldSnapshot = {
             loadedAt: new Date().toISOString(),

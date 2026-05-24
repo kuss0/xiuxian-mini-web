@@ -33,7 +33,7 @@ do not prove success.
 | --- | --- |
 | State source | Resource events and deltas derived from stored message cards. Blood trial remains archived out of this stats surface. |
 | Trigger | Message ingest parses observed settlement replies; `/api/resource-stats` and `/api/resource-coverage` expose read-only summaries and parser coverage diagnostics. |
-| Refresh path | The resource stats modal and coverage renderer are isolated in `web/static/views/resource_stats.js`, with `web/static/app.js` keeping compatibility wrappers for world report, health, and cockpit summaries. |
+| Refresh path | The resource stats modal and coverage renderer are isolated in `web/static/views/resource_stats.js`, with `web/static/app.js` keeping compatibility wrappers for health and cockpit summaries. The world report modal is isolated in `web/static/views/world_report.js`, with composite health/dungeon/resource/intel/priority loading injected from `web/static/app.js`. |
 | Failure/manual fallback | Coverage diagnosis can highlight likely missed samples and reparse recent candidates, but unknown reward text does not mutate inventory or create sends. The health modal reuses the same coverage renderer so message-box gaps remain visible beside stats trust signals. |
 | Current gap | Parser coverage still depends on observed stable bot replies, so new gameplay text should become fixtures before it is promoted into stats logic. |
 | Next action | Add parser coverage only from real missed samples and keep the resource modal read-only. |
