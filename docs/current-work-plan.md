@@ -108,7 +108,9 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      intelligence modal lives in `web/static/views/leader_intel.js` with
      leader-message loading injected from `web/static/app.js`. The message logs
      modal lives in `web/static/views/logs.js` with message paging/export APIs
-     injected from `web/static/app.js`. The official schedule rail and modal
+     injected from `web/static/app.js`. The notification settings modal lives in
+     `web/static/views/notify.js` with card-title/settings/test APIs injected
+     from `web/static/app.js`. The official schedule rail and modal
      live in `web/static/views/schedule.js`. The chat
      message stream, channel chips, quick filters, scroll anchoring, and quick actions live in
      `web/static/views/chat_stream.js`; the direct composer, emoji palette, and

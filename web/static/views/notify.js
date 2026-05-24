@@ -2,11 +2,10 @@
 (function () {
   "use strict";
 
-  const { fetchJson, postJson } = window.MiniwebApi;
   const { closeModal, openModal } = window.MiniwebModal;
   const { escapeAttr, escapeHtml } = window.MiniwebFormat;
 
-  async function openNotifySettingsModal({ loadSettings }) {
+  async function openNotifySettingsModal({ loadNotifyCardTitles, loadSettings, saveSettings, sendNotifyTest }) {
     const settings = await loadSettings();
     const savedSecrets = settings.saved_secrets || {};
     const enabled = !!settings.notify_enabled;
@@ -57,15 +56,18 @@
     });
     if (!dialog) return;
 
-    await renderNotifyCardTitleOptions(dialog, subscribed);
-    bindNotifySettingsModal(dialog, { loadSettings });
+    await renderNotifyCardTitleOptions(dialog, subscribed, { loadNotifyCardTitles });
+    bindNotifySettingsModal(dialog, { loadSettings, saveSettings, sendNotifyTest });
   }
 
-  async function renderNotifyCardTitleOptions(dialog, subscribed) {
+  async function renderNotifyCardTitleOptions(dialog, subscribed, { loadNotifyCardTitles } = {}) {
     const grid = dialog.querySelector("#notifyEventGrid");
     if (!grid) return;
     try {
-      const data = await fetchJson("/api/notify/card-titles");
+      if (typeof loadNotifyCardTitles !== "function") {
+        throw new Error("notify missing dependency: loadNotifyCardTitles");
+      }
+      const data = await loadNotifyCardTitles();
       const titles = data.titles || [];
       const groups = [
         { name: "高危", keys: ["风险提醒", "天道审判"] },
@@ -108,7 +110,7 @@
     `;
   }
 
-  function bindNotifySettingsModal(dialog, { loadSettings }) {
+  function bindNotifySettingsModal(dialog, { loadSettings, saveSettings, sendNotifyTest }) {
     const status = dialog.querySelector("#notifyStatus");
     const setStatus = (kind, text) => {
       if (!status) return;
@@ -128,7 +130,10 @@
       if (!patch.notify_tg_bot_token) {
         delete patch.notify_tg_bot_token;
       }
-      await postJson("/api/settings", patch);
+      if (typeof saveSettings !== "function") {
+        throw new Error("notify missing dependency: saveSettings");
+      }
+      await saveSettings(patch);
       await loadSettings();
     };
 
@@ -155,7 +160,10 @@
         setStatus("info", "保存当前配置 + 发测试通知...");
         try {
           await saveSettingsPatch();
-          const data = await postJson("/api/notify/test", {});
+          if (typeof sendNotifyTest !== "function") {
+            throw new Error("notify missing dependency: sendNotifyTest");
+          }
+          const data = await sendNotifyTest();
           if (data.ok) {
             const channels = (data.results || []).map((result) => result.channel).join(", ");
             setStatus("ok", `已发(${channels || "无 channel"}),去 chat 看一下`);

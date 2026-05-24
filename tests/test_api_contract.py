@@ -158,6 +158,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "global health/setup banner lives in `web/static/views/global_banner.js`" in normalized_work_plan
     assert "chat message stream, channel chips, quick filters, scroll anchoring, and quick actions live in `web/static/views/chat_stream.js`" in normalized_work_plan
     assert "message logs modal lives in `web/static/views/logs.js` with message paging/export APIs injected from `web/static/app.js`" in normalized_work_plan
+    assert "notification settings modal lives in `web/static/views/notify.js` with card-title/settings/test APIs injected from `web/static/app.js`" in normalized_work_plan
     assert "direct composer, emoji palette, and quick command hotbar live in `web/static/views/direct_composer.js`" in normalized_work_plan
     assert "detail rich cards and field formatting live in `web/static/views/detail_cards.js`" in normalized_work_plan
     assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
@@ -211,7 +212,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "unsupported adapters" in audit
     assert "`web/static/views/outbox.js` renders outbox drafts, send plans, backend automation decisions" in audit
     assert "access settings modal, automation guard form, Telegram dialog/topic option renderers, and read-only Telegram account list are isolated in `web/static/views/settings.js`" in audit
-    assert "`web/static/app.js` keeps `/api/settings`, login, notification-test, and outbox automation API wrappers" in audit
+    assert "notification settings modal is isolated in `web/static/views/notify.js`" in audit
+    assert "`web/static/app.js` keeps `/api/settings`, login, notification-test, notification card-title, and outbox automation API wrappers" in audit
     assert "`backend/outbox/adapters.py` owns sender adapter dispatch" in audit
     assert "`backend/outbox/worker.py` consumes only `auto_pending` drafts" in audit
 
@@ -1078,6 +1080,55 @@ def test_settings_view_module_keeps_wrappers_and_api_boundary_contract():
         assert fragment not in app_js
     for fragment in forbidden_module_fragments:
         assert fragment not in settings_js
+
+
+def test_notify_view_module_keeps_notification_apis_in_app():
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "web" / "index.html").read_text(encoding="utf-8")
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    notify_js = (root / "web" / "static" / "views" / "notify.js").read_text(encoding="utf-8")
+    scripts = re.findall(r'<script src="/static/([^"?]+)"', html)
+
+    required_app_fragments = [
+        "async function openNotifySettingsModal()",
+        "window.MiniwebViews.notify.openNotifySettingsModal({",
+        'loadNotifyCardTitles: () => fetchJson("/api/notify/card-titles")',
+        "loadSettings,",
+        "saveSettings,",
+        'sendNotifyTest: () => postJson("/api/notify/test", {})',
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: notification settings modal",
+        "async function openNotifySettingsModal({ loadNotifyCardTitles, loadSettings, saveSettings, sendNotifyTest })",
+        "await renderNotifyCardTitleOptions(dialog, subscribed, { loadNotifyCardTitles })",
+        "bindNotifySettingsModal(dialog, { loadSettings, saveSettings, sendNotifyTest })",
+        "notify missing dependency: loadNotifyCardTitles",
+        "const data = await loadNotifyCardTitles()",
+        "notify missing dependency: saveSettings",
+        "await saveSettings(patch)",
+        "notify missing dependency: sendNotifyTest",
+        "const data = await sendNotifyTest()",
+        "window.MiniwebViews.notify = { openNotifySettingsModal }",
+    ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "fetchJson(",
+        "apiFetch(",
+        "window.MiniwebApi",
+        '"/api/',
+        '"/api/settings"',
+        '"/api/notify/',
+        '"/api/skills/send"',
+        '"/api/outbox/drafts"',
+    ]
+
+    assert scripts.index("views/notify.js") < scripts.index("app.js")
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in notify_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in notify_js
 
 
 def test_account_management_view_module_keeps_api_orchestration_in_app():

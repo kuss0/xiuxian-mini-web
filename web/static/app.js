@@ -1359,7 +1359,10 @@ async function openInventoryModal() {
 
 async function openNotifySettingsModal() {
   await window.MiniwebViews.notify.openNotifySettingsModal({
+    loadNotifyCardTitles: () => fetchJson("/api/notify/card-titles"),
     loadSettings,
+    saveSettings,
+    sendNotifyTest: () => postJson("/api/notify/test", {}),
   });
 }
 
