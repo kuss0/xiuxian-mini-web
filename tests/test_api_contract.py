@@ -155,6 +155,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
     assert "chat message stream, scroll anchoring, and quick actions live in `web/static/views/chat_stream.js`" in normalized_work_plan
     assert "detail rich cards and field formatting live in `web/static/views/detail_cards.js`" in normalized_work_plan
+    assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
 
     assert "/api/dungeon-status" in audit
     assert "/api/dungeons/status" not in audit
@@ -166,6 +167,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "Chat stream quick actions fill the composer only" in audit
     assert "Detail rich cards and field formatting are isolated in `web/static/views/detail_cards.js`" in audit
     assert "Detail cards are read-only renderers" in audit
+    assert "message detail panel and manual action controls are isolated in `web/static/views/detail_panel.js`" in audit
+    assert "Detail panel actions fill the composer or create manual plans/drafts only" in audit
     assert "Dungeon playbook actions fill the composer only" in audit
     assert "Xutian now exposes phase, route" in audit
 
@@ -751,6 +754,70 @@ def test_detail_cards_view_module_keeps_wrappers_and_read_only_renderer_contract
         assert fragment not in app_js
     for fragment in forbidden_module_fragments:
         assert fragment not in detail_cards_js
+
+
+def test_detail_panel_view_module_keeps_wrappers_and_manual_action_contract():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    detail_panel_js = (root / "web" / "static" / "views" / "detail_panel.js").read_text(encoding="utf-8")
+
+    required_app_fragments = [
+        "function detailPanelDeps()",
+        "function detailPanelView()",
+        "async function renderDetail()",
+        "return detailPanelView().renderDetail(detailPanelDeps())",
+        "function renderFocusInsight(message)",
+        "return detailPanelView().renderFocusInsight(detailPanelDeps(), message)",
+        "function renderDetailActions(message)",
+        "return detailPanelView().renderDetailActions(detailPanelDeps(), message)",
+        "function bindDetailActions(message)",
+        "return detailPanelView().bindDetailActions(detailPanelDeps(), message)",
+        "fillDirectSendComposer,",
+        "createOutboxDraft,",
+        "planOutboxAction,",
+        "renderOutboxPlan,",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: message detail panel and manual action controls",
+        "async function renderDetail(deps = {})",
+        "function renderFocusInsight(deps = {}, message)",
+        "function actionCountLabel(message)",
+        "function renderFocusTools(deps = {}, message)",
+        "function focusReasonList(deps = {}, message)",
+        "function canFocusArchiveMessage(deps = {}, message)",
+        "function renderDetailActions(deps = {}, message)",
+        "function renderActionContextLine(action)",
+        "function bindDetailActions(deps = {}, message)",
+        "window.MiniwebViews.detailPanel = {",
+        "renderDetail,",
+        "renderDetailActions,",
+        "bindDetailActions,",
+        "deps.fillDirectSendComposer?.(action.command, {",
+        "deps.createOutboxDraft?.(action, message.id)",
+        "deps.planOutboxAction?.(action)",
+        "已填入输入框，请确认内容后发送。",
+    ]
+    forbidden_app_fragments = [
+        "async function renderDetail() {\n  if (state.detailMode === \"overview\")",
+        "function renderFocusInsight(message) {\n  const reasons = focusReasonList(message);",
+        "function bindDetailActions(message) {\n  const actions = message.actions || [];",
+    ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "fetchJson(",
+        "sendDirectComposerMessage",
+        '"/api/skills/send"',
+        '"/api/outbox/drafts"',
+        '"/api/settings"',
+    ]
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in detail_panel_js
+    for fragment in forbidden_app_fragments:
+        assert fragment not in app_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in detail_panel_js
 
 
 def test_frontend_identity_state_refresh_is_first_class():
