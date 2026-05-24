@@ -21,6 +21,10 @@ ITEM_RE = re.compile(
 )
 TREE_HARVEST_REWARD_RE = re.compile(r"【([^】]+)】\s*(?:[xX×]\s*([\d,]+))?")
 LISTING_SUCCESS_RE = re.compile(r"你已将\s*【(?P<item>.+?)】\s*[xX×](?P<count>[\d,]+)\s*上架至万宝楼")
+DELISTING_SUCCESS_RE = re.compile(
+    r"你已成功将\s*【(?P<item>.+?)】\s*[xX×](?P<count>[\d,]+)"
+    r"\s*从万宝楼下架，物品已归还至你的储物袋"
+)
 GIFT_SUCCESS_RE = re.compile(r"赠送了\s*【(?P<item>.+?)】\s*[xX×](?P<count>[\d,]+)")
 GIFT_TAX_RE = re.compile(r"额外支付了\s*(?P<count>[\d,]+)\s*灵石")
 TREE_REWARD_KEYWORDS = ("获得【", "分得【", "稳定分得【")
@@ -137,6 +141,12 @@ def parse_inventory_delta_event(event: RawMessageEvent) -> dict | None:
         if item and amount > 0:
             deltas[item] = deltas.get(item, 0) - amount
             source_type = "listing_success"
+    elif match := DELISTING_SUCCESS_RE.search(text):
+        item = _clean_item_name(match.group("item"))
+        amount = _parse_amount(match.group("count"))
+        if item and amount > 0:
+            deltas[item] = deltas.get(item, 0) + amount
+            source_type = "delisting_success"
     elif match := GIFT_SUCCESS_RE.search(text):
         item = _clean_item_name(match.group("item"))
         amount = _parse_amount(match.group("count"))

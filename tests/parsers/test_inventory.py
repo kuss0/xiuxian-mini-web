@@ -1,4 +1,4 @@
-from backend.parsers.inventory import InventoryParser, parse_inventory_snapshot
+from backend.parsers.inventory import InventoryParser, parse_inventory_delta_event, parse_inventory_snapshot
 from tests.parsers import load_fixture, make_event
 
 
@@ -36,6 +36,15 @@ def test_inventory_snapshot_parses_and_merges_items():
     assert items[("法宝/丹药/杂物", "清灵丹", "")] == 7
     assert items[("法宝/丹药/杂物", "乌龙幡", "(耐久 100/100)")] == 1
     assert items[("材料", "阴凝之晶", "")] == 2
+
+
+def test_inventory_delta_parses_wanbaolou_delisting_return():
+    event = make_event("你已成功将 【二级妖丹】x10 从万宝楼下架，物品已归还至你的储物袋。")
+    delta = parse_inventory_delta_event(event)
+
+    assert delta is not None
+    assert delta["source_type"] == "delisting_success"
+    assert delta["deltas"] == {"二级妖丹": 10}
 
 
 def test_skips_unrelated_message():

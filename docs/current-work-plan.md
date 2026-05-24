@@ -39,10 +39,12 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      per-identity boundary and refuses additional automation with a manual
      handling notice.
    - Current state: inventory auto-refreshes while open and names the owners
-     that need manual `.储物袋` calibration; official schedule manual handling
-     details persist in the modal status line. The official schedule rail and
-     modal live in `web/static/views/schedule.js`; identity state refresh is
-     part of the normal identity refresh path.
+     that need manual `.储物袋` calibration; `inventory_current` consumes stable
+     Wanbaolou listing/delisting, gift, and tree-harvest success replies as
+     conservative deltas; official schedule manual handling details persist in
+     the modal status line. The official schedule rail and modal live in
+     `web/static/views/schedule.js`; identity state refresh is part of the
+     normal identity refresh path.
 
 4. Tool center cleanup
    - Common workflows remain on the main page.
@@ -82,7 +84,8 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
 - Keep adding concrete message-classification fixtures only from observed bad
   samples.
 - Add new inventory delta parsers only from stable real bot success replies,
-  then backfill `inventory_current`.
+  then backfill `inventory_current`; current stable families are Wanbaolou
+  listing/delisting, gift, and tree harvest.
 - Treat official schedule Telegram-history sync as reconciliation only; never
   use it to exceed the local 100-message guard.
 - Continue CSS/module cleanup opportunistically when a touched surface already

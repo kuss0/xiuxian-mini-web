@@ -136,8 +136,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "tests/layout_probe.py" in work_plan
     assert "two-row quick-command hotbar visibility" in work_plan
     assert "dungeon panel" in work_plan and "clickability" in work_plan
-    assert "official schedule manual handling" in work_plan
-    assert "details persist in the modal status line" in work_plan
+    assert "official schedule manual handling" in normalized_work_plan
+    assert "details persist in the modal status line" in normalized_work_plan
     assert "inventory lives in `web/static/views/inventory.js`" in work_plan
     assert "playbook cards live in `web/static/views/dungeon_playbook.js`" in work_plan
     assert "status modal shell and refresh flow live in" in work_plan
@@ -2643,6 +2643,56 @@ def test_inventory_current_applies_confirmed_deltas_after_snapshot(tmp_path):
     assert by_name["阴凝之晶"]["confidence"] == "estimated"
     assert by_name["清灵草"]["amount"] == 2
     assert by_name["清灵草"]["basis"] == "ledger_delta"
+
+
+def test_inventory_current_adds_wanbaolou_delisting_return_to_owner(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_account({"local_id": "main", "account_id": "12345", "username": "seller"})
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:103",
+            chat_id=-1,
+            msg_id=103,
+            text="""@seller 的储物袋
+
+材料:
+- 二级妖丹 x 2""",
+            source="韩天尊",
+            date="2026-05-15T10:00:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:104",
+            chat_id=-1,
+            msg_id=104,
+            text=".下架 21179",
+            source="seller",
+            date="2026-05-15T10:01:00+00:00",
+            sender_id=12345,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:105",
+            chat_id=-1,
+            msg_id=105,
+            text="你已成功将 【二级妖丹】x10 从万宝楼下架，物品已归还至你的储物袋。",
+            source="韩天尊",
+            date="2026-05-15T10:02:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+            reply_to_msg_id=104,
+        )
+    )
+
+    by_name = {item["name"]: item for item in store.list_inventory_current(owner="seller")}
+    assert by_name["二级妖丹"]["amount"] == 12
+    assert by_name["二级妖丹"]["confidence"] == "estimated"
+    assert by_name["二级妖丹"]["basis"] == "ledger_delta"
+    assert by_name["二级妖丹"]["last_delta_message_id"] == "tg:-1:105"
 
 
 def test_inventory_current_resets_to_authoritative_snapshot(tmp_path):
