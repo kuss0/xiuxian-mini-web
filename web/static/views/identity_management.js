@@ -1,4 +1,4 @@
-// MINIWEB-VIEW: add-identity modal and send_as renderers
+// MINIWEB-VIEW: sidebar identity list, add-identity modal, and send_as renderers
 (function () {
   "use strict";
 
@@ -72,6 +72,94 @@
         </div>
       </details>
     `;
+  }
+
+  function identityRowStatusText(identity, account) {
+    if (!identity.enabled) return "已停用";
+    if (!account) return "未绑定账号";
+    const loginStatus = account.login_status || "idle";
+    if (loginStatus === "done") {
+      if (identity.kind === "self") return "已登录｜以自己身份";
+      if (identity.kind === "channel") return "已登录｜以频道身份";
+      return "已登录";
+    }
+    if (loginStatus === "waiting_code") return "等验证码";
+    if (loginStatus === "need_2fa") return "需要 2FA";
+    if (loginStatus === "error") return "账号离线｜登录出错";
+    return "账号未登录";
+  }
+
+  function identityRowIsOffline(identity, account) {
+    if (!account) return true;
+    const status = account.login_status || "idle";
+    return status === "error" || status === "idle";
+  }
+
+  function buildProfileChips(patchMap) {
+    const charName = patchMap.get("角色名") || "";
+    const daohao = patchMap.get("道号") || "";
+    const root = patchMap.get("灵根") || "";
+    const realm = patchMap.get("境界") || "";
+    const sect = (patchMap.get("宗门") || "").replace(/^【|】$/g, "");
+    const title = (patchMap.get("称号") || "").replace(/^【|】$/g, "");
+    const chips = [];
+    if (charName || daohao) {
+      const txt = [charName, daohao ? `· ${daohao}` : ""].filter(Boolean).join(" ").trim();
+      chips.push(`<span class="row-chip">👤 ${escapeHtml(txt)}</span>`);
+    }
+    if (realm) chips.push(`<span class="row-chip realm">📿 ${escapeHtml(realm)}</span>`);
+    if (root) chips.push(`<span class="row-chip root">🌿 ${escapeHtml(root)}</span>`);
+    if (sect) chips.push(`<span class="row-chip sect">🏔️ ${escapeHtml(sect)}</span>`);
+    if (title) chips.push(`<span class="row-chip title">🏷️ ${escapeHtml(title)}</span>`);
+    if (!chips.length) return "";
+    return `<div class="identity-row-profile">${chips.join("")}</div>`;
+  }
+
+  function renderSidebarIdentityList(deps = {}, container) {
+    const state = identityManagementState(deps);
+    if (!container) return;
+    if (!state.identities?.length) {
+      container.innerHTML = '<p class="empty">还没有身份。登录账号后会自动建好。</p>';
+      deps.renderCultivationModules?.();
+      return;
+    }
+    const patchMap = new Map((deps.activeIdentityPatches?.() || []).map((patch) => [patch.key, patch.value]));
+    const accountsByLocalId = new Map((state.accounts || []).map((account) => [account.local_id, account]));
+    container.innerHTML = state.identities.map((identity) => {
+      const account = accountsByLocalId.get(identity.account_local_id);
+      const status = identityRowStatusText(identity, account);
+      const offline = identityRowIsOffline(identity, account);
+      const active = Number(identity.send_as_id || 0) === Number(state.activeIdentityId || 0);
+      const klass = ["identity-row", offline ? "offline" : "", active ? "active" : ""].filter(Boolean).join(" ");
+      const name = identity.label || identity.username || identity.send_as_id;
+      const profileChips = active ? buildProfileChips(patchMap) : "";
+      return `
+        <button type="button" class="${klass}" data-identity-row="${escapeAttr(String(identity.send_as_id))}">
+          <div class="identity-row-head">
+            <strong>${escapeHtml(String(name))}</strong>
+            <span class="identity-row-status">${escapeHtml(status)}</span>
+          </div>
+          <div class="identity-row-sub">
+            ${identity.username ? `@${escapeHtml(identity.username)}` : ""} <span class="muted">#${escapeHtml(String(identity.send_as_id))}</span>
+          </div>
+          ${profileChips}
+        </button>
+      `;
+    }).join("");
+    bindSidebarIdentityList(deps, container);
+    deps.renderCultivationModules?.();
+  }
+
+  function bindSidebarIdentityList(deps = {}, container) {
+    container?.querySelectorAll("[data-identity-row]").forEach((row) => {
+      row.addEventListener("click", () => {
+        const id = Number(row.dataset.identityRow);
+        Promise.resolve(deps.setActiveIdentity?.(id, { toggle: true, loadPatches: true })).catch((err) => {
+          console.warn("[mini-web] reload patches failed:", err);
+          deps.showSkillToast?.(`切换身份失败: ${err.message || err}`, "err");
+        });
+      });
+    });
   }
 
   function identityPeerKind(peer) {
@@ -153,6 +241,7 @@
 
   window.MiniwebViews = window.MiniwebViews || {};
   window.MiniwebViews.identityManagement = {
+    renderSidebarIdentityList,
     renderAddIdentityModalBody,
     renderSendAsRow,
     renderBatchSaveResult,
