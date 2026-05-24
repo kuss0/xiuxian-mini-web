@@ -145,6 +145,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "identity status modal and shared module-status helpers live in `web/static/views/identity_status.js`" in normalized_work_plan
     assert "cultivation status modal and timers live in `web/static/views/cultivation.js`" in normalized_work_plan
     assert "overview detail panel lives in `web/static/views/overview.js`" in normalized_work_plan
+    assert "quest tracker and manual action-fill flow live in `web/static/views/quest_tracker.js`" in normalized_work_plan
     assert "resource stats modal and coverage renderer live in `web/static/views/resource_stats.js`" in normalized_work_plan
     assert "world report modal lives in `web/static/views/world_report.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
@@ -351,6 +352,58 @@ def test_overview_view_module_keeps_panel_wrappers_and_manual_action_contract():
         assert fragment in app_js
     for fragment in required_module_fragments:
         assert fragment in overview_js
+
+
+def test_quest_tracker_view_module_keeps_wrappers_and_manual_fill_contract():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    quest_tracker_js = (root / "web" / "static" / "views" / "quest_tracker.js").read_text(encoding="utf-8")
+
+    required_app_fragments = [
+        "function questTrackerDeps()",
+        "function questTrackerView()",
+        "function renderQuestTracker()",
+        "return questTrackerView().renderQuestTracker(questTrackerDeps())",
+        "function questTrackerItems()",
+        "return questTrackerView().questTrackerItems(questTrackerDeps())",
+        "function currentDungeonQuestItem(existingItems = [])",
+        "return questTrackerView().currentDungeonQuestItem(questTrackerDeps(), existingItems)",
+        "function questItemKind(message, actionEntries = null)",
+        "return questTrackerView().questItemKind(questTrackerDeps(), message, actionEntries)",
+        "async function fillQuestTrackerAction(key, index, label)",
+        "return questTrackerView().fillQuestTrackerAction(questTrackerDeps(), key, index, label)",
+        "fillDirectSendComposer,",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: quest tracker and manual action filling",
+        "function renderQuestTracker(deps = {})",
+        "function questTrackerItems(deps = {})",
+        "function currentDungeonQuestItem(deps = {}, existingItems = [])",
+        "function currentModuleQuestItems(deps = {}, existingItems = [])",
+        "function questTrackerRank(deps = {}, message)",
+        "function renderQuestTrackerItem(deps = {}, message)",
+        "function questItemKind(deps = {}, message, actionEntries = null)",
+        "async function fillQuestTrackerAction(deps = {}, key, index, label)",
+        "window.MiniwebViews.questTracker = {",
+        "renderQuestTracker,",
+        "questTrackerItems,",
+        "fillQuestTrackerAction,",
+        "只填入发送栏，不自动发送",
+        "await fillQuestTrackerAction(deps, key, Number(indexText || 0), \"任务动作\")",
+        "deps.fillDirectSendComposer?.(action.command, {",
+        "statusText: deps.quickActionNeedsManualReview?.(action)",
+    ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "sendDirectComposerMessage",
+        '"/api/skills/send"',
+    ]
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in quest_tracker_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in quest_tracker_js
 
 
 def test_frontend_identity_state_refresh_is_first_class():
