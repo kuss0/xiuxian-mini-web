@@ -317,10 +317,19 @@
     return "未识别";
   }
 
+  function isSendAsAlreadyRegistered(deps = {}, peer) {
+    if (!peer || peer.send_as_id === undefined || peer.send_as_id === null) {
+      return false;
+    }
+    const state = identityManagementState(deps);
+    const id = Number(peer.send_as_id);
+    return (state.identities || []).some((identity) => Number(identity.send_as_id) === id);
+  }
+
   function renderSendAsRow(deps = {}, peer) {
     const state = identityManagementState(deps);
     const id = String(peer.send_as_id);
-    const already = deps.isSendAsAlreadyRegistered?.(peer) || false;
+    const already = isSendAsAlreadyRegistered(deps, peer);
     const checked = state.sendAs?.selected?.has?.(id) || false;
     const kind = identityPeerKind(peer);
     const tag = deps.identityKindLabel?.(kind) || defaultIdentityKindLabel(kind);
@@ -346,6 +355,142 @@
         <button type="button" class="send-as-row-fill" data-send-as-fill="${escapeAttr(id)}" title="填到手动添加">填入</button>
       </label>
     `;
+  }
+
+  function sendAsPeers(deps = {}) {
+    const state = identityManagementState(deps);
+    return state.sendAs?.peers || [];
+  }
+
+  function selectedSendAsTargets(deps = {}) {
+    const state = identityManagementState(deps);
+    return sendAsPeers(deps).filter(
+      (peer) => !isSendAsAlreadyRegistered(deps, peer) && state.sendAs?.selected?.has?.(String(peer.send_as_id))
+    );
+  }
+
+  function selectFreshSendAsPeers(deps = {}) {
+    const state = identityManagementState(deps);
+    if (!state.sendAs?.selected) return;
+    sendAsPeers(deps).forEach((peer) => {
+      if (!isSendAsAlreadyRegistered(deps, peer)) {
+        state.sendAs.selected.add(String(peer.send_as_id));
+      }
+    });
+  }
+
+  function sendAsListCounts(deps = {}) {
+    const peers = sendAsPeers(deps);
+    const selectable = peers.filter((peer) => !isSendAsAlreadyRegistered(deps, peer));
+    const selected = selectedSendAsTargets(deps);
+    return {
+      total: peers.length,
+      fresh: selectable.length,
+      selectable: selectable.length,
+      selected: selected.length,
+    };
+  }
+
+  function setSendAsStatus(rootEl, text) {
+    const status = rootEl?.querySelector("[data-send-as-status]");
+    if (status) status.textContent = text || "";
+  }
+
+  function clearSendAsResult(rootEl) {
+    const result = rootEl?.querySelector("[data-send-as-result]");
+    if (!result) return;
+    result.hidden = true;
+    result.innerHTML = "";
+  }
+
+  function renderSendAsError(deps = {}, rootEl, error) {
+    const result = rootEl?.querySelector("[data-send-as-result]");
+    if (!result) return;
+    result.hidden = false;
+    result.innerHTML = `<p class="error">${escapeHtml(error?.message || String(error || "批量保存失败"))}</p>`;
+  }
+
+  function renderSendAsLoadStatus(deps = {}, rootEl) {
+    const counts = sendAsListCounts(deps);
+    setSendAsStatus(rootEl, counts.total
+      ? `共 ${counts.total} 个可选身份,其中 ${counts.fresh} 个未添加。默认已勾选未添加的;按需调整后点「保存选中」。`
+      : "该账号当前在该群没有可用 send_as 身份");
+  }
+
+  function rerenderSendAsList(deps = {}, rootEl) {
+    const state = identityManagementState(deps);
+    const list = rootEl?.querySelector("[data-send-as-list]");
+    const bulkBar = rootEl?.querySelector(".send-as-bulk-bar");
+    const peers = sendAsPeers(deps);
+    if (!peers.length) {
+      if (list) list.innerHTML = "";
+      if (bulkBar) bulkBar.hidden = true;
+      return;
+    }
+    if (list) {
+      list.innerHTML = peers
+        .map((peer) => renderSendAsRow(deps, peer))
+        .join("");
+      list.querySelectorAll('input[type="checkbox"][data-send-as-checkbox]').forEach((cb) => {
+        cb.addEventListener("change", () => {
+          const id = cb.dataset.sendAsCheckbox;
+          if (cb.checked) {
+            state.sendAs.selected.add(id);
+          } else {
+            state.sendAs.selected.delete(id);
+          }
+          updateSendAsBulkSummary(deps, rootEl);
+        });
+      });
+      list.querySelectorAll("[data-send-as-fill]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const id = button.dataset.sendAsFill;
+          const peer = peers.find((item) => String(item.send_as_id) === id);
+          if (!peer) return;
+          const idInput = rootEl.querySelector("#manualSendAsId");
+          const labelInput = rootEl.querySelector("#manualLabel");
+          if (idInput) {
+            idInput.value = peer.send_as_id ?? "";
+            idInput.focus();
+          }
+          if (labelInput) {
+            labelInput.value = peer.title || "";
+          }
+        });
+      });
+    }
+    if (bulkBar) {
+      bulkBar.hidden = false;
+    }
+    updateSendAsBulkSummary(deps, rootEl);
+  }
+
+  function updateSendAsBulkSummary(deps = {}, rootEl) {
+    const summary = rootEl?.querySelector("[data-send-as-summary]");
+    const saveButton = rootEl?.querySelector('[data-send-as-action="batch-save"]');
+    const counts = sendAsListCounts(deps);
+    if (summary) {
+      summary.textContent = `已勾选 ${counts.selected} / 可添加 ${counts.selectable}`;
+    }
+    if (saveButton) {
+      saveButton.disabled = counts.selected === 0;
+      saveButton.textContent = counts.selected > 0 ? `保存选中 (${counts.selected})` : "保存选中";
+    }
+  }
+
+  function selectAllSendAs(deps = {}, rootEl, mode) {
+    const state = identityManagementState(deps);
+    if (!state.sendAs?.selected) return;
+    if (mode === "all") {
+      sendAsPeers(deps).forEach((peer) => {
+        if (!isSendAsAlreadyRegistered(deps, peer)) {
+          state.sendAs.selected.add(String(peer.send_as_id));
+        }
+      });
+    } else {
+      state.sendAs.selected.clear();
+    }
+    rerenderSendAsList(deps, rootEl);
   }
 
   function renderBatchSaveResult(deps = {}, container, response, peers) {
@@ -378,7 +523,17 @@
     tickSidebarIdentityModuleChips,
     renderIdentitySnapshot,
     renderAddIdentityModalBody,
+    isSendAsAlreadyRegistered,
     renderSendAsRow,
+    rerenderSendAsList,
+    updateSendAsBulkSummary,
+    selectAllSendAs,
+    selectFreshSendAsPeers,
+    selectedSendAsTargets,
+    clearSendAsResult,
+    renderSendAsError,
+    renderSendAsLoadStatus,
+    setSendAsStatus,
     renderBatchSaveResult,
   };
 })();

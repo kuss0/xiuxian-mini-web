@@ -160,7 +160,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
     assert "access settings modal, automation guard form, Telegram dialog/topic option renderers, and read-only Telegram account list live in `web/static/views/settings.js`" in normalized_work_plan
     assert "Telegram account login/logout modals, listen-target renderers, account status line, and account action guards live in `web/static/views/account_management.js`" in normalized_work_plan
-    assert "sidebar identity list, identity snapshot, identity module chips, add-identity modal body, and send_as row/result renderers live in `web/static/views/identity_management.js`" in normalized_work_plan
+    assert "sidebar identity list, identity snapshot, identity module chips, add-identity modal body, and send_as list/selection/status/result renderers live in `web/static/views/identity_management.js`" in normalized_work_plan
     assert "Outbox automation guard logic lives in `backend/outbox/automation.py`" in normalized_work_plan
     assert "sender adapters live in `backend/outbox/adapters.py`" in normalized_work_plan
     assert "optional queue worker lives in `backend/outbox/worker.py`" in normalized_work_plan
@@ -187,7 +187,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "Detail panel actions fill the composer or create manual plans/drafts only" in audit
     assert "Account login/logout modals, listen-target renderers, account status line, and account action guards are isolated in `web/static/views/account_management.js`" in audit
     assert "keeps account save/login/dialog/topic/listener API orchestration" in audit
-    assert "Sidebar identity list, identity snapshot, sidebar module chips, and add-identity modal renderers are isolated in `web/static/views/identity_management.js`" in audit
+    assert "Sidebar identity list, identity snapshot, sidebar module chips, add-identity modal renderers, and send_as list/selection/status renderers are isolated in `web/static/views/identity_management.js`" in audit
     assert "keeps Telegram account/send_as API binding, global timer orchestration, and event orchestration" in audit
     assert "Dungeon playbook actions fill the composer only" in audit
     assert "Xutian now exposes phase, route" in audit
@@ -1149,15 +1149,18 @@ def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_fo
         "function openAddIdentityModal()",
         "body: renderAddIdentityModalBody()",
         "function renderAddIdentityModalBody()",
-        "function renderSendAsRow(peer)",
+        "function rerenderSendAsList(rootEl)",
+        "return identityManagementView().rerenderSendAsList(identityManagementDeps(), rootEl)",
+        "function selectFreshSendAsPeers()",
+        "return identityManagementView().selectFreshSendAsPeers(identityManagementDeps())",
+        "function selectedSendAsTargets()",
+        "return identityManagementView().selectedSendAsTargets(identityManagementDeps())",
+        "function renderSendAsLoadStatus(rootEl)",
+        "return identityManagementView().renderSendAsLoadStatus(identityManagementDeps(), rootEl)",
         "function renderBatchSaveResult(container, response, peers)",
         'postJson("/api/identities/batch", payload)',
         'postJson("/api/identities", {',
-        'list.querySelectorAll("[data-send-as-fill]")',
-        'rootEl.querySelector("#manualSendAsId")',
-        'rootEl.querySelector("#manualLabel")',
-        'idInput.value = peer.send_as_id ?? "";',
-        'labelInput.value = peer.title || "";',
+        'fetchJson(`/api/accounts/send-as-peers?${params.toString()}`)',
     ]
     required_module_fragments = [
         "// MINIWEB-VIEW: sidebar identity list, identity snapshot, identity module chips, add-identity modal, and send_as renderers",
@@ -1182,16 +1185,41 @@ def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_fo
         "deps.showSkillToast?.(`切换身份失败: ${err.message || err}`, \"err\")",
         "deps.renderCultivationModules?.()",
         "function renderAddIdentityModalBody(deps = {})",
+        "function isSendAsAlreadyRegistered(deps = {}, peer)",
         "function renderSendAsRow(deps = {}, peer)",
+        "function rerenderSendAsList(deps = {}, rootEl)",
+        "function updateSendAsBulkSummary(deps = {}, rootEl)",
+        "function selectAllSendAs(deps = {}, rootEl, mode)",
+        "function selectFreshSendAsPeers(deps = {})",
+        "function selectedSendAsTargets(deps = {})",
+        "function clearSendAsResult(rootEl)",
+        "function renderSendAsError(deps = {}, rootEl, error)",
+        "function renderSendAsLoadStatus(deps = {}, rootEl)",
+        "function setSendAsStatus(rootEl, text)",
         "function renderBatchSaveResult(deps = {}, container, response, peers)",
         "window.MiniwebViews.identityManagement = {",
         "renderSidebarIdentityList,",
         "renderIdentityModulesLine,",
         "tickSidebarIdentityModuleChips,",
         "renderIdentitySnapshot,",
+        "isSendAsAlreadyRegistered,",
+        "rerenderSendAsList,",
+        "updateSendAsBulkSummary,",
+        "selectAllSendAs,",
+        "selectFreshSendAsPeers,",
+        "selectedSendAsTargets,",
+        "clearSendAsResult,",
+        "renderSendAsError,",
+        "renderSendAsLoadStatus,",
+        "setSendAsStatus,",
         'id="manualSendAsId"',
         'id="manualLabel"',
         'title="填到手动添加">填入',
+        'list.querySelectorAll("[data-send-as-fill]")',
+        'rootEl.querySelector("#manualSendAsId")',
+        'rootEl.querySelector("#manualLabel")',
+        'idInput.value = peer.send_as_id ?? "";',
+        'labelInput.value = peer.title || "";',
     ]
     forbidden_app_fragments = [
         "async function saveIdentity(",
@@ -1213,6 +1241,13 @@ def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_fo
         "const SIDEBAR_MODULE_KEYS = new Set(Object.keys(MODULE_ICONS));",
         "const chips = sidebarIdentityList.querySelectorAll('[data-module-chip=\"1\"]')",
         'chip.innerHTML = `${icon} ${label} 已就绪`',
+        'list.querySelectorAll("[data-send-as-fill]")',
+        'rootEl.querySelector("#manualSendAsId")',
+        'rootEl.querySelector("#manualLabel")',
+        'idInput.value = peer.send_as_id ?? "";',
+        'labelInput.value = peer.title || "";',
+        "const selectableCount = peers.filter((peer) => !isSendAsAlreadyRegistered(peer)).length",
+        "const targets = peers.filter(",
         ".send-as-section",
         "data-identity-action",
         "identity-item",

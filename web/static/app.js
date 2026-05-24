@@ -2633,7 +2633,6 @@ function identityManagementDeps() {
     state,
     activeIdentityPatches,
     identityKindLabel,
-    isSendAsAlreadyRegistered,
     moduleStartTs,
     fmtCountdown,
     renderCultivationModules,
@@ -3383,20 +3382,15 @@ async function ensureSaveAccountTarget(localId, targetChat, targetTopicId) {
 async function loadSendAsListIntoForm(rootEl, button) {
   const accountSelect = rootEl.querySelector('[data-send-as-field="account"]');
   const targetChatInput = rootEl.querySelector('[data-send-as-field="target_chat"]');
-  const status = rootEl.querySelector("[data-send-as-status]");
-  const result = rootEl.querySelector("[data-send-as-result]");
-  if (result) {
-    result.hidden = true;
-    result.innerHTML = "";
-  }
+  clearSendAsResult(rootEl);
   const localId = accountSelect?.value || "";
   if (!localId) {
-    if (status) status.textContent = "请先选账号";
+    setSendAsStatus(rootEl, "请先选账号");
     return;
   }
   const targetChat = (targetChatInput?.value || "").trim();
   button.disabled = true;
-  if (status) status.textContent = "正在拉取…";
+  setSendAsStatus(rootEl, "正在拉取…");
   state.sendAs = { peers: [], accountLocalId: localId, selected: new Set() };
   rerenderSendAsList(rootEl);
   try {
@@ -3414,132 +3408,64 @@ async function loadSendAsListIntoForm(rootEl, button) {
       selected: new Set(),
     };
     // 默认勾选所有还没添加的 peer,符合「批量添加」的常见预期
-    state.sendAs.peers.forEach((peer) => {
-      if (!isSendAsAlreadyRegistered(peer)) {
-        state.sendAs.selected.add(String(peer.send_as_id));
-      }
-    });
+    selectFreshSendAsPeers();
     rerenderSendAsList(rootEl);
-    if (status) {
-      const total = state.sendAs.peers.length;
-      const fresh = state.sendAs.peers.filter((peer) => !isSendAsAlreadyRegistered(peer)).length;
-      status.textContent = total
-        ? `共 ${total} 个可选身份,其中 ${fresh} 个未添加。默认已勾选未添加的;按需调整后点「保存选中」。`
-        : "该账号当前在该群没有可用 send_as 身份";
-    }
+    renderSendAsLoadStatus(rootEl);
   } catch (error) {
-    if (status) status.textContent = error.message;
+    setSendAsStatus(rootEl, error.message);
     rerenderSendAsList(rootEl);
   } finally {
     button.disabled = false;
   }
 }
 
-function isSendAsAlreadyRegistered(peer) {
-  if (!peer || peer.send_as_id === undefined || peer.send_as_id === null) {
-    return false;
-  }
-  const id = Number(peer.send_as_id);
-  return state.identities.some((identity) => Number(identity.send_as_id) === id);
-}
-
 function rerenderSendAsList(rootEl) {
-  const list = rootEl.querySelector("[data-send-as-list]");
-  const bulkBar = rootEl.querySelector(".send-as-bulk-bar");
-  const summary = rootEl.querySelector("[data-send-as-summary]");
-  const peers = state.sendAs.peers || [];
-  if (!peers.length) {
-    if (list) list.innerHTML = "";
-    if (bulkBar) bulkBar.hidden = true;
-    return;
-  }
-  if (list) {
-    list.innerHTML = peers
-      .map((peer) => renderSendAsRow(peer))
-      .join("");
-    list.querySelectorAll('input[type="checkbox"][data-send-as-checkbox]').forEach((cb) => {
-      cb.addEventListener("change", () => {
-        const id = cb.dataset.sendAsCheckbox;
-        if (cb.checked) {
-          state.sendAs.selected.add(id);
-        } else {
-          state.sendAs.selected.delete(id);
-        }
-        updateSendAsBulkSummary(rootEl);
-      });
-    });
-    list.querySelectorAll("[data-send-as-fill]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const id = button.dataset.sendAsFill;
-        const peer = peers.find((item) => String(item.send_as_id) === id);
-        if (!peer) return;
-        const idInput = rootEl.querySelector("#manualSendAsId");
-        const labelInput = rootEl.querySelector("#manualLabel");
-        if (idInput) {
-          idInput.value = peer.send_as_id ?? "";
-          idInput.focus();
-        }
-        if (labelInput) {
-          labelInput.value = peer.title || "";
-        }
-      });
-    });
-  }
-  if (bulkBar) {
-    bulkBar.hidden = false;
-  }
-  updateSendAsBulkSummary(rootEl);
-}
-
-function renderSendAsRow(peer) {
-  return identityManagementView().renderSendAsRow(identityManagementDeps(), peer);
+  return identityManagementView().rerenderSendAsList(identityManagementDeps(), rootEl);
 }
 
 function updateSendAsBulkSummary(rootEl) {
-  const summary = rootEl.querySelector("[data-send-as-summary]");
-  const saveButton = rootEl.querySelector('[data-send-as-action="batch-save"]');
-  const peers = state.sendAs.peers || [];
-  const selectableCount = peers.filter((peer) => !isSendAsAlreadyRegistered(peer)).length;
-  const selectedCount = peers.filter(
-    (peer) => !isSendAsAlreadyRegistered(peer) && state.sendAs.selected.has(String(peer.send_as_id))
-  ).length;
-  if (summary) {
-    summary.textContent = `已勾选 ${selectedCount} / 可添加 ${selectableCount}`;
-  }
-  if (saveButton) {
-    saveButton.disabled = selectedCount === 0;
-    saveButton.textContent = selectedCount > 0 ? `保存选中 (${selectedCount})` : "保存选中";
-  }
+  return identityManagementView().updateSendAsBulkSummary(identityManagementDeps(), rootEl);
 }
 
 function selectAllSendAs(rootEl, mode) {
-  const peers = state.sendAs.peers || [];
-  if (mode === "all") {
-    peers.forEach((peer) => {
-      if (!isSendAsAlreadyRegistered(peer)) {
-        state.sendAs.selected.add(String(peer.send_as_id));
-      }
-    });
-  } else {
-    state.sendAs.selected.clear();
-  }
-  rerenderSendAsList(rootEl);
+  return identityManagementView().selectAllSendAs(identityManagementDeps(), rootEl, mode);
+}
+
+function selectFreshSendAsPeers() {
+  return identityManagementView().selectFreshSendAsPeers(identityManagementDeps());
+}
+
+function selectedSendAsTargets() {
+  return identityManagementView().selectedSendAsTargets(identityManagementDeps());
+}
+
+function clearSendAsResult(rootEl) {
+  return identityManagementView().clearSendAsResult(rootEl);
+}
+
+function renderSendAsLoadStatus(rootEl) {
+  return identityManagementView().renderSendAsLoadStatus(identityManagementDeps(), rootEl);
+}
+
+function setSendAsStatus(rootEl, text) {
+  return identityManagementView().setSendAsStatus(rootEl, text);
+}
+
+function renderSendAsError(rootEl, error) {
+  return identityManagementView().renderSendAsError(identityManagementDeps(), rootEl, error);
 }
 
 async function batchSaveSelectedSendAs(rootEl, button) {
   const peers = state.sendAs.peers || [];
   const localId = state.sendAs.accountLocalId;
   const result = rootEl.querySelector("[data-send-as-result]");
-  const status = rootEl.querySelector("[data-send-as-status]");
   if (!localId) {
-    if (status) status.textContent = "请先获取可用身份";
+    setSendAsStatus(rootEl, "请先获取可用身份");
     return;
   }
-  const targets = peers.filter(
-    (peer) => !isSendAsAlreadyRegistered(peer) && state.sendAs.selected.has(String(peer.send_as_id))
-  );
+  const targets = selectedSendAsTargets();
   if (!targets.length) {
-    if (status) status.textContent = "还没勾选任何未添加的身份";
+    setSendAsStatus(rootEl, "还没勾选任何未添加的身份");
     return;
   }
   button.disabled = true;
@@ -3560,14 +3486,9 @@ async function batchSaveSelectedSendAs(rootEl, button) {
     renderBatchSaveResult(result, response, peers);
     state.sendAs.selected.clear();
     rerenderSendAsList(rootEl);
-    if (status) {
-      status.textContent = `本次保存:成功 ${response.saved || 0} / 共 ${response.total || targets.length}。已添加的会自动锁定。`;
-    }
+    setSendAsStatus(rootEl, `本次保存:成功 ${response.saved || 0} / 共 ${response.total || targets.length}。已添加的会自动锁定。`);
   } catch (error) {
-    if (result) {
-      result.hidden = false;
-      result.innerHTML = `<p class="error">${escapeHtml(error.message || "批量保存失败")}</p>`;
-    }
+    renderSendAsError(rootEl, error);
   } finally {
     button.disabled = false;
     button.textContent = original;
