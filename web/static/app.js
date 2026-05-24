@@ -852,6 +852,7 @@ function directComposerDeps() {
     skillIsUnlocked,
     currentIdentitySect,
     fmtCountdown,
+    renderSkillViews,
     openModal,
     showError,
     loadAccounts,
@@ -2828,37 +2829,7 @@ function tickCockpitModuleChips() {
 }
 
 function tickSkillBarChips() {
-  const chips = document.querySelectorAll(".skill-chip");
-  if (!chips.length) return;
-  const activeId = state.activeIdentityId;
-  if (!activeId) return;
-  const modulesByKey = new Map(
-    (state.identityModuleStates.get(Number(activeId)) || []).map((it) => [it.module_key, it])
-  );
-  const now = Date.now() / 1000;
-  let anyExpired = false;
-  chips.forEach((chip) => {
-    const key = chip.dataset.skillKey;
-    const skill = (state.skills || []).find((s) => s.key === key);
-    if (!skill || !skill.cd_module) return;
-    const ms = modulesByKey.get(skill.cd_module);
-    const cdUntil = ms
-      ? Number((ms.summary && ms.summary.next_at) || (ms.state && ms.state.cooldown_until) || 0)
-      : 0;
-    const remaining = cdUntil - now;
-    const cdEl = chip.querySelector(".skill-chip-cd");
-    if (remaining > 0) {
-      if (cdEl) cdEl.textContent = chip.classList.contains("hotbar-skill") ? fmtCountdown(remaining) : `剩 ${fmtCountdown(remaining)}`;
-      else {
-        // 之前没冷却,现在出现了 — 标记重渲
-        anyExpired = true;
-      }
-    } else if (chip.classList.contains("cooling")) {
-      // 冷却到 0:重新渲染整条以解除 disabled
-      anyExpired = true;
-    }
-  });
-  if (anyExpired) renderSkillViews();
+  return directComposerView().tickSkillBarChips(directComposerDeps());
 }
 
 function updateCurrentAccountLine() {

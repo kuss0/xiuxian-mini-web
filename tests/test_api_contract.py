@@ -813,6 +813,9 @@ def test_direct_composer_view_module_keeps_wrappers_and_explicit_send_contract()
         "return directComposerView().renderDirectSendComposer(directComposerDeps())",
         "function renderQuickActionHotbar()",
         "return directComposerView().renderQuickActionHotbar(directComposerDeps())",
+        "function tickSkillBarChips()",
+        "return directComposerView().tickSkillBarChips(directComposerDeps())",
+        "renderSkillViews,",
         "directComposerView().bindDirectComposer(directComposerDeps());",
         "async function sendDirectComposerMessage()",
         'postJson("/api/skills/send", payload)',
@@ -823,12 +826,15 @@ def test_direct_composer_view_module_keeps_wrappers_and_explicit_send_contract()
         "function fillDirectSendComposer(deps = {}, command, opts = {})",
         "function renderDirectSendComposer(deps = {})",
         "function renderQuickActionHotbar(deps = {})",
+        "function tickSkillBarChips(deps = {})",
+        "deps.renderSkillViews?.()",
         "function fillSkillIntoComposer(deps = {}, skillKey, button = null)",
         "deps.sendComposerMessage?.()",
         "window.MiniwebViews.directComposer = {",
         "bindDirectComposer,",
         "fillDirectSendComposer,",
         "renderQuickActionHotbar,",
+        "tickSkillBarChips,",
     ]
     forbidden_module_fragments = [
         "postJson(",
@@ -836,6 +842,11 @@ def test_direct_composer_view_module_keeps_wrappers_and_explicit_send_contract()
         "sendDirectComposerMessage",
         '"/api/skills/send"',
         '"/api/outbox/drafts"',
+    ]
+    forbidden_app_fragments = [
+        'const chips = document.querySelectorAll(".skill-chip")',
+        'chip.classList.contains("hotbar-skill") ? fmtCountdown(remaining)',
+        "let anyExpired = false;",
     ]
 
     assert scripts.index("views/direct_composer.js") < scripts.index("app.js")
@@ -845,6 +856,8 @@ def test_direct_composer_view_module_keeps_wrappers_and_explicit_send_contract()
         assert fragment in direct_composer_js
     for fragment in forbidden_module_fragments:
         assert fragment not in direct_composer_js
+    for fragment in forbidden_app_fragments:
+        assert fragment not in app_js
 
 
 def test_settings_view_module_keeps_wrappers_and_api_boundary_contract():

@@ -598,6 +598,44 @@
     });
   }
 
+  function tickSkillBarChips(deps = {}) {
+    const state = composerState(deps);
+    const chips = document.querySelectorAll(".skill-chip");
+    if (!chips.length) return;
+    const activeId = state.activeIdentityId;
+    if (!activeId) return;
+    const modulesByKey = new Map(
+      (state.identityModuleStates.get(Number(activeId)) || []).map((item) => [item.module_key, item])
+    );
+    const now = Date.now() / 1000;
+    let shouldRerender = false;
+    chips.forEach((chip) => {
+      const key = chip.dataset.skillKey;
+      const skill = (state.skills || []).find((item) => item.key === key);
+      if (!skill || !skill.cd_module) return;
+      const moduleState = modulesByKey.get(skill.cd_module);
+      const cdUntil = moduleState
+        ? Number((moduleState.summary && moduleState.summary.next_at) || (moduleState.state && moduleState.state.cooldown_until) || 0)
+        : 0;
+      const remaining = cdUntil - now;
+      const cdEl = chip.querySelector(".skill-chip-cd");
+      if (remaining > 0) {
+        if (cdEl) {
+          cdEl.textContent = chip.classList.contains("hotbar-skill")
+            ? deps.fmtCountdown?.(remaining) || ""
+            : `剩 ${deps.fmtCountdown?.(remaining) || ""}`;
+        } else {
+          shouldRerender = true;
+        }
+      } else if (chip.classList.contains("cooling")) {
+        shouldRerender = true;
+      }
+    });
+    if (shouldRerender) {
+      deps.renderSkillViews?.();
+    }
+  }
+
   function fillSkillIntoComposer(deps = {}, skillKey, button = null) {
     const state = composerState(deps);
     const elements = composerElements(deps);
@@ -764,6 +802,7 @@
     renderSkillBar,
     renderSkillMenuModal,
     renderSkillPanel,
+    tickSkillBarChips,
     fillSkillIntoComposer,
     bindDirectComposer,
   };
