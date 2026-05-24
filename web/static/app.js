@@ -3539,6 +3539,21 @@ if (logsButton) {
 async function openLogsModal() {
   window.MiniwebViews.logs.openLogsModal({
     channels: state.channels || [],
+    exportLogMessages: ({ channel, fmt }) => {
+      const params = new URLSearchParams({
+        channel: channel || "all",
+        fmt: fmt || "jsonl",
+      });
+      return apiFetch(`/api/messages/export?${params.toString()}`);
+    },
+    loadLogMessages: ({ beforeSeq, channel, limit }) => {
+      const params = new URLSearchParams({ channel: channel || "all" });
+      params.set("limit", limit || "200");
+      if (Number(beforeSeq || 0) > 0) {
+        params.set("before_seq", String(beforeSeq));
+      }
+      return fetchJson(`/api/messages?${params.toString()}`);
+    },
     renderTelegramTextHtml,
   });
 }

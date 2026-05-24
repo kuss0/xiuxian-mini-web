@@ -157,6 +157,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
     assert "global health/setup banner lives in `web/static/views/global_banner.js`" in normalized_work_plan
     assert "chat message stream, channel chips, quick filters, scroll anchoring, and quick actions live in `web/static/views/chat_stream.js`" in normalized_work_plan
+    assert "message logs modal lives in `web/static/views/logs.js` with message paging/export APIs injected from `web/static/app.js`" in normalized_work_plan
     assert "direct composer, emoji palette, and quick command hotbar live in `web/static/views/direct_composer.js`" in normalized_work_plan
     assert "detail rich cards and field formatting live in `web/static/views/detail_cards.js`" in normalized_work_plan
     assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
@@ -186,8 +187,9 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "official schedule rail and modal are isolated in `web/static/views/schedule.js`" in audit
     assert "chat message stream, channel chips, quick filters, scroll anchoring, and quick-action renderer are isolated in `web/static/views/chat_stream.js`" in audit
     assert "leader intelligence modal is isolated in `web/static/views/leader_intel.js`, with leader-message loading injected from `web/static/app.js`" in audit
+    assert "message logs modal is isolated in `web/static/views/logs.js`, with message paging/export APIs injected from `web/static/app.js`" in audit
     assert "Chat stream quick actions fill the composer only" in audit
-    assert "leader-intel module is read-only and does not create direct API requests" in audit
+    assert "leader-intel and logs modules are read-only; logs export only triggers a browser download from an injected response" in audit
     assert "direct composer, emoji palette, and quick command hotbar are isolated in `web/static/views/direct_composer.js`" in audit
     assert "Direct composer sends only through the injected explicit composer-submit callback" in audit
     assert "Detail rich cards and field formatting are isolated in `web/static/views/detail_cards.js`" in audit
@@ -306,6 +308,52 @@ def test_world_report_view_module_keeps_app_wrappers_and_read_only_action_contra
         assert fragment in world_report_js
     for fragment in forbidden_module_fragments:
         assert fragment not in world_report_js
+
+
+def test_logs_view_module_keeps_message_apis_in_app():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    logs_js = (root / "web" / "static" / "views" / "logs.js").read_text(encoding="utf-8")
+    index_html = (root / "web" / "index.html").read_text(encoding="utf-8")
+    scripts = re.findall(r'<script src="/static/([^"]+)"></script>', index_html)
+
+    required_app_fragments = [
+        "async function openLogsModal()",
+        "window.MiniwebViews.logs.openLogsModal({",
+        "exportLogMessages: ({ channel, fmt }) => {",
+        "return apiFetch(`/api/messages/export?${params.toString()}`)",
+        "loadLogMessages: ({ beforeSeq, channel, limit }) => {",
+        "return fetchJson(`/api/messages?${params.toString()}`)",
+        "renderTelegramTextHtml,",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: message logs modal",
+        "function openLogsModal({ channels = [], exportLogMessages, loadLogMessages, renderTelegramTextHtml })",
+        "function bindLogsModal(dialog, { exportLogMessages, loadLogMessages, renderTelegramTextHtml })",
+        "logs missing dependency: loadLogMessages",
+        "const result = await loadLogMessages({",
+        "logs missing dependency: exportLogMessages",
+        "const res = await exportLogMessages({",
+        "function renderLogs(container, items, { renderTelegramTextHtml })",
+        "window.MiniwebViews.logs = { openLogsModal }",
+    ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "fetchJson(",
+        "apiFetch(",
+        "window.MiniwebApi",
+        '"/api/',
+        '"/api/skills/send"',
+        '"/api/outbox/drafts"',
+    ]
+
+    assert scripts.index("views/logs.js") < scripts.index("app.js")
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in logs_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in logs_js
 
 
 def test_identity_status_view_module_keeps_shared_helpers_and_composer_fill_contract():

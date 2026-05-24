@@ -2,11 +2,10 @@
 (function () {
   "use strict";
 
-  const { apiFetch, fetchJson } = window.MiniwebApi;
   const { openModal } = window.MiniwebModal;
   const { escapeAttr, escapeHtml } = window.MiniwebFormat;
 
-  function openLogsModal({ channels = [], renderTelegramTextHtml }) {
+  function openLogsModal({ channels = [], exportLogMessages, loadLogMessages, renderTelegramTextHtml }) {
     const dialog = openModal({
       title: "消息日志(全部采集)",
       body: `
@@ -52,10 +51,10 @@
       footer: `<button type="button" data-modal-close>关闭</button>`,
     });
     if (!dialog) return;
-    bindLogsModal(dialog, { renderTelegramTextHtml });
+    bindLogsModal(dialog, { exportLogMessages, loadLogMessages, renderTelegramTextHtml });
   }
 
-  function bindLogsModal(dialog, { renderTelegramTextHtml }) {
+  function bindLogsModal(dialog, { exportLogMessages, loadLogMessages, renderTelegramTextHtml }) {
     const channelSelect = dialog.querySelector("#logsChannelSelect");
     const searchInput = dialog.querySelector("#logsSearch");
     const pageSizeSelect = dialog.querySelector("#logsPageSize");
@@ -77,13 +76,15 @@
       loadMoreBtn.disabled = true;
       setStatus("加载中…");
       try {
-        const params = new URLSearchParams({ channel: channelSelect.value || "all" });
         const limit = pageSizeSelect.value || "200";
-        params.set("limit", limit);
-        if (!reset && local.oldestSeq > 0) {
-          params.set("before_seq", String(local.oldestSeq));
+        if (typeof loadLogMessages !== "function") {
+          throw new Error("logs missing dependency: loadLogMessages");
         }
-        const result = await fetchJson(`/api/messages?${params.toString()}`);
+        const result = await loadLogMessages({
+          beforeSeq: !reset && local.oldestSeq > 0 ? local.oldestSeq : 0,
+          channel: channelSelect.value || "all",
+          limit,
+        });
         let incoming = result.messages || [];
         const q = (searchInput.value || "").trim();
         if (q) incoming = incoming.filter((m) => (m.raw || m.summary || "").includes(q));
@@ -126,16 +127,18 @@
     if (exportBtn) {
       exportBtn.addEventListener("click", async () => {
         const fmt = exportFmt.value || "jsonl";
-        const params = new URLSearchParams({
-          channel: channelSelect.value || "all",
-          fmt,
-        });
         exportBtn.disabled = true;
         const oldText = exportBtn.textContent;
         exportBtn.textContent = "导出中…";
         setStatus("拉取全量数据,大批可能要几秒…");
         try {
-          const res = await apiFetch(`/api/messages/export?${params.toString()}`);
+          if (typeof exportLogMessages !== "function") {
+            throw new Error("logs missing dependency: exportLogMessages");
+          }
+          const res = await exportLogMessages({
+            channel: channelSelect.value || "all",
+            fmt,
+          });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const blob = await res.blob();
           const cd = res.headers.get("Content-Disposition") || "";

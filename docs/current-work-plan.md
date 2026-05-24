@@ -106,8 +106,10 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      action dock live in `web/static/views/game_cockpit.js`. The global
      health/setup banner lives in `web/static/views/global_banner.js`. The leader
      intelligence modal lives in `web/static/views/leader_intel.js` with
-     leader-message loading injected from `web/static/app.js`. The official
-     schedule rail and modal live in `web/static/views/schedule.js`. The chat
+     leader-message loading injected from `web/static/app.js`. The message logs
+     modal lives in `web/static/views/logs.js` with message paging/export APIs
+     injected from `web/static/app.js`. The official schedule rail and modal
+     live in `web/static/views/schedule.js`. The chat
      message stream, channel chips, quick filters, scroll anchoring, and quick actions live in
      `web/static/views/chat_stream.js`; the direct composer, emoji palette, and
      quick command hotbar live in `web/static/views/direct_composer.js`; detail
