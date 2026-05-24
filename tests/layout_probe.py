@@ -397,15 +397,25 @@ PROBE_SCRIPT = """
   }))).sort(function(a, b) { return a - b; });
   var hotbarOversized = hotbarChips.filter(function(chip) {
     var box = chip.getBoundingClientRect();
-    return box.height > 28 || box.width > 122;
+    return box.height > 26 || box.width > 122;
   }).map(function(chip) {
     var box = chip.getBoundingClientRect();
     return { text: chip.textContent.trim(), width: box.width, height: box.height };
   });
+  var hotbarClipped = hotbarChips.filter(function(chip) {
+    var box = chip.getBoundingClientRect();
+    return box.left < boxes.hotbar.left - 1 || box.right > boxes.hotbar.right + 1 ||
+      box.top < boxes.hotbar.top - 1 || box.bottom > boxes.hotbar.bottom + 1;
+  }).map(function(chip) {
+    var box = chip.getBoundingClientRect();
+    return { text: chip.textContent.trim(), left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+  });
   check("hotbar renders enough shortcuts", hotbarChips.length >= 10, String(hotbarChips.length));
-  check("hotbar uses two compact rows", hotbarRowTops.length === 2 && boxes.hotbar.height <= 60,
+  check("hotbar uses two compact rows", hotbarRowTops.length === 2 && boxes.hotbar.height <= 52,
     JSON.stringify({ rows: hotbarRowTops, hotbar: boxes.hotbar }));
   check("hotbar chips stay compact", hotbarOversized.length === 0, JSON.stringify(hotbarOversized));
+  check("hotbar shows all chips without clipping", hotbarClipped.length === 0,
+    JSON.stringify({ clipped: hotbarClipped, hotbar: boxes.hotbar }));
   if (shell) shell.open = false;
   await wait(120);
   boxes.emojiButton = rect("#emojiPickerButton");
