@@ -3333,6 +3333,7 @@ function renderDungeonPlaybookPanels(summaries, guides = {}) {
       statusText: xutian ? dungeonPlaybookStatusText(xutian) : "等待近期虚天线索",
       mainAdvice: xutianPlaybookAdvice(xutian, guides.xutian),
       chips: xutianPlaybookChips(xutian, guides.xutian),
+      boundaries: xutianPlaybookBoundaries(xutian, guides.xutian),
       commands: xutianPlaybookCommands(xutian),
       guideLabel: "虚天攻略",
     })}
@@ -3344,13 +3345,14 @@ function renderDungeonPlaybookPanels(summaries, guides = {}) {
       statusText: cangkun ? dungeonPlaybookStatusText(cangkun) : "等待近期苍坤线索",
       mainAdvice: cangkunPlaybookAdvice(cangkun, guides.cangkun),
       chips: cangkunPlaybookChips(cangkun, guides.cangkun),
+      boundaries: [],
       commands: cangkunPlaybookCommands(cangkun, guides.cangkun),
       guideLabel: "苍坤攻略",
     })}
   `;
 }
 
-function renderDungeonPlaybookCard({ key, label, subtitle, summary, statusText, mainAdvice, chips, commands, guideLabel }) {
+function renderDungeonPlaybookCard({ key, label, subtitle, summary, statusText, mainAdvice, chips, boundaries, commands, guideLabel }) {
   const latestId = summary?.latestMessage?.id || "";
   const live = summary && ["open", "joined", "choice", "active"].includes(summary.statusKind);
   return `
@@ -3378,6 +3380,13 @@ function renderDungeonPlaybookCard({ key, label, subtitle, summary, statusText, 
         <button type="button" data-playbook-guide="${escapeAttr(key)}">${escapeHtml(guideLabel || "攻略")}</button>
         ${latestId ? `<button type="button" data-playbook-jump="${escapeAttr(latestId)}">最新消息</button>` : ""}
       </div>
+      ${(boundaries || []).length ? `
+        <div class="dungeon-playbook-boundaries">
+          ${(boundaries || []).map(([boundaryLabel, value]) => `
+            <span><b>${escapeHtml(boundaryLabel)}</b>${escapeHtml(value)}</span>
+          `).join("")}
+        </div>
+      ` : ""}
     </article>
   `;
 }
@@ -3427,11 +3436,49 @@ function cangkunPlaybookAdvice(summary, guide) {
 function xutianPlaybookChips(summary, guide) {
   return [
     ["卦象", summary?.oracle || "未读"],
+    ["阶段", summary?.latestStage || "待定"],
     ["路线", summary?.route || "待定"],
     ["阵策", summary?.strategy || "待定"],
     ["明示", formatNumber(guide?.counts?.explicit || 0)],
     ["反例", formatNumber(guide?.counts?.failure || 0)],
   ].filter(([, value]) => value);
+}
+
+function xutianPlaybookBoundaries(summary, guide) {
+  const rows = [];
+  if (!summary) {
+    rows.push(["边界", "等待虚天消息后再给阶段/后殿判断。"]);
+    return rows;
+  }
+  const statusText = `${summary.status || ""} ${summary.latestStage || ""} ${summary.latestMessage?.title || ""}`;
+  const failureText = (summary.failures || []).join("；");
+  if (/后殿冲关止步/.test(`${statusText} ${failureText}`)) {
+    rows.push(["后殿止步", "第三关结算已锁定; 失去的是后殿追加机缘,不是全本收益。"]);
+  } else if (/后殿/.test(statusText)) {
+    rows.push(["后殿边界", "后殿属于追加机缘,先守住前置结算,再看是否继续压鼎。"]);
+  }
+  for (const failure of (summary.failures || []).slice(0, 2)) {
+    rows.push(["近期失败", failure]);
+  }
+  const negativeExamples = xutianNegativeExamplesForSummary(summary, guide).slice(0, 2);
+  for (const example of negativeExamples) {
+    rows.push(["避坑反例", example]);
+  }
+  if (!rows.length) {
+    rows.push(["边界", "明示优先; 反例只用于避坑,不反推唯一答案。"]);
+  }
+  return rows.slice(0, 2);
+}
+
+function xutianNegativeExamplesForSummary(summary, guide) {
+  if ((summary?.negativeExamples || []).length) return summary.negativeExamples;
+  const oracle = String(summary?.oracle || "").trim();
+  if (!oracle) return [];
+  const current = (guide?.cases?.failure || []).find((item) => String(item.gua || "").trim() === oracle);
+  if (!current) return [];
+  return (current.negative_examples || [])
+    .concat((current.examples || []).map((example) => [example.route, example.strategy, example.source].filter(Boolean).join(" / ")))
+    .filter(Boolean);
 }
 
 function cangkunPlaybookChips(summary, guide) {

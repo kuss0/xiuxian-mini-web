@@ -3506,7 +3506,7 @@ button.health-chip:hover {
 
 .dungeon-playbook-card {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-left: 4px solid rgba(96, 165, 250, 0.7);
@@ -3514,7 +3514,7 @@ button.health-chip:hover {
   background:
     linear-gradient(135deg, rgba(15, 23, 42, 0.86), rgba(30, 41, 59, 0.66)),
     var(--surface-2);
-  padding: 12px;
+  padding: 10px;
 }
 
 .dungeon-playbook-card.live {
@@ -3533,7 +3533,7 @@ button.health-chip:hover {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
 }
 
 .dungeon-playbook-head > div {
@@ -3565,10 +3565,10 @@ button.health-chip:hover {
 
 .dungeon-playbook-advice {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   margin: 0;
   border-left: 3px solid rgba(96, 165, 250, 0.5);
-  padding-left: 9px;
+  padding-left: 8px;
 }
 
 .dungeon-playbook-advice strong {
@@ -3577,10 +3577,11 @@ button.health-chip:hover {
 }
 
 .dungeon-playbook-chips,
+.dungeon-playbook-boundaries,
 .dungeon-playbook-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
+  gap: 5px;
 }
 
 .dungeon-playbook-chips span {
@@ -3591,7 +3592,7 @@ button.health-chip:hover {
   border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.46);
-  padding: 4px 8px;
+  padding: 3px 7px;
 }
 
 .dungeon-playbook-chips b {
@@ -3599,13 +3600,38 @@ button.health-chip:hover {
   font-weight: 600;
 }
 
+.dungeon-playbook-boundaries {
+  display: grid;
+  gap: 4px;
+}
+
+.dungeon-playbook-boundaries span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  border-radius: 7px;
+  background: rgba(120, 53, 15, 0.14);
+  color: var(--muted);
+  padding: 4px 7px;
+  font-size: 12px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.dungeon-playbook-boundaries b {
+  color: #fed7aa;
+  font-size: 12px;
+  font-weight: 650;
+}
+
 .dungeon-playbook-actions button {
-  min-height: 30px;
+  min-height: 28px;
   border: 1px solid rgba(96, 165, 250, 0.22);
   border-radius: 8px;
   background: rgba(37, 99, 235, 0.12);
   color: var(--text);
-  padding: 6px 10px;
+  padding: 5px 9px;
   font-size: 12px;
 }
 
