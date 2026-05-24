@@ -2,7 +2,6 @@
 (function () {
   "use strict";
 
-  const { fetchJson, postJson } = window.MiniwebApi;
   const { closeModal, openModal } = window.MiniwebModal;
   const { clipGraphemes, escapeAttr, escapeHtml, formatNumber } = window.MiniwebFormat;
 
@@ -10,7 +9,9 @@
     fetchMessageById,
     findMessageById,
     jumpToMessage,
+    loadFilterDiagnostics,
     muteFocusSenderId,
+    previewFocusExcludePattern,
     renderFocusArchivePreview,
     saveFilterSettings,
     settings = {},
@@ -101,7 +102,9 @@
       fetchMessageById,
       findMessageById,
       jumpToMessage,
+      loadFilterDiagnostics,
       muteFocusSenderId,
+      previewFocusExcludePattern,
       renderFocusArchivePreview,
       saveFilterSettings,
     });
@@ -135,6 +138,7 @@
           target: excludeTextarea,
           previewBox,
           append: true,
+          previewFocusExcludePattern: deps.previewFocusExcludePattern,
           renderFocusArchivePreview: deps.renderFocusArchivePreview,
           setStatus,
         });
@@ -147,6 +151,7 @@
         target: excludeTextarea,
         previewBox,
         append: false,
+        previewFocusExcludePattern: deps.previewFocusExcludePattern,
         renderFocusArchivePreview: deps.renderFocusArchivePreview,
         setStatus,
       });
@@ -158,6 +163,7 @@
         target: excludeTextarea,
         previewBox,
         append: true,
+        previewFocusExcludePattern: deps.previewFocusExcludePattern,
         renderFocusArchivePreview: deps.renderFocusArchivePreview,
         setStatus,
       });
@@ -169,6 +175,7 @@
         target: excludeTextarea,
         previewBox,
         append: true,
+        previewFocusExcludePattern: deps.previewFocusExcludePattern,
         renderFocusArchivePreview: deps.renderFocusArchivePreview,
         setStatus,
       });
@@ -179,7 +186,10 @@
       setStatus("info", "正在统计最近消息归类原因…");
       if (diagnosticsBox) diagnosticsBox.innerHTML = '<p class="empty inline">统计中…</p>';
       try {
-        const payload = await fetchJson("/api/filter/diagnostics?limit=1000");
+        if (typeof deps.loadFilterDiagnostics !== "function") {
+          throw new Error("filterSettings missing dependency: loadFilterDiagnostics");
+        }
+        const payload = await deps.loadFilterDiagnostics();
         if (!payload.ok) throw new Error(payload.error || "诊断失败");
         if (diagnosticsBox) diagnosticsBox.innerHTML = renderFilterDiagnostics(payload);
         bindFilterDiagnosticsActions({
@@ -260,6 +270,7 @@
     target,
     previewBox,
     append,
+    previewFocusExcludePattern,
     renderFocusArchivePreview,
     setStatus,
   }) {
@@ -271,7 +282,10 @@
     setStatus?.("info", "正在预览规则影响…");
     if (previewBox) previewBox.innerHTML = '<p class="empty inline">预览中…</p>';
     try {
-      const preview = await postJson("/api/focus-exclude/preview", { mode, text: value });
+      if (typeof previewFocusExcludePattern !== "function") {
+        throw new Error("filterSettings missing dependency: previewFocusExcludePattern");
+      }
+      const preview = await previewFocusExcludePattern({ mode, text: value });
       if (!preview.ok) throw new Error(preview.error || "预览失败");
       if (previewBox) previewBox.innerHTML = renderFocusArchivePreview(preview);
       if (append && preview.pattern) {
@@ -341,6 +355,7 @@
     findMessageById,
     jumpToMessage,
     muteFocusSenderId,
+    previewFocusExcludePattern,
     previewBox,
     renderFocusArchivePreview,
     setStatus,
@@ -369,6 +384,7 @@
           target: excludeTextarea,
           previewBox,
           append: true,
+          previewFocusExcludePattern,
           renderFocusArchivePreview,
           setStatus,
         });

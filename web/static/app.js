@@ -1026,7 +1026,9 @@ function openFilterSettingsModal() {
     fetchMessageById,
     findMessageById: (id) => state.messages.find((message) => message.id === id),
     jumpToMessage,
+    loadFilterDiagnostics: () => fetchJson("/api/filter/diagnostics?limit=1000"),
     muteFocusSenderId,
+    previewFocusExcludePattern: (payload) => postJson("/api/focus-exclude/preview", payload),
     renderFocusArchivePreview: (preview) => window.MiniwebViews.focusArchive.renderFocusArchivePreview(preview, { formatChatTime }),
     saveFilterSettings: async (payload) => {
       const saved = await postJson("/api/settings", payload);

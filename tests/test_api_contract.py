@@ -159,6 +159,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "detail rich cards and field formatting live in `web/static/views/detail_cards.js`" in normalized_work_plan
     assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
     assert "focus archive rule modal lives in `web/static/views/focus_archive.js` with preview API injected from `web/static/app.js`" in normalized_work_plan
+    assert "filter settings modal lives in `web/static/views/filter_settings.js` with diagnostics and preview APIs injected from `web/static/app.js`" in normalized_work_plan
     assert "access settings modal, automation guard form, Telegram dialog/topic option renderers, and read-only Telegram account list live in `web/static/views/settings.js`" in normalized_work_plan
     assert "Telegram account login/logout modals, listen-target renderers, account login/listen-target event flow, account status line, and account action guards live in `web/static/views/account_management.js`" in normalized_work_plan
     assert "sidebar identity list, identity snapshot, identity module chips, add-identity modal body/event flow, and send_as list/selection/status/result renderers live in `web/static/views/identity_management.js`" in normalized_work_plan
@@ -186,8 +187,9 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "Detail cards are read-only renderers" in audit
     assert "message detail panel and manual action controls are isolated in `web/static/views/detail_panel.js`" in audit
     assert "focus archive rule modal is isolated in `web/static/views/focus_archive.js`, with `/api/focus-exclude/preview` injected from `web/static/app.js`" in audit
+    assert "filter settings modal is isolated in `web/static/views/filter_settings.js`, with diagnostics and focus-exclude preview APIs injected from `web/static/app.js`" in audit
     assert "Detail panel actions fill the composer or create manual plans/drafts only" in audit
-    assert "detail and focus-archive modules do not call send APIs or create direct API requests" in audit
+    assert "detail, focus-archive, and filter-settings modules do not call send APIs or create direct API requests" in audit
     assert "Account login/logout modals, listen-target renderers, account login/listen-target event flow, account status line, and account action guards are isolated in `web/static/views/account_management.js`" in audit
     assert "keeps injected account save/login/dialog/topic/listener API orchestration" in audit
     assert "Sidebar identity list, identity snapshot, sidebar module chips, add-identity modal renderers/event flow, and send_as list/selection/status renderers are isolated in `web/static/views/identity_management.js`" in audit
@@ -1542,6 +1544,54 @@ def test_focus_archive_view_module_keeps_preview_api_in_app():
         assert fragment in focus_archive_js
     for fragment in forbidden_module_fragments:
         assert fragment not in focus_archive_js
+
+
+def test_filter_settings_view_module_keeps_filter_apis_in_app():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    filter_settings_js = (
+        root / "web" / "static" / "views" / "filter_settings.js"
+    ).read_text(encoding="utf-8")
+    index_html = (root / "web" / "index.html").read_text(encoding="utf-8")
+    scripts = re.findall(r'<script src="/static/([^"]+)"></script>', index_html)
+
+    required_app_fragments = [
+        "function openFilterSettingsModal()",
+        "window.MiniwebViews.filterSettings.openFilterSettingsModal({",
+        'loadFilterDiagnostics: () => fetchJson("/api/filter/diagnostics?limit=1000")',
+        'previewFocusExcludePattern: (payload) => postJson("/api/focus-exclude/preview", payload)',
+        "saveFilterSettings: async (payload) => {",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: message filter settings modal",
+        "function openFilterSettingsModal({",
+        "loadFilterDiagnostics,",
+        "previewFocusExcludePattern,",
+        "filterSettings missing dependency: loadFilterDiagnostics",
+        "const payload = await deps.loadFilterDiagnostics()",
+        "filterSettings missing dependency: previewFocusExcludePattern",
+        "const preview = await previewFocusExcludePattern({ mode, text: value })",
+        "window.MiniwebViews.filterSettings = { openFilterSettingsModal }",
+    ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "fetchJson(",
+        "apiFetch(",
+        "window.MiniwebApi",
+        '"/api/filter/diagnostics',
+        '"/api/focus-exclude/preview"',
+        '"/api/settings"',
+        '"/api/skills/send"',
+        '"/api/outbox/drafts"',
+    ]
+
+    assert scripts.index("views/filter_settings.js") < scripts.index("app.js")
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in filter_settings_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in filter_settings_js
 
 
 def test_frontend_identity_state_refresh_is_first_class():
