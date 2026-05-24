@@ -143,6 +143,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "status modal shell and refresh flow live in" in work_plan
     assert "`web/static/views/dungeon_status.js`" in work_plan
     assert "resource stats modal and coverage renderer live in `web/static/views/resource_stats.js`" in normalized_work_plan
+    assert "world report modal lives in `web/static/views/world_report.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
 
     assert "/api/dungeon-status" in audit
@@ -193,6 +194,41 @@ def test_resource_stats_view_module_keeps_app_wrappers_and_health_renderer_contr
         assert fragment in app_js
     for fragment in required_module_fragments:
         assert fragment in resource_js
+
+
+def test_world_report_view_module_keeps_app_wrappers_and_read_only_action_contract():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    world_report_js = (root / "web" / "static" / "views" / "world_report.js").read_text(encoding="utf-8")
+
+    required_app_fragments = [
+        "function worldReportDeps()",
+        "async function openWorldReportModal()",
+        "return window.MiniwebViews.worldReport.openWorldReportModal(worldReportDeps())",
+        "function renderWorldReport(payload)",
+        "return window.MiniwebViews.worldReport.renderWorldReport(worldReportDeps(), payload)",
+        "renderLiveSituationBoard,",
+        "renderGameActionDock,",
+        "fillQuestTrackerAction,",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: world report modal",
+        "async function openWorldReportModal(deps = {})",
+        "function renderWorldReport(deps = {}, payload)",
+        "function renderWorldReportQuestCard(deps = {}, message)",
+        "function bindWorldReport(deps = {}, dialog, payload)",
+        "window.MiniwebViews.worldReport = {",
+        "openWorldReportModal,",
+        "renderWorldReport,",
+        "bindWorldReport,",
+        "await deps.fillQuestTrackerAction?.(key, Number(indexText || 0), \"战报动作\")",
+        "await deps.openResourceStatsModal?.()",
+        "await deps.openDungeonStatusModal?.()",
+    ]
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in world_report_js
 
 
 def test_frontend_identity_state_refresh_is_first_class():
