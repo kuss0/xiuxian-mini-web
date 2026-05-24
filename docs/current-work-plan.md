@@ -111,6 +111,7 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      `web/static/views/settings.js`; the Telegram account login/logout modals and
      listen-target renderers live in
      `web/static/views/account_management.js`; the sidebar identity list,
+     identity snapshot,
      add-identity modal body, and send_as row/result renderers live in
      `web/static/views/identity_management.js`,
      while

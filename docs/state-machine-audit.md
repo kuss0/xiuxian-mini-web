@@ -44,7 +44,7 @@ do not prove success.
 | --- | --- |
 | State source | `identity_module_state` rows keyed by `(send_as_id, module_key)`. Modules live under `backend/identity_state/`. |
 | Trigger | `ModuleRegistry.observe_all` observes real game-bot replies. Most modules resolve the target identity from the replied-to user command. |
-| Refresh path | `/api/identity-state` returns module state plus `status_summary`; identity loading and manual refresh both refresh module state, and official schedules can ask modules for an auto anchor. Sidebar identity list and add-identity modal renderers are isolated in `web/static/views/identity_management.js`, while `web/static/app.js` keeps Telegram account/send_as API binding and event orchestration. |
+| Refresh path | `/api/identity-state` returns module state plus `status_summary`; identity loading and manual refresh both refresh module state, and official schedules can ask modules for an auto anchor. Sidebar identity list, identity snapshot, and add-identity modal renderers are isolated in `web/static/views/identity_management.js`, while `web/static/app.js` keeps Telegram account/send_as API binding and event orchestration. |
 | Failure/manual fallback | No bot reply means no state update. If a module cannot compute an anchor, schedule planning falls back to the normal anchor/default time. |
 | Current gap | Coverage is uneven: deep retreat, pet touch/warm, weakness, small world, and generic cooldowns are represented, but some newer gameplay loops remain message-only. |
 | Next action | Add modules only where replies expose stable cooldown or readiness text; otherwise keep the result in message cards or dungeon panels. |

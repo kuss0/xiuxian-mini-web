@@ -1681,61 +1681,7 @@ function channelMessageCounts() {
 }
 
 function renderIdentitySnapshot() {
-  if (!identitySnapshot) {
-    return;
-  }
-  const map = new Map(activeIdentityPatches().map((item) => [item.key, item]));
-  const activeId = Number(state.activeIdentityId || 0) || null;
-  if (!activeId) {
-    identitySnapshot.innerHTML = `
-      <button class="role-button active" type="button">
-        <span>未选择身份</span>
-        <strong>请选择左侧身份</strong>
-      </button>
-      <div class="snapshot-grid">
-        <p class="empty inline">选中身份后,这里显示对应角色状态。</p>
-      </div>
-    `;
-    return;
-  }
-  if (state.identityPatchesLoading && map.size === 0) {
-    identitySnapshot.innerHTML = `
-      <button class="role-button active" type="button">
-        <span>正在加载</span>
-        <strong>角色状态</strong>
-      </button>
-      <div class="snapshot-grid">
-        <p class="empty inline">正在读取当前身份的角色状态...</p>
-      </div>
-    `;
-    return;
-  }
-  const primaryTitle =
-    map.get("境界")?.value ||
-    map.get("灵根")?.value ||
-    "未识别角色";
-  const rows = ["境界", "宗门", "灵根", "综合战力"]
-    .filter((key) => map.has(key))
-    .map((key) => {
-      const item = map.get(key);
-      return `
-        <div>
-          <span>${escapeHtml(key)}</span>
-          <strong>${escapeHtml(item.value)}</strong>
-        </div>
-      `;
-    })
-    .join("");
-  const updatedAt = [...map.values()].sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)))[0]?.updated_at || "";
-  identitySnapshot.innerHTML = `
-    <button class="role-button active" type="button">
-      <span>${escapeHtml(updatedAt ? `更新 ${updatedAt}` : "等待消息箱投影")}</span>
-      <strong>${escapeHtml(primaryTitle)}</strong>
-    </button>
-    <div class="snapshot-grid">
-      ${rows || '<p class="empty inline">暂无角色状态。发送或监听“我的灵根 / 战力”后会更新。</p>'}
-    </div>
-  `;
+  return identityManagementView().renderIdentitySnapshot(identityManagementDeps(), identitySnapshot);
 }
 
 function copyToClipboardSilent(text) {
