@@ -142,15 +142,57 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "playbook cards live in `web/static/views/dungeon_playbook.js`" in work_plan
     assert "status modal shell and refresh flow live in" in work_plan
     assert "`web/static/views/dungeon_status.js`" in work_plan
+    assert "resource stats modal and coverage renderer live in `web/static/views/resource_stats.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
 
     assert "/api/dungeon-status" in audit
     assert "/api/dungeons/status" not in audit
     assert "modal lists the affected owners and reason" in audit
     assert "detailed manual-handling messages in the modal status line" in audit
+    assert "resource stats modal and coverage renderer are isolated in `web/static/views/resource_stats.js`" in audit
     assert "official schedule rail and modal are isolated in `web/static/views/schedule.js`" in audit
     assert "Dungeon playbook actions fill the composer only" in audit
     assert "Xutian now exposes phase, route" in audit
+
+
+def test_resource_stats_view_module_keeps_app_wrappers_and_health_renderer_contract():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    resource_js = (root / "web" / "static" / "views" / "resource_stats.js").read_text(encoding="utf-8")
+
+    required_app_fragments = [
+        "function resourceStatsDeps()",
+        "function resourceStatsView()",
+        "async function openResourceStatsModal()",
+        "return resourceStatsView().openResourceStatsModal(resourceStatsDeps())",
+        "function renderResourceCoverage(payload)",
+        "return resourceStatsView().renderResourceCoverage(payload)",
+        "function latestResourcePeriod(rows, eventSummary)",
+        "function aggregateRareResourceRows(rows)",
+        "function formatResourceAmount(value, unit)",
+        "renderResourceCoverage,",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: resource stats modal and coverage renderer",
+        "async function openResourceStatsModal(deps = {})",
+        "function resourceStatsState(deps = {})",
+        "function renderResourceTrustCards(deps = {}, payload)",
+        "resourceStatsState(deps).messageAudit",
+        "function renderResourceCoverage(payload)",
+        "function latestResourcePeriod(rows, eventSummary)",
+        "function aggregateRareResourceRows(rows)",
+        "function formatResourceAmount(value, unit)",
+        "window.MiniwebViews.resourceStats = {",
+        "openResourceStatsModal,",
+        "renderResourceCoverage,",
+        "latestResourcePeriod,",
+        "aggregateRareResourceRows,",
+        "formatResourceAmount,",
+    ]
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in resource_js
 
 
 def test_frontend_identity_state_refresh_is_first_class():

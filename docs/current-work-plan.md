@@ -43,8 +43,9 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      Wanbaolou listing/delisting, gift, and tree-harvest success replies as
      conservative deltas; official schedule manual handling details persist in
      the modal status line. The official schedule rail and modal live in
-     `web/static/views/schedule.js`; identity state refresh is part of the
-     normal identity refresh path.
+     `web/static/views/schedule.js`; the resource stats modal and coverage
+     renderer live in `web/static/views/resource_stats.js`; identity state
+     refresh is part of the normal identity refresh path.
 
 4. Tool center cleanup
    - Common workflows remain on the main page.
@@ -75,8 +76,9 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      playbook cards live in `web/static/views/dungeon_playbook.js`; the dungeon
      status modal shell and refresh flow live in
      `web/static/views/dungeon_status.js`, along with reusable status render
-     helpers. The official schedule rail and modal live in
-     `web/static/views/schedule.js`, while `web/static/app.js` keeps
+     helpers. The resource stats modal and coverage renderer live in
+     `web/static/views/resource_stats.js`. The official schedule rail and modal
+     live in `web/static/views/schedule.js`, while `web/static/app.js` keeps
      compatibility wrappers and orchestration callbacks.
 
 ## Remaining Work

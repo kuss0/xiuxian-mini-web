@@ -27,6 +27,17 @@ do not prove success.
 | Current gap | The local count is an estimate until scheduled history is reconciled against Telegram. Local deletion marks rows deleted, but externally deleted Telegram scheduled messages still need explicit sync. |
 | Next action | Keep the 100-message guard local and strict; add Telegram history sync only as a reconciliation tool, not as a reason to exceed the local guard. |
 
+## Resource Stats
+
+| Field | Current contract |
+| --- | --- |
+| State source | Resource events and deltas derived from stored message cards. Blood trial remains archived out of this stats surface. |
+| Trigger | Message ingest parses observed settlement replies; `/api/resource-stats` and `/api/resource-coverage` expose read-only summaries and parser coverage diagnostics. |
+| Refresh path | The resource stats modal and coverage renderer are isolated in `web/static/views/resource_stats.js`, with `web/static/app.js` keeping compatibility wrappers for world report, health, and cockpit summaries. |
+| Failure/manual fallback | Coverage diagnosis can highlight likely missed samples and reparse recent candidates, but unknown reward text does not mutate inventory or create sends. The health modal reuses the same coverage renderer so message-box gaps remain visible beside stats trust signals. |
+| Current gap | Parser coverage still depends on observed stable bot replies, so new gameplay text should become fixtures before it is promoted into stats logic. |
+| Next action | Add parser coverage only from real missed samples and keep the resource modal read-only. |
+
 ## Identity Cooldowns
 
 | Field | Current contract |
