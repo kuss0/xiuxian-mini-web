@@ -151,6 +151,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "world report modal lives in `web/static/views/world_report.js`" in normalized_work_plan
     assert "world event strip and manual event actions live in `web/static/views/world_event.js`" in normalized_work_plan
     assert "live situation board and signal snapshot helpers live in `web/static/views/live_situation.js`" in normalized_work_plan
+    assert "game cockpit, primary strip, and action dock live in `web/static/views/game_cockpit.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
 
     assert "/api/dungeon-status" in audit
@@ -566,6 +567,66 @@ def test_live_situation_view_module_keeps_wrappers_signal_helpers_and_manual_act
         assert fragment in live_situation_js
     for fragment in forbidden_module_fragments:
         assert fragment not in live_situation_js
+
+
+def test_game_cockpit_view_module_keeps_wrappers_and_panel_action_contract():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    game_cockpit_js = (root / "web" / "static" / "views" / "game_cockpit.js").read_text(encoding="utf-8")
+
+    required_app_fragments = [
+        "function gameCockpitDeps()",
+        "function gameCockpitView()",
+        "function renderGameCockpit()",
+        "return gameCockpitView().renderGameCockpit(gameCockpitDeps())",
+        "function renderGamePrimaryStrip()",
+        "return gameCockpitView().renderGamePrimaryStrip(gameCockpitDeps())",
+        "function primaryFocusMessage()",
+        "return gameCockpitView().primaryFocusMessage(gameCockpitDeps())",
+        "function cockpitMetric(label, value)",
+        "return gameCockpitView().cockpitMetric(label, value)",
+        "function renderGameActionDock()",
+        "return gameCockpitView().renderGameActionDock(gameCockpitDeps())",
+        "async function handleGameDockAction(action)",
+        "return gameCockpitView().handleGameDockAction(gameCockpitDeps(), action)",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: game cockpit, primary strip, and action dock",
+        "function renderGameCockpit(deps = {})",
+        "function renderGamePrimaryStrip(deps = {})",
+        "function primaryFocusStripModel(deps = {})",
+        "function primaryFocusMessage(deps = {})",
+        "function primaryDungeonStripModel(deps = {})",
+        "function primaryStatusStripModel(deps = {})",
+        "async function handlePrimaryStripAction(deps = {}, action)",
+        "function openSecondaryGamePanel(deps = {})",
+        "function renderCockpitIdentity(deps = {})",
+        "function renderHudIdentitySelect(deps = {}, activeId)",
+        "function cockpitMetric(label, value)",
+        "function renderCockpitModules(deps = {})",
+        "function renderCockpitInbox(deps = {})",
+        "function renderGameActionDock(deps = {})",
+        "async function handleGameDockAction(deps = {}, action)",
+        "window.MiniwebViews.gameCockpit = {",
+        "renderGameCockpit,",
+        "renderGameActionDock,",
+        "handleGameDockAction,",
+        "deps.openOverviewDetailPanel?.()",
+        "await deps.openDungeonStatusModal?.()",
+        "await deps.openScheduleModal?.()",
+    ]
+    forbidden_module_fragments = [
+        "fillDirectSendComposer",
+        "postJson(",
+        "sendDirectComposerMessage",
+        '"/api/skills/send"',
+    ]
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in game_cockpit_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in game_cockpit_js
 
 
 def test_frontend_identity_state_refresh_is_first_class():

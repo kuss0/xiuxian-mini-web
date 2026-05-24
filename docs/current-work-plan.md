@@ -87,9 +87,11 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      modal lives in `web/static/views/world_report.js`; the world event strip
      and manual event actions live in `web/static/views/world_event.js`. The
      live situation board and signal snapshot helpers live in
-     `web/static/views/live_situation.js`. The official schedule rail and modal
-     live in `web/static/views/schedule.js`, while `web/static/app.js` keeps
-     compatibility wrappers and orchestration callbacks.
+     `web/static/views/live_situation.js`. The game cockpit, primary strip, and
+     action dock live in `web/static/views/game_cockpit.js`. The official
+     schedule rail and modal live in `web/static/views/schedule.js`, while
+     `web/static/app.js` keeps compatibility wrappers and orchestration
+     callbacks.
 
 ## Remaining Work
 

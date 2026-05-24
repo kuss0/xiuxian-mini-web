@@ -503,615 +503,154 @@ function updateGlobalBanner() {
   }
 }
 
+function gameCockpitDeps() {
+  return {
+    state,
+    gameCockpit,
+    gameHud,
+    gameActionDock,
+    gamePrimaryStrip,
+    cockpitIdentity,
+    hudIdentity,
+    cockpitModules,
+    hudModules,
+    cockpitInbox,
+    hudInbox,
+    compareRankThenRecency,
+    healthStatusLabel,
+    collectorLiveStatus,
+    worldEventMeta,
+    liveMessagePreview,
+    displaySource,
+    formatChatTime,
+    summarySignalMessages,
+    isPersonalSignal,
+    messageKind,
+    actionableDungeonSnapshot,
+    currentDungeonSnapshot,
+    visibleDungeonActions,
+    dungeonSummaryDisplayLabel,
+    identityById,
+    activeIdentityPatches,
+    overviewModuleRows,
+    accountForIdentity,
+    identityProfileSourceRows,
+    identityCanSend,
+    sourceInitial,
+    setActiveIdentity,
+    showSkillToast,
+    auditTimeLabel,
+    findOrFetchMessage,
+    jumpToMessage,
+    openIdentityStatusModal,
+    moduleStartTs,
+    fmtCountdown,
+    listenerStatusText,
+    channelMessageCounts,
+    questTrackerItems,
+    liveResourceSnapshot,
+    formatResourceAmount,
+    renderLiveSituationBoard,
+    renderGameSceneBoard,
+    renderQuestTracker,
+    showError,
+    openOverviewDetailPanel,
+    openDungeonStatusModal,
+    openHealthModal,
+    openWorldReportModal,
+    openLeaderIntelModal,
+    openXutianOracleGuideModal,
+    openResourceStatsModal,
+    openInventoryModal,
+    loadAccounts,
+    loadIdentities,
+    openScheduleModal,
+    openLogsModal,
+  };
+}
+
+function gameCockpitView() {
+  return window.MiniwebViews.gameCockpit;
+}
+
 function renderGameCockpit() {
-  if (!gameCockpit && !gameHud && !gameActionDock && !gamePrimaryStrip) return;
-  renderCockpitIdentity();
-  renderCockpitModules();
-  renderCockpitInbox();
-  renderGamePrimaryStrip();
-  renderLiveSituationBoard();
-  renderGameActionDock();
-  renderGameSceneBoard();
-  renderQuestTracker();
+  return gameCockpitView().renderGameCockpit(gameCockpitDeps());
 }
 
 function renderGamePrimaryStrip() {
-  if (!gamePrimaryStrip) return;
-  const focus = primaryFocusStripModel();
-  const dungeon = primaryDungeonStripModel();
-  const status = primaryStatusStripModel();
-  gamePrimaryStrip.innerHTML = `
-    <button type="button" class="game-primary-item focus ${escapeAttr(focus.kind)}" data-primary-strip-action="${escapeAttr(focus.action)}">
-      <span>${escapeHtml(focus.label)}</span>
-      <strong>${escapeHtml(focus.title)}</strong>
-      <small>${escapeHtml(focus.meta)}</small>
-    </button>
-    <button type="button" class="game-primary-item dungeon ${escapeAttr(dungeon.kind)}" data-primary-strip-action="dungeon">
-      <span>${escapeHtml(dungeon.label)}</span>
-      <strong>${escapeHtml(dungeon.title)}</strong>
-      <small>${escapeHtml(dungeon.meta)}</small>
-    </button>
-    <button type="button" class="game-primary-item status ${escapeAttr(status.kind)}" data-primary-strip-action="status">
-      <span>${escapeHtml(status.label)}</span>
-      <strong>${escapeHtml(status.title)}</strong>
-      <small>${escapeHtml(status.meta)}</small>
-    </button>
-    <button type="button" class="game-primary-more" data-primary-strip-action="secondary">工具</button>
-  `;
-  gamePrimaryStrip.querySelectorAll("[data-primary-strip-action]").forEach((button) => {
-    button.addEventListener("click", () => {
-      handlePrimaryStripAction(button.dataset.primaryStripAction || "").catch((error) => showError(error));
-    });
-  });
+  return gameCockpitView().renderGamePrimaryStrip(gameCockpitDeps());
 }
 
 function primaryFocusStripModel() {
-  const auditStatus = state.messageAudit?.status || "";
-  if (auditStatus && auditStatus !== "ok") {
-    return {
-      label: "重点",
-      title: "消息箱异常",
-      meta: healthStatusLabel(auditStatus),
-      kind: "warn",
-      action: "health",
-    };
-  }
-  const message = primaryFocusMessage();
-  if (!message) {
-    return {
-      label: "重点",
-      title: "暂无重点回复",
-      meta: collectorLiveStatus() || "风险、@我和重点频道会显示在这里",
-      kind: "muted",
-      action: "overview",
-    };
-  }
-  const meta = worldEventMeta(message);
-  const actionCount = (message.actions || []).filter((item) => String(item.command || "").trim()).length;
-  const preview = liveMessagePreview(message, 44);
-  return {
-    label: meta.label === "我的" ? "重点 / 我的" : "重点",
-    title: String(message.title || displaySource(message.source) || "重点回复").trim(),
-    meta: [
-      formatChatTime(message.time) || "最近",
-      displaySource(message.source),
-      actionCount ? `${actionCount} 个候选` : preview,
-    ].filter(Boolean).join("｜"),
-    kind: meta.kind || "focus",
-    action: "focus",
-  };
+  return gameCockpitView().primaryFocusStripModel(gameCockpitDeps());
 }
 
 function primaryFocusMessage() {
-  const seen = new Set();
-  return summarySignalMessages()
-    .filter((message) => {
-      if (!message?.id || seen.has(message.id)) return false;
-      seen.add(message.id);
-      const channels = message.channels || [message.channel];
-      const tags = message.tags || [];
-      if (channels.includes("dungeon")) return false;
-      if (message.severity === "risk" || channels.includes("risk")) return true;
-      if (isPersonalSignal(message)) return true;
-      if (channels.includes("leader") || channels.includes("focus")) return true;
-      if ((tags.includes("会长") || tags.includes("重点")) && messageKind(message) === "bot") return true;
-      return false;
-    })
-    .sort(compareRankThenRecency(primaryFocusRank))[0] || null;
+  return gameCockpitView().primaryFocusMessage(gameCockpitDeps());
 }
 
 function primaryFocusRank(message) {
-  const channels = message.channels || [message.channel];
-  const hasCommand = (message.actions || []).some((item) => String(item.command || "").trim());
-  if (message.severity === "risk" || channels.includes("risk")) return 1;
-  if (hasCommand) return 2;
-  if (isPersonalSignal(message)) return 3;
-  if (channels.includes("leader")) return 4;
-  if (channels.includes("focus")) return 5;
-  return 9;
+  return gameCockpitView().primaryFocusRank(gameCockpitDeps(), message);
 }
 
 function primaryDungeonStripModel() {
-  const summary = actionableDungeonSnapshot() || currentDungeonSnapshot();
-  if (!summary) {
-    return {
-      label: "副本",
-      title: "暂无副本线索",
-      meta: "苍坤洞府、虚天殿等副本会在这里置顶",
-      kind: "muted",
-    };
-  }
-  const actions = visibleDungeonActions(summary).filter((action) => String(action.command || "").trim());
-  const meta = [
-    summary.status || "副本",
-    summary.latestStage || "",
-    actions.length ? `${actions.length} 个动作` : "",
-    formatChatTime(summary.latestMessage?.time) || "",
-  ].filter(Boolean).join("｜");
-  return {
-    label: "副本",
-    title: dungeonSummaryDisplayLabel(summary),
-    meta: meta || summary.advice || summary.routeVerdict || "点击查看副本面板",
-    kind: summary.statusKind || "dungeon",
-  };
+  return gameCockpitView().primaryDungeonStripModel(gameCockpitDeps());
 }
 
 function primaryStatusStripModel() {
-  const activeId = Number(state.activeIdentityId || 0) || null;
-  const identity = activeId ? identityById(activeId) : null;
-  const patchMap = new Map(activeIdentityPatches().map((item) => [item.key, item.value]));
-  const identityName =
-    patchMap.get("角色名") ||
-    patchMap.get("道号") ||
-    identity?.label ||
-    identity?.username ||
-    (activeId ? String(activeId) : "未选角色");
-  const identityMeta = [
-    patchMap.get("境界"),
-    String(patchMap.get("宗门") || "").replace(/^【|】$/g, ""),
-  ].filter(Boolean).join("｜") || (identity ? "资料待补全" : "先选身份");
-  const moduleRow = overviewModuleRows(activeId).find((row) => ["warn", "ready", "running", "cooling"].includes(row.view?.cls)) || null;
-  return {
-    label: "角色 / CD",
-    title: String(identityName),
-    meta: moduleRow ? `${moduleRow.view.label} ${moduleRow.view.time}`.trim() : identityMeta,
-    kind: moduleRow?.view?.cls || (activeId ? "ready" : "muted"),
-  };
+  return gameCockpitView().primaryStatusStripModel(gameCockpitDeps());
 }
 
 async function handlePrimaryStripAction(action) {
-  if (action === "secondary") {
-    openSecondaryGamePanel();
-    return;
-  }
-  if (action === "focus") {
-    const signal = primaryFocusMessage();
-    const message = signal?.id ? await findOrFetchMessage(signal.id) : null;
-    if (message) {
-      jumpToMessage(message);
-    } else {
-      openOverviewDetailPanel();
-    }
-    return;
-  }
-  if (action === "overview") {
-    openOverviewDetailPanel();
-    return;
-  }
-  if (action === "dungeon") {
-    await openDungeonStatusModal();
-    return;
-  }
-  if (action === "health") {
-    await openHealthModal();
-    return;
-  }
-  openIdentityStatusModal();
+  return gameCockpitView().handlePrimaryStripAction(gameCockpitDeps(), action);
 }
 
 function openSecondaryGamePanel() {
-  const shell = document.querySelector(".workspace-tools-shell");
-  const secondary = document.querySelector(".game-secondary-shell");
-  if (shell) shell.open = true;
-  if (secondary) {
-    secondary.open = true;
-    secondary.scrollIntoView({ block: "nearest" });
-  } else {
-    openOverviewDetailPanel();
-  }
+  return gameCockpitView().openSecondaryGamePanel(gameCockpitDeps());
 }
 
 function renderCockpitIdentity() {
-  if (!cockpitIdentity && !hudIdentity) return;
-  const activeId = Number(state.activeIdentityId || 0) || null;
-  const identity = activeId ? identityById(activeId) : null;
-  const account = identity ? accountForIdentity(identity) : null;
-  const patches = activeIdentityPatches();
-  const patchMap = new Map(patches.map((item) => [item.key, item.value]));
-  const sourceRows = identityProfileSourceRows(patches);
-  if (!identity) {
-    const hudSelect = renderHudIdentitySelect(activeId);
-    const emptyHtml = `
-      <div class="cockpit-empty">
-        <strong>未选择身份</strong>
-        <span>左侧选身份后，下方发送栏会自动跟随。</span>
-      </div>
-    `;
-    if (cockpitIdentity) cockpitIdentity.innerHTML = emptyHtml;
-    if (hudIdentity) {
-      hudIdentity.innerHTML = `
-        <div class="hud-empty">
-          <strong>未选择身份</strong>
-          <span>选择角色后显示状态</span>
-          ${hudSelect}
-        </div>
-      `;
-      bindHudIdentitySelect();
-    }
-    return;
-  }
-
-  const name =
-    patchMap.get("角色名") ||
-    patchMap.get("道号") ||
-    identity.label ||
-    identity.username ||
-    String(identity.send_as_id || "未命名");
-  const subtitleParts = [
-    patchMap.get("境界"),
-    String(patchMap.get("宗门") || "").replace(/^【|】$/g, ""),
-    patchMap.get("灵根"),
-  ].filter(Boolean);
-  const cultivation = String(patchMap.get("修为") || "");
-  const power = String(patchMap.get("综合战力") || "");
-  const title = String(patchMap.get("称号") || "").replace(/^【|】$/g, "");
-  const canSend = identityCanSend(identity);
-  const statusClass = !account ? "warn" : canSend ? "ok" : "warn";
-  const statusText = !account ? "未绑定账号" : canSend ? "可直接发送" : "只能观察";
-  const metricRows = [
-    ["战力", power || "未读"],
-    ["修为", cultivation || "未读"],
-    ["称号", title || "未读"],
-  ].filter(([, value]) => value);
-
-  if (cockpitIdentity) {
-    cockpitIdentity.innerHTML = `
-      <div class="cockpit-identity-main">
-        <div class="cockpit-avatar">${escapeHtml(sourceInitial(name, "player"))}</div>
-        <div class="cockpit-identity-title">
-          <strong>${escapeHtml(name)}</strong>
-          <span>${escapeHtml(subtitleParts.join("｜") || "等待消息箱补全角色资料")}</span>
-        </div>
-        <span class="cockpit-status ${statusClass}">${escapeHtml(statusText)}</span>
-      </div>
-      <div class="cockpit-player-meta">
-        ${metricRows.map(([label, value]) => cockpitMetric(label, value)).join("")}
-      </div>
-      ${renderHudProfileSource(sourceRows)}
-    `;
-  }
-
-  if (hudIdentity) {
-    const hudMetrics = [
-      ["境界", patchMap.get("境界") || "未读"],
-      ["灵根", patchMap.get("灵根") || "未读"],
-      ["战力", power || "未读"],
-      ["修为", cultivation || "未读"],
-    ];
-    hudIdentity.innerHTML = `
-      <div class="hud-identity-switch">
-        <span>当前角色</span>
-        ${renderHudIdentitySelect(activeId)}
-      </div>
-      <div class="hud-player-main">
-        <div class="cockpit-avatar hud-avatar">${escapeHtml(sourceInitial(name, "player"))}</div>
-        <div class="hud-player-title">
-          <strong>${escapeHtml(name)}</strong>
-          <span>${escapeHtml(subtitleParts.join("｜") || title || "等待角色资料")}</span>
-        </div>
-        <span class="cockpit-status ${statusClass}">${escapeHtml(statusText)}</span>
-      </div>
-      <div class="hud-player-metrics">
-        ${hudMetrics.map(([label, value]) => cockpitMetric(label, value)).join("")}
-      </div>
-      ${renderHudProfileSource(sourceRows)}
-    `;
-    bindHudIdentitySelect();
-  }
-  bindHudSourceButtons();
+  return gameCockpitView().renderCockpitIdentity(gameCockpitDeps());
 }
 
 function renderHudIdentitySelect(activeId) {
-  if (!state.identities.length) {
-    return "";
-  }
-  const options = [
-    `<option value="">未选择</option>`,
-    ...state.identities.map((identity) => {
-      const id = Number(identity.send_as_id || 0);
-      const name = identity.label || identity.username || identity.send_as_id || "未命名";
-      const account = accountForIdentity(identity);
-      const accountLabel = account?.label || identity.account_local_id || "未绑定";
-      return `
-        <option value="${escapeAttr(String(id))}" ${id === Number(activeId || 0) ? "selected" : ""}>
-          ${escapeHtml(String(name))}｜${escapeHtml(String(accountLabel))}
-        </option>
-      `;
-    }),
-  ].join("");
-  return `<select class="hud-identity-select" data-hud-identity-select aria-label="切换当前角色">${options}</select>`;
+  return gameCockpitView().renderHudIdentitySelect(gameCockpitDeps(), activeId);
 }
 
 function bindHudIdentitySelect() {
-  hudIdentity?.querySelector("[data-hud-identity-select]")?.addEventListener("change", (event) => {
-    const id = Number(event.currentTarget.value || 0) || null;
-    setActiveIdentity(id, { loadPatches: true }).catch((err) => {
-      console.warn("[mini-web] switch identity failed:", err);
-      showSkillToast(`切换身份失败: ${err.message || err}`, "err");
-    });
-  });
+  return gameCockpitView().bindHudIdentitySelect(gameCockpitDeps());
 }
 
 function renderHudProfileSource(rows) {
-  const cleanRows = Array.isArray(rows) ? rows.filter(Boolean) : [];
-  if (!cleanRows.length) {
-    return `
-      <button type="button" class="hud-profile-source muted" data-hud-source-status>
-        <span>资料来源</span>
-        <strong>等待玉牒 / 战力</strong>
-      </button>
-    `;
-  }
-  const latest = cleanRows
-    .map((row) => row.updatedAt)
-    .filter(Boolean)
-    .sort((a, b) => String(b).localeCompare(String(a)))[0] || "";
-  const primary = cleanRows.find((row) => row.sourceMessageId) || cleanRows[0];
-  const countText = `${cleanRows.length} 项投影`;
-  const timeText = auditTimeLabel(latest) || "未知时间";
-  const sourceAttr = primary?.sourceMessageId ? `data-hud-source-message="${escapeAttr(primary.sourceMessageId)}"` : "data-hud-source-status";
-  return `
-    <button type="button" class="hud-profile-source" ${sourceAttr}>
-      <span>资料来源</span>
-      <strong>${escapeHtml(countText)}｜${escapeHtml(timeText)}</strong>
-    </button>
-  `;
+  return gameCockpitView().renderHudProfileSource(gameCockpitDeps(), rows);
 }
 
 function bindHudSourceButtons() {
-  [cockpitIdentity, hudIdentity].filter(Boolean).forEach((root) => {
-    root.querySelectorAll("[data-hud-source-message]").forEach((button) => {
-      button.addEventListener("click", async () => {
-        const id = button.dataset.hudSourceMessage || "";
-        const message = id ? await findOrFetchMessage(id) : null;
-        if (message) {
-          jumpToMessage(message);
-        } else {
-          openIdentityStatusModal();
-        }
-      });
-    });
-    root.querySelectorAll("[data-hud-source-status]").forEach((button) => {
-      button.addEventListener("click", () => openIdentityStatusModal());
-    });
-  });
+  return gameCockpitView().bindHudSourceButtons(gameCockpitDeps());
 }
 
 function cockpitMetric(label, value) {
-  return `
-    <span class="cockpit-metric">
-      <span>${escapeHtml(label)}</span>
-      <strong>${escapeHtml(String(value || "—"))}</strong>
-    </span>
-  `;
+  return gameCockpitView().cockpitMetric(label, value);
 }
 
 function renderCockpitModules() {
-  if (!cockpitModules && !hudModules) return;
-  const activeId = Number(state.activeIdentityId || 0) || null;
-  if (!activeId) {
-    const empty = '<p class="cockpit-muted">选中身份后显示关键 CD。</p>';
-    if (cockpitModules) cockpitModules.innerHTML = empty;
-    if (hudModules) hudModules.innerHTML = empty;
-    return;
-  }
-  const moduleStates = state.identityModuleStates.get(activeId) || [];
-  const byKey = new Map(moduleStates.map((item) => [item.module_key, item]));
-  const now = Date.now() / 1000;
-  const specs = [
-    { key: "wild_training", icon: "⚔️", label: "野外" },
-    { key: "checkin", icon: "📋", label: "点卯" },
-    { key: "tower", icon: "🗼", label: "闯塔" },
-    { key: "deep_retreat", icon: "📿", label: "深闭" },
-    { key: "retreat_shallow", icon: "🧘", label: "浅闭" },
-    { key: "yuanying", icon: "👻", label: "元婴" },
-    { key: "second_soul", icon: "🪞", label: "元神" },
-    { key: "pet_touch", icon: "🖐️", label: "抚摸" },
-    { key: "pet_warm", icon: "♨️", label: "温养" },
-    { key: "pet_trial", icon: "🥊", label: "试炼" },
-  ];
-  const rows = specs.map((spec) => {
-    const item = byKey.get(spec.key);
-    const summary = item?.summary || {};
-    const st = item?.state || {};
-    const nextAt = Number(summary.next_at || st.cooldown_until || 0) || 0;
-    const startAt = moduleStartTs(st);
-    const label = item?.label || spec.label;
-    if (!item) {
-      return cockpitModuleChip({ icon: spec.icon, label, text: "未知", cls: "unknown" });
-    }
-    const phase = String(summary.phase || st.phase || "");
-    if (phase === "running") {
-      if (nextAt > now) {
-        const remaining = Math.max(0, nextAt - now);
-        const total = Math.max(1, nextAt - startAt);
-        const pct = Math.min(100, Math.max(0, ((total - remaining) / total) * 100));
-        return cockpitModuleChip({
-          icon: spec.icon,
-          label,
-          text: `剩 ${fmtCountdown(remaining)}`,
-          cls: "cooling",
-          nextAt,
-          startAt,
-          pct,
-        });
-      }
-      return cockpitModuleChip({ icon: spec.icon, label, text: "待结算", cls: "ready" });
-    }
-    const ready = summary.ready === true || nextAt === 0 || (nextAt > 0 && nextAt <= now);
-    if (ready) {
-      return cockpitModuleChip({ icon: spec.icon, label, text: "已就绪", cls: "ready" });
-    }
-    const remaining = Math.max(0, nextAt - now);
-    const total = Math.max(1, nextAt - startAt);
-    const pct = Math.min(100, Math.max(0, ((total - remaining) / total) * 100));
-    return cockpitModuleChip({
-      icon: spec.icon,
-      label,
-      text: `剩 ${fmtCountdown(remaining)}`,
-      cls: "cooling",
-      nextAt,
-      startAt,
-      pct,
-    });
-  });
-  const html = rows.join("");
-  if (cockpitModules) cockpitModules.innerHTML = html;
-  if (hudModules) hudModules.innerHTML = html;
+  return gameCockpitView().renderCockpitModules(gameCockpitDeps());
 }
 
-function cockpitModuleChip({ icon, label, text, cls, nextAt = 0, startAt = 0, pct = 0 }) {
-  const liveAttrs = nextAt
-    ? ` data-cockpit-timer="1" data-next-at="${nextAt}" data-start-at="${startAt}"`
-    : "";
-  return `
-    <div class="cockpit-module ${escapeAttr(cls || "")}"${liveAttrs}>
-      <span class="cockpit-module-icon">${escapeHtml(icon || "•")}</span>
-      <span class="cockpit-module-label">${escapeHtml(label || "")}</span>
-      <strong class="cockpit-module-time">${escapeHtml(text || "—")}</strong>
-      <span class="cockpit-module-bar"><span style="width:${Number(pct || 0).toFixed(1)}%"></span></span>
-    </div>
-  `;
+function cockpitModuleChip(args) {
+  return gameCockpitView().cockpitModuleChip(args);
 }
 
 function renderCockpitInbox() {
-  if (!cockpitInbox && !hudInbox) return;
-  const audit = state.messageAudit || {};
-  const messages = audit.messages || {};
-  const listener = audit.listener || state.listenerSummary || {};
-  const running = listener.running || {};
-  const runningCount = Object.keys(running).length;
-  const status = audit.status || (runningCount ? "ok" : "warn");
-  const latestMsg = audit.latest_target_msg_id || messages.latest_msg_id || 0;
-  const latestTime = auditTimeLabel(messages.latest_message_time || audit.time || "");
-  const gapCount = Number(audit.gap_count || 0);
-  const counts = channelMessageCounts();
-  const html = `
-    <button type="button" class="cockpit-inbox-status ${escapeAttr(status)}" data-cockpit-action="health">
-      <span class="health-dot" aria-hidden="true"></span>
-      <strong>${escapeHtml(healthStatusLabel(status))}</strong>
-      <small>${escapeHtml(listenerStatusText(listener, runningCount))}</small>
-    </button>
-    <div class="cockpit-inbox-line">
-      ${cockpitMetric("水位", latestMsg ? `#${formatNumber(latestMsg)}` : "未配置")}
-      ${cockpitMetric("断层", `${formatNumber(gapCount)} 段`)}
-      ${cockpitMetric("重点", `${formatNumber(counts.get("focus") || 0)} 条`)}
-      ${cockpitMetric("最近", latestTime || "暂无")}
-    </div>
-  `;
-  [cockpitInbox, hudInbox].filter(Boolean).forEach((root) => {
-    root.innerHTML = html;
-    root.querySelector('[data-cockpit-action="health"]')?.addEventListener("click", () => openHealthModal());
-  });
+  return gameCockpitView().renderCockpitInbox(gameCockpitDeps());
 }
 
 function renderGameActionDock() {
-  if (!gameActionDock) return;
-  const active = identityById(state.activeIdentityId);
-  const activeName = active ? (active.label || active.username || active.send_as_id) : "未选角色";
-  const counts = channelMessageCounts();
-  const focusCount = Number(counts.get("focus") || 0);
-  const dungeonCount = Number(counts.get("dungeon") || 0);
-  const resourceCount = Number(counts.get("resource") || 0) + Number(counts.get("training") || 0);
-  const leaderCount = Number(counts.get("leader") || 0);
-  const healthStatus = state.messageAudit?.status || (state.listenerSummary?.collector ? "ok" : "warn");
-  const questCount = questTrackerItems().length;
-  const dungeonSummary = actionableDungeonSnapshot() || currentDungeonSnapshot();
-  const dungeonActions = visibleDungeonActions(dungeonSummary).length;
-  const resource = liveResourceSnapshot();
-  const rareTop = resource?.rareRows?.[0] || null;
-  const dungeonMeta = dungeonSummary
-    ? `${dungeonSummaryDisplayLabel(dungeonSummary)} ${dungeonSummary.status || ""}`.trim()
-    : (dungeonCount ? `${formatNumber(dungeonCount)} 条` : "房间/卦象");
-  const rareMeta = rareTop
-    ? `${rareTop.resource_name}${formatResourceAmount(rareTop.total_amount, rareTop.unit)}`
-    : (resourceCount ? `${formatNumber(resourceCount)} 条` : "收益统计");
-  const dockItems = [
-    { key: "overview", label: "概览", meta: questCount ? `${formatNumber(questCount)} 待办` : (active ? "右侧面板" : "全局态势") },
-    { key: "report", label: "战报", meta: "世界总览" },
-    { key: "status", label: "状态", meta: active ? "角色总览" : "先选身份" },
-    { key: "intel", label: "情报", meta: leaderCount ? `${formatNumber(leaderCount)} 条` : "会长频道" },
-    { key: "dungeon", label: "副本", meta: dungeonActions ? `${formatNumber(dungeonActions)} 动作` : dungeonMeta },
-    { key: "guide", label: "攻略", meta: "虚天卦象" },
-    { key: "resource", label: "资源", meta: rareMeta },
-    { key: "inventory", label: "库存", meta: "批量转移" },
-    { key: "schedule", label: "定时", meta: "官方排班" },
-    { key: "logs", label: "记录", meta: focusCount ? `重点 ${formatNumber(focusCount)}` : "按天查看" },
-    { key: "health", label: "健康", meta: healthStatusLabel(healthStatus) },
-  ];
-  gameActionDock.innerHTML = `
-    <div class="game-dock-context">
-      <span>当前</span>
-      <strong>${escapeHtml(String(activeName))}</strong>
-      <div class="game-dock-context-metrics">
-        <span><b>待办</b>${escapeHtml(formatNumber(questCount))}</span>
-        <span><b>副本</b>${escapeHtml(dungeonSummary ? (dungeonSummary.status || "线索") : "暂无")}</span>
-        <span><b>收益</b>${escapeHtml(rareTop ? rareTop.resource_name : "今日")}</span>
-      </div>
-    </div>
-    <div class="game-dock-actions">
-      ${dockItems.map((item) => `
-        <button type="button" data-game-dock-action="${escapeAttr(item.key)}">
-          <strong>${escapeHtml(item.label)}</strong>
-          <small>${escapeHtml(item.meta)}</small>
-        </button>
-      `).join("")}
-    </div>
-  `;
-  gameActionDock.querySelectorAll("[data-game-dock-action]").forEach((button) => {
-    button.addEventListener("click", () => handleGameDockAction(button.dataset.gameDockAction || ""));
-  });
+  return gameCockpitView().renderGameActionDock(gameCockpitDeps());
 }
 
 async function handleGameDockAction(action) {
-  try {
-    if (action === "overview") {
-      openOverviewDetailPanel();
-      return;
-    }
-    if (action === "report") {
-      await openWorldReportModal();
-      return;
-    }
-    if (action === "status") {
-      openIdentityStatusModal();
-      return;
-    }
-    if (action === "intel") {
-      await openLeaderIntelModal();
-      return;
-    }
-    if (action === "dungeon") {
-      await openDungeonStatusModal();
-      return;
-    }
-    if (action === "guide") {
-      await openXutianOracleGuideModal();
-      return;
-    }
-    if (action === "resource") {
-      await openResourceStatsModal();
-      return;
-    }
-    if (action === "inventory") {
-      await openInventoryModal();
-      return;
-    }
-    if (action === "schedule") {
-      await Promise.all([loadAccounts(), loadIdentities()]);
-      await openScheduleModal();
-      return;
-    }
-    if (action === "logs") {
-      await openLogsModal();
-      return;
-    }
-    if (action === "health") {
-      await openHealthModal();
-    }
-  } catch (error) {
-    showError(error);
-  }
+  return gameCockpitView().handleGameDockAction(gameCockpitDeps(), action);
 }
 
 function worldReportDeps() {
