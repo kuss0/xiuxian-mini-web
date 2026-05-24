@@ -84,8 +84,9 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      scene board and manual scene actions live in
      `web/static/views/game_scene.js`. The resource stats modal and coverage
      renderer live in `web/static/views/resource_stats.js`; the world report
-     modal lives in `web/static/views/world_report.js`. The official schedule
-     rail and modal live in `web/static/views/schedule.js`, while
+     modal lives in `web/static/views/world_report.js`; the world event strip
+     and manual event actions live in `web/static/views/world_event.js`. The
+     official schedule rail and modal live in `web/static/views/schedule.js`, while
      `web/static/app.js` keeps compatibility wrappers and orchestration
      callbacks.
 

@@ -149,6 +149,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "game scene board and manual scene actions live in `web/static/views/game_scene.js`" in normalized_work_plan
     assert "resource stats modal and coverage renderer live in `web/static/views/resource_stats.js`" in normalized_work_plan
     assert "world report modal lives in `web/static/views/world_report.js`" in normalized_work_plan
+    assert "world event strip and manual event actions live in `web/static/views/world_event.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
 
     assert "/api/dungeon-status" in audit
@@ -458,6 +459,55 @@ def test_game_scene_view_module_keeps_wrappers_and_manual_action_contract():
         assert fragment in game_scene_js
     for fragment in forbidden_module_fragments:
         assert fragment not in game_scene_js
+
+
+def test_world_event_view_module_keeps_wrappers_and_manual_action_contract():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    world_event_js = (root / "web" / "static" / "views" / "world_event.js").read_text(encoding="utf-8")
+
+    required_app_fragments = [
+        "function worldEventDeps()",
+        "function worldEventView()",
+        "function renderWorldEventStrip()",
+        "return worldEventView().renderWorldEventStrip(worldEventDeps())",
+        "function worldEventSlotDefs()",
+        "return worldEventView().worldEventSlotDefs()",
+        "function worldEventSlotSnapshot(def, matches = [])",
+        "return worldEventView().worldEventSlotSnapshot(worldEventDeps(), def, matches)",
+        "function worldEventRank(message)",
+        "return worldEventView().worldEventRank(worldEventDeps(), message)",
+        "fillDirectSendComposer,",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: world event strip and manual event actions",
+        "function renderWorldEventStrip(deps = {})",
+        "function bindWorldEventStrip(deps = {}, worldEventStrip)",
+        "function worldEventSlotDefs()",
+        "function worldEventSlots(deps = {})",
+        "function worldEventSlotSnapshot(deps = {}, def, matches = [])",
+        "function worldEventSlotMatch(deps = {}, def, message)",
+        "function worldEventRank(deps = {}, message)",
+        "function worldEventMeta(deps = {}, message)",
+        "window.MiniwebViews.worldEvent = {",
+        "renderWorldEventStrip,",
+        "worldEventSlots,",
+        "worldEventMeta,",
+        "deps.fillDirectSendComposer?.(action.command, {",
+        "已填入世界事件候选动作，请确认后发送。",
+        "已填入事件带候选动作，请确认后发送。",
+    ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "sendDirectComposerMessage",
+        '"/api/skills/send"',
+    ]
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in world_event_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in world_event_js
 
 
 def test_frontend_identity_state_refresh_is_first_class():
