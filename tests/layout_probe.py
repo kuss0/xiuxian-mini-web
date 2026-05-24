@@ -397,11 +397,13 @@ PROBE_SCRIPT = """
   }))).sort(function(a, b) { return a - b; });
   var hotbarOversized = hotbarChips.filter(function(chip) {
     var box = chip.getBoundingClientRect();
-    return box.height > 26 || box.width > 122;
+    return box.height > 23;
   }).map(function(chip) {
     var box = chip.getBoundingClientRect();
     return { text: chip.textContent.trim(), width: box.width, height: box.height };
   });
+  var firstHotbarChip = hotbarChips[0] && hotbarChips[0].getBoundingClientRect();
+  var lastFirstRowHotbarChip = hotbarChips[5] && hotbarChips[5].getBoundingClientRect();
   var hotbarClipped = hotbarChips.filter(function(chip) {
     var box = chip.getBoundingClientRect();
     return box.left < boxes.hotbar.left - 1 || box.right > boxes.hotbar.right + 1 ||
@@ -411,8 +413,11 @@ PROBE_SCRIPT = """
     return { text: chip.textContent.trim(), left: box.left, right: box.right, top: box.top, bottom: box.bottom };
   });
   check("hotbar renders enough shortcuts", hotbarChips.length >= 10, String(hotbarChips.length));
-  check("hotbar uses two compact rows", hotbarRowTops.length === 2 && boxes.hotbar.height <= 52,
+  check("hotbar uses two compact rows", hotbarRowTops.length === 2 && boxes.hotbar.height <= 44,
     JSON.stringify({ rows: hotbarRowTops, hotbar: boxes.hotbar }));
+  check("hotbar uses available width", firstHotbarChip && lastFirstRowHotbarChip &&
+      firstHotbarChip.left <= boxes.hotbar.left + 1 && lastFirstRowHotbarChip.right >= boxes.hotbar.right - 2,
+    JSON.stringify({ hotbar: boxes.hotbar, first: firstHotbarChip, lastFirstRow: lastFirstRowHotbarChip }));
   check("hotbar chips stay compact", hotbarOversized.length === 0, JSON.stringify(hotbarOversized));
   check("hotbar shows all chips without clipping", hotbarClipped.length === 0,
     JSON.stringify({ clipped: hotbarClipped, hotbar: boxes.hotbar }));

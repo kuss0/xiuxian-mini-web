@@ -11518,6 +11518,7 @@ function renderQuickActionHotbar() {
   if (!quickActionHotbar) return;
   const activeId = state.activeIdentityId;
   const skills = quickActionHotbarSkills();
+  quickActionHotbar.style.setProperty("--hotbar-columns", String(Math.max(1, Math.ceil(skills.length / 2))));
   if (!skills.length) {
     quickActionHotbar.innerHTML = `
       <span class="quick-action-hotbar-empty">${activeId ? "暂无可用快捷指令" : "选择身份后显示常用操作"}</span>
@@ -11542,7 +11543,7 @@ function renderQuickActionHotbar() {
       cooling ? "cooling" : "",
       busy ? "busy" : "",
     ].filter(Boolean).join(" ");
-    const cdText = cooling ? `剩 ${fmtCountdown(cdUntil - now)}` : "";
+    const cdText = cooling ? fmtCountdown(cdUntil - now) : "";
     return `
       <button type="button" class="${cls}" ${disabled ? "disabled" : ""}
               data-skill-key="${escapeAttr(skill.key)}" title="${escapeAttr(skill.note || skill.command || skill.label || "")}">
