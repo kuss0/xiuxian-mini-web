@@ -99,11 +99,12 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      action dock live in `web/static/views/game_cockpit.js`. The official
      schedule rail and modal live in `web/static/views/schedule.js`. The chat
      message stream, scroll anchoring, and quick actions live in
-     `web/static/views/chat_stream.js`; detail rich cards and field formatting
-     live in `web/static/views/detail_cards.js`; the message detail panel and
-     manual action controls live in `web/static/views/detail_panel.js`, while
-     `web/static/app.js` keeps compatibility wrappers and orchestration
-     callbacks.
+     `web/static/views/chat_stream.js`; the direct composer, emoji palette, and
+     quick command hotbar live in `web/static/views/direct_composer.js`; detail
+     rich cards and field formatting live in `web/static/views/detail_cards.js`;
+     the message detail panel and manual action controls live in
+     `web/static/views/detail_panel.js`, while `web/static/app.js` keeps
+     compatibility wrappers and orchestration callbacks.
 
 ## Remaining Work
 

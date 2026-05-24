@@ -93,6 +93,17 @@ do not prove success.
 | Current gap | Classification quality still depends on observed bad samples and backend channel tags, so uncertain messages should stay visible rather than being aggressively archived. |
 | Next action | Keep message-flow UI fixes in the chat stream module and add fixtures only from real misclassified messages. |
 
+## Direct Composer
+
+| Field | Current contract |
+| --- | --- |
+| State source | The active identity, selected message, reply context, quick-command catalog, and identity cooldown state in the frontend store. |
+| Trigger | Composer input events, emoji insertion, selected-message actions, quick-command hotbar clicks, identity changes, and explicit submit clicks update or submit the composer. |
+| Refresh path | The direct composer, emoji palette, and quick command hotbar are isolated in `web/static/views/direct_composer.js`, with `web/static/app.js` keeping API send and global-state wrappers. |
+| Failure/manual fallback | Direct composer sends only through the injected explicit composer-submit callback. The view module fills or updates the composer and does not call `/api/skills/send` directly. |
+| Current gap | Quick-command ranking still follows static priority words and unlocked-state projections, so new shortcuts should be promoted only after repeated observed use. |
+| Next action | Keep send APIs out of the view module and move future composer UI refinements behind dependency-injected callbacks. |
+
 ## Detail Cards
 
 | Field | Current contract |

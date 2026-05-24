@@ -810,73 +810,83 @@ function bindIdentityStatusBody(dialog) {
   return identityStatusView().bindIdentityStatusBody(identityStatusDeps(), dialog);
 }
 
-function directReplyContextFromMessage(message) {
-  if (!message) return null;
-  const chatId = Number(message.chat_id || 0);
-  const msgId = Number(message.msg_id || 0);
-  if (!chatId || !msgId) return null;
+function directComposerDeps() {
   return {
-    messageId: message.id || `tg:${chatId}:${msgId}`,
-    chatId,
-    replyToMsgId: msgId,
-    topMsgId: Number(message.top_msg_id || 0) || null,
-    source: displaySource(message.source),
-    preview: manualMessagePreview(message),
+    state,
+    elements: {
+      directSendComposer,
+      directSendIdentityLine,
+      directSendIdentitySelect,
+      directSendInput,
+      directSendSubmit,
+      directSendStatus,
+      directSendReplyContext,
+      directSendSelectionContext,
+      directSendActionHints,
+      emojiPickerButton,
+      directSendEmojiPalette,
+      directSendSkillPanel,
+      openSkillMenuButton,
+      openCultivationButton,
+      quickActionHotbar,
+      skillBarTabs,
+      skillBarChips,
+      skillBarIdentity,
+    },
+    modalRoot,
+    selectedVisibleMessage,
+    channelLabel,
+    messageKind,
+    displaySource,
+    formatChatTime,
+    quickActionLabel,
+    quickActionNeedsManualReview,
+    copyCommandToClipboard,
+    setWorkspacePanelOpen,
+    renderMessages,
+    showSkillToast,
+    identityById,
+    identityCanSend,
+    identityOptionLabel,
+    skillIsUnlocked,
+    currentIdentitySect,
+    fmtCountdown,
+    openModal,
+    showError,
+    loadAccounts,
+    loadIdentities,
+    loadSkills,
+    openCultivationModal,
+    sendComposerMessage: sendDirectComposerMessage,
   };
+}
+
+function directComposerView() {
+  return window.MiniwebViews.directComposer;
+}
+
+function manualMessagePreview(message) {
+  return directComposerView().manualMessagePreview(directComposerDeps(), message);
+}
+
+function directReplyContextFromMessage(message) {
+  return directComposerView().directReplyContextFromMessage(directComposerDeps(), message);
 }
 
 function directReplyContextFromAction(action, fallbackMessage = null) {
-  if (!action) return null;
-  const chatId = Number(action.chat_id || fallbackMessage?.chat_id || 0);
-  const replyToMsgId = Number(action.reply_to_msg_id || 0);
-  if (!chatId || !replyToMsgId) return null;
-  const parent =
-    state.messages.find(
-      (message) =>
-        Number(message.chat_id || 0) === chatId &&
-        Number(message.msg_id || 0) === replyToMsgId
-    ) || fallbackMessage;
-  return {
-    messageId: parent?.id || `tg:${chatId}:${replyToMsgId}`,
-    chatId,
-    replyToMsgId,
-    topMsgId: Number(action.top_msg_id || parent?.top_msg_id || 0) || null,
-    source: parent ? displaySource(parent.source) : "Telegram 消息",
-    preview: parent ? manualMessagePreview(parent) : `回复消息 #${replyToMsgId}`,
-  };
+  return directComposerView().directReplyContextFromAction(directComposerDeps(), action, fallbackMessage);
 }
 
 function setDirectSendReply(replyContext) {
-  state.directSendReply = replyContext || null;
-  renderDirectSendReplyContext();
+  return directComposerView().setDirectSendReply(directComposerDeps(), replyContext);
 }
 
 function clearDirectSendReply() {
-  setDirectSendReply(null);
+  return directComposerView().clearDirectSendReply(directComposerDeps());
 }
 
 function renderDirectSendReplyContext() {
-  if (!directSendReplyContext) return;
-  const reply = state.directSendReply;
-  if (!reply) {
-    directSendReplyContext.hidden = true;
-    directSendReplyContext.innerHTML = "";
-    return;
-  }
-  const preview = reply.preview || `${reply.source || "Telegram 消息"} #${reply.replyToMsgId || ""}`;
-  directSendReplyContext.hidden = false;
-  directSendReplyContext.innerHTML = `
-    <div class="direct-send-reply-main">
-      <span>回复</span>
-      <strong>${escapeHtml(preview)}</strong>
-      <small>群 ${escapeHtml(String(reply.chatId || ""))}｜消息 #${escapeHtml(String(reply.replyToMsgId || ""))}</small>
-    </div>
-    <button type="button" data-direct-reply-clear>取消回复</button>
-  `;
-  directSendReplyContext.querySelector("[data-direct-reply-clear]")?.addEventListener("click", () => {
-    clearDirectSendReply();
-    focusDirectSendInput();
-  });
+  return directComposerView().renderDirectSendReplyContext(directComposerDeps());
 }
 
 function setWorkspaceSelectedMessage(message, { rerenderList = true } = {}) {
@@ -938,163 +948,27 @@ function openOverviewDetailPanel() {
 }
 
 function renderDirectSendSelectionContext() {
-  if (!directSendSelectionContext) return;
-  const message = selectedVisibleMessage();
-  if (!message) {
-    directSendSelectionContext.hidden = true;
-    directSendSelectionContext.innerHTML = "";
-    return;
-  }
-  const channels = (message.channels || [message.channel])
-    .map((channel) => channelLabel(channel))
-    .filter(Boolean)
-    .slice(0, 3)
-    .join(" / ");
-  const title = String(message.title || "").trim();
-  const raw = String(message.summary || message.raw || "").trim().replace(/\s+/g, " ");
-  const preview = clipGraphemes(raw || title || "（空消息）", 120);
-  const canReply = Number(message.chat_id || 0) !== 0 && Number(message.msg_id || 0) > 0;
-  const kind = messageKind(message);
-  const source = displaySource(message.source);
-  directSendSelectionContext.hidden = false;
-  directSendSelectionContext.innerHTML = `
-    <div class="direct-selection-main kind-${escapeAttr(kind)}">
-      <span>当前消息</span>
-      <strong>${escapeHtml(source)}${title ? `｜${escapeHtml(title)}` : ""}</strong>
-      <small>${escapeHtml(formatChatTime(message.time) || message.time || "")}${channels ? `｜${escapeHtml(channels)}` : ""}${message.msg_id ? `｜#${escapeHtml(String(message.msg_id))}` : ""}</small>
-      <p>${escapeHtml(preview)}</p>
-    </div>
-    <div class="direct-selection-actions">
-      <button type="button" class="primary" data-direct-selected-action="reply" ${canReply ? "" : "disabled"}>回复</button>
-      <button type="button" data-direct-selected-action="quote">填入原文</button>
-      <button type="button" data-direct-selected-action="copy">复制</button>
-      <button type="button" data-direct-selected-action="clear">清除</button>
-    </div>
-  `;
-  directSendSelectionContext.querySelector('[data-direct-selected-action="reply"]')?.addEventListener("click", () => {
-    setDirectSendReplyFromMessage(message);
-  });
-  directSendSelectionContext.querySelector('[data-direct-selected-action="quote"]')?.addEventListener("click", () => {
-    const text = String(message.raw || message.summary || message.title || "").trim();
-    fillDirectSendComposer(text, {
-      replyContext: null,
-      statusText: "已把当前消息原文填入发送框，请确认后发送。",
-      statusKind: "info",
-    });
-  });
-  directSendSelectionContext.querySelector('[data-direct-selected-action="copy"]')?.addEventListener("click", async (event) => {
-    const text = String(message.raw || message.summary || message.title || "").trim();
-    await copyCommandToClipboard(text, event.currentTarget);
-  });
-  directSendSelectionContext.querySelector('[data-direct-selected-action="clear"]')?.addEventListener("click", () => {
-    state.selectedMessageId = null;
-    setWorkspacePanelOpen(false);
-    renderMessages();
-    renderDirectSendComposer();
-  });
+  return directComposerView().renderDirectSendSelectionContext(directComposerDeps());
 }
 
 function renderDirectSendActionHints() {
-  if (!directSendActionHints) return;
-  const message = selectedVisibleMessage();
-  const actions = (message?.actions || []).filter((action) => String(action.command || "").trim());
-  if (!message || !actions.length) {
-    directSendActionHints.hidden = true;
-    directSendActionHints.innerHTML = "";
-    return;
-  }
-  directSendActionHints.hidden = false;
-  directSendActionHints.innerHTML = `
-    <span class="direct-action-hints-label">候选动作</span>
-    <div class="direct-action-hints-list">
-    ${actions.slice(0, 6).map((action, index) => {
-      const command = String(action.command || "").trim();
-      return `
-        <button type="button" data-direct-action-hint="${index}" title="${escapeAttr(command)}">
-          <strong>${escapeHtml(quickActionLabel(action))}</strong>
-          <small>${escapeHtml(clipGraphemes(command, 42))}</small>
-        </button>
-      `;
-    }).join("")}
-    ${actions.length > 6 ? `<span class="direct-action-hints-more">+${actions.length - 6}</span>` : ""}
-    </div>
-  `;
-  directSendActionHints.querySelectorAll("[data-direct-action-hint]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const action = actions[Number(button.dataset.directActionHint || 0)];
-      if (!action) return;
-      fillDirectSendComposer(action.command, {
-        identityId: action.identity_id,
-        replyContext: directReplyContextFromAction(action, message),
-        statusText: quickActionNeedsManualReview(action)
-          ? "已填入候选动作，请补全内容后发送。"
-          : "已填入候选动作，请确认后发送。",
-        statusKind: "info",
-      });
-    });
-  });
+  return directComposerView().renderDirectSendActionHints(directComposerDeps());
 }
 
 function fillDirectSendComposer(command, opts = {}) {
-  const text = String(command || "").trim();
-  if (opts.identityId) {
-    state.directSendIdentityId = Number(opts.identityId || 0) || state.directSendIdentityId;
-  }
-  if (opts.replyContext !== undefined) {
-    setDirectSendReply(opts.replyContext);
-  }
-  renderDirectSendComposer();
-  if (directSendInput && text) {
-    directSendInput.value = text;
-    resizeDirectSendInput();
-  }
-  if (opts.statusText) {
-    setDirectSendStatus(opts.statusText, opts.statusKind || "info");
-  }
-  if (opts.focus !== false) {
-    focusDirectSendInput();
-  }
+  return directComposerView().fillDirectSendComposer(directComposerDeps(), command, opts);
 }
 
 function resizeDirectSendInput() {
-  if (!directSendInput) return;
-  directSendInput.style.height = "auto";
-  const style = window.getComputedStyle(directSendInput);
-  const minHeight = Number.parseFloat(style.minHeight) || 44;
-  const cssMaxHeight = Number.parseFloat(style.maxHeight);
-  const maxHeight = Number.isFinite(cssMaxHeight) && cssMaxHeight > 0 ? cssMaxHeight : 140;
-  const nextHeight = Math.min(Math.max(directSendInput.scrollHeight, minHeight), maxHeight);
-  directSendInput.style.height = `${nextHeight}px`;
-  directSendInput.style.overflowY = directSendInput.scrollHeight > maxHeight + 1 ? "auto" : "hidden";
+  return directComposerView().resizeDirectSendInput(directComposerDeps());
 }
 
 function focusDirectSendInput() {
-  window.requestAnimationFrame(() => {
-    if (!directSendInput) return;
-    resizeDirectSendInput();
-    if (window.innerWidth <= 900) {
-      directSendComposer?.scrollIntoView({ block: "nearest" });
-    }
-    try {
-      directSendInput.focus({ preventScroll: true });
-    } catch (_error) {
-      directSendInput.focus();
-    }
-    directSendInput.setSelectionRange(directSendInput.value.length, directSendInput.value.length);
-  });
+  return directComposerView().focusDirectSendInput(directComposerDeps());
 }
 
 function setDirectSendReplyFromMessage(message) {
-  const reply = directReplyContextFromMessage(message);
-  if (!reply) {
-    showSkillToast("这条消息缺少 Telegram chat_id/msg_id，不能回复", "err");
-    return;
-  }
-  fillDirectSendComposer("", {
-    replyContext: reply,
-    statusText: `已锁定回复对象：${reply.preview}`,
-    statusKind: "info",
-  });
+  return directComposerView().setDirectSendReplyFromMessage(directComposerDeps(), message);
 }
 
 function healthStatusLabel(status) {
@@ -2068,38 +1942,15 @@ function copyToClipboardSilent(text) {
 }
 
 function emojiPaletteHtml() {
-  const buttons = EMOJI_PALETTE.map((emoji) => `
-    <button type="button" class="emoji-palette-button" data-emoji="${escapeAttr(emoji)}" title="插入 ${escapeAttr(emoji)}">${escapeHtml(emoji)}</button>
-  `).join("");
-  return `
-    <div class="emoji-palette-buttons">${buttons}</div>
-    <span class="emoji-palette-hint">系统表情: Windows 用 Win+.，macOS 用 Ctrl+Cmd+Space</span>
-  `;
+  return directComposerView().emojiPaletteHtml();
 }
 
 function bindEmojiPalette(container, getTextarea) {
-  if (!container) return;
-  container.innerHTML = emojiPaletteHtml();
-  container.querySelectorAll("[data-emoji]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const textarea = getTextarea ? getTextarea() : null;
-      if (!textarea) return;
-      insertTextAtCursor(textarea, button.dataset.emoji || "");
-    });
-  });
+  return directComposerView().bindEmojiPalette(container, getTextarea);
 }
 
 function insertTextAtCursor(textarea, text) {
-  if (!textarea || !text) return;
-  const start = Number.isInteger(textarea.selectionStart) ? textarea.selectionStart : textarea.value.length;
-  const end = Number.isInteger(textarea.selectionEnd) ? textarea.selectionEnd : start;
-  const before = textarea.value.slice(0, start);
-  const after = textarea.value.slice(end);
-  textarea.value = `${before}${text}${after}`;
-  const next = start + text.length;
-  textarea.focus();
-  textarea.setSelectionRange(next, next);
-  textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  return directComposerView().insertTextAtCursor(textarea, text);
 }
 
 function renderActiveChannelText() {
@@ -5546,81 +5397,23 @@ function identityOptionLabel(identity) {
 }
 
 function defaultManualIdentityId() {
-  const active = identityById(state.activeIdentityId);
-  if (active && identityCanSend(active)) {
-    return Number(active.send_as_id);
-  }
-  const firstSelf = (state.identities || []).find((identity) => identityCanSend(identity));
-  if (firstSelf) {
-    return Number(firstSelf.send_as_id);
-  }
-  return Number((active || (state.identities || [])[0] || {}).send_as_id || 0);
+  return directComposerView().defaultManualIdentityId(directComposerDeps());
 }
 
 function manualSendIdentityOptions(selectedId) {
-  const selected = Number(selectedId || 0);
-  return (state.identities || []).map((identity) => {
-    const id = Number(identity.send_as_id || 0);
-    const canSend = identityCanSend(identity);
-    return `
-      <option value="${escapeAttr(String(id))}" ${id === selected ? "selected" : ""} ${canSend ? "" : "disabled"}>
-        ${escapeHtml(identityOptionLabel(identity))}
-      </option>
-    `;
-  }).join("");
+  return directComposerView().manualSendIdentityOptions(directComposerDeps(), selectedId);
 }
 
 function directSendSelectedIdentityId() {
-  const activeId = Number(state.activeIdentityId || 0);
-  if (activeId && state.directSendLastActiveId !== activeId) {
-    state.directSendLastActiveId = activeId;
-    state.directSendIdentityId = activeId;
-  }
-  if (state.directSendIdentityId && identityById(state.directSendIdentityId)) {
-    return Number(state.directSendIdentityId);
-  }
-  const fallback = activeId || defaultManualIdentityId();
-  state.directSendIdentityId = fallback || null;
-  return Number(fallback || 0);
+  return directComposerView().directSendSelectedIdentityId(directComposerDeps());
 }
 
 function renderDirectSendComposer() {
-  if (!directSendComposer || !directSendIdentitySelect || !directSendSubmit) return;
-  renderDirectSendReplyContext();
-  renderDirectSendSelectionContext();
-  renderDirectSendActionHints();
-  if (!state.identities.length) {
-    directSendIdentitySelect.innerHTML = '<option value="">先登录账号</option>';
-    directSendIdentitySelect.disabled = true;
-    directSendSubmit.disabled = true;
-    if (directSendIdentityLine) directSendIdentityLine.textContent = "未登录";
-    return;
-  }
-
-  const selectedId = directSendSelectedIdentityId();
-  directSendIdentitySelect.innerHTML = manualSendIdentityOptions(selectedId);
-  directSendIdentitySelect.value = String(selectedId || "");
-  directSendIdentitySelect.disabled = false;
-
-  const identity = identityById(selectedId);
-  const canSend = identity && identityCanSend(identity);
-  directSendSubmit.disabled = !canSend;
-  if (directSendIdentityLine) {
-    if (!identity) {
-      directSendIdentityLine.textContent = "未选身份";
-    } else {
-      const name = identity.label || identity.username || identity.send_as_id;
-      directSendIdentityLine.textContent = canSend ? `当前: ${name}` : `当前身份暂不能发送: ${name}`;
-    }
-  }
-  resizeDirectSendInput();
+  return directComposerView().renderDirectSendComposer(directComposerDeps());
 }
 
 function setDirectSendStatus(text, kind = "info") {
-  if (!directSendStatus) return;
-  directSendStatus.textContent = text;
-  directSendStatus.className = `direct-send-status ${kind}`;
-  directSendStatus.hidden = false;
+  return directComposerView().setDirectSendStatus(directComposerDeps(), text, kind);
 }
 
 async function sendDirectComposerMessage() {
@@ -5676,15 +5469,6 @@ async function sendDirectComposerMessage() {
   } finally {
     renderDirectSendComposer();
   }
-}
-
-function manualMessagePreview(message) {
-  if (!message) return "";
-  const raw = String(message.raw || message.summary || message.title || "").trim();
-  const compact = clipGraphemes(raw.replace(/\s+/g, " "), 120);
-  const source = displaySource(message.source);
-  const msgId = message.msg_id ? `#${message.msg_id}` : message.id || "";
-  return `${source} ${msgId}${compact ? `：${compact}` : ""}`;
 }
 
 if (selectAllChannels) {
@@ -5811,91 +5595,7 @@ if (healthButton) {
   });
 }
 
-if (directSendIdentitySelect) {
-  directSendIdentitySelect.addEventListener("change", () => {
-    state.directSendIdentityId = Number(directSendIdentitySelect.value || 0) || null;
-    renderDirectSendComposer();
-  });
-}
-
-if (directSendInput) {
-  resizeDirectSendInput();
-  directSendInput.addEventListener("input", resizeDirectSendInput);
-  directSendInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      sendDirectComposerMessage();
-    }
-  });
-}
-
-if (directSendSubmit) {
-  directSendSubmit.addEventListener("click", () => {
-    sendDirectComposerMessage();
-  });
-}
-
-if (emojiPickerButton && directSendEmojiPalette) {
-  bindEmojiPalette(directSendEmojiPalette, () => directSendInput);
-  emojiPickerButton.addEventListener("click", () => {
-    emojiPickerButton.closest("details")?.removeAttribute("open");
-    const shouldOpen = directSendEmojiPalette.hidden;
-    directSendEmojiPalette.hidden = !shouldOpen;
-    emojiPickerButton.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
-    if (shouldOpen && directSendSkillPanel) {
-      directSendSkillPanel.hidden = true;
-      openSkillMenuButton?.setAttribute("aria-expanded", "false");
-    }
-    if (!directSendEmojiPalette.hidden) {
-      focusDirectSendInput();
-    }
-  });
-}
-
-if (openSkillMenuButton) {
-  openSkillMenuButton.addEventListener("click", async () => {
-    try {
-      openSkillMenuButton.closest("details")?.removeAttribute("open");
-      if (!directSendSkillPanel) {
-        await Promise.all([loadAccounts(), loadIdentities()]);
-        if (!state.skills.length) await loadSkills();
-        openSkillMenuModal();
-        return;
-      }
-      const shouldOpen = directSendSkillPanel.hidden;
-      if (!shouldOpen) {
-        directSendSkillPanel.hidden = true;
-        openSkillMenuButton.setAttribute("aria-expanded", "false");
-        focusDirectSendInput();
-        return;
-      }
-      await Promise.all([loadAccounts(), loadIdentities()]);
-      if (!state.skills.length) await loadSkills();
-      if (directSendEmojiPalette) {
-        directSendEmojiPalette.hidden = true;
-        emojiPickerButton?.setAttribute("aria-expanded", "false");
-      }
-      directSendSkillPanel.hidden = false;
-      openSkillMenuButton.setAttribute("aria-expanded", "true");
-      renderSkillBar();
-      focusDirectSendInput();
-    } catch (error) {
-      showError(error);
-    }
-  });
-}
-
-if (openCultivationButton) {
-  openCultivationButton.addEventListener("click", async () => {
-    try {
-      openCultivationButton.closest("details")?.removeAttribute("open");
-      await Promise.all([loadAccounts(), loadIdentities()]);
-      openCultivationModal();
-    } catch (error) {
-      showError(error);
-    }
-  });
-}
+directComposerView().bindDirectComposer(directComposerDeps());
 
 outboxButton.addEventListener("click", async () => {
   try {
@@ -6145,14 +5845,11 @@ function skillIsUnlocked(skill) {
 }
 
 function renderSkillBar() {
-  renderSkillPanel(skillBarTabs, skillBarChips, skillBarIdentity, renderSkillBar);
+  return directComposerView().renderSkillBar(directComposerDeps());
 }
 
 function renderSkillMenuModal() {
-  const tabs = modalRoot?.querySelector("#skillMenuTabs");
-  const chips = modalRoot?.querySelector("#skillMenuChips");
-  const identity = modalRoot?.querySelector("#skillMenuIdentity");
-  renderSkillPanel(tabs, chips, identity, renderSkillMenuModal);
+  return directComposerView().renderSkillMenuModal(directComposerDeps());
 }
 
 function renderSkillViews() {
@@ -6165,238 +5862,35 @@ function renderSkillViews() {
   renderGameActionDock();
 }
 
-const HOTBAR_ROWS = 2;
-const HOTBAR_VISIBLE_SLOTS = 10;
+const HOTBAR_ROWS = directComposerView().HOTBAR_ROWS;
+const HOTBAR_VISIBLE_SLOTS = directComposerView().HOTBAR_VISIBLE_SLOTS;
 
 function hotbarSkillGroups() {
-  const preferred = ["日常", "玩法", "查询", "法宝", "副本"];
-  const available = state.skillGroups || [];
-  const seen = new Set();
-  return [...preferred, ...available].filter((group) => {
-    if (!group || seen.has(group)) return false;
-    seen.add(group);
-    return available.includes(group);
-  });
+  return directComposerView().hotbarSkillGroups(directComposerDeps());
 }
 
 function hotbarSkillScore(skill) {
-  const groupScore = {
-    "日常": 1,
-    "玩法": 2,
-    "查询": 3,
-    "法宝": 4,
-    "副本": 5,
-  }[skill.group] || 9;
-  const label = `${skill.label || ""}${skill.key || ""}${skill.command || ""}`;
-  const important = [
-    ["深度闭关", 1],
-    ["野外历练", 2],
-    ["点卯", 3],
-    ["闯塔", 4],
-    ["元婴", 5],
-    ["第二元神", 6],
-    ["抚摸", 7],
-    ["温养", 8],
-    ["我的", 9],
-    ["战力", 10],
-  ];
-  const hit = important.find(([word]) => label.includes(word));
-  return groupScore * 100 + (hit ? hit[1] : 50);
+  return directComposerView().hotbarSkillScore(skill);
 }
 
 function quickActionHotbarSkills() {
-  const groups = new Set(hotbarSkillGroups());
-  return (state.skills || [])
-    .filter((skill) => groups.has(skill.group))
-    .filter((skill) => skill.reply_mode !== "required")
-    .filter((skill) => String(skill.command || "").trim())
-    .filter((skill) => skillIsUnlocked(skill))
-    .sort((a, b) => hotbarSkillScore(a) - hotbarSkillScore(b) || String(a.label || "").localeCompare(String(b.label || ""), "zh-Hans-CN"));
+  return directComposerView().quickActionHotbarSkills(directComposerDeps());
 }
 
 function renderQuickActionHotbar() {
-  if (!quickActionHotbar) return;
-  const activeId = state.activeIdentityId;
-  const rankedSkills = quickActionHotbarSkills();
-  const hasMore = rankedSkills.length > HOTBAR_VISIBLE_SLOTS;
-  const skills = hasMore ? rankedSkills.slice(0, HOTBAR_VISIBLE_SLOTS - 1) : rankedSkills.slice(0, HOTBAR_VISIBLE_SLOTS);
-  const renderedCount = skills.length + (hasMore ? 1 : 0);
-  quickActionHotbar.style.setProperty("--hotbar-columns", String(Math.max(1, Math.ceil(renderedCount / HOTBAR_ROWS))));
-  if (!renderedCount) {
-    quickActionHotbar.innerHTML = `
-      <span class="quick-action-hotbar-empty">${activeId ? "暂无可用快捷指令" : "选择身份后显示常用操作"}</span>
-    `;
-    return;
-  }
-  const modulesByKey = activeId
-    ? new Map((state.identityModuleStates.get(Number(activeId)) || []).map((it) => [it.module_key, it]))
-    : new Map();
-  const now = Date.now() / 1000;
-  quickActionHotbar.innerHTML = skills.map((skill) => {
-    const moduleState = skill.cd_module ? modulesByKey.get(skill.cd_module) : null;
-    const cdUntil = moduleState
-      ? Number((moduleState.summary && moduleState.summary.next_at) || (moduleState.state && moduleState.state.cooldown_until) || 0)
-      : 0;
-    const cooling = cdUntil > now;
-    const busy = state.skillBarBusyKeys.has(skill.key);
-    const disabled = !activeId || busy || cooling;
-    const cls = [
-      "skill-chip",
-      "hotbar-skill",
-      cooling ? "cooling" : "",
-      busy ? "busy" : "",
-    ].filter(Boolean).join(" ");
-    const cdText = cooling ? fmtCountdown(cdUntil - now) : "";
-    return `
-      <button type="button" class="${cls}" ${disabled ? "disabled" : ""}
-              data-skill-key="${escapeAttr(skill.key)}" title="${escapeAttr(skill.note || skill.command || skill.label || "")}">
-        ${skill.icon ? `<span class="skill-chip-icon">${skill.icon}</span>` : ""}
-        <span class="skill-chip-label">${escapeHtml(skill.label || skill.command)}</span>
-        ${cdText ? `<span class="skill-chip-cd">${escapeHtml(cdText)}</span>` : ""}
-      </button>
-    `;
-  }).join("");
-  if (hasMore) {
-    quickActionHotbar.insertAdjacentHTML("beforeend", `
-      <button type="button" class="skill-chip hotbar-more" data-hotbar-more title="打开全部快捷指令">
-        <span class="skill-chip-icon">＋</span>
-        <span class="skill-chip-label">更多</span>
-      </button>
-    `);
-  }
-  quickActionHotbar.querySelectorAll("[data-skill-key]").forEach((btn) => {
-    btn.addEventListener("click", () => fillSkillIntoComposer(btn.dataset.skillKey, btn));
-  });
-  quickActionHotbar.querySelector("[data-hotbar-more]")?.addEventListener("click", () => {
-    openSkillMenuModal();
-  });
+  return directComposerView().renderQuickActionHotbar(directComposerDeps());
 }
 
 function openSkillMenuModal() {
-  const dialog = openModal({
-    title: "快捷指令",
-    body: `
-      <section class="modal-section skill-menu-modal">
-        <div class="skill-bar-head">
-          <div class="skill-bar-tabs" id="skillMenuTabs"></div>
-          <div class="skill-bar-meta">
-            <span id="skillMenuIdentity" class="skill-bar-identity">未选身份</span>
-          </div>
-        </div>
-        <div id="skillMenuChips" class="skill-bar-chips"></div>
-      </section>
-    `,
-    footer: `<button type="button" data-modal-close>关闭</button>`,
-  });
-  if (!dialog) return;
-  renderSkillMenuModal();
+  return directComposerView().openSkillMenuModal(directComposerDeps());
 }
 
 function renderSkillPanel(tabsEl, chipsEl, identityEl, rerender) {
-  if (!tabsEl || !chipsEl) return;
-  // tabs
-  tabsEl.innerHTML = state.skillGroups.map((g) => {
-    const cls = g === state.skillBarTab ? "skill-bar-tab active" : "skill-bar-tab";
-    return `<button type="button" class="${cls}" data-skill-tab="${escapeAttr(g)}">${escapeHtml(g)}</button>`;
-  }).join("");
-  tabsEl.querySelectorAll("[data-skill-tab]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.skillBarTab = btn.dataset.skillTab;
-      rerender();
-    });
-  });
-  // identity meta
-  const activeId = state.activeIdentityId;
-  const identity = activeId ? (state.identities || []).find((i) => i.send_as_id === activeId) : null;
-  if (identityEl) {
-    if (identity) {
-      identityEl.textContent = `身份: ${identity.label || identity.username || activeId}`;
-      identityEl.classList.remove("empty");
-    } else {
-      identityEl.textContent = "未选身份(点左边身份列表)";
-      identityEl.classList.add("empty");
-    }
-  }
-  // chips
-  const tabSkills = (state.skills || [])
-    .filter((s) => s.group === state.skillBarTab)
-    .filter((s) => skillIsUnlocked(s));
-  if (!tabSkills.length) {
-    const sect = currentIdentitySect();
-    const hint = sect
-      ? `「${state.skillBarTab}」组里没有跟你宗门(${sect})/境界匹配的技能`
-      : `「${state.skillBarTab}」组里没有技能`;
-    chipsEl.innerHTML = `<span class="muted">${escapeHtml(hint)}</span>`;
-    return;
-  }
-  const modulesByKey = activeId
-    ? new Map((state.identityModuleStates.get(Number(activeId)) || []).map((it) => [it.module_key, it]))
-    : new Map();
-  const now = Date.now() / 1000;
-  chipsEl.innerHTML = tabSkills.map((skill) => {
-    const isReply = skill.reply_mode === "required";
-    const moduleState = skill.cd_module ? modulesByKey.get(skill.cd_module) : null;
-    const cdUntil = moduleState
-      ? Number((moduleState.summary && moduleState.summary.next_at) || (moduleState.state && moduleState.state.cooldown_until) || 0)
-      : 0;
-    const cooling = cdUntil > now;
-    const busy = state.skillBarBusyKeys.has(skill.key);
-    // reply 类不能从底栏填入(没 reply 上下文),只能从消息卡的 action 走。
-    const disabled = !activeId || isReply || busy || cooling;
-    const cls = [
-      "skill-chip",
-      isReply ? "reply" : "",
-      cooling ? "cooling" : "",
-      busy ? "busy" : "",
-    ].filter(Boolean).join(" ");
-    const cdText = cooling ? `剩 ${fmtCountdown(cdUntil - now)}` : "";
-    const title = isReply
-      ? (skill.note || "需要回复指定消息发送 — 在消息卡的 actions 区点对应按钮")
-      : (skill.note || skill.command);
-    return `
-      <button type="button" class="${cls}" ${disabled ? "disabled" : ""}
-              data-skill-key="${escapeAttr(skill.key)}" title="${escapeAttr(title)}">
-        ${skill.icon ? `<span class="skill-chip-icon">${skill.icon}</span>` : ""}
-        <span class="skill-chip-label">${escapeHtml(skill.label)}</span>
-        ${cdText ? `<span class="skill-chip-cd">${escapeHtml(cdText)}</span>` : ""}
-        ${isReply ? '<span class="skill-chip-cd" style="color:#fbbf24;">回复</span>' : ""}
-      </button>
-    `;
-  }).join("");
-  chipsEl.querySelectorAll("[data-skill-key]").forEach((btn) => {
-    btn.addEventListener("click", () => fillSkillIntoComposer(btn.dataset.skillKey, btn));
-  });
+  return directComposerView().renderSkillPanel(directComposerDeps(), tabsEl, chipsEl, identityEl, rerender);
 }
 
 function fillSkillIntoComposer(skillKey, button = null) {
-  const skill = (state.skills || []).find((item) => item.key === skillKey);
-  if (!skill) {
-    showSkillToast("找不到快捷指令", "err");
-    return;
-  }
-  const command = String(skill.command || "").trim();
-  if (!command) {
-    showSkillToast("这条快捷指令没有命令文本", "err");
-    return;
-  }
-  fillDirectSendComposer(command, {
-    identityId: state.activeIdentityId,
-    replyContext: null,
-    statusText: `已填入快捷指令：${skill.label || command}`,
-    statusKind: "info",
-  });
-  if (directSendSkillPanel && !directSendSkillPanel.hidden) {
-    directSendSkillPanel.hidden = true;
-    openSkillMenuButton?.setAttribute("aria-expanded", "false");
-  }
-  if (button) {
-    const originalText = button.querySelector(".skill-chip-label")?.textContent || button.textContent;
-    const label = button.querySelector(".skill-chip-label");
-    if (label) label.textContent = "已填入";
-    window.setTimeout(() => {
-      if (label) label.textContent = originalText;
-    }, 1000);
-  }
+  return directComposerView().fillSkillIntoComposer(directComposerDeps(), skillKey, button);
 }
 
 function showSkillToast(text, kind) {

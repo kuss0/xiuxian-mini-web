@@ -154,6 +154,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "game cockpit, primary strip, and action dock live in `web/static/views/game_cockpit.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
     assert "chat message stream, scroll anchoring, and quick actions live in `web/static/views/chat_stream.js`" in normalized_work_plan
+    assert "direct composer, emoji palette, and quick command hotbar live in `web/static/views/direct_composer.js`" in normalized_work_plan
     assert "detail rich cards and field formatting live in `web/static/views/detail_cards.js`" in normalized_work_plan
     assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
     assert "Outbox automation guard logic lives in `backend/outbox/automation.py`" in normalized_work_plan
@@ -171,6 +172,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "official schedule rail and modal are isolated in `web/static/views/schedule.js`" in audit
     assert "chat message stream, scroll anchoring, and quick-action renderer are isolated in `web/static/views/chat_stream.js`" in audit
     assert "Chat stream quick actions fill the composer only" in audit
+    assert "direct composer, emoji palette, and quick command hotbar are isolated in `web/static/views/direct_composer.js`" in audit
+    assert "Direct composer sends only through the injected explicit composer-submit callback" in audit
     assert "Detail rich cards and field formatting are isolated in `web/static/views/detail_cards.js`" in audit
     assert "Detail cards are read-only renderers" in audit
     assert "message detail panel and manual action controls are isolated in `web/static/views/detail_panel.js`" in audit
@@ -706,6 +709,57 @@ def test_chat_stream_view_module_keeps_wrappers_scroll_and_manual_action_contrac
         assert fragment not in chat_stream_js
 
 
+def test_direct_composer_view_module_keeps_wrappers_and_explicit_send_contract():
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "web" / "index.html").read_text(encoding="utf-8")
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    direct_composer_js = (root / "web" / "static" / "views" / "direct_composer.js").read_text(encoding="utf-8")
+    scripts = re.findall(r'<script src="/static/([^"?]+)"', html)
+
+    required_app_fragments = [
+        "function directComposerDeps()",
+        "function directComposerView()",
+        "return window.MiniwebViews.directComposer",
+        "function fillDirectSendComposer(command, opts = {})",
+        "return directComposerView().fillDirectSendComposer(directComposerDeps(), command, opts)",
+        "function renderDirectSendComposer()",
+        "return directComposerView().renderDirectSendComposer(directComposerDeps())",
+        "function renderQuickActionHotbar()",
+        "return directComposerView().renderQuickActionHotbar(directComposerDeps())",
+        "directComposerView().bindDirectComposer(directComposerDeps());",
+        "async function sendDirectComposerMessage()",
+        'postJson("/api/skills/send", payload)',
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: direct composer, emoji palette, and quick command hotbar",
+        "function bindDirectComposer(deps = {})",
+        "function fillDirectSendComposer(deps = {}, command, opts = {})",
+        "function renderDirectSendComposer(deps = {})",
+        "function renderQuickActionHotbar(deps = {})",
+        "function fillSkillIntoComposer(deps = {}, skillKey, button = null)",
+        "deps.sendComposerMessage?.()",
+        "window.MiniwebViews.directComposer = {",
+        "bindDirectComposer,",
+        "fillDirectSendComposer,",
+        "renderQuickActionHotbar,",
+    ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "fetchJson(",
+        "sendDirectComposerMessage",
+        '"/api/skills/send"',
+        '"/api/outbox/drafts"',
+    ]
+
+    assert scripts.index("views/direct_composer.js") < scripts.index("app.js")
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in direct_composer_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in direct_composer_js
+
+
 def test_detail_cards_view_module_keeps_wrappers_and_read_only_renderer_contract():
     root = Path(__file__).resolve().parents[1]
     app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
@@ -835,6 +889,7 @@ def test_detail_panel_view_module_keeps_wrappers_and_manual_action_contract():
 def test_frontend_identity_state_refresh_is_first_class():
     root = Path(__file__).resolve().parents[1]
     app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    direct_composer_js = (root / "web" / "static" / "views" / "direct_composer.js").read_text(encoding="utf-8")
 
     load_identities_start = app_js.index("async function loadIdentities()")
     load_identity_states_start = app_js.index("async function loadIdentityModuleStates()")
@@ -847,9 +902,12 @@ def test_frontend_identity_state_refresh_is_first_class():
     refresh_handler = app_js[refresh_start:health_start]
     assert "loadIdentityModuleStates()," in refresh_handler
 
-    cultivation_start = app_js.index("if (openCultivationButton)")
-    outbox_start = app_js.index("outboxButton.addEventListener", cultivation_start)
-    cultivation_handler = app_js[cultivation_start:outbox_start]
+    cultivation_start = direct_composer_js.index("if (openCultivationButton)")
+    bind_end = direct_composer_js.index("window.MiniwebViews.directComposer", cultivation_start)
+    cultivation_handler = direct_composer_js[cultivation_start:bind_end]
+    assert "deps.loadAccounts?.()" in cultivation_handler
+    assert "deps.loadIdentities?.()" in cultivation_handler
+    assert "deps.openCultivationModal?.()" in cultivation_handler
     assert "loadIdentityModuleStates()" not in cultivation_handler
 
 
