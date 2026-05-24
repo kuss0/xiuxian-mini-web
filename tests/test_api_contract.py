@@ -160,6 +160,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "Outbox automation guard logic lives in `backend/outbox/automation.py`" in normalized_work_plan
     assert "sender adapters live in `backend/outbox/adapters.py`" in normalized_work_plan
     assert "optional queue worker lives in `backend/outbox/worker.py`" in normalized_work_plan
+    assert "Outbox drafts, send-plan rendering, and automation decision panels live in `web/static/views/outbox.js`" in normalized_work_plan
+    assert "`web/static/app.js` keeps `/api/outbox/auto-plan`, `/api/outbox/auto-dispatch`, and `/api/outbox/auto-queue` wrappers" in normalized_work_plan
     assert "/api/outbox/auto-plan" in normalized_work_plan
     assert "/api/outbox/auto-dispatch" in normalized_work_plan
     assert "/api/outbox/auto-queue" in normalized_work_plan
@@ -184,6 +186,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "Automation is disabled and dry-run by default" in audit
     assert "Unknown commands, empty skill allowlists, non-allowlisted skills" in audit
     assert "unsupported adapters" in audit
+    assert "`web/static/views/outbox.js` renders outbox drafts, send plans, backend automation decisions" in audit
+    assert "`web/static/app.js` keeps API wrappers for `/api/outbox/auto-plan`, `/api/outbox/auto-dispatch`, and `/api/outbox/auto-queue`" in audit
     assert "`backend/outbox/adapters.py` owns sender adapter dispatch" in audit
     assert "`backend/outbox/worker.py` consumes only `auto_pending` drafts" in audit
 
@@ -758,6 +762,70 @@ def test_direct_composer_view_module_keeps_wrappers_and_explicit_send_contract()
         assert fragment in direct_composer_js
     for fragment in forbidden_module_fragments:
         assert fragment not in direct_composer_js
+
+
+def test_outbox_view_module_keeps_wrappers_and_api_boundary_contract():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    outbox_js = (root / "web" / "static" / "views" / "outbox.js").read_text(encoding="utf-8")
+
+    required_app_fragments = [
+        "function outboxDeps()",
+        "function outboxView()",
+        "return window.MiniwebViews.outbox",
+        "await outboxView().openDraftsModal(outboxDeps())",
+        "function renderOutboxPlan(plan, action, container)",
+        "return outboxView().renderOutboxPlan(outboxDeps(), plan, action, container)",
+        "function renderOutboxPlanError(error, container)",
+        "return outboxView().renderOutboxPlanError(outboxDeps(), error, container)",
+        "function renderOutboxAutomationResult(result, container)",
+        "return outboxView().renderOutboxAutomationResult(outboxDeps(), result, container)",
+        "function renderOutboxAutomationError(error, container)",
+        "return outboxView().renderOutboxAutomationError(outboxDeps(), error, container)",
+        "async function planOutboxAction(action)",
+        'postJson("/api/outbox/plan", { action })',
+        "async function planOutboxAutomation(action)",
+        'postJson("/api/outbox/auto-plan", { action })',
+        "async function dispatchOutboxAutomation(action)",
+        'postJson("/api/outbox/auto-dispatch", { action })',
+        "async function queueOutboxAutomation(action)",
+        'postJson("/api/outbox/auto-queue", { action })',
+        'postJson("/api/outbox/drafts", {',
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: outbox drafts and send-plan automation panel",
+        "async function openDraftsModal({",
+        "function renderOutboxPlan(deps = {}, plan, action, container)",
+        "function renderOutboxPlanError(deps = {}, error, container)",
+        "function renderOutboxAutomationResult(deps = {}, result, container)",
+        "function renderOutboxAutomationError(deps = {}, error, container)",
+        "function bindOutboxPlanControls(deps = {}, container, action)",
+        "function actionWithPlanOverrides(action, container)",
+        "function renderPlanIdentityOptions(deps = {}, selectedId)",
+        "function renderPlanAccountOptions(deps = {}, selectedLocalId)",
+        "window.MiniwebViews.outbox = {",
+        "openDraftsModal,",
+        "renderOutboxPlan,",
+        "renderOutboxAutomationResult,",
+        "actionWithPlanOverrides,",
+        "const plan = await deps.planOutboxAutomation?.(nextAction)",
+        "const result = await deps.dispatchOutboxAutomation?.(nextAction)",
+        "const result = await deps.queueOutboxAutomation?.(nextAction)",
+    ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "fetchJson(",
+        '"/api/outbox/',
+        '"/api/skills/send"',
+        "sendDirectComposerMessage",
+    ]
+
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in outbox_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in outbox_js
 
 
 def test_detail_cards_view_module_keeps_wrappers_and_read_only_renderer_contract():

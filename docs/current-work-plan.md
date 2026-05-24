@@ -51,9 +51,11 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      refresh is part of the normal identity refresh path. Outbox automation
      guard logic lives in `backend/outbox/automation.py`; sender adapters live
      in `backend/outbox/adapters.py`; the optional queue worker lives in
-     `backend/outbox/worker.py`. The send-plan panel in `web/static/app.js`
-     calls `/api/outbox/auto-plan`, `/api/outbox/auto-dispatch`, and
-     `/api/outbox/auto-queue` for guarded dry-run/dispatch/queue checks.
+     `backend/outbox/worker.py`. Outbox drafts, send-plan rendering, and
+     automation decision panels live in `web/static/views/outbox.js`, while
+     `web/static/app.js` keeps `/api/outbox/auto-plan`,
+     `/api/outbox/auto-dispatch`, and `/api/outbox/auto-queue` wrappers for
+     guarded dry-run/dispatch/queue checks.
 
 4. Tool center cleanup
    - Common workflows remain on the main page.
