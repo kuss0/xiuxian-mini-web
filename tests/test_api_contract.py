@@ -158,6 +158,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "detail rich cards and field formatting live in `web/static/views/detail_cards.js`" in normalized_work_plan
     assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
     assert "access settings modal, automation guard form, Telegram dialog/topic option renderers, and read-only Telegram account list live in `web/static/views/settings.js`" in normalized_work_plan
+    assert "Telegram account login modal and listen-target renderers live in `web/static/views/account_management.js`" in normalized_work_plan
     assert "add-identity modal body and send_as row/result renderers live in `web/static/views/identity_management.js`" in normalized_work_plan
     assert "Outbox automation guard logic lives in `backend/outbox/automation.py`" in normalized_work_plan
     assert "sender adapters live in `backend/outbox/adapters.py`" in normalized_work_plan
@@ -182,6 +183,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "Detail cards are read-only renderers" in audit
     assert "message detail panel and manual action controls are isolated in `web/static/views/detail_panel.js`" in audit
     assert "Detail panel actions fill the composer or create manual plans/drafts only" in audit
+    assert "Account login modal and listen-target renderers are isolated in `web/static/views/account_management.js`" in audit
+    assert "keeps account save/login/dialog/topic/listener API orchestration" in audit
     assert "Add-identity modal renderers are isolated in `web/static/views/identity_management.js`" in audit
     assert "keeps Telegram account/send_as API binding and event orchestration" in audit
     assert "Dungeon playbook actions fill the composer only" in audit
@@ -929,6 +932,81 @@ def test_settings_view_module_keeps_wrappers_and_api_boundary_contract():
         assert fragment not in app_js
     for fragment in forbidden_module_fragments:
         assert fragment not in settings_js
+
+
+def test_account_management_view_module_keeps_api_orchestration_in_app():
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "web" / "index.html").read_text(encoding="utf-8")
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    account_management_js = (
+        root / "web" / "static" / "views" / "account_management.js"
+    ).read_text(encoding="utf-8")
+    scripts = re.findall(r'<script src="/static/([^"]+)"></script>', html)
+
+    required_app_fragments = [
+        "function accountManagementView()",
+        "return window.MiniwebViews.accountManagement",
+        "function accountManagementDeps()",
+        "function renderAccountModalBody(account, settings, modalState)",
+        "function accountPayloadFromForm(form)",
+        "function setAccountModalStatus(modalState, dialog, kind, text)",
+        "function setAccountModalStep(modalState, dialog, step)",
+        "function populateListenTargetSelect(select, items, currentValue, valueKey, labelFn)",
+        "function dialogKindLabel(kind)",
+        "async function openAccountModal(account)",
+        "body: renderAccountModalBody(account, settings, modalState)",
+        "function bindAccountModal(dialog, account, settings, modalState)",
+        "const collectFormPayload = () => accountPayloadFromForm(form)",
+        'postJson("/api/accounts/login/start", { local_id: modalState.localId })',
+        'postJson("/api/accounts/login/verify", {',
+        'fetchJson(`/api/accounts/dialogs?local_id=${encodeURIComponent(localId)}`)',
+        'fetchJson(`/api/accounts/topics?local_id=${encodeURIComponent(localId)}&chat=${encodeURIComponent(chat)}`)',
+        'postJson("/api/accounts/listener/start", { local_id: localId })',
+        "return postJson(\"/api/accounts\", payload)",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: Telegram account login modal and listen-target renderers",
+        "function renderAccountModalBody(deps = {}, account, settings, modalState)",
+        "function accountPayloadFromForm(form)",
+        "function setAccountModalStatus(modalState, dialog, kind, text)",
+        "function setAccountModalStep(modalState, dialog, step)",
+        "function revealListenTarget(dialog)",
+        "function setListenTargetStatus(dialog, kind, text)",
+        "function populateListenTargetSelect(select, items, currentValue, valueKey, labelFn)",
+        "function dialogKindLabel(kind)",
+        "window.MiniwebViews.accountManagement = {",
+        "renderAccountModalBody,",
+        "accountPayloadFromForm,",
+        "populateListenTargetSelect,",
+        'id="accountModalForm"',
+        'data-listen-select="target_chat"',
+        'data-listen-select="target_topic_id"',
+    ]
+    forbidden_app_fragments = [
+        "const savedSecrets = acc.saved_secrets || {}",
+        "const renderInput = (name, value, placeholder",
+        "const accountSummaryLine = acc.account_id",
+        "const populateSelect = (select, items",
+    ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "fetchJson(",
+        "apiFetch(",
+        '"/api/accounts',
+        '"/api/login',
+        '"/api/settings"',
+        '"/api/skills/send"',
+    ]
+
+    assert scripts.index("views/account_management.js") < scripts.index("app.js")
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in account_management_js
+    for fragment in forbidden_app_fragments:
+        assert fragment not in app_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in account_management_js
 
 
 def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_form():
