@@ -3221,67 +3221,38 @@ function openLogoutAccountModal(presetLocalId = "") {
   if (loggedIn.length === 0) {
     openModal({
       title: "登出账户",
-      body: `<section class="modal-section"><p class="modal-status-line info">当前没有已登录的账号,无需登出。</p></section>`,
-      footer: `<button type="button" data-modal-close>知道了</button>`,
+      body: renderLogoutEmptyBody(),
+      footer: renderLogoutEmptyFooter(),
     });
     return;
   }
-  const options = loggedIn
-    .map((a) => `<option value="${escapeAttr(a.local_id)}" ${a.local_id === presetLocalId ? "selected" : ""}>${escapeHtml(`${a.label || a.local_id}｜${a.account_id || a.local_id}`)}</option>`)
-    .join("");
   const dialog = openModal({
     title: "登出 Telegram 账号",
-    body: `
-      <section class="modal-section">
-        <label>
-          <span>选要登出的账号</span>
-          <select id="logoutAccountSelect">${options}</select>
-        </label>
-        <p class="modal-status-line warn">这会移除本地登录态并清理 session 文件,但<strong>不会</strong>删除已添加的身份。</p>
-        <p class="modal-status-line info">绑定身份会被暂停;重新登录同一账号后可继续使用。</p>
-        <p class="modal-status-line info" id="logoutBoundIdentities"></p>
-        <p class="modal-status-line" id="logoutResult" hidden></p>
-      </section>
-    `,
-    footer: `
-      <button type="button" data-modal-close>取消</button>
-      <button type="button" class="primary" id="logoutConfirmBtn">确认登出</button>
-    `,
+    body: renderLogoutAccountModalBody(loggedIn, presetLocalId),
+    footer: renderLogoutAccountModalFooter(),
   });
   if (!dialog) return;
 
   const select = dialog.querySelector("#logoutAccountSelect");
-  const boundLine = dialog.querySelector("#logoutBoundIdentities");
-  const updateBound = () => {
-    const localId = select.value;
-    const count = state.identities.filter((id) => id.account_local_id === localId).length;
-    boundLine.textContent = count
-      ? `该账号当前绑定 ${count} 条身份(不会被删除,但会暂停)。`
-      : "该账号当前没有绑定身份。";
-  };
+  const updateBound = () => updateLogoutBoundIdentities(dialog);
   select.addEventListener("change", updateBound);
   updateBound();
 
   const confirmBtn = dialog.querySelector("#logoutConfirmBtn");
-  const resultLine = dialog.querySelector("#logoutResult");
   confirmBtn.addEventListener("click", async () => {
-    const localId = select.value;
+    const localId = selectedLogoutAccountId(dialog);
     if (!localId) return;
     confirmBtn.disabled = true;
     confirmBtn.textContent = "退出中…";
-    resultLine.hidden = false;
-    resultLine.className = "modal-status-line info";
-    resultLine.textContent = "正在停 listener、清 session 文件…";
+    setLogoutResult(dialog, "info", "正在停 listener、清 session 文件…");
     try {
       const result = await postJson("/api/accounts/logout", { local_id: localId });
       if (!result.ok) throw new Error(result.error || "登出失败");
-      resultLine.className = "modal-status-line ok";
-      resultLine.textContent = `已登出。如有 ${result.bound_identities || 0} 条绑定身份,已暂停。`;
+      setLogoutResult(dialog, "ok", `已登出。如有 ${result.bound_identities || 0} 条绑定身份,已暂停。`);
       await Promise.all([loadAccounts(), loadIdentities()]);
       setTimeout(() => closeModal(), 800);
     } catch (error) {
-      resultLine.className = "modal-status-line error";
-      resultLine.textContent = error.message;
+      setLogoutResult(dialog, "error", error.message);
       confirmBtn.disabled = false;
       confirmBtn.textContent = "确认登出";
     }
@@ -3360,6 +3331,34 @@ function accountManagementView() {
 
 function accountManagementDeps() {
   return {};
+}
+
+function renderLogoutEmptyBody() {
+  return accountManagementView().renderLogoutEmptyBody(accountManagementDeps());
+}
+
+function renderLogoutEmptyFooter() {
+  return accountManagementView().renderLogoutEmptyFooter(accountManagementDeps());
+}
+
+function renderLogoutAccountModalBody(loggedIn, presetLocalId) {
+  return accountManagementView().renderLogoutAccountModalBody(accountManagementDeps(), loggedIn, presetLocalId);
+}
+
+function renderLogoutAccountModalFooter() {
+  return accountManagementView().renderLogoutAccountModalFooter(accountManagementDeps());
+}
+
+function selectedLogoutAccountId(dialog) {
+  return accountManagementView().selectedLogoutAccountId(dialog);
+}
+
+function updateLogoutBoundIdentities(dialog) {
+  return accountManagementView().updateLogoutBoundIdentities(dialog, state.identities);
+}
+
+function setLogoutResult(dialog, kind, text) {
+  return accountManagementView().setLogoutResult(dialog, kind, text);
 }
 
 function renderAccountModalBody(account, settings, modalState) {

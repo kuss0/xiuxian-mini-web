@@ -158,7 +158,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "detail rich cards and field formatting live in `web/static/views/detail_cards.js`" in normalized_work_plan
     assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
     assert "access settings modal, automation guard form, Telegram dialog/topic option renderers, and read-only Telegram account list live in `web/static/views/settings.js`" in normalized_work_plan
-    assert "Telegram account login modal and listen-target renderers live in `web/static/views/account_management.js`" in normalized_work_plan
+    assert "Telegram account login/logout modals and listen-target renderers live in `web/static/views/account_management.js`" in normalized_work_plan
     assert "add-identity modal body and send_as row/result renderers live in `web/static/views/identity_management.js`" in normalized_work_plan
     assert "Outbox automation guard logic lives in `backend/outbox/automation.py`" in normalized_work_plan
     assert "sender adapters live in `backend/outbox/adapters.py`" in normalized_work_plan
@@ -183,7 +183,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "Detail cards are read-only renderers" in audit
     assert "message detail panel and manual action controls are isolated in `web/static/views/detail_panel.js`" in audit
     assert "Detail panel actions fill the composer or create manual plans/drafts only" in audit
-    assert "Account login modal and listen-target renderers are isolated in `web/static/views/account_management.js`" in audit
+    assert "Account login/logout modals and listen-target renderers are isolated in `web/static/views/account_management.js`" in audit
     assert "keeps account save/login/dialog/topic/listener API orchestration" in audit
     assert "Add-identity modal renderers are isolated in `web/static/views/identity_management.js`" in audit
     assert "keeps Telegram account/send_as API binding and event orchestration" in audit
@@ -947,6 +947,17 @@ def test_account_management_view_module_keeps_api_orchestration_in_app():
         "function accountManagementView()",
         "return window.MiniwebViews.accountManagement",
         "function accountManagementDeps()",
+        "function renderLogoutEmptyBody()",
+        "function renderLogoutAccountModalBody(loggedIn, presetLocalId)",
+        "function selectedLogoutAccountId(dialog)",
+        "function updateLogoutBoundIdentities(dialog)",
+        "function setLogoutResult(dialog, kind, text)",
+        "function openLogoutAccountModal(presetLocalId = \"\")",
+        "body: renderLogoutAccountModalBody(loggedIn, presetLocalId)",
+        "footer: renderLogoutAccountModalFooter()",
+        "const updateBound = () => updateLogoutBoundIdentities(dialog)",
+        "setLogoutResult(dialog, \"info\", \"正在停 listener、清 session 文件…\")",
+        'postJson("/api/accounts/logout", { local_id: localId })',
         "function renderAccountModalBody(account, settings, modalState)",
         "function accountPayloadFromForm(form)",
         "function setAccountModalStatus(modalState, dialog, kind, text)",
@@ -965,7 +976,7 @@ def test_account_management_view_module_keeps_api_orchestration_in_app():
         "return postJson(\"/api/accounts\", payload)",
     ]
     required_module_fragments = [
-        "// MINIWEB-VIEW: Telegram account login modal and listen-target renderers",
+        "// MINIWEB-VIEW: Telegram account login/logout modals and listen-target renderers",
         "function renderAccountModalBody(deps = {}, account, settings, modalState)",
         "function accountPayloadFromForm(form)",
         "function setAccountModalStatus(modalState, dialog, kind, text)",
@@ -974,19 +985,34 @@ def test_account_management_view_module_keeps_api_orchestration_in_app():
         "function setListenTargetStatus(dialog, kind, text)",
         "function populateListenTargetSelect(select, items, currentValue, valueKey, labelFn)",
         "function dialogKindLabel(kind)",
+        "function renderLogoutEmptyBody()",
+        "function renderLogoutAccountModalBody(deps = {}, loggedInAccounts = [], presetLocalId = \"\")",
+        "function renderLogoutAccountModalFooter()",
+        "function selectedLogoutAccountId(dialog)",
+        "function updateLogoutBoundIdentities(dialog, identities = [])",
+        "function setLogoutResult(dialog, kind, text)",
         "window.MiniwebViews.accountManagement = {",
         "renderAccountModalBody,",
         "accountPayloadFromForm,",
+        "renderLogoutAccountModalBody,",
+        "updateLogoutBoundIdentities,",
+        "setLogoutResult,",
         "populateListenTargetSelect,",
         'id="accountModalForm"',
         'data-listen-select="target_chat"',
         'data-listen-select="target_topic_id"',
+        'id="logoutAccountSelect"',
+        'id="logoutBoundIdentities"',
     ]
     forbidden_app_fragments = [
         "const savedSecrets = acc.saved_secrets || {}",
         "const renderInput = (name, value, placeholder",
         "const accountSummaryLine = acc.account_id",
         "const populateSelect = (select, items",
+        "const options = loggedIn",
+        'select id="logoutAccountSelect">${options}</select>',
+        "const boundLine = dialog.querySelector(\"#logoutBoundIdentities\")",
+        "const resultLine = dialog.querySelector(\"#logoutResult\")",
     ]
     forbidden_module_fragments = [
         "postJson(",

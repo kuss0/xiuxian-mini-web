@@ -1,4 +1,4 @@
-// MINIWEB-VIEW: Telegram account login modal and listen-target renderers
+// MINIWEB-VIEW: Telegram account login/logout modals and listen-target renderers
 (function () {
   "use strict";
 
@@ -240,6 +240,69 @@
     return "会话";
   }
 
+  function renderLogoutEmptyBody() {
+    return `<section class="modal-section"><p class="modal-status-line info">当前没有已登录的账号,无需登出。</p></section>`;
+  }
+
+  function renderLogoutEmptyFooter() {
+    return `<button type="button" data-modal-close>知道了</button>`;
+  }
+
+  function renderLogoutAccountModalBody(deps = {}, loggedInAccounts = [], presetLocalId = "") {
+    const options = loggedInAccounts
+      .map((account) => {
+        const label = `${account.label || account.local_id}｜${account.account_id || account.local_id}`;
+        const selected = account.local_id === presetLocalId ? "selected" : "";
+        return `<option value="${escapeAttr(account.local_id)}" ${selected}>${escapeHtml(label)}</option>`;
+      })
+      .join("");
+    return `
+      <section class="modal-section">
+        <label>
+          <span>选要登出的账号</span>
+          <select id="logoutAccountSelect">${options}</select>
+        </label>
+        <p class="modal-status-line warn">这会移除本地登录态并清理 session 文件,但<strong>不会</strong>删除已添加的身份。</p>
+        <p class="modal-status-line info">绑定身份会被暂停;重新登录同一账号后可继续使用。</p>
+        <p class="modal-status-line info" id="logoutBoundIdentities"></p>
+        <p class="modal-status-line" id="logoutResult" hidden></p>
+      </section>
+    `;
+  }
+
+  function renderLogoutAccountModalFooter() {
+    return `
+      <button type="button" data-modal-close>取消</button>
+      <button type="button" class="primary" id="logoutConfirmBtn">确认登出</button>
+    `;
+  }
+
+  function logoutBoundIdentityText(count) {
+    return count
+      ? `该账号当前绑定 ${count} 条身份(不会被删除,但会暂停)。`
+      : "该账号当前没有绑定身份。";
+  }
+
+  function selectedLogoutAccountId(dialog) {
+    return dialog?.querySelector("#logoutAccountSelect")?.value || "";
+  }
+
+  function updateLogoutBoundIdentities(dialog, identities = []) {
+    const localId = selectedLogoutAccountId(dialog);
+    const line = dialog?.querySelector("#logoutBoundIdentities");
+    if (!line) return;
+    const count = identities.filter((identity) => identity.account_local_id === localId).length;
+    line.textContent = logoutBoundIdentityText(count);
+  }
+
+  function setLogoutResult(dialog, kind, text) {
+    const line = dialog?.querySelector("#logoutResult");
+    if (!line) return;
+    line.hidden = !text;
+    line.className = `modal-status-line ${kind}`;
+    line.textContent = text || "";
+  }
+
   window.MiniwebViews = window.MiniwebViews || {};
   window.MiniwebViews.accountManagement = {
     renderAccountModalBody,
@@ -250,5 +313,12 @@
     setListenTargetStatus,
     populateListenTargetSelect,
     dialogKindLabel,
+    renderLogoutEmptyBody,
+    renderLogoutEmptyFooter,
+    renderLogoutAccountModalBody,
+    renderLogoutAccountModalFooter,
+    selectedLogoutAccountId,
+    updateLogoutBoundIdentities,
+    setLogoutResult,
   };
 })();

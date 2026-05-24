@@ -108,7 +108,7 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      `web/static/views/detail_panel.js`; the access settings modal, automation
      guard form, Telegram dialog/topic option renderers, and read-only
      Telegram account list live in
-     `web/static/views/settings.js`; the Telegram account login modal and
+     `web/static/views/settings.js`; the Telegram account login/logout modals and
      listen-target renderers live in
      `web/static/views/account_management.js`; the add-identity modal body and send_as
      row/result renderers live in `web/static/views/identity_management.js`,
