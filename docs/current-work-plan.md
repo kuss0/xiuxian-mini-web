@@ -78,11 +78,12 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      `web/static/views/dungeon_status.js`, along with reusable status render
      helpers. The identity status modal and shared module-status helpers live in
      `web/static/views/identity_status.js`; the cultivation status modal and
-     timers live in `web/static/views/cultivation.js`. The resource stats modal
-     and coverage renderer live in `web/static/views/resource_stats.js`; the
-     world report modal lives in `web/static/views/world_report.js`. The
-     official schedule rail and modal live in `web/static/views/schedule.js`,
-     while `web/static/app.js` keeps compatibility wrappers and orchestration
+     timers live in `web/static/views/cultivation.js`. The overview detail panel
+     lives in `web/static/views/overview.js`. The resource stats modal and
+     coverage renderer live in `web/static/views/resource_stats.js`; the world
+     report modal lives in `web/static/views/world_report.js`. The official
+     schedule rail and modal live in `web/static/views/schedule.js`, while
+     `web/static/app.js` keeps compatibility wrappers and orchestration
      callbacks.
 
 ## Remaining Work

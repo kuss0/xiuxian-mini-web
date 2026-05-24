@@ -144,6 +144,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "`web/static/views/dungeon_status.js`" in work_plan
     assert "identity status modal and shared module-status helpers live in `web/static/views/identity_status.js`" in normalized_work_plan
     assert "cultivation status modal and timers live in `web/static/views/cultivation.js`" in normalized_work_plan
+    assert "overview detail panel lives in `web/static/views/overview.js`" in normalized_work_plan
     assert "resource stats modal and coverage renderer live in `web/static/views/resource_stats.js`" in normalized_work_plan
     assert "world report modal lives in `web/static/views/world_report.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
@@ -312,6 +313,44 @@ def test_cultivation_view_module_keeps_timer_and_composer_fill_contract():
         assert fragment in app_js
     for fragment in required_module_fragments:
         assert fragment in cultivation_js
+
+
+def test_overview_view_module_keeps_panel_wrappers_and_manual_action_contract():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    overview_js = (root / "web" / "static" / "views" / "overview.js").read_text(encoding="utf-8")
+
+    required_app_fragments = [
+        "function overviewDeps()",
+        "function overviewView()",
+        "function renderOverviewDetailPanel()",
+        "return overviewView().renderOverviewDetailPanel(overviewDeps())",
+        "function overviewModuleRows(activeId)",
+        "return overviewView().overviewModuleRows(overviewDeps(), activeId)",
+        "function renderOverviewQuestRow(message)",
+        "return overviewView().renderOverviewQuestRow(overviewDeps(), message)",
+        "function bindOverviewDetailPanel()",
+        "return overviewView().bindOverviewDetailPanel(overviewDeps())",
+        "fillQuestTrackerAction,",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: overview detail panel",
+        "function renderOverviewDetailPanel(deps = {})",
+        "function overviewModuleRows(deps = {}, activeId)",
+        "function renderOverviewModuleRow(row)",
+        "function renderOverviewQuestRow(deps = {}, message)",
+        "function bindOverviewDetailPanel(deps = {})",
+        "window.MiniwebViews.overview = {",
+        "renderOverviewDetailPanel,",
+        "overviewModuleRows,",
+        "bindOverviewDetailPanel,",
+        "await deps.fillQuestTrackerAction?.(key, Number(indexText || 0), \"概览动作\")",
+        "await Promise.all([deps.refreshChatViewport?.(), deps.loadIdentityPatches?.(), deps.loadIdentityModuleStates?.()])",
+    ]
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in overview_js
 
 
 def test_frontend_identity_state_refresh_is_first_class():
