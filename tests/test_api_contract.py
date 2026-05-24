@@ -139,6 +139,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "details persist in the modal status line" in work_plan
     assert "inventory lives in `web/static/views/inventory.js`" in work_plan
     assert "playbook cards live in `web/static/views/dungeon_playbook.js`" in work_plan
+    assert "status modal shell and refresh flow live in" in work_plan
+    assert "`web/static/views/dungeon_status.js`" in work_plan
 
     assert "/api/dungeon-status" in audit
     assert "/api/dungeons/status" not in audit
@@ -278,17 +280,28 @@ def test_dungeon_playbook_panel_contract_is_read_only_until_composer_send():
     root = Path(__file__).resolve().parents[1]
     app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
     playbook_js = (root / "web" / "static" / "views" / "dungeon_playbook.js").read_text(encoding="utf-8")
+    status_js = (root / "web" / "static" / "views" / "dungeon_status.js").read_text(encoding="utf-8")
     css = (root / "web" / "static" / "styles.css").read_text(encoding="utf-8")
 
     required_app_fragments = [
-        'id="dungeonPlaybookPanels"',
-        "/api/cangkun-guide",
-        "/api/xutian-oracle-guide",
+        "window.MiniwebViews.dungeonStatus.openDungeonStatusModal",
+        "normalizeDungeonStatusSummary",
+        "renderDungeonStatusModal",
+        "openXutianOracleGuideModal",
+        "openCangkunGuideModal",
         "window.MiniwebViews.dungeonPlaybook.renderDungeonPlaybookPanels",
         "window.MiniwebViews.dungeonPlaybook.bindDungeonPlaybookPanels",
         "fillDirectSendComposer(command",
-        "openXutianOracleGuideModal",
-        "openCangkunGuideModal",
+    ]
+    required_status_fragments = [
+        'id="dungeonPlaybookPanels"',
+        "/api/cangkun-guide",
+        "/api/xutian-oracle-guide",
+        "function openDungeonStatusModal",
+        "function bindDungeonStatusModal",
+        "async function refreshDungeonStatusModal",
+        "deps.renderDungeonStatusModal",
+        "window.MiniwebViews.dungeonStatus",
     ]
     required_playbook_fragments = [
         "function renderDungeonPlaybookPanels",
@@ -311,6 +324,8 @@ def test_dungeon_playbook_panel_contract_is_read_only_until_composer_send():
     ]
     for fragment in required_app_fragments:
         assert fragment in app_js
+    for fragment in required_status_fragments:
+        assert fragment in status_js
     for fragment in required_playbook_fragments:
         assert fragment in playbook_js
 
