@@ -170,6 +170,27 @@ def test_schedule_manual_required_details_persist_in_status_line():
     assert "overflow-wrap: anywhere;" in modal_status
 
 
+def test_inventory_modal_keeps_auto_refresh_with_manual_owner_fallback():
+    root = Path(__file__).resolve().parents[1]
+    inventory_js = (root / "web" / "static" / "views" / "inventory.js").read_text(encoding="utf-8")
+
+    assert "const INVENTORY_AUTO_REFRESH_MS = 60 * 1000;" in inventory_js
+    assert "await refreshInventorySnapshots(dialog);" in inventory_js
+    assert "startInventoryAutoRefresh(dialog);" in inventory_js
+    assert "window.setTimeout(tick, INVENTORY_AUTO_REFRESH_MS)" in inventory_js
+    assert 'dialog.querySelector("#inventoryRefresh")?.addEventListener("click"' in inventory_js
+    assert "refreshInventorySnapshots(dialog, { manual: true })" in inventory_js
+
+    assert "function inventoryManualRefreshLines(dialog)" in inventory_js
+    assert "function inventoryManualRefreshReason(state)" in inventory_js
+    assert "state?.needs_manual_refresh" in inventory_js
+    assert '需手动 .储物袋 校准:' in inventory_js
+    assert '`${index + 1}. ${owner}: ${inventoryManualRefreshReason(state)}`' in inventory_js
+    assert "缺快照,发送 .储物袋 建立权威基线" in inventory_js
+    assert "快照偏旧(${formatInventoryAge(state?.snapshot_age_seconds)}),建议重新 .储物袋" in inventory_js
+    assert "${formatNumber(estimated)} 类估算项,关键转移前建议 .储物袋" in inventory_js
+
+
 def test_chat_viewport_layout_contract_keeps_composer_visible():
     root = Path(__file__).resolve().parents[1]
     html = (root / "web" / "index.html").read_text(encoding="utf-8")

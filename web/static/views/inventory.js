@@ -106,7 +106,7 @@
       const count = inventoryOwners(dialog).length;
       const manualRequired = Number(payload.state?.summary?.manual_required_count || 0);
       const statusKind = count && !manualRequired ? "ok" : "warn";
-      const statusText = inventoryStatusText({ count, manualRequired, silent });
+      const statusText = inventoryStatusText({ dialog, count, manualRequired, silent });
       setInventoryStatus(dialog, statusKind, statusText);
       await renderInventoryItems(dialog);
     } finally {
@@ -132,15 +132,38 @@
     dialog._inventoryAutoRefreshTimer = window.setTimeout(tick, INVENTORY_AUTO_REFRESH_MS);
   }
 
-  function inventoryStatusText({ count, manualRequired, silent }) {
+  function inventoryStatusText({ dialog, count, manualRequired, silent }) {
     if (!count) {
       return "没有可见资源号快照。先确认账号/身份/own_aliases,再用 .储物袋 让消息箱采到。";
     }
     const prefix = silent ? `自动刷新 ${formatClockTime(new Date())}: ` : "";
     if (manualRequired) {
-      return `${prefix}已载入 ${count} 个资源号,${manualRequired} 个建议手动 .储物袋 校准。`;
+      const lines = inventoryManualRefreshLines(dialog);
+      const detail = lines.length ? `\n需手动 .储物袋 校准:\n${lines.join("\n")}` : "";
+      return `${prefix}已载入 ${count} 个资源号,${manualRequired} 个建议手动 .储物袋 校准。${detail}`;
     }
     return `${prefix}已载入 ${count} 个资源号,快照状态正常。`;
+  }
+
+  function inventoryManualRefreshLines(dialog) {
+    const states = (dialog._inventoryState?.owners || []).filter((state) => state?.needs_manual_refresh);
+    const shown = states.slice(0, 6).map((state, index) => {
+      const owner = state.owner ? `@${state.owner}` : "未知资源号";
+      return `${index + 1}. ${owner}: ${inventoryManualRefreshReason(state)}`;
+    });
+    if (states.length > shown.length) {
+      shown.push(`...另有 ${formatNumber(states.length - shown.length)} 个资源号也需校准`);
+    }
+    return shown;
+  }
+
+  function inventoryManualRefreshReason(state) {
+    const status = String(state?.status || "missing");
+    const estimated = Number(state?.estimated_item_count || 0);
+    if (status === "missing") return "缺快照,发送 .储物袋 建立权威基线";
+    if (status === "stale") return `快照偏旧(${formatInventoryAge(state?.snapshot_age_seconds)}),建议重新 .储物袋`;
+    if (status === "estimated" && estimated) return `${formatNumber(estimated)} 类估算项,关键转移前建议 .储物袋`;
+    return state?.note || "建议手动 .储物袋 校准";
   }
 
   function inventoryOwners(dialog) {
