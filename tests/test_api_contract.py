@@ -154,6 +154,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "game cockpit, primary strip, and action dock live in `web/static/views/game_cockpit.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
     assert "chat message stream, scroll anchoring, and quick actions live in `web/static/views/chat_stream.js`" in normalized_work_plan
+    assert "detail rich cards and field formatting live in `web/static/views/detail_cards.js`" in normalized_work_plan
 
     assert "/api/dungeon-status" in audit
     assert "/api/dungeons/status" not in audit
@@ -163,6 +164,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "official schedule rail and modal are isolated in `web/static/views/schedule.js`" in audit
     assert "chat message stream, scroll anchoring, and quick-action renderer are isolated in `web/static/views/chat_stream.js`" in audit
     assert "Chat stream quick actions fill the composer only" in audit
+    assert "Detail rich cards and field formatting are isolated in `web/static/views/detail_cards.js`" in audit
+    assert "Detail cards are read-only renderers" in audit
     assert "Dungeon playbook actions fill the composer only" in audit
     assert "Xutian now exposes phase, route" in audit
 
@@ -686,6 +689,68 @@ def test_chat_stream_view_module_keeps_wrappers_scroll_and_manual_action_contrac
         assert fragment in chat_stream_js
     for fragment in forbidden_module_fragments:
         assert fragment not in chat_stream_js
+
+
+def test_detail_cards_view_module_keeps_wrappers_and_read_only_renderer_contract():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    detail_cards_js = (root / "web" / "static" / "views" / "detail_cards.js").read_text(encoding="utf-8")
+
+    required_app_fragments = [
+        "function detailCardsDeps()",
+        "function detailCardsView()",
+        "function renderEnhancedBlock(message)",
+        "return detailCardsView().renderEnhancedBlock(detailCardsDeps(), message)",
+        "function renderDetailFields(fields)",
+        "return detailCardsView().renderDetailFields(fields)",
+        "function isPresentValue(value)",
+        "return detailCardsView().isPresentValue(value)",
+        "function formatFieldValue(value)",
+        "return detailCardsView().formatFieldValue(value)",
+        "function rawMatch(raw, regex)",
+        "return detailCardsView().rawMatch(raw, regex)",
+        "function parseProgressObject(value, implicitMax = 0)",
+        "return detailCardsView().parseProgressObject(value, implicitMax)",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: detail rich cards and field formatting",
+        "const cardRenderers = {",
+        '"战力评估": renderBattlePowerCard,',
+        '"虚天殿开启": renderDungeonCard,',
+        "function renderEnhancedBlock(deps = {}, message)",
+        "function renderDetailFields(fields)",
+        "function isPresentValue(value)",
+        "function formatFieldValue(value)",
+        "function rawMatch(raw, regex)",
+        "function rawLineValue(raw, label)",
+        "function parseProgressObject(value, implicitMax = 0)",
+        "window.MiniwebViews.detailCards = {",
+        "renderEnhancedBlock,",
+        "formatFieldValue,",
+        "parseProgressObject,",
+    ]
+    forbidden_app_fragments = [
+        "const cardRenderers = {",
+        "function renderBattlePowerCard(",
+        "function renderDungeonCard(",
+        "function renderGenericGameplayCard(",
+    ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "fetchJson(",
+        "fillDirectSendComposer",
+        "sendDirectComposerMessage",
+        '"/api/skills/send"',
+        '"/api/outbox/drafts"',
+    ]
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in detail_cards_js
+    for fragment in forbidden_app_fragments:
+        assert fragment not in app_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in detail_cards_js
 
 
 def test_frontend_identity_state_refresh_is_first_class():

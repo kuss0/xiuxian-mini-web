@@ -82,6 +82,17 @@ do not prove success.
 | Current gap | Classification quality still depends on observed bad samples and backend channel tags, so uncertain messages should stay visible rather than being aggressively archived. |
 | Next action | Keep message-flow UI fixes in the chat stream module and add fixtures only from real misclassified messages. |
 
+## Detail Cards
+
+| Field | Current contract |
+| --- | --- |
+| State source | The selected message card and its parsed `fields`, `title`, `summary`, `tags`, and channels. |
+| Trigger | Opening a message detail panel renders a rich card or falls back to the structured field grid. |
+| Refresh path | Detail rich cards and field formatting are isolated in `web/static/views/detail_cards.js`, with `web/static/app.js` keeping compatibility wrappers for callers that need `formatFieldValue` or detail rendering. |
+| Failure/manual fallback | Detail cards are read-only renderers. They do not call APIs, enqueue drafts, or send commands; action buttons remain in the detail action stage and bottom composer path. |
+| Current gap | Rich card coverage still follows known titles and channel families; unknown gameplay cards fall back to generic rendering or the field grid. |
+| Next action | Add card renderers only for stable parsed fields, keeping send/copy/draft behavior outside this module. |
+
 ## Maintenance Rules
 
 - Prefer existing state stores and APIs before adding new state tables.
