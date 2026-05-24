@@ -153,6 +153,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "live situation board and signal snapshot helpers live in `web/static/views/live_situation.js`" in normalized_work_plan
     assert "game cockpit, primary strip, and action dock live in `web/static/views/game_cockpit.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
+    assert "chat message stream, scroll anchoring, and quick actions live in `web/static/views/chat_stream.js`" in normalized_work_plan
 
     assert "/api/dungeon-status" in audit
     assert "/api/dungeons/status" not in audit
@@ -160,6 +161,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "detailed manual-handling messages in the modal status line" in audit
     assert "resource stats modal and coverage renderer are isolated in `web/static/views/resource_stats.js`" in audit
     assert "official schedule rail and modal are isolated in `web/static/views/schedule.js`" in audit
+    assert "chat message stream, scroll anchoring, and quick-action renderer are isolated in `web/static/views/chat_stream.js`" in audit
+    assert "Chat stream quick actions fill the composer only" in audit
     assert "Dungeon playbook actions fill the composer only" in audit
     assert "Xutian now exposes phase, route" in audit
 
@@ -627,6 +630,62 @@ def test_game_cockpit_view_module_keeps_wrappers_and_panel_action_contract():
         assert fragment in game_cockpit_js
     for fragment in forbidden_module_fragments:
         assert fragment not in game_cockpit_js
+
+
+def test_chat_stream_view_module_keeps_wrappers_scroll_and_manual_action_contract():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    chat_stream_js = (root / "web" / "static" / "views" / "chat_stream.js").read_text(encoding="utf-8")
+
+    required_app_fragments = [
+        "function chatStreamDeps()",
+        "function chatStreamView()",
+        "function visibleMessages()",
+        "return chatStreamView().visibleMessages(chatStreamDeps())",
+        "function renderMessages()",
+        "return chatStreamView().renderMessages(chatStreamDeps())",
+        "function captureMessageScrollSnapshot()",
+        "return chatStreamView().captureMessageScrollSnapshot(chatStreamDeps())",
+        "function restoreMessageScrollSnapshot(snapshot)",
+        "return chatStreamView().restoreMessageScrollSnapshot(chatStreamDeps(), snapshot)",
+        "function quickActionLabel(action)",
+        "return chatStreamView().quickActionLabel(action)",
+        "async function handleChatQuickAction(message, index, button)",
+        "return chatStreamView().handleChatQuickAction(chatStreamDeps(), message, index, button)",
+        "function messageKind(message)",
+        "return chatStreamView().messageKind(chatStreamDeps(), message)",
+        "fillDirectSendComposer,",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: chat message stream, scroll anchoring, and quick actions",
+        "function visibleMessages(deps = {})",
+        "function messageMatchesSearch(deps = {}, message)",
+        "function renderMessages(deps = {})",
+        "function renderChatMessageNode(deps = {}, message)",
+        "function captureMessageScrollSnapshot(deps = {})",
+        "function restoreMessageScrollSnapshot(deps = {}, snapshot)",
+        "function renderChatQuickActions(deps = {}, message)",
+        "async function handleChatQuickAction(deps = {}, message, index, button)",
+        "function messageKind(deps = {}, message)",
+        "window.MiniwebViews.chatStream = {",
+        "renderMessages,",
+        "quickActionLabel,",
+        "messageKind,",
+        "deps.fillDirectSendComposer?.(action.command, {",
+        "已填入快捷动作，请确认后发送。",
+        "已填入快捷动作，请补全内容后发送。",
+    ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "sendDirectComposerMessage",
+        '"/api/skills/send"',
+    ]
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in chat_stream_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in chat_stream_js
 
 
 def test_frontend_identity_state_refresh_is_first_class():

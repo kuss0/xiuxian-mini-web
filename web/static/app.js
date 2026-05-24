@@ -1540,38 +1540,42 @@ async function planOutboxAction(action) {
   return data;
 }
 
+function chatStreamDeps() {
+  return {
+    state,
+    messageList,
+    messageCount,
+    activeChannelText,
+    streamActiveChannelText,
+    jumpToLatestButton,
+    collectorLiveStatus,
+    renderLiveSituationBoard,
+    renderWorldEventStrip,
+    renderGameActionDock,
+    emptyMessageHint,
+    formatFieldValue,
+    isPersonalSignal,
+    renderTelegramTextHtml,
+    selectMessageForComposer,
+    setWorkspaceSelectedMessage,
+    setDirectSendReplyFromMessage,
+    fetchMessageById,
+    jumpToMessage,
+    fillDirectSendComposer,
+    directReplyContextFromAction,
+  };
+}
+
+function chatStreamView() {
+  return window.MiniwebViews.chatStream;
+}
+
 function visibleMessages() {
-  if (state.selectedChannels.size === 0) {
-    return [];
-  }
-  // solo 模式数据已由 server 端 SQL 预过滤(mode=solo);前端只做频道过滤。
-  // 「日志」modal 是另一条单独的全量数据流,不走这里。
-  return state.messages.filter((message) => {
-    const channels = message.channels || [message.channel];
-    if (!channels.some((channel) => state.selectedChannels.has(channel))) {
-      return false;
-    }
-    return messageMatchesSearch(message);
-  });
+  return chatStreamView().visibleMessages(chatStreamDeps());
 }
 
 function messageMatchesSearch(message) {
-  const query = String(state.messageSearch || "").trim().toLowerCase();
-  if (!query) return true;
-  const haystack = [
-    message.title,
-    message.summary,
-    message.raw,
-    message.source,
-    message.channel,
-    ...(message.channels || []),
-    ...Object.entries(message.fields || {}).map(([key, value]) => `${key} ${formatFieldValue(value)}`),
-    ...(message.tags || []),
-  ]
-    .filter(Boolean)
-    .join("\n")
-    .toLowerCase();
-  return haystack.includes(query);
+  return chatStreamView().messageMatchesSearch(chatStreamDeps(), message);
 }
 
 function myIdSet() {
@@ -1660,17 +1664,7 @@ async function applyChannelSelection(nextChannels) {
 }
 
 function parentMessageOf(card) {
-  if (!card.reply_to_msg_id || !card.chat_id) return null;
-  const parentId = `tg:${card.chat_id}:${card.reply_to_msg_id}`;
-  return (
-    state.messages.find((m) => m.id === parentId) ||
-    state.messages.find(
-      (m) =>
-        Number(m.chat_id || 0) === Number(card.chat_id || 0) &&
-        Number(m.msg_id || 0) === Number(card.reply_to_msg_id || 0)
-    ) ||
-    null
-  );
+  return chatStreamView().parentMessageOf(chatStreamDeps(), card);
 }
 
 function jumpToMessage(target) {
@@ -1717,26 +1711,7 @@ function jumpToMessage(target) {
 }
 
 function renderReplyContext(message) {
-  if (!message.reply_to_msg_id || !message.chat_id) return "";
-  const parent = parentMessageOf(message);
-  const parentId = `tg:${message.chat_id}:${message.reply_to_msg_id}`;
-  if (parent) {
-    const preview = clipGraphemes((parent.raw || parent.summary || "").trim().replace(/\s+/g, " "), 60) || "(无内容)";
-    return `
-      <div class="chat-reply-context" data-reply-jump="${escapeAttr(parentId)}" title="点击跳到原消息">
-        <span class="arrow">↪</span>
-        <span class="source">${escapeHtml(displaySource(parent.source))}</span>
-        <span class="preview">${escapeHtml(preview)}</span>
-      </div>
-    `;
-  }
-  // 父消息不在当前 state(超出初始 200 条范围),仍可点击 — 点了会按需拉
-  return `
-    <div class="chat-reply-context" data-reply-jump="${escapeAttr(parentId)}" title="点击按需拉取并跳到原消息">
-      <span class="arrow">↪</span>
-      <span class="preview muted">回复消息 #${escapeHtml(String(message.reply_to_msg_id))}(点击载入)</span>
-    </div>
-  `;
+  return chatStreamView().renderReplyContext(chatStreamDeps(), message);
 }
 
 async function fetchMessageById(id) {
@@ -2116,120 +2091,31 @@ function insertTextAtCursor(textarea, text) {
 }
 
 function renderActiveChannelText() {
-  let text = "";
-  if (state.selectedChannels.size === 0) {
-    text = "未选择频道";
-  } else if (state.selectedChannels.size === state.channels.length) {
-    text = "全部频道";
-  } else {
-    const labels = state.channels
-      .filter((channel) => state.selectedChannels.has(channel.key))
-      .map((channel) => channel.label);
-    text = labels.join(" / ");
-  }
-  const query = String(state.messageSearch || "").trim();
-  if (query) {
-    text = `${text}｜搜索「${query}」`;
-  }
-  if (activeChannelText) activeChannelText.textContent = text;
-  if (streamActiveChannelText) streamActiveChannelText.textContent = text;
+  return chatStreamView().renderActiveChannelText(chatStreamDeps());
 }
 
 function renderMessages() {
-  const messages = visibleMessages();
-  const collectorStatus = collectorLiveStatus();
-  const searchSuffix = state.messageSearch ? "｜搜索中" : "";
-  messageCount.textContent = `${messages.length} 条${searchSuffix}${collectorStatus ? `｜${collectorStatus}` : ""}`;
-  renderActiveChannelText();
-  renderLiveSituationBoard();
-  renderWorldEventStrip();
-  renderGameActionDock();
-
-  if (messages.length === 0) {
-    messageList.innerHTML = `<div class="chat-empty">${escapeHtml(emptyMessageHint())}</div>`;
-    if (jumpToLatestButton) {
-      jumpToLatestButton.hidden = true;
-    }
-    return;
-  }
-
-  // 聊天客户端顺序:旧消息在上,最新消息在底部发送栏上方。
-  // 重建 DOM 时锚住当前可见消息;只有用户本来就在最新位置时才自动贴底。
-  const scrollSnapshot = captureMessageScrollSnapshot();
-
-  const groups = groupMessagesByDate([...messages].reverse());
-  const fragment = document.createDocumentFragment();
-  groups.forEach((group) => {
-    const divider = document.createElement("div");
-    divider.className = "chat-day-divider";
-    divider.innerHTML = `<span>${escapeHtml(group.label)}</span>`;
-    fragment.appendChild(divider);
-    group.items.forEach((message) => {
-      fragment.appendChild(renderChatMessageNode(message));
-    });
-  });
-  messageList.replaceChildren(fragment);
-
-  restoreMessageScrollSnapshot(scrollSnapshot);
+  return chatStreamView().renderMessages(chatStreamDeps());
 }
 
 function isMessageListNearLatest(threshold = 120) {
-  if (!messageList) return true;
-  return messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight <= threshold;
+  return chatStreamView().isMessageListNearLatest(chatStreamDeps(), threshold);
 }
 
 function updateJumpToLatestVisibility() {
-  if (!jumpToLatestButton || !messageList) return;
-  jumpToLatestButton.hidden = isMessageListNearLatest();
+  return chatStreamView().updateJumpToLatestVisibility(chatStreamDeps());
 }
 
 function scrollMessageListToLatest({ behavior = "auto" } = {}) {
-  if (!messageList) return;
-  messageList.scrollTo({ top: messageList.scrollHeight, behavior });
-  updateJumpToLatestVisibility();
+  return chatStreamView().scrollMessageListToLatest(chatStreamDeps(), { behavior });
 }
 
 function captureMessageScrollSnapshot() {
-  if (!messageList) return { nearLatest: true };
-  if (messageList.scrollHeight === 0 || isMessageListNearLatest(96)) {
-    return { nearLatest: true };
-  }
-
-  const listRect = messageList.getBoundingClientRect();
-  const topGuard = listRect.top + 1;
-  const nodes = messageList.querySelectorAll("[data-message-id]");
-  for (const node of nodes) {
-    const rect = node.getBoundingClientRect();
-    if (rect.bottom >= topGuard) {
-      return {
-        nearLatest: false,
-        anchorId: node.dataset.messageId || "",
-        anchorOffset: rect.top - listRect.top,
-        scrollTop: messageList.scrollTop,
-      };
-    }
-  }
-  return { nearLatest: false, scrollTop: messageList.scrollTop };
+  return chatStreamView().captureMessageScrollSnapshot(chatStreamDeps());
 }
 
 function restoreMessageScrollSnapshot(snapshot) {
-  if (!messageList || !snapshot) return;
-  if (snapshot.nearLatest) {
-    scrollMessageListToLatest();
-    return;
-  }
-  if (snapshot.anchorId) {
-    const node = messageList.querySelector(`[data-message-id="${CSS.escape(snapshot.anchorId)}"]`);
-    if (node) {
-      const listRect = messageList.getBoundingClientRect();
-      const rect = node.getBoundingClientRect();
-      messageList.scrollTop += rect.top - listRect.top - snapshot.anchorOffset;
-      updateJumpToLatestVisibility();
-      return;
-    }
-  }
-  messageList.scrollTop = Math.max(0, snapshot.scrollTop || 0);
-  updateJumpToLatestVisibility();
+  return chatStreamView().restoreMessageScrollSnapshot(chatStreamDeps(), snapshot);
 }
 
 function liveSituationDeps() {
@@ -2699,327 +2585,67 @@ function collectorLiveStatus() {
 }
 
 function renderChatMessageNode(message) {
-  const row = document.createElement("article");
-  const kind = messageKind(message);
-  const isExpanded = state.expandedMessages.has(message.id);
-  row.className = [
-    "chat-message",
-    `kind-${kind}`,
-    message.id === state.selectedMessageId ? "active" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  row.dataset.messageId = message.id;
-
-  const contextHtml = renderChatContextMeta(message);
-
-  const { html: textHtml, truncated } = renderChatBodyText(message, isExpanded);
-  const riskBadge =
-    kind === "risk"
-      ? `<span class="chat-risk-badge" title="风险消息，需要人工查看">! 需要关注</span>`
-      : "";
-  const sourceText = displaySource(message.source);
-  const sourceClass = isNumericSource(message.source) ? "chat-source numeric" : "chat-source";
-  const replyContext = renderReplyContext(message);
-
-  const canReply = Number(message.chat_id || 0) !== 0 && Number(message.msg_id || 0) > 0;
-  row.innerHTML = `
-    <button type="button" class="chat-avatar-btn" data-chat-action="detail" aria-label="查看消息详情">
-      <span class="chat-avatar" aria-hidden="true">${escapeHtml(sourceInitial(message.source, kind))}</span>
-    </button>
-    <div class="chat-body">
-      <div class="chat-head-row">
-        <button type="button" class="chat-head" data-chat-action="select">
-          <strong class="${sourceClass}">${escapeHtml(sourceText)}</strong>
-          <span class="chat-time">${escapeHtml(formatChatTime(message.time))}</span>
-          ${riskBadge}
-        </button>
-        <div class="chat-message-actions">
-          <button type="button" class="chat-detail-button" data-chat-action="detail" aria-label="查看消息详情"
-                  title="查看原文、字段和候选动作">详</button>
-          <button type="button" class="chat-reply-button" data-chat-action="reply" ${canReply ? "" : "disabled"}
-                  aria-label="回复这条消息"
-                  title="${canReply ? "回复这条 Telegram 消息" : "这条卡片缺少 Telegram msg_id,不能回复"}">回</button>
-        </div>
-      </div>
-      ${replyContext}
-      <div class="chat-text" data-chat-action="select">${textHtml}</div>
-      ${truncated ? `<button type="button" class="chat-toggle" data-chat-action="toggle">${isExpanded ? "收起全文" : "展开全文"}</button>` : ""}
-      ${renderChatQuickActions(message)}
-      ${contextHtml}
-    </div>
-  `;
-
-  row.addEventListener("click", async (event) => {
-    const quickAction = event.target.closest('[data-chat-action="quick-action"]');
-    if (quickAction) {
-      event.stopPropagation();
-      selectMessageForComposer(message, { rerenderList: true });
-      const index = Number(quickAction.dataset.actionIndex || 0);
-      await handleChatQuickAction(message, index, quickAction);
-      return;
-    }
-    const detail = event.target.closest('[data-chat-action="detail"]');
-    if (detail) {
-      event.stopPropagation();
-      setWorkspaceSelectedMessage(message, { rerenderList: true });
-      return;
-    }
-    const reply = event.target.closest('[data-chat-action="reply"]');
-    if (reply) {
-      event.stopPropagation();
-      if (!reply.disabled) {
-        selectMessageForComposer(message, { rerenderList: true });
-        setDirectSendReplyFromMessage(message);
-      }
-      return;
-    }
-    const toggle = event.target.closest('[data-chat-action="toggle"]');
-    if (toggle) {
-      event.stopPropagation();
-      if (state.expandedMessages.has(message.id)) {
-        state.expandedMessages.delete(message.id);
-      } else {
-        state.expandedMessages.add(message.id);
-      }
-      renderMessages();
-      return;
-    }
-    const jump = event.target.closest("[data-reply-jump]");
-    if (jump) {
-      event.stopPropagation();
-      const targetId = jump.dataset.replyJump;
-      let parent = state.messages.find((m) => m.id === targetId);
-      if (!parent) {
-        // 不在 state 里,按需拉一条进来
-        jump.classList.add("loading");
-        parent = await fetchMessageById(targetId);
-        jump.classList.remove("loading");
-        if (!parent) {
-          console.warn("[mini-web] 父消息不存在或已被清理:", targetId);
-          return;
-        }
-      }
-      jumpToMessage(parent);
-      return;
-    }
-    selectMessageForComposer(message, { rerenderList: true });
-  });
-  return row;
+  return chatStreamView().renderChatMessageNode(chatStreamDeps(), message);
 }
 
 function renderChatContextMeta(message) {
-  const badges = visibleMessageBadges(message);
-  const actionCount = (message.actions || []).length;
-  const items = [
-    message.title ? `<span class="chat-title-pill">${escapeHtml(message.title)}</span>` : "",
-    ...badges.map((tag) => `<span class="chat-tag">${escapeHtml(tag)}</span>`),
-    actionCount ? `<span class="chat-action-pill">${actionCount} 个候选</span>` : "",
-  ].filter(Boolean);
-  return items.length ? `<div class="chat-enhance">${items.join("")}</div>` : "";
+  return chatStreamView().renderChatContextMeta(chatStreamDeps(), message);
 }
 
 function visibleMessageBadges(message) {
-  const tags = (message.tags || []).map((tag) => String(tag || "").trim()).filter(Boolean);
-  const channels = message.channels || [message.channel];
-  const important = new Set();
-  if (message.severity === "risk" || channels.includes("risk")) {
-    important.add("风险");
-  }
-  if (isPersonalSignal(message)) {
-    important.add("我的");
-  }
-  for (const tag of tags) {
-    if (["被@", "回复我", "会长", "我发出", "失败", "解散", "可加入", "加入", "风险"].includes(tag)) {
-      important.add(tag === "我发出" ? "我的" : tag);
-    } else if (tag.startsWith("关键词:")) {
-      important.add(tag);
-    }
-  }
-  return Array.from(important).slice(0, 3);
+  return chatStreamView().visibleMessageBadges(chatStreamDeps(), message);
 }
 
 function renderChatQuickActions(message) {
-  const actions = (message.actions || []).filter((action) => String(action.command || "").trim());
-  if (!actions.length) return "";
-  const maxVisible = 4;
-  const buttons = actions.slice(0, maxVisible).map((action, index) => {
-    const label = quickActionLabel(action);
-    const command = String(action.command || "").trim();
-    const replyText = action.reply_to_msg_id ? `回复 #${action.reply_to_msg_id}` : "直接发送";
-    return `
-      <button type="button" class="chat-quick-action" data-chat-action="quick-action"
-              data-action-index="${index}" title="${escapeAttr(`${replyText}: ${command}`)}">
-        ${escapeHtml(label)}
-      </button>
-    `;
-  }).join("");
-  const more = actions.length > maxVisible
-    ? `<span class="chat-quick-more">+${actions.length - maxVisible}</span>`
-    : "";
-  return `<div class="chat-quick-actions">${buttons}${more}</div>`;
+  return chatStreamView().renderChatQuickActions(chatStreamDeps(), message);
 }
 
 function quickActionLabel(action) {
-  const rawLabel = String(action.label || "").trim();
-  const command = String(action.command || "").trim();
-  const cleaned = rawLabel
-    .replace(/^复制\s*/, "")
-    .replace(/[（(]回复[）)]/g, "")
-    .trim();
-  if (cleaned && cleaned.length <= 12) return cleaned;
-  return command.replace(/^[.。]/, "").trim() || "回复";
+  return chatStreamView().quickActionLabel(action);
 }
 
 function quickActionNeedsManualReview(action) {
-  const command = String(action.command || "").trim();
-  // 自证命令通常还需要口令 + 答案,不能裸发 ".自证"。
-  return command === ".自证" || command === "。自证";
+  return chatStreamView().quickActionNeedsManualReview(action);
 }
 
 async function handleChatQuickAction(message, index, button) {
-  const action = (message.actions || [])[index];
-  if (!action) return;
-  fillDirectSendComposer(action.command, {
-    replyContext: directReplyContextFromAction(action, message),
-    statusText: quickActionNeedsManualReview(action)
-      ? "已填入快捷动作，请补全内容后发送。"
-      : "已填入快捷动作，请确认后发送。",
-    statusKind: "info",
-  });
-  if (button) {
-    const originalText = button.textContent;
-    button.textContent = "已填入";
-    window.setTimeout(() => {
-      button.textContent = originalText;
-    }, 1200);
-  }
+  return chatStreamView().handleChatQuickAction(chatStreamDeps(), message, index, button);
 }
 
 function displaySource(source) {
-  const clean = String(source || "").trim();
-  if (!clean) {
-    return "未知发送者";
-  }
-  if (isNumericSource(clean)) {
-    return `用户 ${clean}`;
-  }
-  return clean;
+  return chatStreamView().displaySource(source);
 }
 
 function isNumericSource(source) {
-  const clean = String(source || "").trim();
-  return clean !== "" && NUMERIC_SOURCE_RE.test(clean);
+  return chatStreamView().isNumericSource(source);
 }
 
 function renderChatBodyText(message, isExpanded) {
-  const raw = String(message.raw || "").trim();
-  const fallback = String(message.summary || message.title || "").trim();
-  const text = raw || fallback || "（空消息）";
-  const lines = text.split("\n");
-  const graphemeLength = countGraphemes(text);
-  const tooLong =
-    graphemeLength > MESSAGE_PREVIEW_CHAR_LIMIT || lines.length > MESSAGE_PREVIEW_LINE_LIMIT;
-
-  if (!tooLong || isExpanded) {
-    return { html: renderTelegramTextHtml(text, message), truncated: tooLong };
-  }
-
-  const previewLines = lines.slice(0, MESSAGE_PREVIEW_LINE_LIMIT);
-  let preview = previewLines.join("\n");
-  if (countGraphemes(preview) > MESSAGE_PREVIEW_CHAR_LIMIT) {
-    preview = clipGraphemes(preview, MESSAGE_PREVIEW_CHAR_LIMIT);
-  }
-  return { html: `${renderTelegramTextHtml(preview, message)}<span class="chat-text-ellipsis">…</span>`, truncated: true };
+  return chatStreamView().renderChatBodyText(chatStreamDeps(), message, isExpanded);
 }
 
 function groupMessagesByDate(messages) {
-  const groups = [];
-  let current = null;
-  messages.forEach((message) => {
-    const label = formatDayLabel(message.time);
-    if (!current || current.label !== label) {
-      current = { label, items: [] };
-      groups.push(current);
-    }
-    current.items.push(message);
-  });
-  return groups;
+  return chatStreamView().groupMessagesByDate(messages);
 }
 
 function formatDayLabel(value) {
-  const text = String(value || "").trim();
-  if (!text) {
-    return "时间未知";
-  }
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) {
-    return text;
-  }
-  const now = new Date();
-  const diffDays = daysBetween(date, now);
-  if (diffDays === 0) {
-    return "今天";
-  }
-  if (diffDays === 1) {
-    return "昨天";
-  }
-  if (diffDays === 2) {
-    return "前天";
-  }
-  if (date.getFullYear() === now.getFullYear()) {
-    return `${date.getMonth() + 1} 月 ${date.getDate()} 日`;
-  }
-  return `${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日`;
+  return chatStreamView().formatDayLabel(value);
 }
 
 function daysBetween(date, now) {
-  const a = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const b = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return Math.round((b.getTime() - a.getTime()) / 86400000);
+  return chatStreamView().daysBetween(date, now);
 }
 
 function formatChatTime(value) {
-  const text = String(value || "").trim();
-  if (!text) {
-    return "";
-  }
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) {
-    return text;
-  }
-  const hh = String(date.getHours()).padStart(2, "0");
-  const mm = String(date.getMinutes()).padStart(2, "0");
-  return `${hh}:${mm}`;
+  return chatStreamView().formatChatTime(value);
 }
 
 function messageKind(message) {
-  const channels = message.channels || [message.channel];
-  const source = String(message.source || "");
-  if (message.severity === "risk" || channels.includes("risk")) {
-    return "risk";
-  }
-  if (isPersonalSignal(message)) {
-    return "mine";
-  }
-  if (message.sender_is_bot || channels.includes("system") || source.includes("韩天尊") || source.includes("天尊")) {
-    return "bot";
-  }
-  return "player";
+  return chatStreamView().messageKind(chatStreamDeps(), message);
 }
 
 function sourceInitial(source, kind) {
-  const clean = String(source || "").replace(/^@/, "").trim();
-  if (kind === "risk") {
-    return "！";
-  }
-  if (clean.includes("韩天尊") || clean.includes("天尊")) {
-    return "天";
-  }
-  if (!clean) {
-    return "?";
-  }
-  return firstGrapheme(clean).toUpperCase();
+  return chatStreamView().sourceInitial(source, kind);
 }
 
 async function renderDetail() {

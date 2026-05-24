@@ -71,6 +71,17 @@ do not prove success.
 | Current gap | Health can show symptoms, but it cannot prove Telegram upstream completeness without active backfill or scheduled history reconciliation. |
 | Next action | Keep health in the tool center and use it as a diagnostic surface, not as a gameplay action surface. |
 
+## Chat Stream
+
+| Field | Current contract |
+| --- | --- |
+| State source | Stored message cards in the active frontend state. |
+| Trigger | Channel selection, search, new message polling, reply jumps, and explicit user clicks rebuild or anchor the visible stream. |
+| Refresh path | The chat message stream, scroll anchoring, and quick-action renderer are isolated in `web/static/views/chat_stream.js`, with `web/static/app.js` keeping compatibility wrappers for existing panels. |
+| Failure/manual fallback | Chat stream quick actions fill the composer only; they do not call send APIs or bypass the bottom composer confirmation path. |
+| Current gap | Classification quality still depends on observed bad samples and backend channel tags, so uncertain messages should stay visible rather than being aggressively archived. |
+| Next action | Keep message-flow UI fixes in the chat stream module and add fixtures only from real misclassified messages. |
+
 ## Maintenance Rules
 
 - Prefer existing state stores and APIs before adding new state tables.
