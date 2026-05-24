@@ -150,6 +150,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "resource stats modal and coverage renderer live in `web/static/views/resource_stats.js`" in normalized_work_plan
     assert "world report modal lives in `web/static/views/world_report.js`" in normalized_work_plan
     assert "world event strip and manual event actions live in `web/static/views/world_event.js`" in normalized_work_plan
+    assert "live situation board and signal snapshot helpers live in `web/static/views/live_situation.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
 
     assert "/api/dungeon-status" in audit
@@ -508,6 +509,63 @@ def test_world_event_view_module_keeps_wrappers_and_manual_action_contract():
         assert fragment in world_event_js
     for fragment in forbidden_module_fragments:
         assert fragment not in world_event_js
+
+
+def test_live_situation_view_module_keeps_wrappers_signal_helpers_and_manual_action_contract():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    live_situation_js = (root / "web" / "static" / "views" / "live_situation.js").read_text(encoding="utf-8")
+
+    required_app_fragments = [
+        "function liveSituationDeps()",
+        "function liveSituationView()",
+        "function renderLiveSituationBoard()",
+        "return liveSituationView().renderLiveSituationBoard(liveSituationDeps())",
+        "function liveSituationModel()",
+        "return liveSituationView().liveSituationModel(liveSituationDeps())",
+        "function summarySignalMessages()",
+        "return liveSituationView().summarySignalMessages(liveSituationDeps())",
+        "function isPersonalSignal(message)",
+        "return liveSituationView().isPersonalSignal(liveSituationDeps(), message)",
+        "function liveResourceSnapshot()",
+        "return liveSituationView().liveResourceSnapshot(liveSituationDeps())",
+        "function liveMessagePreview(message, limit)",
+        "return liveSituationView().liveMessagePreview(message, limit)",
+        "fillDirectSendComposer,",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: live situation board and signal snapshots",
+        "function renderLiveSituationBoard(deps = {})",
+        "function liveSituationModel(deps = {})",
+        "function currentDungeonSnapshot(deps = {})",
+        "function latestLeaderSnapshotMessage(deps = {})",
+        "function snapshotPriorityMessages(deps = {})",
+        "function isArchivedOnlySignal(message)",
+        "function isPersonalSignal(deps = {}, message)",
+        "function summarySignalMessages(deps = {})",
+        "function liveResourceSnapshot(deps = {})",
+        "function bindLiveSituationBoard(deps = {}, liveSituationBoard)",
+        "function liveMessagePreview(message, limit)",
+        "window.MiniwebViews.liveSituation = {",
+        "renderLiveSituationBoard,",
+        "summarySignalMessages,",
+        "liveResourceSnapshot,",
+        "liveMessageKindLabel,",
+        "deps.fillDirectSendComposer?.(action.command, {",
+        "已填入当前态势候选动作，请确认后发送。",
+        "已填入副本动作，请看原文后手动发送。",
+    ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "sendDirectComposerMessage",
+        '"/api/skills/send"',
+    ]
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in live_situation_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in live_situation_js
 
 
 def test_frontend_identity_state_refresh_is_first_class():
