@@ -158,6 +158,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "detail rich cards and field formatting live in `web/static/views/detail_cards.js`" in normalized_work_plan
     assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
     assert "access settings modal, automation guard form, Telegram dialog/topic option renderers, and read-only Telegram account list live in `web/static/views/settings.js`" in normalized_work_plan
+    assert "add-identity modal body and send_as row/result renderers live in `web/static/views/identity_management.js`" in normalized_work_plan
     assert "Outbox automation guard logic lives in `backend/outbox/automation.py`" in normalized_work_plan
     assert "sender adapters live in `backend/outbox/adapters.py`" in normalized_work_plan
     assert "optional queue worker lives in `backend/outbox/worker.py`" in normalized_work_plan
@@ -181,6 +182,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "Detail cards are read-only renderers" in audit
     assert "message detail panel and manual action controls are isolated in `web/static/views/detail_panel.js`" in audit
     assert "Detail panel actions fill the composer or create manual plans/drafts only" in audit
+    assert "Add-identity modal renderers are isolated in `web/static/views/identity_management.js`" in audit
+    assert "keeps Telegram account/send_as API binding and event orchestration" in audit
     assert "Dungeon playbook actions fill the composer only" in audit
     assert "Xutian now exposes phase, route" in audit
     assert "## Outbox Automation" in audit
@@ -931,11 +934,21 @@ def test_settings_view_module_keeps_wrappers_and_api_boundary_contract():
 def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_form():
     root = Path(__file__).resolve().parents[1]
     app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    index_html = (root / "web" / "index.html").read_text(encoding="utf-8")
+    identity_management_js = (
+        root / "web" / "static" / "views" / "identity_management.js"
+    ).read_text(encoding="utf-8")
+    scripts = re.findall(r'<script src="/static/([^"]+)"></script>', index_html)
 
-    required_fragments = [
+    required_app_fragments = [
+        "function identityManagementView()",
+        "return window.MiniwebViews.identityManagement",
+        "function identityManagementDeps()",
         "function openAddIdentityModal()",
-        'id="manualSendAsId"',
-        'id="manualLabel"',
+        "body: renderAddIdentityModalBody()",
+        "function renderAddIdentityModalBody()",
+        "function renderSendAsRow(peer)",
+        "function renderBatchSaveResult(container, response, peers)",
         'postJson("/api/identities/batch", payload)',
         'postJson("/api/identities", {',
         'list.querySelectorAll("[data-send-as-fill]")',
@@ -943,9 +956,18 @@ def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_fo
         'rootEl.querySelector("#manualLabel")',
         'idInput.value = peer.send_as_id ?? "";',
         'labelInput.value = peer.title || "";',
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: add-identity modal and send_as renderers",
+        "function renderAddIdentityModalBody(deps = {})",
+        "function renderSendAsRow(deps = {}, peer)",
+        "function renderBatchSaveResult(deps = {}, container, response, peers)",
+        "window.MiniwebViews.identityManagement = {",
+        'id="manualSendAsId"',
+        'id="manualLabel"',
         'title="填到手动添加">填入',
     ]
-    forbidden_fragments = [
+    forbidden_app_fragments = [
         "async function saveIdentity(",
         "function renderIdentityList(",
         "function renderIdentityForm(",
@@ -958,11 +980,23 @@ def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_fo
         "data-identity-action",
         "identity-item",
     ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "fetchJson(",
+        "apiFetch(",
+        '"/api/identities"',
+        '"/api/accounts"',
+    ]
 
-    for fragment in required_fragments:
+    assert scripts.index("views/identity_management.js") < scripts.index("app.js")
+    for fragment in required_app_fragments:
         assert fragment in app_js
-    for fragment in forbidden_fragments:
+    for fragment in required_module_fragments:
+        assert fragment in identity_management_js
+    for fragment in forbidden_app_fragments:
         assert fragment not in app_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in identity_management_js
 
 
 def test_outbox_view_module_keeps_wrappers_and_api_boundary_contract():
