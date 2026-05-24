@@ -98,7 +98,8 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      and manual event actions live in `web/static/views/world_event.js`. The
      live situation board and signal snapshot helpers live in
      `web/static/views/live_situation.js`. The game cockpit, primary strip, and
-     action dock live in `web/static/views/game_cockpit.js`. The official
+     action dock live in `web/static/views/game_cockpit.js`. The global
+     health/setup banner lives in `web/static/views/global_banner.js`. The official
      schedule rail and modal live in `web/static/views/schedule.js`. The chat
      message stream, channel chips, quick filters, scroll anchoring, and quick actions live in
      `web/static/views/chat_stream.js`; the direct composer, emoji palette, and

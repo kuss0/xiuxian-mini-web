@@ -473,35 +473,25 @@ async function loadDiscoveredBots() {
   }
 }
 
+function globalBannerDeps() {
+  return {
+    state,
+    globalBanner,
+    openHealthModal,
+    openGameBotsModal,
+  };
+}
+
+function globalBannerView() {
+  return window.MiniwebViews.globalBanner;
+}
+
 function currentGameBotIds() {
-  return new Set(((state.settings && state.settings.game_bot_ids) || []).map((x) => Number(x)));
+  return globalBannerView().currentGameBotIds(globalBannerDeps());
 }
 
 function updateGlobalBanner() {
-  if (!globalBanner) return;
-  const ids = currentGameBotIds();
-  const audit = state.messageAudit || {};
-  if (audit.status && audit.status !== "ok") {
-    const gapText = audit.gap_count ? `发现 ${audit.gap_count} 段近期断层` : "监听状态异常";
-    globalBanner.hidden = false;
-    globalBanner.innerHTML = `
-      <span><strong>消息箱需要留意</strong> — ${escapeHtml(gapText)}，资源/副本统计可能受影响。</span>
-      <button type="button" id="bannerOpenHealth">查看健康</button>
-    `;
-    globalBanner.querySelector("#bannerOpenHealth")?.addEventListener("click", () => openHealthModal());
-    return;
-  }
-  if (ids.size === 0) {
-    globalBanner.hidden = false;
-    globalBanner.innerHTML = `
-      <span><strong>未设置游戏 Bot</strong> — 现在系统消息(韩天尊)和玩家消息会混在一起,无法区分。</span>
-      <button type="button" id="bannerOpenGameBots">去设置</button>
-    `;
-    globalBanner.querySelector("#bannerOpenGameBots")?.addEventListener("click", () => openGameBotsModal());
-  } else {
-    globalBanner.hidden = true;
-    globalBanner.innerHTML = "";
-  }
+  return globalBannerView().updateGlobalBanner(globalBannerDeps());
 }
 
 function gameCockpitDeps() {

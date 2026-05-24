@@ -153,6 +153,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "live situation board and signal snapshot helpers live in `web/static/views/live_situation.js`" in normalized_work_plan
     assert "game cockpit, primary strip, and action dock live in `web/static/views/game_cockpit.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
+    assert "global health/setup banner lives in `web/static/views/global_banner.js`" in normalized_work_plan
     assert "chat message stream, channel chips, quick filters, scroll anchoring, and quick actions live in `web/static/views/chat_stream.js`" in normalized_work_plan
     assert "direct composer, emoji palette, and quick command hotbar live in `web/static/views/direct_composer.js`" in normalized_work_plan
     assert "detail rich cards and field formatting live in `web/static/views/detail_cards.js`" in normalized_work_plan
@@ -174,6 +175,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "modal lists the affected owners and reason" in audit
     assert "detailed manual-handling messages in the modal status line" in audit
     assert "resource stats modal and coverage renderer are isolated in `web/static/views/resource_stats.js`" in audit
+    assert "Global health/setup banner is isolated in `web/static/views/global_banner.js`" in audit
     assert "official schedule rail and modal are isolated in `web/static/views/schedule.js`" in audit
     assert "chat message stream, channel chips, quick filters, scroll anchoring, and quick-action renderer are isolated in `web/static/views/chat_stream.js`" in audit
     assert "Chat stream quick actions fill the composer only" in audit
@@ -858,6 +860,58 @@ def test_direct_composer_view_module_keeps_wrappers_and_explicit_send_contract()
         assert fragment not in direct_composer_js
     for fragment in forbidden_app_fragments:
         assert fragment not in app_js
+
+
+def test_global_banner_view_module_keeps_api_free_banner_contract():
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "web" / "index.html").read_text(encoding="utf-8")
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    global_banner_js = (root / "web" / "static" / "views" / "global_banner.js").read_text(encoding="utf-8")
+    scripts = re.findall(r'<script src="/static/([^"?]+)"', html)
+
+    required_app_fragments = [
+        "function globalBannerDeps()",
+        "return window.MiniwebViews.globalBanner",
+        "function currentGameBotIds()",
+        "return globalBannerView().currentGameBotIds(globalBannerDeps())",
+        "function updateGlobalBanner()",
+        "return globalBannerView().updateGlobalBanner(globalBannerDeps())",
+        "openHealthModal,",
+        "openGameBotsModal,",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: global health and setup banner",
+        "function currentGameBotIds(deps = {})",
+        "function updateGlobalBanner(deps = {})",
+        "消息箱需要留意",
+        "bannerOpenHealth",
+        "未设置游戏 Bot",
+        "bannerOpenGameBots",
+        "deps.openHealthModal?.()",
+        "deps.openGameBotsModal?.()",
+        "window.MiniwebViews.globalBanner = {",
+    ]
+    forbidden_app_fragments = [
+        "globalBanner.innerHTML = `",
+        "globalBanner.querySelector(\"#bannerOpenHealth\")",
+        "globalBanner.querySelector(\"#bannerOpenGameBots\")",
+    ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "fetchJson(",
+        "apiFetch(",
+        '"/api/',
+    ]
+
+    assert scripts.index("views/global_banner.js") < scripts.index("app.js")
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in global_banner_js
+    for fragment in forbidden_app_fragments:
+        assert fragment not in app_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in global_banner_js
 
 
 def test_settings_view_module_keeps_wrappers_and_api_boundary_contract():
