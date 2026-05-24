@@ -27,8 +27,8 @@
     const automationSkillKeys = (settings.automation_allowed_skill_keys || []).join("\n");
     const automationIdentityIds = (settings.automation_allowed_identity_ids || []).join("\n");
     const savedSecrets = settings.saved_secrets || {};
-    const dialogOptions = deps.renderDialogOptions?.(settings.target_chat) || "";
-    const topicOptions = deps.renderTopicOptions?.(settings.target_topic_id) || "";
+    const dialogOptions = renderDialogOptions(deps, settings.target_chat);
+    const topicOptions = renderTopicOptions(deps, settings.target_topic_id);
     const accountCount = state.accounts?.length || 0;
     const accountLimit = state.accountLimit || 0;
     const identityCount = state.identities?.length || 0;
@@ -316,6 +316,58 @@
     return '<span class="status-pill">未登录</span>';
   }
 
+  function renderDialogOptions(deps = {}, targetChat) {
+    const state = settingsState(deps);
+    const selected = String(targetChat || "");
+    const dialogs = state.telegramDialogs || [];
+    const knownIds = new Set(dialogs.map((item) => String(item.id)));
+    const currentOption =
+      selected && !knownIds.has(selected)
+        ? `<option value="${escapeAttr(selected)}" selected>当前手填：${escapeHtml(selected)}</option>`
+        : "";
+    const options = dialogs
+      .map((dialog) => {
+        const value = String(dialog.id || "");
+        const username = dialog.username ? `｜@${dialog.username}` : "";
+        const label = `${dialog.title || value}｜${telegramDialogKindLabel(dialog.kind)}｜${value}${username}`;
+        return `<option value="${escapeAttr(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
+      })
+      .join("");
+    return `${currentOption}${options}`;
+  }
+
+  function renderTopicOptions(deps = {}, targetTopicId) {
+    const state = settingsState(deps);
+    const selected = String(targetTopicId || "");
+    const topics = state.telegramTopics || [];
+    const knownIds = new Set(topics.map((item) => String(item.id)));
+    const currentOption =
+      selected && !knownIds.has(selected)
+        ? `<option value="${escapeAttr(selected)}" selected>当前手填：${escapeHtml(selected)}</option>`
+        : "";
+    const options = topics
+      .map((topic) => {
+        const value = String(topic.id || "");
+        const label = `${topic.title || value}｜${value}`;
+        return `<option value="${escapeAttr(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
+      })
+      .join("");
+    return `${currentOption}${options}`;
+  }
+
+  function telegramDialogKindLabel(kind) {
+    if (kind === "supergroup") {
+      return "超级群";
+    }
+    if (kind === "channel") {
+      return "频道";
+    }
+    if (kind === "group") {
+      return "群";
+    }
+    return "会话";
+  }
+
   function bindSettingsModal(deps = {}, dialog, settings = {}) {
     const state = settingsState(deps);
     const root = dialog.querySelector(".modal-body") || dialog;
@@ -544,6 +596,8 @@
     renderSettingsBody,
     renderAccountList,
     renderAccountStatusPill,
+    renderDialogOptions,
+    renderTopicOptions,
     bindSettingsModal,
     settingsPayloadFromForm,
     hydrateNotifySection,

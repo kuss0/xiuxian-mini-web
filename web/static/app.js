@@ -2666,8 +2666,6 @@ function settingsDeps() {
     loadSettings,
     loadTelegramDialogs,
     loadTelegramTopics,
-    renderDialogOptions,
-    renderTopicOptions,
     rerenderSettings: renderSettings,
     saveCurrentSettingsFromForm,
     sendNotifyTest: () => postJson("/api/notify/test", {}),
@@ -4377,54 +4375,6 @@ function fillIdentityForm(identity, root = document) {
   if (enabled) {
     enabled.checked = Boolean(identity.enabled);
   }
-}
-
-function renderDialogOptions(targetChat) {
-  const selected = String(targetChat || "");
-  const knownIds = new Set(state.telegramDialogs.map((item) => String(item.id)));
-  const currentOption =
-    selected && !knownIds.has(selected)
-      ? `<option value="${escapeAttr(selected)}" selected>当前手填：${escapeHtml(selected)}</option>`
-      : "";
-  const options = state.telegramDialogs
-    .map((dialog) => {
-      const value = String(dialog.id || "");
-      const username = dialog.username ? `｜@${dialog.username}` : "";
-      const label = `${dialog.title || value}｜${telegramDialogKindLabel(dialog.kind)}｜${value}${username}`;
-      return `<option value="${escapeAttr(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
-    })
-    .join("");
-  return `${currentOption}${options}`;
-}
-
-function renderTopicOptions(targetTopicId) {
-  const selected = String(targetTopicId || "");
-  const knownIds = new Set(state.telegramTopics.map((item) => String(item.id)));
-  const currentOption =
-    selected && !knownIds.has(selected)
-      ? `<option value="${escapeAttr(selected)}" selected>当前手填：${escapeHtml(selected)}</option>`
-      : "";
-  const options = state.telegramTopics
-    .map((topic) => {
-      const value = String(topic.id || "");
-      const label = `${topic.title || value}｜${value}`;
-      return `<option value="${escapeAttr(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
-    })
-    .join("");
-  return `${currentOption}${options}`;
-}
-
-function telegramDialogKindLabel(kind) {
-  if (kind === "supergroup") {
-    return "超级群";
-  }
-  if (kind === "channel") {
-    return "频道";
-  }
-  if (kind === "group") {
-    return "群";
-  }
-  return "会话";
 }
 
 async function saveCurrentSettingsFromForm(form) {
