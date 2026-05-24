@@ -928,6 +928,43 @@ def test_settings_view_module_keeps_wrappers_and_api_boundary_contract():
         assert fragment not in settings_js
 
 
+def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_form():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+
+    required_fragments = [
+        "function openAddIdentityModal()",
+        'id="manualSendAsId"',
+        'id="manualLabel"',
+        'postJson("/api/identities/batch", payload)',
+        'postJson("/api/identities", {',
+        'list.querySelectorAll("[data-send-as-fill]")',
+        'rootEl.querySelector("#manualSendAsId")',
+        'rootEl.querySelector("#manualLabel")',
+        'idInput.value = peer.send_as_id ?? "";',
+        'labelInput.value = peer.title || "";',
+        'title="填到手动添加">填入',
+    ]
+    forbidden_fragments = [
+        "async function saveIdentity(",
+        "function renderIdentityList(",
+        "function renderIdentityForm(",
+        "function bindIdentityControls(",
+        "function hydrateIdentityForm(",
+        "function identityPayloadFromForm(",
+        "function fillIdentityForm(",
+        'rootEl.querySelector("#identityForm")',
+        ".send-as-section",
+        "data-identity-action",
+        "identity-item",
+    ]
+
+    for fragment in required_fragments:
+        assert fragment in app_js
+    for fragment in forbidden_fragments:
+        assert fragment not in app_js
+
+
 def test_outbox_view_module_keeps_wrappers_and_api_boundary_contract():
     root = Path(__file__).resolve().parents[1]
     app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")

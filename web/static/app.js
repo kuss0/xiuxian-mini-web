@@ -1400,15 +1400,6 @@ async function saveAccount(payload) {
   return data.account;
 }
 
-async function saveIdentity(payload) {
-  const data = await postJson("/api/identities", payload);
-  if (!data.ok) {
-    throw new Error(data.error || "保存身份失败");
-  }
-  await loadIdentities();
-  return data.identity;
-}
-
 async function planOutboxAction(action) {
   const data = await postJson("/api/outbox/plan", { action });
   state.outboxPlan = data;
@@ -2683,32 +2674,6 @@ function renderSettings(settings) {
   return settingsView().renderSettings(settingsDeps(), settings);
 }
 
-function renderIdentityList() {
-  if (!state.identities.length) {
-    return `<p class="empty inline">尚未保存游戏身份。登录某个 Telegram 账号后会自动建一条 self-identity（identity_id == account_id）;以频道身份发请手动建一条 identity_id 为 -100… 的 channel-identity。</p>`;
-  }
-  return state.identities
-    .map((identity) => {
-      const accountLabel = identity.account?.label || identity.account_local_id || "未绑定账号";
-      const name = identity.label || identity.username || identity.send_as_id;
-      const kind = identityKindLabel(identity.kind);
-      return `
-        <article class="identity-item" data-identity-id="${escapeAttr(identity.send_as_id)}">
-          <div>
-            <strong>${escapeHtml(name)}</strong>
-            <small><span class="identity-kind ${escapeAttr(identity.kind || "unknown")}">${escapeHtml(kind)}</span>｜send_as ${escapeHtml(identity.send_as_id)}${identity.username ? `｜@${escapeHtml(identity.username)}` : ""}｜账号 ${escapeHtml(accountLabel)}</small>
-            <small>${identity.enabled ? "已启用" : "已停用"}${identity.note ? `｜${escapeHtml(identity.note)}` : ""}</small>
-          </div>
-          <div class="account-actions">
-            <button type="button" data-identity-action="fill" data-identity-id="${escapeAttr(identity.send_as_id)}">编辑</button>
-            <button type="button" data-identity-action="delete" data-identity-id="${escapeAttr(identity.send_as_id)}">删除</button>
-          </div>
-        </article>
-      `;
-    })
-    .join("");
-}
-
 function identityKindLabel(kind) {
   if (kind === "self") {
     return "自己 (self)";
@@ -3368,87 +3333,6 @@ function openLogoutAccountModal(presetLocalId = "") {
   });
 }
 
-function renderIdentityForm() {
-  const accountOptions = state.accounts
-    .map((account) => {
-      const label = `${account.label || account.local_id}｜${account.local_id}`;
-      return `<option value="${escapeAttr(account.local_id)}">${escapeHtml(label)}</option>`;
-    })
-    .join("");
-  const accountPickerOptions = `<option value="">选择账号</option>${accountOptions}`;
-  return `
-    <div class="send-as-section">
-      <fieldset class="send-as-picker">
-        <legend>从 Telegram 拉取并批量添加身份(channels.GetSendAs)</legend>
-        <div class="send-as-controls">
-          <label class="send-as-control">
-            <span>账号</span>
-            <select data-send-as-field="account">
-              ${accountPickerOptions}
-            </select>
-          </label>
-          <label class="send-as-control">
-            <span>目标群(可选)</span>
-            <input data-send-as-field="target_chat" placeholder="留空走该账号配置的 target_chat" />
-          </label>
-          <button type="button" class="primary" data-send-as-action="load">获取可用身份</button>
-        </div>
-        <div class="send-as-status-bar">
-          <small data-send-as-status>选账号后点「获取可用身份」,会拉出该账号在目标群里所有可用 send_as peer。</small>
-        </div>
-        <div class="send-as-bulk-bar" hidden>
-          <span data-send-as-summary></span>
-          <div class="send-as-bulk-actions">
-            <button type="button" data-send-as-action="select-all">全选</button>
-            <button type="button" data-send-as-action="select-none">全不选</button>
-            <button type="button" class="primary" data-send-as-action="batch-save">保存选中</button>
-          </div>
-        </div>
-        <div data-send-as-list class="send-as-list"></div>
-        <div data-send-as-result class="send-as-result" hidden></div>
-      </fieldset>
-    </div>
-
-    <form id="identityForm" class="settings-form account-form">
-      <p class="identity-hint">下方表单适合「编辑现有身份」或「手填一条 GetSendAs 没列出的 send_as_id」。常规批量添加用上面的勾选 + 保存选中。</p>
-      <div class="form-grid">
-        <label>
-          <span>身份 ID（send_as_id）</span>
-          <input name="send_as_id" inputmode="numeric" placeholder="正数=TG 用户;负数=-100…频道 ID" />
-        </label>
-        <label>
-          <span>绑定 Telegram 账号</span>
-          <select name="account_local_id">
-            <option value="">暂不绑定</option>
-            ${accountOptions}
-          </select>
-        </label>
-        <label>
-          <span>显示名称</span>
-          <input name="label" placeholder="例如 WA2000 / 凌霄宫公告" />
-        </label>
-        <label>
-          <span>用户名</span>
-          <input name="username" placeholder="不带 @ 也可以" />
-        </label>
-        <label class="span-2">
-          <span>备注</span>
-          <input name="note" placeholder="可选" />
-        </label>
-      </div>
-      <label class="toggle-row">
-        <input name="enabled" type="checkbox" checked />
-        <span>启用身份</span>
-      </label>
-      <div class="form-actions">
-        <button type="button" data-identity-form-action="hydrate">用 Telegram 解析此 ID</button>
-        <button type="button" data-identity-form-action="clear">清空</button>
-        <button type="submit">保存身份</button>
-      </div>
-    </form>
-  `;
-}
-
 function bindAccountControls(root = document) {
   root.querySelectorAll("[data-account-action]").forEach((button) => {
     const action = button.dataset.accountAction;
@@ -3963,94 +3847,6 @@ function dialogKindLabel(kind) {
   return "会话";
 }
 
-function bindIdentityControls(root = document) {
-  const identityForm = root.querySelector("#identityForm");
-  if (!identityForm) {
-    return;
-  }
-  const sendAsSection = root.querySelector(".send-as-section");
-
-  identityForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    try {
-      await saveIdentity(identityPayloadFromForm(identityForm));
-      state.settingsNotice = "身份已保存";
-      renderSettings(state.settings || (await loadSettings()));
-    } catch (error) {
-      state.settingsNotice = error.message;
-      renderSettings(state.settings || {});
-    }
-  });
-
-  identityForm.querySelectorAll("[data-identity-form-action]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const action = button.dataset.identityFormAction;
-      if (action === "clear") {
-        identityForm.reset();
-        identityForm.querySelector('[name="enabled"]').checked = true;
-        return;
-      }
-      if (action === "hydrate") {
-        await hydrateIdentityForm(identityForm, button, root);
-        return;
-      }
-    });
-  });
-
-  if (sendAsSection) {
-    sendAsSection.querySelectorAll("[data-send-as-action]").forEach((button) => {
-      button.addEventListener("click", async () => {
-        const action = button.dataset.sendAsAction;
-        if (action === "load") {
-          await loadSendAsListIntoForm(sendAsSection, button);
-          return;
-        }
-        if (action === "select-all") {
-          selectAllSendAs(sendAsSection, "all");
-          return;
-        }
-        if (action === "select-none") {
-          selectAllSendAs(sendAsSection, "none");
-          return;
-        }
-        if (action === "batch-save") {
-          await batchSaveSelectedSendAs(sendAsSection, button);
-          return;
-        }
-      });
-    });
-  }
-
-  root.querySelectorAll("[data-identity-action]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const sendAsId = Number(button.dataset.identityId || 0);
-      const identity = state.identities.find((item) => Number(item.send_as_id) === sendAsId);
-      if (!identity) {
-        return;
-      }
-      try {
-        if (button.dataset.identityAction === "fill") {
-          fillIdentityForm(identity, root);
-          identityForm.scrollIntoView({ block: "nearest" });
-          return;
-        }
-        if (button.dataset.identityAction === "delete") {
-          const result = await postJson("/api/identities/delete", { send_as_id: sendAsId });
-          if (!result.ok) {
-            throw new Error(result.error || "删除身份失败");
-          }
-          state.settingsNotice = "身份已删除";
-          await loadIdentities();
-          renderSettings(state.settings || (await loadSettings()));
-        }
-      } catch (error) {
-        state.settingsNotice = error.message;
-        renderSettings(state.settings || {});
-      }
-    });
-  });
-}
-
 async function loadSendAsListIntoForm(rootEl, button) {
   const accountSelect = rootEl.querySelector('[data-send-as-field="account"]');
   const targetChatInput = rootEl.querySelector('[data-send-as-field="target_chat"]');
@@ -4118,10 +3914,6 @@ function rerenderSendAsList(rootEl) {
   const list = rootEl.querySelector("[data-send-as-list]");
   const bulkBar = rootEl.querySelector(".send-as-bulk-bar");
   const summary = rootEl.querySelector("[data-send-as-summary]");
-  const scope =
-    rootEl.closest?.(".modal-body, .modal-dialog") ||
-    rootEl.parentElement ||
-    rootEl;
   const peers = state.sendAs.peers || [];
   if (!peers.length) {
     if (list) list.innerHTML = "";
@@ -4148,17 +3940,15 @@ function rerenderSendAsList(rootEl) {
         const id = button.dataset.sendAsFill;
         const peer = peers.find((item) => String(item.send_as_id) === id);
         if (!peer) return;
-        const form = scope.querySelector("#identityForm");
-        if (!form) return;
-        const set = (name, value) => {
-          const field = form.querySelector(`[name="${name}"]`);
-          if (field) field.value = value ?? "";
-        };
-        set("send_as_id", peer.send_as_id);
-        set("label", peer.title);
-        set("username", peer.username);
-        set("account_local_id", state.sendAs.accountLocalId);
-        form.querySelector('[name="send_as_id"]')?.focus();
+        const idInput = rootEl.querySelector("#manualSendAsId");
+        const labelInput = rootEl.querySelector("#manualLabel");
+        if (idInput) {
+          idInput.value = peer.send_as_id ?? "";
+          idInput.focus();
+        }
+        if (labelInput) {
+          labelInput.value = peer.title || "";
+        }
       });
     });
   }
@@ -4197,7 +3987,7 @@ function renderSendAsRow(peer) {
           ${alreadyBadge ? `｜${alreadyBadge}` : ""}
         </span>
       </span>
-      <button type="button" class="send-as-row-fill" data-send-as-fill="${escapeAttr(id)}" title="把这条填到下方编辑表单">编辑</button>
+      <button type="button" class="send-as-row-fill" data-send-as-fill="${escapeAttr(id)}" title="填到手动添加">填入</button>
     </label>
   `;
 }
@@ -4303,78 +4093,6 @@ function renderBatchSaveResult(container, response, peers) {
     <p>批量保存结果:成功 ${response.saved || 0} / 共 ${response.total || response.results.length}</p>
     <ul class="send-as-result-list">${items.join("")}</ul>
   `;
-}
-
-async function hydrateIdentityForm(identityForm, button, root = document) {
-  const scope =
-    root ||
-    identityForm.closest?.(".modal-body, .modal-dialog") ||
-    document;
-  const status = scope.querySelector("[data-send-as-status]");
-  const sendAsValue = identityForm.querySelector('[name="send_as_id"]').value.trim();
-  const localId = identityForm.querySelector('[name="account_local_id"]').value
-    || scope.querySelector('[data-send-as-field="account"]')?.value
-    || "";
-  if (!sendAsValue || !localId) {
-    if (status) status.textContent = "解析需要先填 send_as_id 并选账号";
-    return;
-  }
-  button.disabled = true;
-  if (status) status.textContent = "正在用 Telegram 解析…";
-  try {
-    const result = await postJson("/api/accounts/resolve-entity", {
-      local_id: localId,
-      send_as_id: Number(sendAsValue),
-    });
-    if (!result.ok) {
-      throw new Error(result.error || "解析失败");
-    }
-    const labelInput = identityForm.querySelector('[name="label"]');
-    const usernameInput = identityForm.querySelector('[name="username"]');
-    if (labelInput && !labelInput.value) labelInput.value = result.label || "";
-    if (usernameInput && !usernameInput.value) usernameInput.value = result.username || "";
-    if (status) status.textContent = `已解析:${result.label || result.username || result.send_as_id}`;
-  } catch (error) {
-    if (status) status.textContent = error.message;
-  } finally {
-    button.disabled = false;
-  }
-}
-
-function identityPayloadFromForm(form) {
-  const data = new FormData(form);
-  return {
-    send_as_id: data.get("send_as_id"),
-    account_local_id: data.get("account_local_id"),
-    label: data.get("label"),
-    username: data.get("username"),
-    note: data.get("note"),
-    enabled: data.get("enabled") === "on",
-  };
-}
-
-function fillIdentityForm(identity, root = document) {
-  const form = root.querySelector("#identityForm");
-  if (!form) {
-    return;
-  }
-  const values = {
-    send_as_id: identity.send_as_id || "",
-    account_local_id: identity.account_local_id || "",
-    label: identity.label || "",
-    username: identity.username || "",
-    note: identity.note || "",
-  };
-  Object.entries(values).forEach(([key, value]) => {
-    const field = form.querySelector(`[name="${key}"]`);
-    if (field) {
-      field.value = value;
-    }
-  });
-  const enabled = form.querySelector('[name="enabled"]');
-  if (enabled) {
-    enabled.checked = Boolean(identity.enabled);
-  }
 }
 
 async function saveCurrentSettingsFromForm(form) {
