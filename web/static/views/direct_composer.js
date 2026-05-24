@@ -6,7 +6,22 @@
   const { clipGraphemes, escapeAttr, escapeHtml } = window.MiniwebFormat;
 
   const HOTBAR_ROWS = 2;
-  const HOTBAR_VISIBLE_SLOTS = 10;
+  const HOTBAR_VISIBLE_SLOTS = 12;
+  const HOTBAR_PRIORITY_KEYS = new Map([
+    ["deep_retreat", 1],
+    ["wild_training", 2],
+    ["checkin", 3],
+    ["tower", 4],
+    ["storage_bag", 5],
+    ["battle_power", 6],
+    ["deep_retreat_query", 7],
+    ["identity_info", 8],
+    ["pet_touch", 9],
+    ["pet_warm", 10],
+    ["yuanying_status", 11],
+    ["second_soul_status", 12],
+    ["dungeon_status", 13],
+  ]);
 
   function composerState(deps = {}) {
     return deps.state || window.MiniwebState?.state || {};
@@ -402,18 +417,22 @@
       "法宝": 4,
       "副本": 5,
     }[skill.group] || 9;
+    const keyScore = HOTBAR_PRIORITY_KEYS.get(skill.key);
+    if (keyScore) return keyScore;
     const label = `${skill.label || ""}${skill.key || ""}${skill.command || ""}`;
     const important = [
       ["深度闭关", 1],
       ["野外历练", 2],
       ["点卯", 3],
       ["闯塔", 4],
-      ["元婴", 5],
-      ["第二元神", 6],
-      ["抚摸", 7],
-      ["温养", 8],
-      ["我的", 9],
-      ["战力", 10],
+      ["储物袋", 5],
+      ["战力", 6],
+      ["查看闭关", 7],
+      ["我的", 8],
+      ["元婴", 9],
+      ["第二元神", 10],
+      ["抚摸", 11],
+      ["温养", 12],
     ];
     const hit = important.find(([word]) => label.includes(word));
     return groupScore * 100 + (hit ? hit[1] : 50);

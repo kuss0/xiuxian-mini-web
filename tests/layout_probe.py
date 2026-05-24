@@ -273,6 +273,7 @@ def api_payload(path: str, query: dict[str, list[str]]) -> dict:
                 {"key": "power", "label": "战力", "group": "查询", "command": ".战力", "icon": "战"},
                 {"key": "storage_bag", "label": "储物袋", "group": "查询", "command": ".储物袋", "icon": "包"},
                 {"key": "dungeon_status", "label": "副本状态", "group": "副本", "command": ".副本状态", "icon": "副"},
+                {"key": "sect_list", "label": "宗门列表", "group": "查询", "command": ".宗门列表", "icon": "宗"},
             ],
         }
     return {"ok": True}
@@ -416,7 +417,13 @@ PROBE_SCRIPT = """
     var box = chip.getBoundingClientRect();
     return { text: chip.textContent.trim(), left: box.left, right: box.right, top: box.top, bottom: box.bottom };
   });
-  check("hotbar renders compact shortcuts", hotbarChips.length === 10, String(hotbarChips.length));
+  var hotbarTexts = hotbarChips.map(function(chip) { return chip.textContent.trim(); });
+  check("hotbar renders compact shortcuts", hotbarChips.length === 12, String(hotbarChips.length));
+  check("hotbar keeps common query shortcuts visible",
+    hotbarTexts.some(function(text) { return text.indexOf("储物袋") !== -1; }) &&
+    hotbarTexts.some(function(text) { return text.indexOf("战力") !== -1; }) &&
+    hotbarTexts.some(function(text) { return text.indexOf("我的") !== -1; }),
+    JSON.stringify(hotbarTexts));
   check("hotbar exposes full shortcut menu", Boolean(hotbarMore), hotbarMore ? hotbarMore.textContent.trim() : "");
   check("hotbar uses two compact rows", hotbarRowTops.length === 2 && boxes.hotbar.height <= 40,
     JSON.stringify({ rows: hotbarRowTops, hotbar: boxes.hotbar }));
