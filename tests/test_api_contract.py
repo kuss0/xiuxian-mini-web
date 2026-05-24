@@ -160,7 +160,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
     assert "access settings modal, automation guard form, Telegram dialog/topic option renderers, and read-only Telegram account list live in `web/static/views/settings.js`" in normalized_work_plan
     assert "Telegram account login/logout modals and listen-target renderers live in `web/static/views/account_management.js`" in normalized_work_plan
-    assert "sidebar identity list, identity snapshot, add-identity modal body, and send_as row/result renderers live in `web/static/views/identity_management.js`" in normalized_work_plan
+    assert "sidebar identity list, identity snapshot, identity module chips, add-identity modal body, and send_as row/result renderers live in `web/static/views/identity_management.js`" in normalized_work_plan
     assert "Outbox automation guard logic lives in `backend/outbox/automation.py`" in normalized_work_plan
     assert "sender adapters live in `backend/outbox/adapters.py`" in normalized_work_plan
     assert "optional queue worker lives in `backend/outbox/worker.py`" in normalized_work_plan
@@ -187,8 +187,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "Detail panel actions fill the composer or create manual plans/drafts only" in audit
     assert "Account login/logout modals and listen-target renderers are isolated in `web/static/views/account_management.js`" in audit
     assert "keeps account save/login/dialog/topic/listener API orchestration" in audit
-    assert "Sidebar identity list, identity snapshot, and add-identity modal renderers are isolated in `web/static/views/identity_management.js`" in audit
-    assert "keeps Telegram account/send_as API binding and event orchestration" in audit
+    assert "Sidebar identity list, identity snapshot, sidebar module chips, and add-identity modal renderers are isolated in `web/static/views/identity_management.js`" in audit
+    assert "keeps Telegram account/send_as API binding, global timer orchestration, and event orchestration" in audit
     assert "Dungeon playbook actions fill the composer only" in audit
     assert "Xutian now exposes phase, route" in audit
     assert "## Outbox Automation" in audit
@@ -1116,12 +1116,17 @@ def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_fo
         "return window.MiniwebViews.identityManagement",
         "function identityManagementDeps()",
         "activeIdentityPatches,",
+        "moduleStartTs,",
+        "fmtCountdown,",
         "setActiveIdentity,",
         "showSkillToast,",
         "function renderIdentitySnapshot()",
         "return identityManagementView().renderIdentitySnapshot(identityManagementDeps(), identitySnapshot)",
         "function renderSidebarIdentityList()",
         "return identityManagementView().renderSidebarIdentityList(identityManagementDeps(), sidebarIdentityList)",
+        "function renderIdentityModulesLine(sendAsId)",
+        "return identityManagementView().renderIdentityModulesLine(identityManagementDeps(), sendAsId)",
+        "identityManagementView().tickSidebarIdentityModuleChips(identityManagementDeps(), sidebarIdentityList)",
         "function openAddIdentityModal()",
         "body: renderAddIdentityModalBody()",
         "function renderAddIdentityModalBody()",
@@ -1136,13 +1141,20 @@ def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_fo
         'labelInput.value = peer.title || "";',
     ]
     required_module_fragments = [
-        "// MINIWEB-VIEW: sidebar identity list, identity snapshot, add-identity modal, and send_as renderers",
+        "// MINIWEB-VIEW: sidebar identity list, identity snapshot, identity module chips, add-identity modal, and send_as renderers",
+        "const MODULE_ICONS = {",
+        "const SIDEBAR_MODULE_KEYS = new Set(Object.keys(MODULE_ICONS));",
         "function renderSidebarIdentityList(deps = {}, container)",
         "function bindSidebarIdentityList(deps = {}, container)",
+        "function renderIdentityModulesLine(deps = {}, sendAsId)",
+        "function tickSidebarIdentityModuleChips(deps = {}, container)",
         "function renderIdentitySnapshot(deps = {}, container)",
         "请选择左侧身份",
         "正在读取当前身份的角色状态",
         "等待消息箱投影",
+        'data-module-chip="1"',
+        "identity-row-modules",
+        "module-chip-bar-fill",
         "function identityRowStatusText(identity, account)",
         "function identityRowIsOffline(identity, account)",
         "function buildProfileChips(patchMap)",
@@ -1155,6 +1167,8 @@ def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_fo
         "function renderBatchSaveResult(deps = {}, container, response, peers)",
         "window.MiniwebViews.identityManagement = {",
         "renderSidebarIdentityList,",
+        "renderIdentityModulesLine,",
+        "tickSidebarIdentityModuleChips,",
         "renderIdentitySnapshot,",
         'id="manualSendAsId"',
         'id="manualLabel"',
@@ -1176,6 +1190,10 @@ def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_fo
         'rootEl.querySelector("#identityForm")',
         'sidebarIdentityList.innerHTML = state.identities.map',
         'sidebarIdentityList.querySelectorAll("[data-identity-row]")',
+        "const MODULE_ICONS = {",
+        "const SIDEBAR_MODULE_KEYS = new Set(Object.keys(MODULE_ICONS));",
+        "const chips = sidebarIdentityList.querySelectorAll('[data-module-chip=\"1\"]')",
+        'chip.innerHTML = `${icon} ${label} 已就绪`',
         ".send-as-section",
         "data-identity-action",
         "identity-item",

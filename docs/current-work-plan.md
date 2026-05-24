@@ -113,6 +113,7 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      listen-target renderers live in
      `web/static/views/account_management.js`; the sidebar identity list,
      identity snapshot,
+     identity module chips,
      add-identity modal body, and send_as row/result renderers live in
      `web/static/views/identity_management.js`,
      while

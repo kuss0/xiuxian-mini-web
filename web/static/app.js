@@ -2634,6 +2634,8 @@ function identityManagementDeps() {
     activeIdentityPatches,
     identityKindLabel,
     isSendAsAlreadyRegistered,
+    moduleStartTs,
+    fmtCountdown,
     renderCultivationModules,
     setActiveIdentity,
     showSkillToast,
@@ -2646,6 +2648,10 @@ function renderAddIdentityModalBody() {
 
 function renderSidebarIdentityList() {
   return identityManagementView().renderSidebarIdentityList(identityManagementDeps(), sidebarIdentityList);
+}
+
+function renderIdentityModulesLine(sendAsId) {
+  return identityManagementView().renderIdentityModulesLine(identityManagementDeps(), sendAsId);
 }
 
 function cultivationDeps() {
@@ -2691,16 +2697,6 @@ function tickCultivationModules() {
   return cultivationView().tickCultivationModules(cultivationDeps());
 }
 
-const MODULE_ICONS = {
-  deep_retreat: "📿",
-  yuanying: "👻",
-  second_soul: "🪞",
-  pet_touch: "🖐️",
-  pet_warm: "🔥",
-  pet_trial: "🥊",
-};
-const SIDEBAR_MODULE_KEYS = new Set(Object.keys(MODULE_ICONS));
-
 function moduleStartTs(state) {
   if (!state) return 0;
   return Number(
@@ -2725,37 +2721,6 @@ function fmtCountdown(secondsLeft) {
   return `${m}:${String(sec).padStart(2, "0")}`;
 }
 
-function renderIdentityModulesLine(sendAsId) {
-  const items = (state.identityModuleStates.get(Number(sendAsId)) || [])
-    .filter((item) => SIDEBAR_MODULE_KEYS.has(item.module_key));
-  if (!items.length) return "";
-  const nowSec = Date.now() / 1000;
-  const parts = items.map((item) => {
-    const icon = MODULE_ICONS[item.module_key] || "•";
-    const summary = item.summary || {};
-    const st = item.state || {};
-    const nextAt = Number(summary.next_at || st.cooldown_until || 0) || 0;
-    const startTs = moduleStartTs(st);
-    const label = escapeHtml(item.label || item.module_key);
-    const liveReady = summary.ready === true || (nextAt > 0 && nextAt <= nowSec) || nextAt === 0;
-    if (liveReady) {
-      return `<span class="module-chip module-ready">${icon} ${label} 已就绪</span>`;
-    }
-    const remaining = nextAt - nowSec;
-    const total = Math.max(1, nextAt - startTs);
-    const pct = Math.min(100, Math.max(0, ((total - remaining) / total) * 100));
-    const text = remaining > 0 ? `剩 ${fmtCountdown(remaining)}` : "已就绪";
-    return `
-      <span class="module-chip module-waiting" data-module-chip="1"
-            data-next-at="${nextAt}" data-start-at="${startTs}" data-icon="${icon}" data-label="${label}">
-        <span class="module-chip-text">${icon} ${label} <span class="module-chip-time">${escapeHtml(text)}</span></span>
-        <span class="module-chip-bar"><span class="module-chip-bar-fill" style="width:${pct.toFixed(1)}%"></span></span>
-      </span>
-    `;
-  });
-  return `<span class="identity-row-modules">${parts.join("")}</span>`;
-}
-
 function tickIdentityModuleChips() {
   // 底部快捷指令倒计时不能依赖左侧身份 chip 是否存在;否则刚产生 CD 时
   // state 已更新但按钮不会重画,用户要再点一次才看见灰态。
@@ -2763,30 +2728,7 @@ function tickIdentityModuleChips() {
   tickCultivationModules();
   tickCockpitModuleChips();
   tickIdentityStatusCards();
-  if (!sidebarIdentityList) return;
-  const chips = sidebarIdentityList.querySelectorAll('[data-module-chip="1"]');
-  if (!chips.length) return;
-  const nowSec = Date.now() / 1000;
-  chips.forEach((chip) => {
-    const nextAt = Number(chip.dataset.nextAt || 0);
-    const startTs = Number(chip.dataset.startAt || 0);
-    const icon = chip.dataset.icon || "";
-    const label = chip.dataset.label || "";
-    const remaining = nextAt - nowSec;
-    if (remaining <= 0) {
-      chip.classList.remove("module-waiting");
-      chip.classList.add("module-ready");
-      chip.removeAttribute("data-module-chip");
-      chip.innerHTML = `${icon} ${label} 已就绪`;
-      return;
-    }
-    const total = Math.max(1, nextAt - startTs);
-    const pct = Math.min(100, Math.max(0, ((total - remaining) / total) * 100));
-    const timeEl = chip.querySelector(".module-chip-time");
-    const fillEl = chip.querySelector(".module-chip-bar-fill");
-    if (timeEl) timeEl.textContent = `剩 ${fmtCountdown(remaining)}`;
-    if (fillEl) fillEl.style.width = `${pct.toFixed(1)}%`;
-  });
+  identityManagementView().tickSidebarIdentityModuleChips(identityManagementDeps(), sidebarIdentityList);
 }
 
 function tickIdentityStatusCards() {
