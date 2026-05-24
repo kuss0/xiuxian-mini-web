@@ -1,4 +1,4 @@
-// MINIWEB-VIEW: chat message stream, scroll anchoring, and quick actions
+// MINIWEB-VIEW: chat message stream, channel filters, scroll anchoring, and quick actions
 (function () {
   "use strict";
 
@@ -8,6 +8,7 @@
     escapeAttr,
     escapeHtml,
     firstGrapheme,
+    formatNumber,
   } = window.MiniwebFormat;
   const {
     MESSAGE_PREVIEW_CHAR_LIMIT,
@@ -18,6 +19,29 @@
   function chatStreamState(deps = {}) {
     return deps.state || window.MiniwebState?.state || {};
   }
+
+  function messageTimeValue(message) {
+    const parsed = Date.parse(String(message?.time || ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function compareMessagesByRecency(a, b) {
+    const timeDiff = messageTimeValue(b) - messageTimeValue(a);
+    if (timeDiff) return timeDiff;
+    return Number(b?.seq || 0) - Number(a?.seq || 0);
+  }
+
+  // 频道筛选:主界面展示的是“视图”,不是后端频道枚举。
+  // 低频的 archive/system/console/world 不直接露在主栏,需要时走“全部/记录”。
+  const QUICK_FILTER_PRESETS = [
+    { key: "focus", label: "重点", icon: "!", channels: ["focus"], title: "需要优先处理的消息" },
+    { key: "dungeon", label: "副本", icon: "#", channels: ["dungeon"], title: "副本开启、加入和队伍状态" },
+    { key: "leader", label: "会长", icon: "◇", channels: ["leader"], title: "会长/情报源消息" },
+    { key: "mine", label: "我的", icon: "@", channels: ["mine"], title: "当前角色相关消息" },
+    { key: "__daily", label: "日常", icon: "↻", channels: ["training", "resource", "home"], title: "修炼、资源、洞府和日常玩法" },
+    { key: "risk", label: "风险", icon: "!", channels: ["risk"], title: "举报、自证、禁言、虚弱和封禁", className: "risk", showWhenCount: true },
+    { key: "__all", label: "全部", icon: "≡", channels: "__all", title: "显示全部频道", className: "all" },
+  ];
 
   function visibleMessages(deps = {}) {
     const state = chatStreamState(deps);
@@ -112,6 +136,257 @@
     }
     if (deps.activeChannelText) deps.activeChannelText.textContent = text;
     if (deps.streamActiveChannelText) deps.streamActiveChannelText.textContent = text;
+  }
+
+  function renderChannelFilters(deps = {}) {
+    const state = chatStreamState(deps);
+    if (!deps.channelFilters) {
+      renderActiveChannelText(deps);
+      return;
+    }
+    const counts = channelMessageCounts(deps);
+    const latestByChannel = latestMessagesByChannel(deps);
+    deps.channelFilters.replaceChildren(
+      ...orderedChannelsForConversationList(deps, latestByChannel).map((channel) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        const isActive = state.selectedChannels.has(channel.key);
+        button.className = "channel-chip" + (isActive ? " active" : "");
+        const latest = latestByChannel.get(channel.key) || null;
+        button.title = channelTooltip(deps, channel, latest);
+        button.dataset.channelKey = channel.key;
+        button.setAttribute("aria-pressed", isActive ? "true" : "false");
+        const count = counts.get(channel.key) || 0;
+        const preview = channelPreviewText(channel, latest);
+        const time = latest ? formatChatTime(latest.time) : "";
+        button.innerHTML = `
+          <span class="channel-chip-icon" aria-hidden="true">${escapeHtml(channelIcon(channel.key, channel.label))}</span>
+          <span class="channel-chip-main">
+            <span class="channel-chip-top">
+              <span class="channel-chip-label">${escapeHtml(channel.label)}</span>
+              <span class="channel-chip-time">${escapeHtml(time)}</span>
+            </span>
+            <span class="channel-chip-preview">${escapeHtml(preview)}</span>
+          </span>
+          <span class="channel-chip-count">${count ? escapeHtml(String(count)) : ""}</span>
+        `;
+        button.addEventListener("click", (event) => {
+          let next;
+          if (event.ctrlKey || event.metaKey || event.shiftKey) {
+            next = new Set(state.selectedChannels);
+            if (state.selectedChannels.has(channel.key)) {
+              next.delete(channel.key);
+            } else {
+              next.add(channel.key);
+            }
+          } else {
+            next = new Set([channel.key]);
+          }
+          deps.applyChannelSelection?.(next).catch((error) => {
+            console.warn("[mini-web] channel selection failed:", error);
+            deps.showSkillToast?.(`频道加载失败: ${error.message || error}`, "err");
+          });
+        });
+        return button;
+      })
+    );
+
+    if (deps.selectAllChannels) {
+      deps.selectAllChannels.textContent =
+        state.selectedChannels.size === state.channels.length ? "重点" : "全部";
+    }
+    renderActiveChannelText(deps);
+  }
+
+  function orderedChannelsForConversationList(deps = {}, latestByChannel = null) {
+    const state = chatStreamState(deps);
+    const latestMap = latestByChannel || latestMessagesByChannel(deps);
+    const originalIndex = new Map(state.channels.map((channel, index) => [channel.key, index]));
+    return [...state.channels].sort((a, b) => {
+      const aLatest = latestMap.get(a.key);
+      const bLatest = latestMap.get(b.key);
+      const recency = compareMessagesByRecency(aLatest, bLatest);
+      if (recency) return recency;
+      return (originalIndex.get(a.key) || 0) - (originalIndex.get(b.key) || 0);
+    });
+  }
+
+  function channelTooltip(deps = {}, channel, latest) {
+    const parts = [channel.label || channel.key];
+    if (channel.description) parts.push(channel.description);
+    if (latest) {
+      const source = displaySource(latest.source);
+      const body = String(latest.summary || latest.raw || latest.title || "").replace(/\s+/g, " ").trim();
+      parts.push(`${formatChatTime(latest.time) || ""} ${source}: ${clipGraphemes(body, 90)}`.trim());
+    }
+    return parts.filter(Boolean).join("\n");
+  }
+
+  function latestMessagesByChannel(deps = {}) {
+    const state = chatStreamState(deps);
+    const candidates = state.channelSummaryMessages.length ? state.channelSummaryMessages : state.messages;
+    const latest = new Map();
+    for (const message of candidates) {
+      const keys = message.channels && message.channels.length ? message.channels : [message.channel];
+      for (const key of keys) {
+        if (key && !latest.has(key)) {
+          latest.set(key, message);
+        }
+      }
+    }
+    return latest;
+  }
+
+  function latestMessageForChannel(deps = {}, channelKey) {
+    return latestMessagesByChannel(deps).get(channelKey) || null;
+  }
+
+  function channelPreviewText(channel, message) {
+    if (!message) {
+      return channel.description || "等待消息";
+    }
+    const source = displaySource(message.source);
+    const body = String(message.summary || message.raw || message.title || "").replace(/\s+/g, " ").trim();
+    const limit = 56;
+    const preview = clipGraphemes(body || "（空消息）", limit);
+    return `${source}: ${preview}${countGraphemes(body) > limit ? "…" : ""}`;
+  }
+
+  function channelIcon(key, label) {
+    const icons = {
+      focus: "重",
+      mine: "我",
+      leader: "会",
+      risk: "险",
+      dungeon: "副",
+      resource: "资",
+      archive: "档",
+      console: "台",
+      training: "修",
+      home: "府",
+      world: "聊",
+      system: "系",
+    };
+    return icons[key] || firstGrapheme(label || key || "?");
+  }
+
+  function quickFilterIsAll(deps = {}) {
+    const state = chatStreamState(deps);
+    return state.selectedChannels.size === state.channels.length;
+  }
+
+  function quickFilterActiveKey(deps = {}) {
+    const state = chatStreamState(deps);
+    if (quickFilterIsAll(deps)) return "__all";
+    const selected = [...state.selectedChannels].sort();
+    for (const preset of QUICK_FILTER_PRESETS) {
+      if (!Array.isArray(preset.channels)) continue;
+      const keys = quickFilterKnownChannels(deps, preset).sort();
+      if (keys.length && keys.length === selected.length && keys.every((key, index) => key === selected[index])) {
+        return preset.key;
+      }
+    }
+    return "";
+  }
+
+  function renderQuickFilters(deps = {}) {
+    const state = chatStreamState(deps);
+    const container = deps.quickFilters;
+    if (!container || !state.channels.length) return;
+    const activeKey = quickFilterActiveKey(deps);
+    const counts = channelMessageCounts(deps);
+    const presets = QUICK_FILTER_PRESETS
+      .map((preset) => {
+        const channels = quickFilterKnownChannels(deps, preset);
+        return {
+          ...preset,
+          channels,
+          count: quickFilterCount(deps, preset, counts),
+        };
+      })
+      .filter((preset) => {
+        if (preset.key === "__all") return true;
+        if (!preset.channels.length) return false;
+        if (preset.showWhenCount) return preset.count > 0 || activeKey === preset.key;
+        return true;
+      });
+    container.innerHTML = presets
+      .map((preset) => {
+        const isActive = activeKey === preset.key;
+        const cls = [
+          "quick-filter-chip",
+          preset.key === "__all" ? "all" : "",
+          preset.className || "",
+          isActive ? "active" : "",
+        ].filter(Boolean).join(" ");
+        return `
+          <button type="button" class="${cls}"
+                  data-quick-filter="${escapeAttr(preset.key)}"
+                  title="${escapeAttr(preset.title || preset.label)}">
+            <span class="quick-filter-icon" aria-hidden="true">${escapeHtml(preset.icon)}</span>
+            <span class="quick-filter-label">${escapeHtml(preset.label)}</span>
+            ${preset.count ? `<span class="quick-filter-count">${escapeHtml(formatNumber(preset.count))}</span>` : ""}
+          </button>
+        `;
+      })
+      .join("");
+    container.querySelectorAll("[data-quick-filter]").forEach((button) => {
+      button.addEventListener("click", () => {
+        button.closest("details")?.removeAttribute("open");
+        applyQuickFilter(deps, button.dataset.quickFilter);
+      });
+    });
+  }
+
+  async function applyQuickFilter(deps = {}, key) {
+    const state = chatStreamState(deps);
+    const preset = QUICK_FILTER_PRESETS.find((item) => item.key === key);
+    let nextChannels;
+    if (!preset || preset.channels === "__all") {
+      nextChannels = state.channels.map((channel) => channel.key);
+    } else if (activeQuickFilterKeyForSelection(deps) === key) {
+      nextChannels = ["focus"];
+    } else {
+      nextChannels = quickFilterKnownChannels(deps, preset);
+    }
+    await deps.applyChannelSelection?.(nextChannels);
+  }
+
+  function activeQuickFilterKeyForSelection(deps = {}) {
+    return quickFilterActiveKey(deps);
+  }
+
+  function quickFilterKnownChannels(deps = {}, preset) {
+    const state = chatStreamState(deps);
+    if (!preset || preset.channels === "__all") {
+      return state.channels.map((channel) => channel.key);
+    }
+    const known = new Set(state.channels.map((channel) => channel.key));
+    return (preset.channels || []).filter((key) => known.has(key));
+  }
+
+  function quickFilterCount(deps = {}, preset, counts) {
+    if (!preset || preset.key === "__all") return 0;
+    return quickFilterKnownChannels(deps, preset)
+      .reduce((total, key) => total + Number(counts.get(key) || 0), 0);
+  }
+
+  function channelMessageCounts(deps = {}) {
+    const state = chatStreamState(deps);
+    const counts = new Map();
+    for (const channel of state.channels) {
+      counts.set(channel.key, 0);
+    }
+    const sourceMessages = deps.summarySignalMessages?.() || [];
+    for (const message of sourceMessages) {
+      const keys = message.channels && message.channels.length ? message.channels : [message.channel];
+      for (const key of keys) {
+        if (counts.has(key)) {
+          counts.set(key, counts.get(key) + 1);
+        }
+      }
+    }
+    return counts;
   }
 
   function renderMessages(deps = {}) {
@@ -552,6 +827,21 @@
     parentMessageOf,
     renderReplyContext,
     renderActiveChannelText,
+    renderChannelFilters,
+    orderedChannelsForConversationList,
+    channelTooltip,
+    latestMessagesByChannel,
+    latestMessageForChannel,
+    channelPreviewText,
+    channelIcon,
+    quickFilterIsAll,
+    quickFilterActiveKey,
+    renderQuickFilters,
+    applyQuickFilter,
+    activeQuickFilterKeyForSelection,
+    quickFilterKnownChannels,
+    quickFilterCount,
+    channelMessageCounts,
     renderMessages,
     isMessageListNearLatest,
     updateJumpToLatestVisibility,

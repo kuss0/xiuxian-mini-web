@@ -153,7 +153,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "live situation board and signal snapshot helpers live in `web/static/views/live_situation.js`" in normalized_work_plan
     assert "game cockpit, primary strip, and action dock live in `web/static/views/game_cockpit.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
-    assert "chat message stream, scroll anchoring, and quick actions live in `web/static/views/chat_stream.js`" in normalized_work_plan
+    assert "chat message stream, channel chips, quick filters, scroll anchoring, and quick actions live in `web/static/views/chat_stream.js`" in normalized_work_plan
     assert "direct composer, emoji palette, and quick command hotbar live in `web/static/views/direct_composer.js`" in normalized_work_plan
     assert "detail rich cards and field formatting live in `web/static/views/detail_cards.js`" in normalized_work_plan
     assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
@@ -172,7 +172,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "detailed manual-handling messages in the modal status line" in audit
     assert "resource stats modal and coverage renderer are isolated in `web/static/views/resource_stats.js`" in audit
     assert "official schedule rail and modal are isolated in `web/static/views/schedule.js`" in audit
-    assert "chat message stream, scroll anchoring, and quick-action renderer are isolated in `web/static/views/chat_stream.js`" in audit
+    assert "chat message stream, channel chips, quick filters, scroll anchoring, and quick-action renderer are isolated in `web/static/views/chat_stream.js`" in audit
     assert "Chat stream quick actions fill the composer only" in audit
     assert "direct composer, emoji palette, and quick command hotbar are isolated in `web/static/views/direct_composer.js`" in audit
     assert "Direct composer sends only through the injected explicit composer-submit callback" in audit
@@ -664,9 +664,45 @@ def test_chat_stream_view_module_keeps_wrappers_scroll_and_manual_action_contrac
 
     required_app_fragments = [
         "function chatStreamDeps()",
+        "channelFilters,",
+        "quickFilters,",
+        "selectAllChannels,",
+        "applyChannelSelection,",
+        "summarySignalMessages,",
+        "showSkillToast,",
         "function chatStreamView()",
         "function visibleMessages()",
         "return chatStreamView().visibleMessages(chatStreamDeps())",
+        "function renderChannelFilters()",
+        "return chatStreamView().renderChannelFilters(chatStreamDeps())",
+        "function orderedChannelsForConversationList(latestByChannel = null)",
+        "return chatStreamView().orderedChannelsForConversationList(chatStreamDeps(), latestByChannel)",
+        "function channelTooltip(channel, latest)",
+        "return chatStreamView().channelTooltip(chatStreamDeps(), channel, latest)",
+        "function latestMessagesByChannel()",
+        "return chatStreamView().latestMessagesByChannel(chatStreamDeps())",
+        "function latestMessageForChannel(channelKey)",
+        "return chatStreamView().latestMessageForChannel(chatStreamDeps(), channelKey)",
+        "function channelPreviewText(message, channel)",
+        "return chatStreamView().channelPreviewText(channel, message)",
+        "function channelIcon(key, label)",
+        "return chatStreamView().channelIcon(key, label)",
+        "function quickFilterIsAll()",
+        "return chatStreamView().quickFilterIsAll(chatStreamDeps())",
+        "function quickFilterActiveKey()",
+        "return chatStreamView().quickFilterActiveKey(chatStreamDeps())",
+        "function renderQuickFilters()",
+        "return chatStreamView().renderQuickFilters(chatStreamDeps())",
+        "async function applyQuickFilter(key)",
+        "return chatStreamView().applyQuickFilter(chatStreamDeps(), key)",
+        "function activeQuickFilterKeyForSelection()",
+        "return chatStreamView().activeQuickFilterKeyForSelection(chatStreamDeps())",
+        "function quickFilterKnownChannels(preset)",
+        "return chatStreamView().quickFilterKnownChannels(chatStreamDeps(), preset)",
+        "function quickFilterCount(preset, counts)",
+        "return chatStreamView().quickFilterCount(chatStreamDeps(), preset, counts)",
+        "function channelMessageCounts()",
+        "return chatStreamView().channelMessageCounts(chatStreamDeps())",
         "function renderMessages()",
         "return chatStreamView().renderMessages(chatStreamDeps())",
         "function captureMessageScrollSnapshot()",
@@ -682,9 +718,28 @@ def test_chat_stream_view_module_keeps_wrappers_scroll_and_manual_action_contrac
         "fillDirectSendComposer,",
     ]
     required_module_fragments = [
-        "// MINIWEB-VIEW: chat message stream, scroll anchoring, and quick actions",
+        "// MINIWEB-VIEW: chat message stream, channel filters, scroll anchoring, and quick actions",
+        "const QUICK_FILTER_PRESETS = [",
         "function visibleMessages(deps = {})",
         "function messageMatchesSearch(deps = {}, message)",
+        "function renderChannelFilters(deps = {})",
+        "function orderedChannelsForConversationList(deps = {}, latestByChannel = null)",
+        "function channelTooltip(deps = {}, channel, latest)",
+        "function latestMessagesByChannel(deps = {})",
+        "function latestMessageForChannel(deps = {}, channelKey)",
+        "function channelPreviewText(channel, message)",
+        "function channelIcon(key, label)",
+        "function quickFilterIsAll(deps = {})",
+        "function quickFilterActiveKey(deps = {})",
+        "function renderQuickFilters(deps = {})",
+        "async function applyQuickFilter(deps = {}, key)",
+        "function activeQuickFilterKeyForSelection(deps = {})",
+        "function quickFilterKnownChannels(deps = {}, preset)",
+        "function quickFilterCount(deps = {}, preset, counts)",
+        "function channelMessageCounts(deps = {})",
+        "deps.applyChannelSelection?.(next)",
+        "deps.showSkillToast?.(",
+        "const sourceMessages = deps.summarySignalMessages?.() || []",
         "function renderMessages(deps = {})",
         "function renderChatMessageNode(deps = {}, message)",
         "function captureMessageScrollSnapshot(deps = {})",
@@ -693,6 +748,21 @@ def test_chat_stream_view_module_keeps_wrappers_scroll_and_manual_action_contrac
         "async function handleChatQuickAction(deps = {}, message, index, button)",
         "function messageKind(deps = {}, message)",
         "window.MiniwebViews.chatStream = {",
+        "renderChannelFilters,",
+        "orderedChannelsForConversationList,",
+        "channelTooltip,",
+        "latestMessagesByChannel,",
+        "latestMessageForChannel,",
+        "channelPreviewText,",
+        "channelIcon,",
+        "quickFilterIsAll,",
+        "quickFilterActiveKey,",
+        "renderQuickFilters,",
+        "applyQuickFilter,",
+        "activeQuickFilterKeyForSelection,",
+        "quickFilterKnownChannels,",
+        "quickFilterCount,",
+        "channelMessageCounts,",
         "renderMessages,",
         "quickActionLabel,",
         "messageKind,",
@@ -705,12 +775,17 @@ def test_chat_stream_view_module_keeps_wrappers_scroll_and_manual_action_contrac
         "sendDirectComposerMessage",
         '"/api/skills/send"',
     ]
+    forbidden_app_fragments = [
+        "const QUICK_FILTER_PRESETS = [",
+    ]
     for fragment in required_app_fragments:
         assert fragment in app_js
     for fragment in required_module_fragments:
         assert fragment in chat_stream_js
     for fragment in forbidden_module_fragments:
         assert fragment not in chat_stream_js
+    for fragment in forbidden_app_fragments:
+        assert fragment not in app_js
 
 
 def test_direct_composer_view_module_keeps_wrappers_and_explicit_send_contract():
