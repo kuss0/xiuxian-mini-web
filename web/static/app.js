@@ -1194,344 +1194,81 @@ function renderLeaderIntelCard(message) {
   });
 }
 
-const IDENTITY_STATUS_GROUPS = [
-  {
-    key: "daily",
-    title: "日常",
-    hint: "常规循环和会卡行动的长 CD。",
-    modules: [
-      { key: "wild_training", skill: "wild_training" },
-      { key: "checkin", skill: "checkin" },
-      { key: "tower", skill: "tower" },
-      { key: "deep_retreat", skill: "deep_retreat", query: "deep_retreat_query" },
-      { key: "retreat_shallow", skill: "retreat_shallow" },
-      { key: "yuanying", skill: "yuanying", query: "yuanying_status" },
-      { key: "second_soul", skill: "second_soul_train", query: "second_soul_status" },
-      { key: "ranch", skill: "ranch" },
-    ],
-  },
-  {
-    key: "artifact",
-    title: "器灵",
-    hint: "抚摸、温养、试炼三块合并看。",
-    modules: [
-      { key: "pet_touch", skill: "pet_touch" },
-      { key: "pet_warm", skill: "pet_warm" },
-      { key: "pet_trial", skill: "pet_trial" },
-    ],
-  },
-  {
-    key: "concubine",
-    title: "侍妾",
-    hint: "入梦、代卜、心劫分开显示，查询走我的侍妾。",
-    query: "concubine_status",
-    modules: [
-      { key: "concubine_dream", skill: "concubine_dream" },
-      { key: "concubine_tianji", skill: "concubine_tianji" },
-      { key: "concubine_heart", skill: "concubine_heart" },
-    ],
-  },
-  {
-    key: "stargazer",
-    title: "星宫",
-    hint: "观星台三项独立 CD，按宗门解锁快捷按钮。",
-    query: "stargazer_panel",
-    modules: [
-      { key: "stargazer_guide", skill: "stargazer_guide" },
-      { key: "stargazer_soothe", skill: "stargazer_soothe" },
-      { key: "stargazer_collect", skill: "stargazer_collect" },
-    ],
-  },
-  {
-    key: "tianti",
-    title: "天阶",
-    hint: "登天阶、问心台、九天罡风分开观测。",
-    query: "tianti_status",
-    modules: [
-      { key: "tianti_climb", skill: "tianti_climb" },
-      { key: "tianti_wenxin", skill: "tianti_wenxin" },
-      { key: "tianti_gangfeng", skill: "tianti_gangfeng" },
-    ],
-  },
-  {
-    key: "taiyi",
-    title: "太一",
-    hint: "太一周期用于引道 / 搜寻节点的手动判断。",
-    query: "taiyi",
-    modules: [
-      { key: "taiyi_cycle", skill: "yindao", extraSkills: ["node_search"] },
-    ],
-  },
-];
-
-function openIdentityStatusModal() {
-  const active = identityById(state.activeIdentityId);
-  const titleSuffix = active ? `｜${active.label || active.username || active.send_as_id}` : "";
-  const dialog = openModal({
-    title: `角色状态${titleSuffix}`,
-    body: `
-      <section class="modal-section identity-status-modal">
-        <div id="identityStatusBody" class="identity-status-body">
-          ${renderIdentityStatusBody()}
-        </div>
-      </section>
-    `,
-    footer: `
-      <button type="button" data-identity-status-action="refresh">刷新状态</button>
-      <button type="button" data-modal-close>关闭</button>
-    `,
-  });
-  if (!dialog) return;
-  bindIdentityStatusModal(dialog);
-}
-
-function renderIdentityStatusBody() {
-  const activeId = Number(state.activeIdentityId || 0) || null;
-  if (!activeId) {
-    return '<p class="empty">先在左侧或顶部选择一个身份。</p>';
-  }
-  const identity = identityById(activeId);
-  const patchMap = new Map(activeIdentityPatches().map((item) => [item.key, item.value]));
-  const stateItems = state.identityModuleStates.get(activeId) || [];
-  const byKey = new Map(stateItems.map((item) => [item.module_key, item]));
-  const titleParts = [
-    patchMap.get("境界"),
-    String(patchMap.get("宗门") || "").replace(/^【|】$/g, ""),
-    patchMap.get("灵根"),
-  ].filter(Boolean);
-  const name =
-    patchMap.get("角色名") ||
-    patchMap.get("道号") ||
-    identity?.label ||
-    identity?.username ||
-    String(activeId);
-  const profileChips = [
-    ["角色", name],
-    ["境界", patchMap.get("境界") || "未读"],
-    ["灵根", patchMap.get("灵根") || "未读"],
-    ["战力", patchMap.get("综合战力") || "未读"],
-    ["修为", patchMap.get("修为") || "未读"],
-  ];
-  const sourceRows = identityProfileSourceRows(activeIdentityPatches());
-  return `
-    <div class="identity-status-profile">
-      <div>
-        <strong>${escapeHtml(String(name))}</strong>
-        <span>${escapeHtml(titleParts.join("｜") || "等待消息箱补全角色资料")}</span>
-      </div>
-      <div class="identity-status-profile-grid">
-        ${profileChips.map(([label, value]) => cockpitMetric(label, value)).join("")}
-      </div>
-      ${renderIdentityProfileSources(sourceRows)}
-    </div>
-    <div class="identity-status-groups">
-      ${IDENTITY_STATUS_GROUPS.map((group) => renderIdentityStatusGroup(group, byKey)).join("")}
-    </div>
-  `;
-}
-
-function identityProfileSourceRows(patches) {
-  const wanted = ["角色名", "境界", "宗门", "灵根", "修为", "综合战力"];
-  const byKey = new Map((patches || []).map((item) => [item.key, item]));
-  return wanted
-    .map((key) => byKey.get(key))
-    .filter(Boolean)
-    .map((item) => ({
-      key: item.key,
-      value: item.value,
-      sourceMessageId: item.source_message_id || "",
-      updatedAt: item.updated_at || "",
-    }));
-}
-
-function renderIdentityProfileSources(rows) {
-  if (!rows.length) {
-    return '<p class="identity-source-empty">暂无投影来源。发送或监听“我的灵根 / 战力”后会更新。</p>';
-  }
-  const latest = rows
-    .map((row) => row.updatedAt)
-    .filter(Boolean)
-    .sort((a, b) => String(b).localeCompare(String(a)))[0] || "";
-  return `
-    <details class="identity-source-panel">
-      <summary>
-        <span>资料来源</span>
-        <strong>${escapeHtml(latest ? `最近 ${auditTimeLabel(latest)}` : "等待消息箱")}</strong>
-      </summary>
-      <div class="identity-source-list">
-        ${rows.map((row) => `
-          <div class="identity-source-row">
-            <span>${escapeHtml(row.key)}</span>
-            <strong>${escapeHtml(formatFieldValue(row.value))}</strong>
-            <small>${escapeHtml(auditTimeLabel(row.updatedAt) || "未知时间")}</small>
-            ${row.sourceMessageId ? `
-              <button type="button" data-identity-source-jump="${escapeAttr(row.sourceMessageId)}">
-                来源
-              </button>
-            ` : '<em>无来源</em>'}
-          </div>
-        `).join("")}
-      </div>
-    </details>
-  `;
-}
-
-function renderIdentityStatusGroup(group, byKey) {
-  const querySkill = group.query ? skillByKey(group.query) : null;
-  const queryButton = querySkill && skillIsUnlocked(querySkill)
-    ? `<button type="button" class="identity-status-query" data-status-skill="${escapeAttr(querySkill.key)}">${escapeHtml(querySkill.label || "查询")}</button>`
-    : "";
-  return `
-    <section class="identity-status-group ${escapeAttr(group.key)}">
-      <div class="identity-status-group-head">
-        <div>
-          <strong>${escapeHtml(group.title)}</strong>
-          <span>${escapeHtml(group.hint || "")}</span>
-        </div>
-        ${queryButton}
-      </div>
-      <div class="identity-status-grid">
-        ${group.modules.map((spec) => renderIdentityStatusCard(spec, byKey.get(spec.key))).join("")}
-      </div>
-    </section>
-  `;
-}
-
-function renderIdentityStatusCard(spec, item) {
-  const view = identityModuleView(spec, item);
-  const actionButtons = identityStatusActions(spec)
-    .map((skill) => {
-      const disabled = !skillIsUnlocked(skill);
-      return `
-        <button type="button" data-status-skill="${escapeAttr(skill.key)}" ${disabled ? "disabled" : ""}>
-          ${escapeHtml(skill.label || skill.command || "填入")}
-        </button>
-      `;
-    })
-    .join("");
-  const excerpt = String(item?.state?.last_text_excerpt || "").trim();
-  return `
-    <article class="identity-status-card ${escapeAttr(view.cls)}" data-status-module="${escapeAttr(spec.key)}">
-      <div class="identity-status-card-head">
-        <span class="identity-status-icon">${escapeHtml(view.icon)}</span>
-        <strong>${escapeHtml(view.label)}</strong>
-        <em>${escapeHtml(view.status)}</em>
-      </div>
-      <div class="identity-status-card-main">
-        <span class="identity-status-time" ${view.nextAt ? `data-status-timer="1" data-next-at="${view.nextAt}" data-start-at="${view.startAt}"` : ""}>
-          ${escapeHtml(view.time)}
-        </span>
-        <span class="identity-status-bar"><span style="width:${view.pct.toFixed(1)}%"></span></span>
-      </div>
-      ${excerpt ? `<p>${escapeHtml(clipGraphemes(excerpt.replace(/\s+/g, " "), 82))}</p>` : '<p class="muted">暂无最近文案。</p>'}
-      ${actionButtons ? `<div class="identity-status-actions">${actionButtons}</div>` : ""}
-    </article>
-  `;
-}
-
-function identityModuleView(spec, item) {
-  const skill = spec.skill ? skillByKey(spec.skill) : null;
-  const now = Date.now() / 1000;
-  const summary = item?.summary || {};
-  const st = item?.state || {};
-  const label = item?.label || skill?.label || spec.label || spec.key;
-  const icon = skill?.icon || spec.icon || "•";
-  const nextAt = Number(summary.next_at || st.cooldown_until || 0) || 0;
-  const startAt = moduleStartTs(st);
-  const lastStatus = String(summary.status || st.last_status || "");
-  if (!item) {
-    return { label, icon, cls: "unknown", status: "未观测", time: "未知", nextAt: 0, startAt: 0, pct: 0 };
-  }
-  if (String(summary.phase || st.phase || "") === "running") {
-    if (nextAt > now) {
-      const remaining = nextAt - now;
-      return moduleTimingView({ label, icon, cls: "running", status: "进行中", nextAt, startAt, remaining });
-    }
-    return { label, icon, cls: "ready", status: "待结算", time: "已到点", nextAt: 0, startAt, pct: 100 };
-  }
-  if (!nextAt || nextAt <= now || summary.ready === true) {
-    const status = lastStatus === "failed" ? "上次失败" : lastStatus === "cooldown" ? "已过 CD" : "已就绪";
-    const cls = lastStatus === "failed" ? "warn" : "ready";
-    return { label, icon, cls, status, time: summary.text || "已就绪", nextAt: 0, startAt, pct: 100 };
-  }
-  return moduleTimingView({ label, icon, cls: "cooling", status: lastStatus === "cooldown" ? "冷却中" : "等待中", nextAt, startAt, remaining: nextAt - now });
-}
-
-function moduleTimingView({ label, icon, cls, status, nextAt, startAt, remaining }) {
-  const total = Math.max(1, nextAt - startAt);
-  const pct = Math.min(100, Math.max(0, ((total - remaining) / total) * 100));
+function identityStatusDeps() {
   return {
-    label,
-    icon,
-    cls,
-    status,
-    time: `剩 ${fmtCountdown(remaining)}`,
-    nextAt,
-    startAt,
-    pct,
+    state,
+    modalRoot,
+    identityById,
+    activeIdentityPatches,
+    cockpitMetric,
+    auditTimeLabel,
+    formatFieldValue,
+    skillIsUnlocked,
+    moduleStartTs,
+    fmtCountdown,
+    loadIdentityModuleStates,
+    loadIdentityPatches,
+    renderGameCockpit,
+    renderSkillViews,
+    fillSkillIntoComposer,
+    findOrFetchMessage,
+    jumpToMessage,
+    showSkillToast,
   };
 }
 
+function identityStatusView() {
+  return window.MiniwebViews.identityStatus;
+}
+
+const IDENTITY_STATUS_GROUPS = identityStatusView().IDENTITY_STATUS_GROUPS;
+
+function openIdentityStatusModal() {
+  return identityStatusView().openIdentityStatusModal(identityStatusDeps());
+}
+
+function renderIdentityStatusBody() {
+  return identityStatusView().renderIdentityStatusBody(identityStatusDeps());
+}
+
+function identityProfileSourceRows(patches) {
+  return identityStatusView().identityProfileSourceRows(patches);
+}
+
+function renderIdentityProfileSources(rows) {
+  return identityStatusView().renderIdentityProfileSources(identityStatusDeps(), rows);
+}
+
+function renderIdentityStatusGroup(group, byKey) {
+  return identityStatusView().renderIdentityStatusGroup(identityStatusDeps(), group, byKey);
+}
+
+function renderIdentityStatusCard(spec, item) {
+  return identityStatusView().renderIdentityStatusCard(identityStatusDeps(), spec, item);
+}
+
+function identityModuleView(spec, item) {
+  return identityStatusView().identityModuleView(identityStatusDeps(), spec, item);
+}
+
+function moduleTimingView(args) {
+  return identityStatusView().moduleTimingView(identityStatusDeps(), args);
+}
+
 function identityStatusActions(spec) {
-  const keys = [spec.skill, ...(spec.extraSkills || []), spec.query].filter(Boolean);
-  const seen = new Set();
-  return keys
-    .map((key) => skillByKey(key))
-    .filter(Boolean)
-    .filter((skill) => {
-      if (skill.reply_mode === "required" || !String(skill.command || "").trim()) return false;
-      if (seen.has(skill.key)) return false;
-      seen.add(skill.key);
-      return true;
-    });
+  return identityStatusView().identityStatusActions(identityStatusDeps(), spec);
 }
 
 function skillByKey(skillKey) {
-  if (!skillKey) return null;
-  return (state.skills || []).find((skill) => skill.key === skillKey) || null;
+  return identityStatusView().skillByKey(identityStatusDeps(), skillKey);
 }
 
 function bindIdentityStatusModal(dialog) {
-  bindIdentityStatusBody(dialog);
-  dialog.querySelector('[data-identity-status-action="refresh"]')?.addEventListener("click", async (event) => {
-    const button = event.currentTarget;
-    const old = button.textContent;
-    button.disabled = true;
-    button.textContent = "刷新中...";
-    try {
-      await Promise.all([
-        loadIdentityModuleStates(),
-        loadIdentityPatches({ reset: true }),
-      ]);
-      const body = dialog.querySelector("#identityStatusBody");
-      if (body) body.innerHTML = renderIdentityStatusBody();
-      bindIdentityStatusBody(dialog);
-      renderGameCockpit();
-      renderSkillViews();
-    } catch (error) {
-      showSkillToast(`刷新失败: ${error.message || error}`, "err");
-    } finally {
-      button.disabled = false;
-      button.textContent = old || "刷新状态";
-    }
-  });
+  return identityStatusView().bindIdentityStatusModal(identityStatusDeps(), dialog);
 }
 
 function bindIdentityStatusBody(dialog) {
-  dialog.querySelectorAll("[data-status-skill]").forEach((button) => {
-    button.addEventListener("click", () => fillSkillIntoComposer(button.dataset.statusSkill, button));
-  });
-  dialog.querySelectorAll("[data-identity-source-jump]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const id = button.dataset.identitySourceJump || "";
-      if (!id) return;
-      const message = await findOrFetchMessage(id);
-      if (message) {
-        closeModal();
-        jumpToMessage(message);
-      }
-    });
-  });
+  return identityStatusView().bindIdentityStatusBody(identityStatusDeps(), dialog);
 }
 
 function directReplyContextFromMessage(message) {
@@ -4195,15 +3932,7 @@ function overviewModuleRows(activeId) {
 }
 
 function identityStatusFlatSpecs() {
-  return IDENTITY_STATUS_GROUPS.flatMap((group, groupIndex) => (
-    group.modules.map((spec, moduleIndex) => ({
-      ...spec,
-      __groupKey: group.key,
-      __groupTitle: group.title,
-      __groupQuery: group.query || "",
-      __rank: groupIndex * 100 + moduleIndex,
-    }))
-  ));
+  return identityStatusView().identityStatusFlatSpecs();
 }
 
 function renderOverviewModuleRow(row) {
@@ -6784,34 +6513,7 @@ function tickIdentityModuleChips() {
 }
 
 function tickIdentityStatusCards() {
-  const timers = document.querySelectorAll('[data-status-timer="1"]');
-  if (!timers.length) return;
-  const nowSec = Date.now() / 1000;
-  let shouldRerender = false;
-  timers.forEach((timer) => {
-    const nextAt = Number(timer.dataset.nextAt || 0);
-    const startAt = Number(timer.dataset.startAt || 0);
-    const remaining = nextAt - nowSec;
-    if (remaining <= 0) {
-      shouldRerender = true;
-      return;
-    }
-    timer.textContent = `剩 ${fmtCountdown(remaining)}`;
-    const card = timer.closest(".identity-status-card");
-    const fill = card?.querySelector(".identity-status-bar span");
-    if (fill) {
-      const total = Math.max(1, nextAt - startAt);
-      const pct = Math.min(100, Math.max(0, ((total - remaining) / total) * 100));
-      fill.style.width = `${pct.toFixed(1)}%`;
-    }
-  });
-  if (shouldRerender) {
-    const body = modalRoot?.querySelector("#identityStatusBody");
-    if (body) {
-      body.innerHTML = renderIdentityStatusBody();
-      bindIdentityStatusBody(modalRoot);
-    }
-  }
+  return identityStatusView().tickIdentityStatusCards(identityStatusDeps());
 }
 
 function tickCockpitModuleChips() {

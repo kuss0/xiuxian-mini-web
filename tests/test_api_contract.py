@@ -142,6 +142,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "playbook cards live in `web/static/views/dungeon_playbook.js`" in work_plan
     assert "status modal shell and refresh flow live in" in work_plan
     assert "`web/static/views/dungeon_status.js`" in work_plan
+    assert "identity status modal and shared module-status helpers live in `web/static/views/identity_status.js`" in normalized_work_plan
     assert "resource stats modal and coverage renderer live in `web/static/views/resource_stats.js`" in normalized_work_plan
     assert "world report modal lives in `web/static/views/world_report.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
@@ -229,6 +230,46 @@ def test_world_report_view_module_keeps_app_wrappers_and_read_only_action_contra
         assert fragment in app_js
     for fragment in required_module_fragments:
         assert fragment in world_report_js
+
+
+def test_identity_status_view_module_keeps_shared_helpers_and_composer_fill_contract():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    identity_status_js = (root / "web" / "static" / "views" / "identity_status.js").read_text(encoding="utf-8")
+
+    required_app_fragments = [
+        "function identityStatusDeps()",
+        "const IDENTITY_STATUS_GROUPS = identityStatusView().IDENTITY_STATUS_GROUPS",
+        "function openIdentityStatusModal()",
+        "return identityStatusView().openIdentityStatusModal(identityStatusDeps())",
+        "function identityModuleView(spec, item)",
+        "return identityStatusView().identityModuleView(identityStatusDeps(), spec, item)",
+        "function identityStatusFlatSpecs()",
+        "return identityStatusView().identityStatusFlatSpecs()",
+        "function tickIdentityStatusCards()",
+        "return identityStatusView().tickIdentityStatusCards(identityStatusDeps())",
+        "fillSkillIntoComposer,",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: identity status modal and shared module helpers",
+        "const IDENTITY_STATUS_GROUPS = [",
+        "function openIdentityStatusModal(deps = {})",
+        "function renderIdentityStatusBody(deps = {})",
+        "function identityModuleView(deps = {}, spec, item)",
+        "function identityStatusFlatSpecs()",
+        "function tickIdentityStatusCards(deps = {})",
+        "window.MiniwebViews.identityStatus = {",
+        "IDENTITY_STATUS_GROUPS,",
+        "openIdentityStatusModal,",
+        "identityModuleView,",
+        "identityStatusFlatSpecs,",
+        "tickIdentityStatusCards,",
+        "deps.fillSkillIntoComposer?.(button.dataset.statusSkill, button)",
+    ]
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in identity_status_js
 
 
 def test_frontend_identity_state_refresh_is_first_class():
