@@ -714,6 +714,7 @@ async function openLeaderIntelModal() {
     findOrFetchMessage,
     formatChatTime,
     jumpToMessage,
+    loadLeaderMessages: () => fetchJson("/api/messages?channel=leader&limit=100"),
   });
 }
 

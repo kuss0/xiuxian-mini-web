@@ -152,6 +152,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "world event strip and manual event actions live in `web/static/views/world_event.js`" in normalized_work_plan
     assert "live situation board and signal snapshot helpers live in `web/static/views/live_situation.js`" in normalized_work_plan
     assert "game cockpit, primary strip, and action dock live in `web/static/views/game_cockpit.js`" in normalized_work_plan
+    assert "leader intelligence modal lives in `web/static/views/leader_intel.js` with leader-message loading injected from `web/static/app.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
     assert "global health/setup banner lives in `web/static/views/global_banner.js`" in normalized_work_plan
     assert "chat message stream, channel chips, quick filters, scroll anchoring, and quick actions live in `web/static/views/chat_stream.js`" in normalized_work_plan
@@ -180,7 +181,9 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "Global health/setup banner is isolated in `web/static/views/global_banner.js`" in audit
     assert "official schedule rail and modal are isolated in `web/static/views/schedule.js`" in audit
     assert "chat message stream, channel chips, quick filters, scroll anchoring, and quick-action renderer are isolated in `web/static/views/chat_stream.js`" in audit
+    assert "leader intelligence modal is isolated in `web/static/views/leader_intel.js`, with leader-message loading injected from `web/static/app.js`" in audit
     assert "Chat stream quick actions fill the composer only" in audit
+    assert "leader-intel module is read-only and does not create direct API requests" in audit
     assert "direct composer, emoji palette, and quick command hotbar are isolated in `web/static/views/direct_composer.js`" in audit
     assert "Direct composer sends only through the injected explicit composer-submit callback" in audit
     assert "Detail rich cards and field formatting are isolated in `web/static/views/detail_cards.js`" in audit
@@ -1431,6 +1434,51 @@ def test_detail_cards_view_module_keeps_wrappers_and_read_only_renderer_contract
         assert fragment not in app_js
     for fragment in forbidden_module_fragments:
         assert fragment not in detail_cards_js
+
+
+def test_leader_intel_view_module_keeps_message_api_in_app():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    leader_intel_js = (
+        root / "web" / "static" / "views" / "leader_intel.js"
+    ).read_text(encoding="utf-8")
+    index_html = (root / "web" / "index.html").read_text(encoding="utf-8")
+    scripts = re.findall(r'<script src="/static/([^"]+)"></script>', index_html)
+
+    required_app_fragments = [
+        "async function openLeaderIntelModal()",
+        "window.MiniwebViews.leaderIntel.openLeaderIntelModal({",
+        'loadLeaderMessages: () => fetchJson("/api/messages?channel=leader&limit=100")',
+        "function renderLeaderIntelCard(message)",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: leader intelligence modal",
+        "async function openLeaderIntelModal({",
+        "loadLeaderMessages,",
+        "leaderIntel missing dependency: loadLeaderMessages",
+        "const payload = await loadLeaderMessages()",
+        "function renderLeaderIntelCard(message, { displaySource, formatChatTime } = {})",
+        "window.MiniwebViews.leaderIntel = {",
+        "openLeaderIntelModal,",
+        "renderLeaderIntelCard,",
+    ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "fetchJson(",
+        "apiFetch(",
+        "window.MiniwebApi",
+        '"/api/messages',
+        '"/api/skills/send"',
+        '"/api/outbox/drafts"',
+    ]
+
+    assert scripts.index("views/leader_intel.js") < scripts.index("app.js")
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in leader_intel_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in leader_intel_js
 
 
 def test_detail_panel_view_module_keeps_wrappers_and_manual_action_contract():

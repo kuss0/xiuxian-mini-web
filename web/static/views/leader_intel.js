@@ -2,7 +2,6 @@
 (function () {
   "use strict";
 
-  const { fetchJson } = window.MiniwebApi;
   const { closeModal, openModal } = window.MiniwebModal;
   const { clipGraphemes, escapeAttr, escapeHtml, formatNumber } = window.MiniwebFormat;
 
@@ -12,6 +11,7 @@
     findOrFetchMessage,
     formatChatTime,
     jumpToMessage,
+    loadLeaderMessages,
   }) {
     const dialog = openModal({
       title: "情报频道",
@@ -50,7 +50,10 @@
       local.loading = true;
       renderLeaderIntelModal(dialog, local, deps);
       try {
-        const payload = await fetchJson("/api/messages?channel=leader&limit=100");
+        if (typeof loadLeaderMessages !== "function") {
+          throw new Error("leaderIntel missing dependency: loadLeaderMessages");
+        }
+        const payload = await loadLeaderMessages();
         local.items = payload.messages || [];
       } catch (error) {
         local.items = [];
