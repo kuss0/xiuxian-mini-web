@@ -179,6 +179,15 @@ class SampleStore:
             "login_account_id": "",
             "listener_status": "stopped",
             "listener_message": "",
+            "automation_enabled": False,
+            "automation_dry_run": True,
+            "automation_allowed_skill_keys": ["storage_bag", "battle_power"],
+            "automation_allowed_identity_ids": [],
+            "automation_max_per_minute": 6,
+            "automation_sender_adapter": "user_session",
+            "automation_worker_enabled": False,
+            "automation_worker_interval_seconds": 15,
+            "automation_worker_batch_size": 3,
         }
 
     def list_state_patches(self, scope: str = "", send_as_id: int = 0) -> list[dict]:

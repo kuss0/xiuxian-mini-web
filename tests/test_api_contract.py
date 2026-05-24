@@ -157,8 +157,11 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "detail rich cards and field formatting live in `web/static/views/detail_cards.js`" in normalized_work_plan
     assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
     assert "Outbox automation guard logic lives in `backend/outbox/automation.py`" in normalized_work_plan
+    assert "sender adapters live in `backend/outbox/adapters.py`" in normalized_work_plan
+    assert "optional queue worker lives in `backend/outbox/worker.py`" in normalized_work_plan
     assert "/api/outbox/auto-plan" in normalized_work_plan
     assert "/api/outbox/auto-dispatch" in normalized_work_plan
+    assert "/api/outbox/auto-queue" in normalized_work_plan
 
     assert "/api/dungeon-status" in audit
     assert "/api/dungeons/status" not in audit
@@ -177,6 +180,9 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "## Outbox Automation" in audit
     assert "Automation is disabled and dry-run by default" in audit
     assert "Unknown commands, empty skill allowlists, non-allowlisted skills" in audit
+    assert "unsupported adapters" in audit
+    assert "`backend/outbox/adapters.py` owns sender adapter dispatch" in audit
+    assert "`backend/outbox/worker.py` consumes only `auto_pending` drafts" in audit
 
 
 def test_resource_stats_view_module_keeps_app_wrappers_and_health_renderer_contract():
@@ -2340,6 +2346,10 @@ def test_sqlite_settings_roundtrip(tmp_path):
     assert store.get_settings()["automation_enabled"] is False
     assert store.get_settings()["automation_dry_run"] is True
     assert "storage_bag" in store.get_settings()["automation_allowed_skill_keys"]
+    assert store.get_settings()["automation_sender_adapter"] == "user_session"
+    assert store.get_settings()["automation_worker_enabled"] is False
+    assert store.get_settings()["automation_worker_interval_seconds"] == 15
+    assert store.get_settings()["automation_worker_batch_size"] == 3
 
     saved = store.save_settings(
         {
@@ -2353,6 +2363,10 @@ def test_sqlite_settings_roundtrip(tmp_path):
             "automation_allowed_skill_keys": "storage_bag\nbattle_power",
             "automation_allowed_identity_ids": "123\nbad\n456",
             "automation_max_per_minute": "99",
+            "automation_sender_adapter": "ayugram_ipc",
+            "automation_worker_enabled": True,
+            "automation_worker_interval_seconds": "999",
+            "automation_worker_batch_size": "99",
         }
     )
 
@@ -2364,6 +2378,10 @@ def test_sqlite_settings_roundtrip(tmp_path):
     assert saved["automation_allowed_skill_keys"] == ["battle_power", "storage_bag"]
     assert saved["automation_allowed_identity_ids"] == [123, 456]
     assert saved["automation_max_per_minute"] == 60
+    assert saved["automation_sender_adapter"] == "ayugram_ipc"
+    assert saved["automation_worker_enabled"] is True
+    assert saved["automation_worker_interval_seconds"] == 300
+    assert saved["automation_worker_batch_size"] == 20
     assert -1002049298748 in saved["leader_sender_ids"]
     assert "@iosdo7" in saved["leader_source_names"]
     assert SQLiteStore(tmp_path / "miniweb.db").get_settings()["listen_enabled"] is True
@@ -3903,6 +3921,71 @@ def test_outbox_auto_plan_rejects_non_allowlisted_or_unknown_commands(tmp_path):
     assert dungeon["automation"]["manual_required"] is True
     assert chat["automation"]["reason"] == "unknown_skill"
     assert chat["automation"]["manual_required"] is True
+
+
+def test_outbox_auto_plan_blocks_unsupported_sender_adapter(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    identity_id = _seed_automation_identity(server)
+    store.save_settings({
+        "automation_enabled": True,
+        "automation_dry_run": False,
+        "automation_allowed_skill_keys": ["storage_bag"],
+        "automation_allowed_identity_ids": [identity_id],
+        "automation_sender_adapter": "ayugram_ipc",
+    })
+
+    result = server.outbox_auto_plan_payload(
+        {"command": ".储物袋", "identity_id": identity_id, "source_message_id": "tg:-1001:5"}
+    )
+
+    assert result["ok"] is True
+    assert result["automation"]["can_auto_dispatch"] is False
+    assert result["automation"]["manual_required"] is True
+    assert result["automation"]["reason"] == "adapter_not_supported"
+    assert result["automation"]["adapter"] == "ayugram_ipc"
+
+
+def test_outbox_auto_queue_worker_consumes_pending_draft_through_dispatch(tmp_path, monkeypatch):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    identity_id = _seed_automation_identity(server)
+    store.save_settings({
+        "automation_enabled": True,
+        "automation_dry_run": False,
+        "automation_allowed_skill_keys": ["storage_bag"],
+        "automation_allowed_identity_ids": [identity_id],
+    })
+    captured: list[dict] = []
+
+    def fake_send(payload):
+        captured.append(dict(payload))
+        return {"ok": True, "sent_msg_id": 5252, "command": payload["command_override"]}, {}
+
+    monkeypatch.setattr(server, "_send_skill_command", fake_send)
+
+    queued = server.outbox_auto_queue_payload(
+        {"command": ".储物袋", "identity_id": identity_id, "source_message_id": "tg:-1001:6"}
+    )
+    store.save_settings({
+        **store.get_settings(),
+        "automation_worker_enabled": True,
+    })
+    tick = server.outbox_automation_tick_payload({})
+
+    assert queued["ok"] is True
+    assert queued["draft"]["status"] == "auto_pending"
+    assert queued["worker"]["pending_count"] == 1
+    assert tick["ok"] is True
+    assert tick["result"]["processed"] == 1
+    assert tick["result"]["items"][0]["status"] == "sent"
+    assert captured[0]["skill_key"] == "storage_bag"
+    drafts = server.outbox_drafts_payload("all")["drafts"]
+    assert drafts[0]["status"] == "sent"
+    logs = server.outbox_logs_payload(kind="auto_send", identity_id=identity_id)["logs"]
+    assert logs[0]["status"] == "success"
+    assert logs[0]["tg_msg_id"] == 5252
+    assert server.outbox_logs_payload(kind="manual_send")["logs"] == []
 
 
 def test_outbox_draft_roundtrip_preserves_reply_context(tmp_path):

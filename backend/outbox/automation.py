@@ -82,9 +82,11 @@ class OutboxAutomation:
         *,
         settings: dict,
         source_message_id: str = "",
+        supported_adapters: set[str] | list[str] | tuple[str, ...] | None = None,
     ) -> AutomationDecision:
         skill = infer_skill_from_command(self._registry, plan.command)
         skill_key = skill.key if skill is not None else ""
+        adapter = str(settings.get("automation_sender_adapter") or "user_session").strip() or "user_session"
         idempotency_key = automation_idempotency_key(
             plan,
             skill_key=skill_key,
@@ -102,6 +104,7 @@ class OutboxAutomation:
                 reason=reason,
                 message=message,
                 idempotency_key=idempotency_key,
+                adapter=adapter,
                 max_per_minute=max_per_minute,
             )
 
@@ -116,6 +119,10 @@ class OutboxAutomation:
             return blocked("missing_reply", "该命令必须回复具体 bot 消息,缺少 reply_to_msg_id")
         if not bool(settings.get("automation_enabled")):
             return blocked("automation_disabled", "自动发送未启用")
+
+        supported = {str(item).strip() for item in supported_adapters or () if str(item or "").strip()}
+        if supported and adapter not in supported:
+            return blocked("adapter_not_supported", f"发送适配器 {adapter} 未接入,必须人工确认")
 
         allowed_skills = _settings_str_set(settings, "automation_allowed_skill_keys")
         if not allowed_skills:
@@ -141,6 +148,7 @@ class OutboxAutomation:
                 reason="rate_limited",
                 message=f"自动发送限速:最近 60 秒已成功 {recent_count} 条",
                 idempotency_key=idempotency_key,
+                adapter=adapter,
                 max_per_minute=max_per_minute,
                 recent_success_count=recent_count,
             )
@@ -153,6 +161,7 @@ class OutboxAutomation:
             reason="dry_run" if dry_run else "allowed",
             message="自动发送演练通过,不会真实发送" if dry_run else "策略守卫已放行,可交给发送适配器",
             idempotency_key=idempotency_key,
+            adapter=adapter,
             max_per_minute=max_per_minute,
             recent_success_count=recent_count,
         )

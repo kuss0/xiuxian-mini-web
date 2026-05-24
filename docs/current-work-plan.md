@@ -35,8 +35,9 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      and manual fallback.
    - Automatic refresh reduces manual refresh pressure without removing the
      manual fallback.
-   - Outbox automation uses a guarded dry-run-first flow before any user-session
-     sender adapter can dispatch.
+   - Outbox automation uses a guarded dry-run-first flow before any sender
+     adapter can dispatch; the optional `auto_pending` worker consumes only
+     queued outbox drafts through the same policy guard.
    - Official schedule creation respects the observed 100 scheduled-message
      per-identity boundary and refuses additional automation with a manual
      handling notice.
@@ -48,9 +49,11 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      `web/static/views/schedule.js`; the resource stats modal and coverage
      renderer live in `web/static/views/resource_stats.js`; identity state
      refresh is part of the normal identity refresh path. Outbox automation
-     guard logic lives in `backend/outbox/automation.py`; the send-plan panel in
-     `web/static/app.js` calls `/api/outbox/auto-plan` and
-     `/api/outbox/auto-dispatch` for guarded dry-run/dispatch checks.
+     guard logic lives in `backend/outbox/automation.py`; sender adapters live
+     in `backend/outbox/adapters.py`; the optional queue worker lives in
+     `backend/outbox/worker.py`. The send-plan panel in `web/static/app.js`
+     calls `/api/outbox/auto-plan`, `/api/outbox/auto-dispatch`, and
+     `/api/outbox/auto-queue` for guarded dry-run/dispatch/queue checks.
 
 4. Tool center cleanup
    - Common workflows remain on the main page.

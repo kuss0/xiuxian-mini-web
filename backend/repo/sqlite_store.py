@@ -2297,6 +2297,10 @@ class SQLiteStore:
             ],
             "automation_allowed_identity_ids": [],
             "automation_max_per_minute": 6,
+            "automation_sender_adapter": "user_session",
+            "automation_worker_enabled": False,
+            "automation_worker_interval_seconds": 15,
+            "automation_worker_batch_size": 3,
         }
         with self._connect() as conn:
             rows = conn.execute("SELECT key, value_json FROM settings").fetchall()
