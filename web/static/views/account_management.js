@@ -240,6 +240,53 @@
     return "会话";
   }
 
+  function accountManagementState(deps = {}) {
+    return deps.state || window.MiniwebState?.state || {};
+  }
+
+  function loggedInAccounts(deps = {}) {
+    const state = accountManagementState(deps);
+    return (state.accounts || []).filter((account) => (account.login_status || "") === "done");
+  }
+
+  function renderCurrentAccountLine(deps = {}) {
+    const loggedIn = loggedInAccounts(deps);
+    if (loggedIn.length === 0) {
+      return "当前账号: 未登录";
+    }
+    if (loggedIn.length === 1) {
+      const account = loggedIn[0];
+      const id = account.account_id ? ` (${account.account_id})` : "";
+      return `当前账号: ${account.label || account.local_id}${id}`;
+    }
+    return `已登录 ${loggedIn.length} 个账号`;
+  }
+
+  function updateCurrentAccountLine(deps = {}, line) {
+    if (!line) return;
+    line.textContent = renderCurrentAccountLine(deps);
+  }
+
+  function updateAccountActionGuards(deps = {}, nodes = {}) {
+    const state = accountManagementState(deps);
+    const loggedInCount = loggedInAccounts(deps).length;
+    const anyCount = (state.accounts || []).length;
+    const addIdentityButton = nodes.addIdentityButton || null;
+    const logoutAccountButton = nodes.logoutAccountButton || null;
+    if (addIdentityButton) {
+      addIdentityButton.disabled = loggedInCount === 0;
+      addIdentityButton.title = loggedInCount === 0
+        ? "需要先登录至少一个 Telegram 账号才能新增身份"
+        : "选账号 → 拉可用 send_as 列表 → 勾选保存";
+    }
+    if (logoutAccountButton) {
+      logoutAccountButton.disabled = loggedInCount === 0;
+      logoutAccountButton.title = loggedInCount === 0
+        ? (anyCount === 0 ? "还没有任何 Telegram 账号" : "保存的账号都未登录,无可登出")
+        : "登出指定账号(只清 session,不删账号和身份)";
+    }
+  }
+
   function renderLogoutEmptyBody() {
     return `<section class="modal-section"><p class="modal-status-line info">当前没有已登录的账号,无需登出。</p></section>`;
   }
@@ -313,6 +360,9 @@
     setListenTargetStatus,
     populateListenTargetSelect,
     dialogKindLabel,
+    renderCurrentAccountLine,
+    updateCurrentAccountLine,
+    updateAccountActionGuards,
     renderLogoutEmptyBody,
     renderLogoutEmptyFooter,
     renderLogoutAccountModalBody,

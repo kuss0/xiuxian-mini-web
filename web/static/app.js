@@ -2765,36 +2765,14 @@ function tickSkillBarChips() {
 }
 
 function updateCurrentAccountLine() {
-  if (!currentAccountLine) return;
-  const loggedIn = state.accounts.filter((a) => (a.login_status || "") === "done");
-  if (loggedIn.length === 0) {
-    currentAccountLine.textContent = "当前账号: 未登录";
-    return;
-  }
-  if (loggedIn.length === 1) {
-    const a = loggedIn[0];
-    const id = a.account_id ? ` (${a.account_id})` : "";
-    currentAccountLine.textContent = `当前账号: ${a.label || a.local_id}${id}`;
-    return;
-  }
-  currentAccountLine.textContent = `已登录 ${loggedIn.length} 个账号`;
+  return accountManagementView().updateCurrentAccountLine(accountManagementDeps(), currentAccountLine);
 }
 
 function updateAccountActionGuards() {
-  const loggedInCount = state.accounts.filter((a) => (a.login_status || "") === "done").length;
-  const anyCount = state.accounts.length;
-  if (addIdentityButton) {
-    addIdentityButton.disabled = loggedInCount === 0;
-    addIdentityButton.title = loggedInCount === 0
-      ? "需要先登录至少一个 Telegram 账号才能新增身份"
-      : "选账号 → 拉可用 send_as 列表 → 勾选保存";
-  }
-  if (logoutAccountButton) {
-    logoutAccountButton.disabled = loggedInCount === 0;
-    logoutAccountButton.title = loggedInCount === 0
-      ? (anyCount === 0 ? "还没有任何 Telegram 账号" : "保存的账号都未登录,无可登出")
-      : "登出指定账号(只清 session,不删账号和身份)";
-  }
+  return accountManagementView().updateAccountActionGuards(accountManagementDeps(), {
+    addIdentityButton,
+    logoutAccountButton,
+  });
 }
 
 function openAddIdentityModal() {
@@ -3104,7 +3082,9 @@ function accountManagementView() {
 }
 
 function accountManagementDeps() {
-  return {};
+  return {
+    state,
+  };
 }
 
 function renderLogoutEmptyBody() {

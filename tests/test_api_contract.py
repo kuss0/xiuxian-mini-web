@@ -159,7 +159,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "detail rich cards and field formatting live in `web/static/views/detail_cards.js`" in normalized_work_plan
     assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
     assert "access settings modal, automation guard form, Telegram dialog/topic option renderers, and read-only Telegram account list live in `web/static/views/settings.js`" in normalized_work_plan
-    assert "Telegram account login/logout modals and listen-target renderers live in `web/static/views/account_management.js`" in normalized_work_plan
+    assert "Telegram account login/logout modals, listen-target renderers, account status line, and account action guards live in `web/static/views/account_management.js`" in normalized_work_plan
     assert "sidebar identity list, identity snapshot, identity module chips, add-identity modal body, and send_as row/result renderers live in `web/static/views/identity_management.js`" in normalized_work_plan
     assert "Outbox automation guard logic lives in `backend/outbox/automation.py`" in normalized_work_plan
     assert "sender adapters live in `backend/outbox/adapters.py`" in normalized_work_plan
@@ -185,7 +185,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "Detail cards are read-only renderers" in audit
     assert "message detail panel and manual action controls are isolated in `web/static/views/detail_panel.js`" in audit
     assert "Detail panel actions fill the composer or create manual plans/drafts only" in audit
-    assert "Account login/logout modals and listen-target renderers are isolated in `web/static/views/account_management.js`" in audit
+    assert "Account login/logout modals, listen-target renderers, account status line, and account action guards are isolated in `web/static/views/account_management.js`" in audit
     assert "keeps account save/login/dialog/topic/listener API orchestration" in audit
     assert "Sidebar identity list, identity snapshot, sidebar module chips, and add-identity modal renderers are isolated in `web/static/views/identity_management.js`" in audit
     assert "keeps Telegram account/send_as API binding, global timer orchestration, and event orchestration" in audit
@@ -1014,6 +1014,13 @@ def test_account_management_view_module_keeps_api_orchestration_in_app():
         "function accountManagementView()",
         "return window.MiniwebViews.accountManagement",
         "function accountManagementDeps()",
+        "state,",
+        "function updateCurrentAccountLine()",
+        "return accountManagementView().updateCurrentAccountLine(accountManagementDeps(), currentAccountLine)",
+        "function updateAccountActionGuards()",
+        "return accountManagementView().updateAccountActionGuards(accountManagementDeps(), {",
+        "addIdentityButton,",
+        "logoutAccountButton,",
         "function renderLogoutEmptyBody()",
         "function renderLogoutAccountModalBody(loggedIn, presetLocalId)",
         "function selectedLogoutAccountId(dialog)",
@@ -1052,6 +1059,11 @@ def test_account_management_view_module_keeps_api_orchestration_in_app():
         "function setListenTargetStatus(dialog, kind, text)",
         "function populateListenTargetSelect(select, items, currentValue, valueKey, labelFn)",
         "function dialogKindLabel(kind)",
+        "function accountManagementState(deps = {})",
+        "function loggedInAccounts(deps = {})",
+        "function renderCurrentAccountLine(deps = {})",
+        "function updateCurrentAccountLine(deps = {}, line)",
+        "function updateAccountActionGuards(deps = {}, nodes = {})",
         "function renderLogoutEmptyBody()",
         "function renderLogoutAccountModalBody(deps = {}, loggedInAccounts = [], presetLocalId = \"\")",
         "function renderLogoutAccountModalFooter()",
@@ -1065,6 +1077,9 @@ def test_account_management_view_module_keeps_api_orchestration_in_app():
         "updateLogoutBoundIdentities,",
         "setLogoutResult,",
         "populateListenTargetSelect,",
+        "renderCurrentAccountLine,",
+        "updateCurrentAccountLine,",
+        "updateAccountActionGuards,",
         'id="accountModalForm"',
         'data-listen-select="target_chat"',
         'data-listen-select="target_topic_id"',
@@ -1076,6 +1091,10 @@ def test_account_management_view_module_keeps_api_orchestration_in_app():
         "const renderInput = (name, value, placeholder",
         "const accountSummaryLine = acc.account_id",
         "const populateSelect = (select, items",
+        "currentAccountLine.textContent =",
+        "addIdentityButton.title = loggedInCount",
+        "logoutAccountButton.title = loggedInCount",
+        "const loggedInCount = state.accounts.filter((a) => (a.login_status || \"\") === \"done\").length",
         "const options = loggedIn",
         'select id="logoutAccountSelect">${options}</select>',
         "const boundLine = dialog.querySelector(\"#logoutBoundIdentities\")",

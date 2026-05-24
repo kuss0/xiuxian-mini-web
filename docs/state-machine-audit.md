@@ -66,7 +66,7 @@ do not prove success.
 | --- | --- |
 | State source | `TelegramListenerManager.status()`, account login/listener fields, and stored raw message continuity. |
 | Trigger | Account login/listener start/stop and message ingest update visible state. Health endpoints read current listener status and recent message continuity. |
-| Refresh path | `/api/health`, `/api/health/audit`, and the health modal expose listener state without SSH. Global health/setup banner is isolated in `web/static/views/global_banner.js`. Account login/logout modals and listen-target renderers are isolated in `web/static/views/account_management.js`, while `web/static/app.js` keeps account save/login/dialog/topic/listener API orchestration. |
+| Refresh path | `/api/health`, `/api/health/audit`, and the health modal expose listener state without SSH. Global health/setup banner is isolated in `web/static/views/global_banner.js`. Account login/logout modals, listen-target renderers, account status line, and account action guards are isolated in `web/static/views/account_management.js`, while `web/static/app.js` keeps account save/login/dialog/topic/listener API orchestration. |
 | Failure/manual fallback | If the listener is stopped, disconnected, or has obvious message gaps, the user must restart or backfill before trusting derived state. |
 | Current gap | Health can show symptoms, but it cannot prove Telegram upstream completeness without active backfill or scheduled history reconciliation. |
 | Next action | Keep health in the tool center and use it as a diagnostic surface, not as a gameplay action surface. |
