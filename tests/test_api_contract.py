@@ -138,6 +138,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "official schedule manual handling" in work_plan
     assert "details persist in the modal status line" in work_plan
     assert "inventory lives in `web/static/views/inventory.js`" in work_plan
+    assert "playbook cards live in `web/static/views/dungeon_playbook.js`" in work_plan
 
     assert "/api/dungeon-status" in audit
     assert "/api/dungeons/status" not in audit
@@ -276,12 +277,20 @@ def test_chat_viewport_layout_contract_keeps_composer_visible():
 def test_dungeon_playbook_panel_contract_is_read_only_until_composer_send():
     root = Path(__file__).resolve().parents[1]
     app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    playbook_js = (root / "web" / "static" / "views" / "dungeon_playbook.js").read_text(encoding="utf-8")
     css = (root / "web" / "static" / "styles.css").read_text(encoding="utf-8")
 
     required_app_fragments = [
         'id="dungeonPlaybookPanels"',
         "/api/cangkun-guide",
         "/api/xutian-oracle-guide",
+        "window.MiniwebViews.dungeonPlaybook.renderDungeonPlaybookPanels",
+        "window.MiniwebViews.dungeonPlaybook.bindDungeonPlaybookPanels",
+        "fillDirectSendComposer(command",
+        "openXutianOracleGuideModal",
+        "openCangkunGuideModal",
+    ]
+    required_playbook_fragments = [
         "function renderDungeonPlaybookPanels",
         "function renderDungeonPlaybookCard",
         "function bindDungeonPlaybookPanels",
@@ -298,17 +307,21 @@ def test_dungeon_playbook_panel_contract_is_read_only_until_composer_send():
         "避坑反例",
         "113/五幕 3",
         "默认 ${guide?.default_route || \"1 -> 1 -> 2\"}",
-        "fillDirectSendComposer(command",
-        "openXutianOracleGuideModal",
-        "openCangkunGuideModal",
+        "window.MiniwebViews.dungeonPlaybook",
     ]
     for fragment in required_app_fragments:
         assert fragment in app_js
+    for fragment in required_playbook_fragments:
+        assert fragment in playbook_js
 
-    handler_start = app_js.index("function bindDungeonPlaybookPanels(root)")
-    handler_end = app_js.index("function renderCurrentDungeonPanel", handler_start)
-    playbook_handler = app_js[handler_start:handler_end]
-    assert 'statusText: "已填入副本命令，请确认后发送。"' in playbook_handler
+    handler_start = playbook_js.index("function bindDungeonPlaybookPanels(root")
+    handler_end = playbook_js.index("window.MiniwebViews = window.MiniwebViews || {}", handler_start)
+    playbook_handler = playbook_js[handler_start:handler_end]
+    app_wrapper_start = app_js.index("function bindDungeonPlaybookPanels(root)")
+    app_wrapper_end = app_js.index("function renderCurrentDungeonPanel", app_wrapper_start)
+    app_wrapper = app_js[app_wrapper_start:app_wrapper_end]
+    assert 'statusText: "已填入副本命令，请确认后发送。"' in app_wrapper
+    assert "deps.fillCommand?.(command)" in playbook_handler
     assert "postJson(" not in playbook_handler
     assert "sendDirectComposerMessage" not in playbook_handler
     assert '"/api/skills/send"' not in playbook_handler

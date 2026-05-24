@@ -68,9 +68,10 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
    - New fixes land in final contract files or small modules, not as unrelated
      overrides across multiple sections.
    - Current state: chat viewport stability lives in `web/static/chat-layout.css`;
-     inventory lives in `web/static/views/inventory.js`; dungeon playbook UI
-     still shares `web/static/app.js` and should be split only when a coherent
-     module boundary is being edited.
+     inventory lives in `web/static/views/inventory.js`; dungeon Xutian/Cangkun
+     playbook cards live in `web/static/views/dungeon_playbook.js`; the broader
+     dungeon status modal still uses `web/static/app.js` as the orchestration
+     layer.
 
 ## Remaining Work
 
