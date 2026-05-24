@@ -157,6 +157,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "direct composer, emoji palette, and quick command hotbar live in `web/static/views/direct_composer.js`" in normalized_work_plan
     assert "detail rich cards and field formatting live in `web/static/views/detail_cards.js`" in normalized_work_plan
     assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
+    assert "access settings modal and automation guard form live in `web/static/views/settings.js`" in normalized_work_plan
     assert "Outbox automation guard logic lives in `backend/outbox/automation.py`" in normalized_work_plan
     assert "sender adapters live in `backend/outbox/adapters.py`" in normalized_work_plan
     assert "optional queue worker lives in `backend/outbox/worker.py`" in normalized_work_plan
@@ -187,7 +188,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "Unknown commands, empty skill allowlists, non-allowlisted skills" in audit
     assert "unsupported adapters" in audit
     assert "`web/static/views/outbox.js` renders outbox drafts, send plans, backend automation decisions" in audit
-    assert "`web/static/app.js` keeps API wrappers for `/api/outbox/auto-plan`, `/api/outbox/auto-dispatch`, and `/api/outbox/auto-queue`" in audit
+    assert "access settings modal and automation guard form are isolated in `web/static/views/settings.js`" in audit
+    assert "`web/static/app.js` keeps `/api/settings`, login, notification-test, and outbox automation API wrappers" in audit
     assert "`backend/outbox/adapters.py` owns sender adapter dispatch" in audit
     assert "`backend/outbox/worker.py` consumes only `auto_pending` drafts" in audit
 
@@ -837,6 +839,81 @@ def test_direct_composer_view_module_keeps_wrappers_and_explicit_send_contract()
         assert fragment in direct_composer_js
     for fragment in forbidden_module_fragments:
         assert fragment not in direct_composer_js
+
+
+def test_settings_view_module_keeps_wrappers_and_api_boundary_contract():
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "web" / "index.html").read_text(encoding="utf-8")
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    settings_js = (root / "web" / "static" / "views" / "settings.js").read_text(encoding="utf-8")
+    scripts = re.findall(r'<script src="/static/([^"?]+)"', html)
+
+    required_app_fragments = [
+        "function settingsView()",
+        "return window.MiniwebViews.settings",
+        "function settingsDeps()",
+        "function renderSettings(settings)",
+        "return settingsView().renderSettings(settingsDeps(), settings)",
+        "async function saveCurrentSettingsFromForm(form)",
+        "return saveSettings(settingsView().settingsPayloadFromForm(form))",
+        'cancelLogin: () => postJson("/api/login/cancel", {})',
+        'loadNotifyCardTitles: () => fetchJson("/api/notify/card-titles")',
+        "loadTelegramDialogs,",
+        "loadTelegramTopics,",
+        "renderAccountList,",
+        "renderDialogOptions,",
+        "renderTopicOptions,",
+        "saveCurrentSettingsFromForm,",
+        'sendNotifyTest: () => postJson("/api/notify/test", {})',
+        'startLogin: () => postJson("/api/login/start", {})',
+        'verifyLogin: (payload) => postJson("/api/login/verify", payload)',
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: access settings modal and automation guard form",
+        "function settingsState(deps = {})",
+        "function renderSettings(deps = {}, settings = {})",
+        "function renderSettingsBody(deps = {}, state = {}, settings = {})",
+        "function bindSettingsModal(deps = {}, dialog, settings = {})",
+        "function settingsPayloadFromForm(form)",
+        "function hydrateNotifySection(deps = {}, settings = {}, root = document)",
+        "deps.saveCurrentSettingsFromForm?.(event.currentTarget)",
+        "deps.loadTelegramDialogs?.()",
+        "deps.loadTelegramTopics?.(targetChat)",
+        "deps.startLogin?.()",
+        "deps.verifyLogin?.({",
+        "deps.cancelLogin?.()",
+        "deps.loadNotifyCardTitles?.()",
+        "deps.sendNotifyTest?.()",
+        "deps.bindAccountControls?.(root)",
+        "window.MiniwebViews.settings = {",
+        "renderSettings,",
+        "settingsPayloadFromForm,",
+        "hydrateNotifySection,",
+    ]
+    forbidden_app_fragments = [
+        "async function _hydrateNotifySection(",
+        "const botIds = (settings.game_bot_ids || []).join",
+        "const automationSkillKeys = (settings.automation_allowed_skill_keys || []).join",
+    ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "fetchJson(",
+        "apiFetch(",
+        '"/api/settings"',
+        '"/api/login/',
+        '"/api/notify/',
+        '"/api/skills/send"',
+    ]
+
+    assert scripts.index("views/settings.js") < scripts.index("app.js")
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in settings_js
+    for fragment in forbidden_app_fragments:
+        assert fragment not in app_js
+    for fragment in forbidden_module_fragments:
+        assert fragment not in settings_js
 
 
 def test_outbox_view_module_keeps_wrappers_and_api_boundary_contract():
