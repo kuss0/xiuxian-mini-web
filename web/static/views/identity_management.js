@@ -493,6 +493,196 @@
     rerenderSendAsList(deps, rootEl);
   }
 
+  function requireIdentityDep(deps, name) {
+    const fn = deps?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`identityManagement missing dependency: ${name}`);
+    }
+    return fn;
+  }
+
+  async function loadSendAsListIntoForm(deps = {}, rootEl, button) {
+    const state = identityManagementState(deps);
+    const accountSelect = rootEl?.querySelector('[data-send-as-field="account"]');
+    const targetChatInput = rootEl?.querySelector('[data-send-as-field="target_chat"]');
+    clearSendAsResult(rootEl);
+    const localId = accountSelect?.value || "";
+    if (!localId) {
+      setSendAsStatus(rootEl, "请先选账号");
+      return;
+    }
+    const targetChat = (targetChatInput?.value || "").trim();
+    button.disabled = true;
+    setSendAsStatus(rootEl, "正在拉取...");
+    state.sendAs = { peers: [], accountLocalId: localId, selected: new Set() };
+    rerenderSendAsList(deps, rootEl);
+    try {
+      const payload = await requireIdentityDep(deps, "loadSendAsPeers")(localId, targetChat);
+      if (!payload?.ok) {
+        throw new Error(payload?.error || "获取可用身份失败");
+      }
+      state.sendAs = {
+        peers: payload.peers || [],
+        accountLocalId: localId,
+        selected: new Set(),
+      };
+      selectFreshSendAsPeers(deps);
+      rerenderSendAsList(deps, rootEl);
+      renderSendAsLoadStatus(deps, rootEl);
+    } catch (error) {
+      setSendAsStatus(rootEl, error.message || "获取可用身份失败");
+      rerenderSendAsList(deps, rootEl);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function batchSaveSelectedSendAs(deps = {}, rootEl, button) {
+    const state = identityManagementState(deps);
+    const peers = state.sendAs?.peers || [];
+    const localId = state.sendAs?.accountLocalId;
+    const result = rootEl?.querySelector("[data-send-as-result]");
+    if (!localId) {
+      setSendAsStatus(rootEl, "请先获取可用身份");
+      return;
+    }
+    const targets = selectedSendAsTargets(deps);
+    if (!targets.length) {
+      setSendAsStatus(rootEl, "还没勾选任何未添加的身份");
+      return;
+    }
+    button.disabled = true;
+    const original = button.textContent;
+    button.textContent = `保存中... (${targets.length})`;
+    try {
+      const identities = targets.map((peer) => ({
+        send_as_id: peer.send_as_id,
+        account_local_id: localId,
+        label: peer.title || "",
+        username: peer.username || "",
+        enabled: true,
+      }));
+      const response = await requireIdentityDep(deps, "batchSaveIdentities")(identities);
+      await deps.loadIdentities?.();
+      renderBatchSaveResult(deps, result, response, peers);
+      state.sendAs.selected.clear();
+      rerenderSendAsList(deps, rootEl);
+      setSendAsStatus(rootEl, `本次保存:成功 ${response?.saved || 0} / 共 ${response?.total || targets.length}。已添加的会自动锁定。`);
+    } catch (error) {
+      renderSendAsError(deps, rootEl, error);
+    } finally {
+      button.disabled = false;
+      button.textContent = original;
+      updateSendAsBulkSummary(deps, rootEl);
+    }
+  }
+
+  async function addManualIdentity(deps = {}, dialog, accountSelect, manualBtn) {
+    const idInput = dialog?.querySelector("#manualSendAsId");
+    const labelInput = dialog?.querySelector("#manualLabel");
+    const status = dialog?.querySelector("#manualAddStatus");
+    const localId = accountSelect?.value || "";
+    const sendAsId = (idInput?.value || "").trim();
+    if (!status) return;
+    if (!localId) {
+      status.hidden = false;
+      status.className = "modal-status-line warn";
+      status.textContent = "请先选账号";
+      return;
+    }
+    if (!sendAsId) {
+      status.hidden = false;
+      status.className = "modal-status-line warn";
+      status.textContent = "请填 send_as_id";
+      return;
+    }
+    manualBtn.disabled = true;
+    status.hidden = false;
+    status.className = "modal-status-line info";
+    status.textContent = "正在解析并保存...";
+    try {
+      let label = (labelInput?.value || "").trim();
+      let username = "";
+      if (!label) {
+        const resolved = await requireIdentityDep(deps, "resolveAccountEntity")(localId, Number(sendAsId)).catch(() => ({ ok: false }));
+        if (resolved.ok) {
+          label = resolved.label || "";
+          username = resolved.username || "";
+        }
+      }
+      const result = await requireIdentityDep(deps, "saveIdentity")({
+        send_as_id: sendAsId,
+        account_local_id: localId,
+        label,
+        username,
+        enabled: true,
+      });
+      if (!result?.ok) throw new Error(result?.error || "保存失败");
+      status.className = "modal-status-line ok";
+      status.textContent = `已添加 ${result.identity?.label || result.identity?.send_as_id}`;
+      if (idInput) idInput.value = "";
+      if (labelInput) labelInput.value = "";
+      await deps.loadIdentities?.();
+    } catch (error) {
+      status.className = "modal-status-line error";
+      status.textContent = error.message || "添加失败";
+    } finally {
+      manualBtn.disabled = false;
+    }
+  }
+
+  function updateAddIdentityLogoutButton(deps = {}, accountSelect, logoutBtn) {
+    if (!accountSelect || !logoutBtn) return;
+    const state = identityManagementState(deps);
+    const localId = accountSelect.value;
+    const account = (state.accounts || []).find((item) => item.local_id === localId);
+    logoutBtn.hidden = !account || account.login_status !== "done";
+  }
+
+  function bindAddIdentityModal(deps = {}, dialog) {
+    const accountSelect = dialog?.querySelector('[data-send-as-field="account"]');
+    const logoutBtn = dialog?.querySelector('[data-send-as-action="open-logout"]');
+    if (accountSelect && logoutBtn) {
+      const update = () => updateAddIdentityLogoutButton(deps, accountSelect, logoutBtn);
+      accountSelect.addEventListener("change", update);
+      update();
+    }
+
+    dialog?.querySelectorAll("[data-send-as-action]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const action = button.dataset.sendAsAction;
+        if (action === "load") {
+          await loadSendAsListIntoForm(deps, dialog, button);
+          return;
+        }
+        if (action === "select-all") {
+          selectAllSendAs(deps, dialog, "all");
+          return;
+        }
+        if (action === "select-none") {
+          selectAllSendAs(deps, dialog, "none");
+          return;
+        }
+        if (action === "batch-save") {
+          await batchSaveSelectedSendAs(deps, dialog, button);
+          return;
+        }
+        if (action === "open-logout") {
+          const localId = accountSelect?.value || "";
+          requireIdentityDep(deps, "closeModal")();
+          requireIdentityDep(deps, "openLogoutAccountModal")(localId);
+        }
+      });
+    });
+
+    const manualBtn = dialog?.querySelector("#manualAddIdentityBtn");
+    if (manualBtn) {
+      manualBtn.addEventListener("click", async () => {
+        await addManualIdentity(deps, dialog, accountSelect, manualBtn);
+      });
+    }
+  }
+
   function renderBatchSaveResult(deps = {}, container, response, peers) {
     if (!container) return;
     if (!response || !Array.isArray(response.results) || response.results.length === 0) {
@@ -523,6 +713,7 @@
     tickSidebarIdentityModuleChips,
     renderIdentitySnapshot,
     renderAddIdentityModalBody,
+    bindAddIdentityModal,
     isSendAsAlreadyRegistered,
     renderSendAsRow,
     rerenderSendAsList,

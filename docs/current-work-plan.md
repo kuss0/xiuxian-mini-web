@@ -114,11 +114,11 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      `web/static/views/account_management.js`; the sidebar identity list,
      identity snapshot,
      identity module chips,
-     add-identity modal body, and send_as list/selection/status/result renderers live in
+     add-identity modal body/event flow, and send_as list/selection/status/result renderers live in
      `web/static/views/identity_management.js`,
      while
      `web/static/app.js` keeps
-     compatibility wrappers and account/send_as API orchestration callbacks.
+     compatibility wrappers and injected account/identity/send_as API orchestration callbacks.
 
 ## Remaining Work
 

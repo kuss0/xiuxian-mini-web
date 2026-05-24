@@ -160,7 +160,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
     assert "access settings modal, automation guard form, Telegram dialog/topic option renderers, and read-only Telegram account list live in `web/static/views/settings.js`" in normalized_work_plan
     assert "Telegram account login/logout modals, listen-target renderers, account login/listen-target event flow, account status line, and account action guards live in `web/static/views/account_management.js`" in normalized_work_plan
-    assert "sidebar identity list, identity snapshot, identity module chips, add-identity modal body, and send_as list/selection/status/result renderers live in `web/static/views/identity_management.js`" in normalized_work_plan
+    assert "sidebar identity list, identity snapshot, identity module chips, add-identity modal body/event flow, and send_as list/selection/status/result renderers live in `web/static/views/identity_management.js`" in normalized_work_plan
     assert "Outbox automation guard logic lives in `backend/outbox/automation.py`" in normalized_work_plan
     assert "sender adapters live in `backend/outbox/adapters.py`" in normalized_work_plan
     assert "optional queue worker lives in `backend/outbox/worker.py`" in normalized_work_plan
@@ -187,8 +187,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "Detail panel actions fill the composer or create manual plans/drafts only" in audit
     assert "Account login/logout modals, listen-target renderers, account login/listen-target event flow, account status line, and account action guards are isolated in `web/static/views/account_management.js`" in audit
     assert "keeps injected account save/login/dialog/topic/listener API orchestration" in audit
-    assert "Sidebar identity list, identity snapshot, sidebar module chips, add-identity modal renderers, and send_as list/selection/status renderers are isolated in `web/static/views/identity_management.js`" in audit
-    assert "keeps Telegram account/send_as API binding, global timer orchestration, and event orchestration" in audit
+    assert "Sidebar identity list, identity snapshot, sidebar module chips, add-identity modal renderers/event flow, and send_as list/selection/status renderers are isolated in `web/static/views/identity_management.js`" in audit
+    assert "keeps injected Telegram account/identity/send_as API binding, global timer orchestration, and event orchestration" in audit
     assert "Dungeon playbook actions fill the composer only" in audit
     assert "Xutian now exposes phase, route" in audit
     assert "## Outbox Automation" in audit
@@ -1150,8 +1150,15 @@ def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_fo
         "return window.MiniwebViews.identityManagement",
         "function identityManagementDeps()",
         "activeIdentityPatches,",
+        "batchSaveIdentities: (identities) => postJson(\"/api/identities/batch\", { identities })",
+        "closeModal,",
+        "loadIdentities,",
+        "loadSendAsPeers: (localId, targetChat) => {",
         "moduleStartTs,",
         "fmtCountdown,",
+        "openLogoutAccountModal,",
+        "resolveAccountEntity: (localId, sendAsId) => postJson(\"/api/accounts/resolve-entity\", {",
+        "saveIdentity: (payload) => postJson(\"/api/identities\", payload)",
         "setActiveIdentity,",
         "showSkillToast,",
         "function renderIdentitySnapshot()",
@@ -1164,18 +1171,9 @@ def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_fo
         "function openAddIdentityModal()",
         "body: renderAddIdentityModalBody()",
         "function renderAddIdentityModalBody()",
-        "function rerenderSendAsList(rootEl)",
-        "return identityManagementView().rerenderSendAsList(identityManagementDeps(), rootEl)",
-        "function selectFreshSendAsPeers()",
-        "return identityManagementView().selectFreshSendAsPeers(identityManagementDeps())",
-        "function selectedSendAsTargets()",
-        "return identityManagementView().selectedSendAsTargets(identityManagementDeps())",
-        "function renderSendAsLoadStatus(rootEl)",
-        "return identityManagementView().renderSendAsLoadStatus(identityManagementDeps(), rootEl)",
-        "function renderBatchSaveResult(container, response, peers)",
-        'postJson("/api/identities/batch", payload)',
-        'postJson("/api/identities", {',
-        'fetchJson(`/api/accounts/send-as-peers?${params.toString()}`)',
+        "function bindAddIdentityModal(dialog)",
+        "return identityManagementView().bindAddIdentityModal(identityManagementDeps(), dialog)",
+        "return fetchJson(`/api/accounts/send-as-peers?${params.toString()}`)",
     ]
     required_module_fragments = [
         "// MINIWEB-VIEW: sidebar identity list, identity snapshot, identity module chips, add-identity modal, and send_as renderers",
@@ -1211,12 +1209,25 @@ def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_fo
         "function renderSendAsError(deps = {}, rootEl, error)",
         "function renderSendAsLoadStatus(deps = {}, rootEl)",
         "function setSendAsStatus(rootEl, text)",
+        "function requireIdentityDep(deps, name)",
+        "async function loadSendAsListIntoForm(deps = {}, rootEl, button)",
+        "async function batchSaveSelectedSendAs(deps = {}, rootEl, button)",
+        "async function addManualIdentity(deps = {}, dialog, accountSelect, manualBtn)",
+        "function updateAddIdentityLogoutButton(deps = {}, accountSelect, logoutBtn)",
+        "function bindAddIdentityModal(deps = {}, dialog)",
+        "const payload = await requireIdentityDep(deps, \"loadSendAsPeers\")(localId, targetChat)",
+        "const response = await requireIdentityDep(deps, \"batchSaveIdentities\")(identities)",
+        "const resolved = await requireIdentityDep(deps, \"resolveAccountEntity\")(localId, Number(sendAsId))",
+        "const result = await requireIdentityDep(deps, \"saveIdentity\")({",
+        "requireIdentityDep(deps, \"closeModal\")()",
+        "requireIdentityDep(deps, \"openLogoutAccountModal\")(localId)",
         "function renderBatchSaveResult(deps = {}, container, response, peers)",
         "window.MiniwebViews.identityManagement = {",
         "renderSidebarIdentityList,",
         "renderIdentityModulesLine,",
         "tickSidebarIdentityModuleChips,",
         "renderIdentitySnapshot,",
+        "bindAddIdentityModal,",
         "isSendAsAlreadyRegistered,",
         "rerenderSendAsList,",
         "updateSendAsBulkSummary,",
@@ -1263,6 +1274,11 @@ def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_fo
         'labelInput.value = peer.title || "";',
         "const selectableCount = peers.filter((peer) => !isSendAsAlreadyRegistered(peer)).length",
         "const targets = peers.filter(",
+        "dialog.querySelectorAll(\"[data-send-as-action]\").forEach((button) => {",
+        "const manualBtn = dialog.querySelector(\"#manualAddIdentityBtn\")",
+        "postJson(\"/api/identities/batch\", payload)",
+        "postJson(\"/api/identities\", {",
+        "const resolved = await postJson(\"/api/accounts/resolve-entity\", {",
         ".send-as-section",
         "data-identity-action",
         "identity-item",
