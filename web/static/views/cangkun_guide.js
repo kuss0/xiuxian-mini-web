@@ -2,11 +2,10 @@
 (function () {
   "use strict";
 
-  const { fetchJson } = window.MiniwebApi;
   const { closeModal, openModal } = window.MiniwebModal;
   const { escapeAttr, escapeHtml, formatNumber } = window.MiniwebFormat;
 
-  async function openCangkunGuideModal({ fillCommand } = {}) {
+  async function openCangkunGuideModal({ fillCommand, loadCangkunGuide } = {}) {
     const dialog = openModal({
       title: "苍坤攻略",
       body: `
@@ -45,7 +44,10 @@
       local.loading = true;
       renderCangkunGuide(dialog, local, { fillCommand });
       try {
-        local.payload = await fetchJson("/api/cangkun-guide");
+        if (typeof loadCangkunGuide !== "function") {
+          throw new Error("cangkunGuide missing dependency: loadCangkunGuide");
+        }
+        local.payload = await loadCangkunGuide();
       } catch (error) {
         local.payload = { ok: false, error: error.message || "读取失败" };
       } finally {

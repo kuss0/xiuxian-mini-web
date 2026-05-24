@@ -75,7 +75,10 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
    - Current state: Cangkun and Xutian playbook cards are in the dungeon modal.
      Cangkun uses the conservative route guide; Xutian shows stage, route,
      advice, 后殿 boundary notes, and curated negative examples while keeping
-     command buttons as composer-fill actions only.
+     command buttons as composer-fill actions only. The standalone Xutian and
+     Cangkun guide modals live in `web/static/views/xutian_guide.js` and
+     `web/static/views/cangkun_guide.js` with guide loading injected from
+     `web/static/app.js`.
 
 6. Frontend CSS/module debt cleanup
    - Chat shell, composer, tool center, and dungeon panels have clear ownership.

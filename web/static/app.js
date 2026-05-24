@@ -1304,6 +1304,7 @@ async function openXutianOracleGuideModal() {
       statusText: "已填入虚天殿命令，请确认后发送。",
       statusKind: "info",
     }),
+    loadXutianOracleGuide: () => fetchJson("/api/xutian-oracle-guide"),
   });
 }
 
@@ -1313,6 +1314,7 @@ async function openCangkunGuideModal() {
       statusText: "已填入苍坤洞府命令，请确认后发送。",
       statusKind: "info",
     }),
+    loadCangkunGuide: () => fetchJson("/api/cangkun-guide"),
   });
 }
 

@@ -138,6 +138,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "dungeon panel" in work_plan and "clickability" in work_plan
     assert "official schedule manual handling" in normalized_work_plan
     assert "details persist in the modal status line" in normalized_work_plan
+    assert "standalone Xutian and Cangkun guide modals live in `web/static/views/xutian_guide.js` and `web/static/views/cangkun_guide.js` with guide loading injected from `web/static/app.js`" in normalized_work_plan
     assert "inventory lives in `web/static/views/inventory.js`" in work_plan
     assert "playbook cards live in `web/static/views/dungeon_playbook.js`" in work_plan
     assert "status modal shell and refresh flow live in" in work_plan
@@ -177,6 +178,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "/api/dungeons/status" not in audit
     assert "modal lists the affected owners and reason" in audit
     assert "detailed manual-handling messages in the modal status line" in audit
+    assert "Standalone Xutian/Cangkun guide modals are isolated in `web/static/views/xutian_guide.js` and `web/static/views/cangkun_guide.js`, with guide loading injected from `web/static/app.js`" in audit
+    assert "Dungeon playbook and standalone guide actions fill the composer only" in audit
     assert "resource stats modal and coverage renderer are isolated in `web/static/views/resource_stats.js`" in audit
     assert "Global health/setup banner is isolated in `web/static/views/global_banner.js`" in audit
     assert "official schedule rail and modal are isolated in `web/static/views/schedule.js`" in audit
@@ -197,7 +200,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "keeps injected account save/login/dialog/topic/listener API orchestration" in audit
     assert "Sidebar identity list, identity snapshot, sidebar module chips, add-identity modal renderers/event flow, and send_as list/selection/status renderers are isolated in `web/static/views/identity_management.js`" in audit
     assert "keeps injected Telegram account/identity/send_as API binding, global timer orchestration, and event orchestration" in audit
-    assert "Dungeon playbook actions fill the composer only" in audit
+    assert "Dungeon playbook and standalone guide actions fill the composer only" in audit
     assert "Xutian now exposes phase, route" in audit
     assert "## Outbox Automation" in audit
     assert "Automation is disabled and dry-run by default" in audit
@@ -1874,6 +1877,61 @@ def test_dungeon_playbook_panel_contract_is_read_only_until_composer_send():
     ]
     for fragment in required_css_fragments:
         assert fragment in css
+
+
+def test_standalone_dungeon_guides_keep_guide_apis_in_app():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    xutian_js = (root / "web" / "static" / "views" / "xutian_guide.js").read_text(encoding="utf-8")
+    cangkun_js = (root / "web" / "static" / "views" / "cangkun_guide.js").read_text(encoding="utf-8")
+    index_html = (root / "web" / "index.html").read_text(encoding="utf-8")
+    scripts = re.findall(r'<script src="/static/([^"]+)"></script>', index_html)
+
+    required_app_fragments = [
+        "async function openXutianOracleGuideModal()",
+        "async function openCangkunGuideModal()",
+        'loadXutianOracleGuide: () => fetchJson("/api/xutian-oracle-guide")',
+        'loadCangkunGuide: () => fetchJson("/api/cangkun-guide")',
+        'statusText: "已填入虚天殿命令，请确认后发送。"',
+        'statusText: "已填入苍坤洞府命令，请确认后发送。"',
+    ]
+    required_xutian_fragments = [
+        "// MINIWEB-VIEW: Xutian oracle guide modal",
+        "async function openXutianOracleGuideModal({ fillCommand, loadXutianOracleGuide } = {})",
+        "xutianGuide missing dependency: loadXutianOracleGuide",
+        "local.payload = await loadXutianOracleGuide()",
+        "function bindXutianGuideCards(root, { fillCommand })",
+        "fillCommand(command)",
+    ]
+    required_cangkun_fragments = [
+        "// MINIWEB-VIEW: Cangkun guide modal",
+        "async function openCangkunGuideModal({ fillCommand, loadCangkunGuide } = {})",
+        "cangkunGuide missing dependency: loadCangkunGuide",
+        "local.payload = await loadCangkunGuide()",
+        "function bindCangkunGuideCards(root, { fillCommand } = {})",
+        "fillCommand(command)",
+    ]
+    forbidden_module_fragments = [
+        "postJson(",
+        "fetchJson(",
+        "apiFetch(",
+        "window.MiniwebApi",
+        '"/api/',
+        '"/api/skills/send"',
+        "sendDirectComposerMessage",
+    ]
+
+    assert scripts.index("views/xutian_guide.js") < scripts.index("app.js")
+    assert scripts.index("views/cangkun_guide.js") < scripts.index("app.js")
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_xutian_fragments:
+        assert fragment in xutian_js
+    for fragment in required_cangkun_fragments:
+        assert fragment in cangkun_js
+    for module_js in [xutian_js, cangkun_js]:
+        for fragment in forbidden_module_fragments:
+            assert fragment not in module_js
 
 
 def test_sample_store_filters_by_secondary_channel():

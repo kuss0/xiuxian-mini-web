@@ -2,11 +2,10 @@
 (function () {
   "use strict";
 
-  const { fetchJson } = window.MiniwebApi;
   const { closeModal, openModal } = window.MiniwebModal;
   const { escapeAttr, escapeHtml, formatNumber } = window.MiniwebFormat;
 
-  async function openXutianOracleGuideModal({ fillCommand }) {
+  async function openXutianOracleGuideModal({ fillCommand, loadXutianOracleGuide } = {}) {
     const dialog = openModal({
       title: "虚天攻略",
       body: `
@@ -45,7 +44,10 @@
       local.loading = true;
       renderXutianGuide(dialog, local, { fillCommand });
       try {
-        local.payload = await fetchJson("/api/xutian-oracle-guide");
+        if (typeof loadXutianOracleGuide !== "function") {
+          throw new Error("xutianGuide missing dependency: loadXutianOracleGuide");
+        }
+        local.payload = await loadXutianOracleGuide();
       } catch (error) {
         local.payload = { ok: false, error: error.message || "读取失败", cases: {}, counts: {} };
       } finally {
