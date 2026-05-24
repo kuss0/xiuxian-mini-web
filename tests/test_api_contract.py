@@ -143,6 +143,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "status modal shell and refresh flow live in" in work_plan
     assert "`web/static/views/dungeon_status.js`" in work_plan
     assert "identity status modal and shared module-status helpers live in `web/static/views/identity_status.js`" in normalized_work_plan
+    assert "cultivation status modal and timers live in `web/static/views/cultivation.js`" in normalized_work_plan
     assert "resource stats modal and coverage renderer live in `web/static/views/resource_stats.js`" in normalized_work_plan
     assert "world report modal lives in `web/static/views/world_report.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
@@ -270,6 +271,47 @@ def test_identity_status_view_module_keeps_shared_helpers_and_composer_fill_cont
         assert fragment in app_js
     for fragment in required_module_fragments:
         assert fragment in identity_status_js
+
+
+def test_cultivation_view_module_keeps_timer_and_composer_fill_contract():
+    root = Path(__file__).resolve().parents[1]
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    cultivation_js = (root / "web" / "static" / "views" / "cultivation.js").read_text(encoding="utf-8")
+
+    required_app_fragments = [
+        "function cultivationDeps()",
+        "function cultivationView()",
+        "const CULTIVATION_MODULE_SPECS = cultivationView().CULTIVATION_MODULE_SPECS",
+        "function renderCultivationModules()",
+        "return cultivationView().renderCultivationModules(cultivationDeps())",
+        "function renderCultivationModulesInto(container)",
+        "return cultivationView().renderCultivationModulesInto(cultivationDeps(), container)",
+        "function openCultivationModal()",
+        "return cultivationView().openCultivationModal(cultivationDeps())",
+        "function tickCultivationModules()",
+        "return cultivationView().tickCultivationModules(cultivationDeps())",
+        "fillSkillIntoComposer,",
+    ]
+    required_module_fragments = [
+        "// MINIWEB-VIEW: cultivation status modal and timers",
+        "const CULTIVATION_MODULE_SPECS = [",
+        "function renderCultivationModules(deps = {})",
+        "function renderCultivationModulesInto(deps = {}, container)",
+        "function openCultivationModal(deps = {})",
+        "function cultivationCardHtml(spec, timerText, timerCls, pct, nextAt, startTs)",
+        "function bindCultivationModuleActions(deps = {}, container)",
+        "function tickCultivationModules(deps = {})",
+        "window.MiniwebViews.cultivation = {",
+        "CULTIVATION_MODULE_SPECS,",
+        "openCultivationModal,",
+        "tickCultivationModules,",
+        "deps.fillSkillIntoComposer?.(btn.dataset.cultFire, btn)",
+        "deps.fillSkillIntoComposer?.(btn.dataset.cultQuery, btn)",
+    ]
+    for fragment in required_app_fragments:
+        assert fragment in app_js
+    for fragment in required_module_fragments:
+        assert fragment in cultivation_js
 
 
 def test_frontend_identity_state_refresh_is_first_class():
