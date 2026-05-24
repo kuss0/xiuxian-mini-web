@@ -12,6 +12,10 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
    - Message list and composer remain visible at desktop, tablet, and narrow
      mobile widths.
    - Width guards prevent page-level horizontal overflow.
+   - Current state: implemented in the final chat layout contract and covered by
+     `tests/layout_probe.py`, including composer visibility, tool-center
+     reachability, two-row quick-command hotbar visibility, dungeon panel
+     clickability, and page-level overflow guards.
 
 2. Message classification regression suite
    - Player plain messages that should stay in focus remain visible.
@@ -21,6 +25,9 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
    - Falling Demon Heart Trial messages are archived unless they are a direct
      reply or mention for the active identity.
    - Xutian rear-hall stop messages are archived and labeled.
+   - Current state: covered by parser/filter regression tests. New examples
+     should still be added when real misclassified messages appear, rather than
+     broadening heuristics from guesses.
 
 3. State-machine audit and improvements
    - Inventory, official schedules, dungeon guides, cooldowns, and listener
@@ -31,23 +38,50 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
    - Official schedule creation respects the observed 100 scheduled-message
      per-identity boundary and refuses additional automation with a manual
      handling notice.
+   - Current state: inventory auto-refreshes while open and names the owners
+     that need manual `.储物袋` calibration; official schedule manual handling
+     details persist in the modal status line; identity state refresh is part
+     of the normal identity refresh path.
 
 4. Tool center cleanup
    - Common workflows remain on the main page.
    - Settings, health, refresh, identity, and notification controls live in the
      tool center without duplicating controls already present elsewhere.
    - Secondary panels are grouped by usage frequency and do not hide chat input.
+   - Current state: common workflows stay on the main page, and the top-right
+     tool center is covered by layout probe checks. Future work should avoid
+     adding new always-visible header controls unless they pass the same width
+     and clickability checks.
 
 5. Dungeon panel page-game pass
    - Cangkun and Xutian expose current stage, route/history, advice, and known
      failure boundaries in a dedicated panel.
    - Dungeon state is projected from messages, not from an automatic sender.
    - Uncertain route recommendations are explicit and conservative.
+   - Current state: Cangkun and Xutian playbook cards are in the dungeon modal.
+     Cangkun uses the conservative route guide; Xutian shows stage, route,
+     advice, 后殿 boundary notes, and curated negative examples while keeping
+     command buttons as composer-fill actions only.
 
 6. Frontend CSS/module debt cleanup
    - Chat shell, composer, tool center, and dungeon panels have clear ownership.
    - New fixes land in final contract files or small modules, not as unrelated
      overrides across multiple sections.
+   - Current state: chat viewport stability lives in `web/static/chat-layout.css`;
+     inventory lives in `web/static/views/inventory.js`; dungeon playbook UI
+     still shares `web/static/app.js` and should be split only when a coherent
+     module boundary is being edited.
+
+## Remaining Work
+
+- Keep adding concrete message-classification fixtures only from observed bad
+  samples.
+- Add new inventory delta parsers only from stable real bot success replies,
+  then backfill `inventory_current`.
+- Treat official schedule Telegram-history sync as reconciliation only; never
+  use it to exceed the local 100-message guard.
+- Continue CSS/module cleanup opportunistically when a touched surface already
+  has tests or layout-probe coverage.
 
 ## Verification
 

@@ -127,6 +127,26 @@ def test_frontend_bootstrap_loads_registered_views_before_app():
     assert app_view_refs <= registered_views
 
 
+def test_current_work_docs_match_implemented_state_machine_contracts():
+    root = Path(__file__).resolve().parents[1]
+    work_plan = (root / "docs" / "current-work-plan.md").read_text(encoding="utf-8")
+    audit = (root / "docs" / "state-machine-audit.md").read_text(encoding="utf-8")
+
+    assert "tests/layout_probe.py" in work_plan
+    assert "two-row quick-command hotbar visibility" in work_plan
+    assert "dungeon panel" in work_plan and "clickability" in work_plan
+    assert "official schedule manual handling" in work_plan
+    assert "details persist in the modal status line" in work_plan
+    assert "inventory lives in `web/static/views/inventory.js`" in work_plan
+
+    assert "/api/dungeon-status" in audit
+    assert "/api/dungeons/status" not in audit
+    assert "modal lists the affected owners and reason" in audit
+    assert "detailed manual-handling messages in the modal status line" in audit
+    assert "Dungeon playbook actions fill the composer only" in audit
+    assert "Xutian now exposes phase, route" in audit
+
+
 def test_frontend_identity_state_refresh_is_first_class():
     root = Path(__file__).resolve().parents[1]
     app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
