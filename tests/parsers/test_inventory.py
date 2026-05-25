@@ -47,6 +47,18 @@ def test_inventory_delta_parses_wanbaolou_delisting_return():
     assert delta["deltas"] == {"二级妖丹": 10}
 
 
+def test_inventory_delta_parses_unopened_dungeon_room_return():
+    event = make_event(
+        "队长 @seller 已将副本房间（ID: 896）解散。\n"
+        "因副本未曾开启，天道已将【虚天残图】归还至你的储物袋中。"
+    )
+    delta = parse_inventory_delta_event(event)
+
+    assert delta is not None
+    assert delta["source_type"] == "dungeon_room_return"
+    assert delta["deltas"] == {"虚天残图": 1}
+
+
 def test_skips_unrelated_message():
     event = make_event("无关消息")
     assert InventoryParser().parse(event) is None

@@ -27,6 +27,9 @@ DELISTING_SUCCESS_RE = re.compile(
 )
 GIFT_SUCCESS_RE = re.compile(r"赠送了\s*【(?P<item>.+?)】\s*[xX×](?P<count>[\d,]+)")
 GIFT_TAX_RE = re.compile(r"额外支付了\s*(?P<count>[\d,]+)\s*灵石")
+DUNGEON_ROOM_RETURN_RE = re.compile(
+    r"因副本未曾开启，天道已将【(?P<item>.+?)】归还至你的储物袋中"
+)
 TREE_REWARD_KEYWORDS = ("获得【", "分得【", "稳定分得【")
 
 
@@ -157,6 +160,11 @@ def parse_inventory_delta_event(event: RawMessageEvent) -> dict | None:
             tax = _parse_amount(tax_match.group("count"))
             if tax > 0:
                 deltas["灵石"] = deltas.get("灵石", 0) - tax
+    elif match := DUNGEON_ROOM_RETURN_RE.search(text):
+        item = _clean_item_name(match.group("item"))
+        if item:
+            deltas[item] = deltas.get(item, 0) + 1
+            source_type = "dungeon_room_return"
     elif any(keyword in text for keyword in TREE_REWARD_KEYWORDS):
         for raw_line in text.splitlines():
             line = raw_line.strip()

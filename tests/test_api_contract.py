@@ -4416,6 +4416,56 @@ def test_inventory_current_adds_wanbaolou_delisting_return_to_owner(tmp_path):
     assert by_name["二级妖丹"]["last_delta_message_id"] == "tg:-1:105"
 
 
+def test_inventory_current_adds_unopened_dungeon_room_return_to_owner(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_account({"local_id": "main", "account_id": "12345", "username": "seller"})
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:106",
+            chat_id=-1,
+            msg_id=106,
+            text="""@seller 的储物袋
+
+材料:
+- 灵石 x 100""",
+            source="韩天尊",
+            date="2026-05-15T10:00:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:107",
+            chat_id=-1,
+            msg_id=107,
+            text=".解散副本",
+            source="seller",
+            date="2026-05-15T10:01:00+00:00",
+            sender_id=12345,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:108",
+            chat_id=-1,
+            msg_id=108,
+            text="队长 @seller 已将副本房间（ID: 896）解散。\n因副本未曾开启，天道已将【虚天残图】归还至你的储物袋中。",
+            source="韩天尊",
+            date="2026-05-15T10:02:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+            reply_to_msg_id=107,
+        )
+    )
+
+    by_name = {item["name"]: item for item in store.list_inventory_current(owner="seller")}
+    assert by_name["虚天残图"]["amount"] == 1
+    assert by_name["虚天残图"]["confidence"] == "estimated"
+    assert by_name["虚天残图"]["basis"] == "ledger_delta"
+    assert by_name["虚天残图"]["last_delta_message_id"] == "tg:-1:108"
+
+
 def test_inventory_current_resets_to_authoritative_snapshot(tmp_path):
     store = SQLiteStore(tmp_path / "miniweb.db")
     store.save_account({"local_id": "main", "account_id": "12345", "username": "seller"})
