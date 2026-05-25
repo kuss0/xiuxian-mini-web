@@ -407,6 +407,7 @@
         deps.messageList.innerHTML = `<div class="chat-empty">${escapeHtml(deps.emptyMessageHint?.() || "没有消息。")}</div>`;
       }
       if (deps.jumpToLatestButton) {
+        chatStreamState(deps).chatUnreadCount = 0;
         deps.jumpToLatestButton.hidden = true;
       }
       return;
@@ -440,12 +441,21 @@
 
   function updateJumpToLatestVisibility(deps = {}) {
     if (!deps.jumpToLatestButton || !deps.messageList) return;
-    deps.jumpToLatestButton.hidden = isMessageListNearLatest(deps);
+    const state = chatStreamState(deps);
+    const nearLatest = isMessageListNearLatest(deps);
+    if (nearLatest) {
+      state.chatUnreadCount = 0;
+    }
+    const unread = Number(state.chatUnreadCount || 0);
+    deps.jumpToLatestButton.hidden = nearLatest && unread <= 0;
+    deps.jumpToLatestButton.textContent = unread > 0 ? `↓ ${formatNumber(unread)} 条新消息` : "↓ 回到最新";
+    deps.jumpToLatestButton.title = unread > 0 ? "跳到底部并清除新消息提示" : "跳到底部查看最新消息";
   }
 
   function scrollMessageListToLatest(deps = {}, { behavior = "auto" } = {}) {
     const messageList = deps.messageList;
     if (!messageList) return;
+    chatStreamState(deps).chatUnreadCount = 0;
     messageList.scrollTo({ top: messageList.scrollHeight, behavior });
     updateJumpToLatestVisibility(deps);
   }

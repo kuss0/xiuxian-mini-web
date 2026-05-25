@@ -156,7 +156,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "leader intelligence modal lives in `web/static/views/leader_intel.js` with leader-message loading injected from `web/static/app.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
     assert "global health/setup banner lives in `web/static/views/global_banner.js`" in normalized_work_plan
-    assert "chat message stream, channel chips, quick filters, scroll anchoring, and quick actions live in `web/static/views/chat_stream.js`" in normalized_work_plan
+    assert "bottom new-message counters that preserve the user's historical scroll position" in normalized_work_plan
+    assert "chat message stream, channel chips, quick filters, scroll anchoring, unread new-message counter, and quick actions live in `web/static/views/chat_stream.js`" in normalized_work_plan
     assert "message logs modal lives in `web/static/views/logs.js` with message paging/export APIs injected from `web/static/app.js`" in normalized_work_plan
     assert "notification settings modal lives in `web/static/views/notify.js` with card-title/settings/test APIs injected from `web/static/app.js`" in normalized_work_plan
     assert "direct composer, emoji palette, and quick command hotbar live in `web/static/views/direct_composer.js`" in normalized_work_plan
@@ -186,7 +187,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "world report modal is isolated in `web/static/views/world_report.js`, with composite health/dungeon/resource/intel/priority loading injected from `web/static/app.js`" in audit
     assert "Global health/setup banner is isolated in `web/static/views/global_banner.js`" in audit
     assert "official schedule rail and modal are isolated in `web/static/views/schedule.js`" in audit
-    assert "chat message stream, channel chips, quick filters, scroll anchoring, and quick-action renderer are isolated in `web/static/views/chat_stream.js`" in audit
+    assert "chat message stream, channel chips, quick filters, scroll anchoring, unread new-message counter, and quick-action renderer are isolated in `web/static/views/chat_stream.js`" in audit
+    assert "Incremental polling preserves the user's historical scroll position and turns the bottom jump button into a new-message counter until the user returns to latest." in audit
     assert "leader intelligence modal is isolated in `web/static/views/leader_intel.js`, with leader-message loading injected from `web/static/app.js`" in audit
     assert "message logs modal is isolated in `web/static/views/logs.js`, with message paging/export APIs injected from `web/static/app.js`" in audit
     assert "Chat stream quick actions fill the composer only" in audit
@@ -751,6 +753,7 @@ def test_game_cockpit_view_module_keeps_wrappers_and_panel_action_contract():
 def test_chat_stream_view_module_keeps_wrappers_scroll_and_manual_action_contract():
     root = Path(__file__).resolve().parents[1]
     app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    state_js = (root / "web" / "static" / "state.js").read_text(encoding="utf-8")
     chat_stream_js = (root / "web" / "static" / "views" / "chat_stream.js").read_text(encoding="utf-8")
 
     required_app_fragments = [
@@ -800,6 +803,8 @@ def test_chat_stream_view_module_keeps_wrappers_scroll_and_manual_action_contrac
         "return chatStreamView().captureMessageScrollSnapshot(chatStreamDeps())",
         "function restoreMessageScrollSnapshot(snapshot)",
         "return chatStreamView().restoreMessageScrollSnapshot(chatStreamDeps(), snapshot)",
+        "const wasNearLatest = !incremental || isMessageListNearLatest()",
+        "state.chatUnreadCount = wasNearLatest ? 0 : Math.min(999, Number(state.chatUnreadCount || 0) + unseenIncomingCount)",
         "function quickActionLabel(action)",
         "return chatStreamView().quickActionLabel(action)",
         "async function handleChatQuickAction(message, index, button)",
@@ -833,6 +838,8 @@ def test_chat_stream_view_module_keeps_wrappers_scroll_and_manual_action_contrac
         "const sourceMessages = deps.summarySignalMessages?.() || []",
         "function renderMessages(deps = {})",
         "function renderChatMessageNode(deps = {}, message)",
+        "state.chatUnreadCount = 0;",
+        "deps.jumpToLatestButton.textContent = unread > 0 ? `↓ ${formatNumber(unread)} 条新消息` : \"↓ 回到最新\";",
         "function captureMessageScrollSnapshot(deps = {})",
         "function restoreMessageScrollSnapshot(deps = {}, snapshot)",
         "function renderChatQuickActions(deps = {}, message)",
@@ -871,6 +878,7 @@ def test_chat_stream_view_module_keeps_wrappers_scroll_and_manual_action_contrac
     ]
     for fragment in required_app_fragments:
         assert fragment in app_js
+    assert "chatUnreadCount: 0," in state_js
     for fragment in required_module_fragments:
         assert fragment in chat_stream_js
     for fragment in forbidden_module_fragments:

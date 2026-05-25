@@ -286,6 +286,7 @@ async function loadMessages({ incremental = false } = {}) {
   const payload = await fetchJson(`/api/messages?${params.toString()}`);
   const incoming = payload.messages || [];
   const serverMax = Number(payload.max_seq || 0);
+  const wasNearLatest = !incremental || isMessageListNearLatest();
 
   // 游标跑过头检测:服务端 max_seq 突然小于本地 lastSeq → DB 重置 / parsed_cards 重建,
   // 这时不能按 max 取(永远走不到),要把本地游标重置并重新初始化。
@@ -303,13 +304,16 @@ async function loadMessages({ incremental = false } = {}) {
       return { changed: false, count: 0 };
     }
     const byId = new Map(state.messages.map((m) => [m.id, m]));
+    const unseenIncomingCount = incoming.filter((card) => !byId.has(card.id) && messageMatchesSearch(card)).length;
     for (const card of incoming) {
       byId.set(card.id, card);  // 同 id 的会被新版本覆盖(支持 edit)
     }
     state.messages = sortMessagesByRecency(Array.from(byId.values()));
+    state.chatUnreadCount = wasNearLatest ? 0 : Math.min(999, Number(state.chatUnreadCount || 0) + unseenIncomingCount);
   } else {
     // 初始化:直接替换
     state.messages = sortMessagesByRecency(incoming);
+    state.chatUnreadCount = 0;
   }
   state.lastMessageSeq = incremental ? Math.max(state.lastMessageSeq, serverMax) : serverMax;
 

@@ -15,7 +15,8 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
    - Current state: implemented in the final chat layout contract and covered by
      `tests/layout_probe.py`, including composer visibility, tool-center
      reachability, two-row quick-command hotbar visibility, dungeon panel
-     clickability, and page-level overflow guards.
+     clickability, page-level overflow guards, and bottom new-message counters
+     that preserve the user's historical scroll position.
 
 2. Message classification regression suite
    - Player plain messages that should stay in focus remain visible.
@@ -112,7 +113,7 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      `web/static/views/notify.js` with card-title/settings/test APIs injected
      from `web/static/app.js`. The official schedule rail and modal
      live in `web/static/views/schedule.js`. The chat
-     message stream, channel chips, quick filters, scroll anchoring, and quick actions live in
+     message stream, channel chips, quick filters, scroll anchoring, unread new-message counter, and quick actions live in
      `web/static/views/chat_stream.js`; the direct composer, emoji palette, and
      quick command hotbar live in `web/static/views/direct_composer.js`; detail
      rich cards and field formatting live in `web/static/views/detail_cards.js`;
