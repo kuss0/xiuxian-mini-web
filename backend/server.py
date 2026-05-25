@@ -329,11 +329,16 @@ class MiniWebServer:
                     f"{resource_backfilled.get('deltas', 0)} 条 resource_deltas"
                 )
             inventory_backfilled = sqlite_store.backfill_inventory_snapshots_if_needed()
-            if inventory_backfilled.get("snapshots") or inventory_backfilled.get("items"):
+            if (
+                inventory_backfilled.get("snapshots")
+                or inventory_backfilled.get("items")
+                or inventory_backfilled.get("deltas")
+            ):
                 print(
                     "[mini-web] 储物袋历史 backfill: "
                     f"写入 {inventory_backfilled.get('snapshots', 0)} 条快照, "
-                    f"{inventory_backfilled.get('items', 0)} 条物品"
+                    f"{inventory_backfilled.get('items', 0)} 条物品, "
+                    f"{inventory_backfilled.get('deltas', 0)} 条账本"
                 )
             store = sqlite_store
         self._store = store

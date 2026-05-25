@@ -59,6 +59,23 @@ def test_inventory_delta_parses_unopened_dungeon_room_return():
     assert delta["deltas"] == {"虚天残图": 1}
 
 
+def test_inventory_delta_keeps_tree_harvest_but_skips_generic_rewards():
+    tree = make_event(
+        """【灵果入腹 · 造化自生】
+你摘下一枚【万年灵木果 (极品)】...
+🪵 前三保底: 稳定分得【一截灵眼之树】！
+🌰 树髓余珍: 获得【灵眼木髓碎片】x5"""
+    )
+    delta = parse_inventory_delta_event(tree)
+
+    assert delta is not None
+    assert delta["source_type"] == "tree_harvest"
+    assert delta["deltas"] == {"一截灵眼之树": 1, "灵眼木髓碎片": 5}
+
+    generic = make_event("【试炼古塔 - 战报】\n最终获得【灵石】x28，并获得【三级妖丹】x1。")
+    assert parse_inventory_delta_event(generic) is None
+
+
 def test_skips_unrelated_message():
     event = make_event("无关消息")
     assert InventoryParser().parse(event) is None

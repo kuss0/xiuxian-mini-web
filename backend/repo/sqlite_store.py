@@ -62,7 +62,8 @@ DEFAULT_TARGET_CHAT = "-1001680975844"
 DEFAULT_TARGET_TOPIC_ID = "7310786"
 ACCOUNT_SECRET_KEYS = {"api_hash", "proxy_password"}
 RESOURCE_STATS_SCHEMA_VERSION = 8
-INVENTORY_SCHEMA_VERSION = 4
+INVENTORY_SCHEMA_VERSION = 5
+INVENTORY_LEDGER_SCHEMA_VERSION = 2
 DUNGEON_CONTEXT_SCAN_LIMIT = 2500
 RESOURCE_BASIC_NAMES = ("修为", "贡献", "灵石")
 RESOURCE_RARE_NAMES = (
@@ -622,9 +623,24 @@ class SQLiteStore:
                 stored_version = int(json.loads(stored_version_row[0])) if stored_version_row else 0
             except (TypeError, ValueError, json.JSONDecodeError):
                 stored_version = 0
+            stored_ledger_version_row = conn.execute(
+                "SELECT value_json FROM settings WHERE key='inventory_ledger_schema_version'"
+            ).fetchone()
+            try:
+                stored_ledger_version = (
+                    int(json.loads(stored_ledger_version_row[0])) if stored_ledger_version_row else 0
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                stored_ledger_version = 0
             existing = conn.execute("SELECT COUNT(*) FROM inventory_snapshots").fetchone()[0]
-            if existing and stored_version >= INVENTORY_SCHEMA_VERSION:
-                return {"snapshots": 0, "items": 0}
+            missing_delta_candidates = self._missing_inventory_ledger_delta_candidates(conn)
+            if (
+                existing
+                and stored_version >= INVENTORY_SCHEMA_VERSION
+                and stored_ledger_version >= INVENTORY_LEDGER_SCHEMA_VERSION
+                and missing_delta_candidates == 0
+            ):
+                return {"snapshots": 0, "items": 0, "deltas": 0}
             rows = conn.execute(
                 """
                 SELECT id, chat_id, msg_id, text, source, date, sender_id,
@@ -633,7 +649,9 @@ class SQLiteStore:
                 FROM raw_messages
                 WHERE text LIKE '%储物袋%'
                    OR text LIKE '%上架成功%'
+                   OR text LIKE '%上架至万宝楼%'
                    OR text LIKE '%赠送了%'
+                   OR text LIKE '%归还至你的储物袋%'
                    OR text LIKE '%获得【%'
                    OR text LIKE '%分得【%'
                 ORDER BY rowid ASC
@@ -641,6 +659,7 @@ class SQLiteStore:
             ).fetchall()
         snapshot_count = 0
         item_count = 0
+        delta_count = 0
         with self._connect() as conn:
             conn.execute("DELETE FROM inventory_items")
             conn.execute("DELETE FROM inventory_snapshots")
@@ -671,6 +690,13 @@ class SQLiteStore:
                 if after > before:
                     snapshot_count += 1
                     item_count += after - before
+                delta_count += int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM inventory_ledger WHERE raw_message_id=?",
+                        (event.id,),
+                    ).fetchone()[0]
+                    or 0
+                )
             conn.execute(
                 """
                 INSERT INTO settings(key, value_json)
@@ -679,7 +705,72 @@ class SQLiteStore:
                 """,
                 ("inventory_schema_version", json.dumps(INVENTORY_SCHEMA_VERSION)),
             )
-        return {"snapshots": snapshot_count, "items": item_count}
+            conn.execute(
+                """
+                INSERT INTO settings(key, value_json)
+                VALUES(?, ?)
+                ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json
+                """,
+                ("inventory_ledger_schema_version", json.dumps(INVENTORY_LEDGER_SCHEMA_VERSION)),
+            )
+        return {"snapshots": snapshot_count, "items": item_count, "deltas": delta_count}
+
+    def _missing_inventory_ledger_delta_candidates(self, conn) -> int:
+        sender_ids = self._inventory_owner_sender_ids(conn)
+        if not sender_ids:
+            return 0
+        placeholders = ",".join("?" for _ in sender_ids)
+        params = [*sender_ids, *sender_ids]
+        row = conn.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM raw_messages rm
+            LEFT JOIN raw_messages parent
+              ON parent.chat_id=rm.chat_id
+             AND parent.msg_id=rm.reply_to_msg_id
+            WHERE (
+                    rm.text LIKE '%上架至万宝楼%'
+                 OR (rm.text LIKE '%从万宝楼下架%' AND rm.text LIKE '%归还至你的储物袋%')
+                 OR rm.text LIKE '%赠送了%【%'
+                 OR (rm.text LIKE '%因副本未曾开启%' AND rm.text LIKE '%归还至你的储物袋%')
+                 OR (
+                        (rm.text LIKE '%灵果入腹%'
+                         OR rm.text LIKE '%树髓余珍%'
+                         OR rm.text LIKE '%稳定分得【%'
+                         OR rm.text LIKE '%枝榜机缘%'
+                         OR rm.text LIKE '%天降鸿运%')
+                    AND (rm.text LIKE '%获得【%' OR rm.text LIKE '%分得【%')
+                    )
+                )
+              AND (
+                    parent.sender_id IN ({placeholders})
+                 OR (rm.reply_to_msg_id IS NULL AND rm.sender_id IN ({placeholders}))
+                )
+              AND NOT EXISTS (
+                    SELECT 1 FROM inventory_ledger il
+                    WHERE il.raw_message_id=rm.id
+                )
+            """,
+            params,
+        ).fetchone()
+        return int((row or [0])[0] or 0)
+
+    def _inventory_owner_sender_ids(self, conn) -> list[int]:
+        sender_ids: set[int] = set()
+        for table, key in (("identities", "send_as_id"), ("accounts", "account_id")):
+            try:
+                rows = conn.execute(f"SELECT payload_json FROM {table}").fetchall()
+            except sqlite3.Error:
+                continue
+            for row in rows:
+                try:
+                    payload = json.loads(row[0] or "{}")
+                    sender_id = int(payload.get(key) or 0)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                if sender_id:
+                    sender_ids.add(sender_id)
+        return sorted(sender_ids)
 
     def latest_message_id(self, chat_id: int, topic_id: int = 0) -> int:
         """返回当前消息箱在指定 chat/topic 里已落库的最大 Telegram msg_id。"""

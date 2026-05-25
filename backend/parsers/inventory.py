@@ -31,6 +31,17 @@ DUNGEON_ROOM_RETURN_RE = re.compile(
     r"因副本未曾开启，天道已将【(?P<item>.+?)】归还至你的储物袋中"
 )
 TREE_REWARD_KEYWORDS = ("获得【", "分得【", "稳定分得【")
+TREE_HARVEST_CONTEXT_KEYWORDS = (
+    "灵果入腹",
+    "稳定分得【",
+    "树髓余珍",
+    "灵纹回馈",
+    "摘下一枚",
+    "天道榜名",
+    "前三保底",
+    "枝榜机缘",
+    "天降鸿运",
+)
 
 
 class InventoryParser:
@@ -165,7 +176,7 @@ def parse_inventory_delta_event(event: RawMessageEvent) -> dict | None:
         if item:
             deltas[item] = deltas.get(item, 0) + 1
             source_type = "dungeon_room_return"
-    elif any(keyword in text for keyword in TREE_REWARD_KEYWORDS):
+    elif _is_tree_harvest_delta_text(text):
         for raw_line in text.splitlines():
             line = raw_line.strip()
             if not any(keyword in line for keyword in TREE_REWARD_KEYWORDS):
@@ -209,6 +220,10 @@ def _parse_amount(value: object) -> int:
         return int(str(value or "0").replace(",", "").strip() or "0")
     except (TypeError, ValueError):
         return 0
+
+
+def _is_tree_harvest_delta_text(text: str) -> bool:
+    return any(keyword in text for keyword in TREE_HARVEST_CONTEXT_KEYWORDS)
 
 
 __all__ = ["InventoryParser", "parse_inventory_delta_event", "parse_inventory_snapshot"]

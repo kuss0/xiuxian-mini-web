@@ -13,8 +13,8 @@ do not prove success.
 | Trigger | `backend/parsers/inventory.py` parses snapshots and deltas during message ingest. Store ingestion replaces the owner snapshot and replays later deltas. |
 | Refresh path | `/api/inventory` returns `snapshots`, `current`, and `state`. The inventory modal auto-refreshes while open and keeps the manual `刷新快照` button. |
 | Failure/manual fallback | `state.owners[].status` is `missing`, `stale`, `estimated`, or `fresh`. Anything except `fresh` tells the user to run `.储物袋` before relying on transfer numbers; the modal lists the affected owners and reason so the user does not need to inspect each identity manually. |
-| Current gap | Deltas still only cover known safe reply families: Wanbaolou listing/delisting, gift, tree harvest, and unopened dungeon room returns. Unknown reward text must not mutate inventory. |
-| Next action | Add new delta parsers only with fixtures from real bot replies, then backfill `inventory_current`. |
+| Current gap | Deltas still only cover known safe reply families: Wanbaolou listing/delisting, gift, narrowly-scoped tree harvest, and unopened dungeon room returns. Unknown reward text must not mutate inventory. |
+| Next action | Add new delta parsers only with fixtures from real bot replies, then bump the inventory schema version so historical `inventory_current` is rebuilt from owner-resolvable `raw_messages`. |
 
 ## Official Schedules
 

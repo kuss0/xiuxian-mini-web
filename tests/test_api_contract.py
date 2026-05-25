@@ -4627,6 +4627,185 @@ def test_inventory_current_replays_later_deltas_when_old_snapshot_reingested(tmp
     assert current["阴凝之晶"]["confidence"] == "estimated"
 
 
+def test_inventory_backfill_rebuilds_legacy_version_dungeon_returns(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_account({"local_id": "main", "account_id": "12345", "username": "seller"})
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:140",
+            chat_id=-1,
+            msg_id=140,
+            text="""@seller 的储物袋
+
+材料:
+- 灵石 x 100""",
+            source="韩天尊",
+            date="2026-05-15T10:00:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
+    with store._connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO raw_messages(
+                id, chat_id, msg_id, text, source, date, sender_id,
+                reply_to_msg_id, top_msg_id, mentions_json, sender_is_bot
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "tg:-1:141",
+                -1,
+                141,
+                ".解散副本",
+                "seller",
+                "2026-05-15T10:01:00+00:00",
+                12345,
+                None,
+                None,
+                "[]",
+                0,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO raw_messages(
+                id, chat_id, msg_id, text, source, date, sender_id,
+                reply_to_msg_id, top_msg_id, mentions_json, sender_is_bot
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "tg:-1:142",
+                -1,
+                142,
+                "队长 @seller 已将副本房间（ID: 896）解散。\n因副本未曾开启，天道已将【虚天残图】归还至你的储物袋中。",
+                "韩天尊",
+                "2026-05-15T10:02:00+00:00",
+                7900199668,
+                141,
+                None,
+                "[]",
+                1,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO settings(key, value_json)
+            VALUES('inventory_schema_version', '4')
+            ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json
+            """
+        )
+
+    assert "虚天残图" not in {item["name"] for item in store.list_inventory_current(owner="seller")}
+
+    result = store.backfill_inventory_snapshots_if_needed()
+
+    by_name = {item["name"]: item for item in store.list_inventory_current(owner="seller")}
+    assert result["snapshots"] == 1
+    assert result["items"] == 1
+    assert result["deltas"] == 1
+    assert by_name["虚天残图"]["amount"] == 1
+    assert by_name["虚天残图"]["basis"] == "ledger_delta"
+    assert by_name["虚天残图"]["last_delta_message_id"] == "tg:-1:142"
+    with store._connect() as conn:
+        assert conn.execute(
+            "SELECT value_json FROM settings WHERE key='inventory_schema_version'"
+        ).fetchone()[0] == "5"
+        assert conn.execute(
+            "SELECT value_json FROM settings WHERE key='inventory_ledger_schema_version'"
+        ).fetchone()[0] == "2"
+
+
+def test_inventory_backfill_rebuilds_when_current_version_has_missing_ledger(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_account({"local_id": "main", "account_id": "12345", "username": "seller"})
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:143",
+            chat_id=-1,
+            msg_id=143,
+            text="""@seller 的储物袋
+
+材料:
+- 灵石 x 100""",
+            source="韩天尊",
+            date="2026-05-15T10:00:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
+    with store._connect() as conn:
+        conn.execute("DELETE FROM inventory_ledger")
+        conn.execute("DELETE FROM inventory_current WHERE item_name='虚天残图'")
+        conn.execute(
+            """
+            INSERT INTO raw_messages(
+                id, chat_id, msg_id, text, source, date, sender_id,
+                reply_to_msg_id, top_msg_id, mentions_json, sender_is_bot
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "tg:-1:144",
+                -1,
+                144,
+                ".解散副本",
+                "seller",
+                "2026-05-15T10:01:00+00:00",
+                12345,
+                None,
+                None,
+                "[]",
+                0,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO raw_messages(
+                id, chat_id, msg_id, text, source, date, sender_id,
+                reply_to_msg_id, top_msg_id, mentions_json, sender_is_bot
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "tg:-1:145",
+                -1,
+                145,
+                "队长 @seller 已将副本房间（ID: 897）解散。\n因副本未曾开启，天道已将【虚天残图】归还至你的储物袋中。",
+                "韩天尊",
+                "2026-05-15T10:02:00+00:00",
+                7900199668,
+                144,
+                None,
+                "[]",
+                1,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO settings(key, value_json)
+            VALUES('inventory_schema_version', '5')
+            ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO settings(key, value_json)
+            VALUES('inventory_ledger_schema_version', '2')
+            ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json
+            """
+        )
+
+    result = store.backfill_inventory_snapshots_if_needed()
+
+    by_name = {item["name"]: item for item in store.list_inventory_current(owner="seller")}
+    assert result["deltas"] == 1
+    assert by_name["虚天残图"]["amount"] == 1
+    assert by_name["虚天残图"]["last_delta_message_id"] == "tg:-1:145"
+
+
 def test_account_routes_are_wired():
     """GetSendAs / resolve-entity / batch identities / accounts delete 路由必须挂上,
     前端身份表单才有得用。"""

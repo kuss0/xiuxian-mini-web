@@ -44,8 +44,10 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      handling notice.
    - Current state: inventory auto-refreshes while open and names the owners
      that need manual `.储物袋` calibration; `inventory_current` consumes stable
-     Wanbaolou listing/delisting, gift, tree-harvest, and unopened dungeon room
-     return success replies as conservative deltas; official schedule manual
+     Wanbaolou listing/delisting, gift, narrowly-scoped tree-harvest, and
+     unopened dungeon room return success replies as conservative deltas;
+     inventory schema upgrades replay owner-resolvable raw messages so new safe
+     delta families also reach historical `inventory_current`; official schedule manual
      handling details persist in the modal status line. The official schedule rail and modal live in
      `web/static/views/schedule.js`; the resource stats modal and coverage
      renderer live in `web/static/views/resource_stats.js`; identity state
@@ -141,8 +143,10 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
 - Keep adding concrete message-classification fixtures only from observed bad
   samples.
 - Add new inventory delta parsers only from stable real bot success replies,
-  then backfill `inventory_current`; current stable families are Wanbaolou
-  listing/delisting, gift, tree harvest, and unopened dungeon room returns.
+  then bump the inventory schema version so historical `inventory_current` is
+  rebuilt for owner-resolvable messages; current stable families are Wanbaolou
+  listing/delisting, gift, narrowly-scoped tree harvest, and unopened dungeon
+  room returns.
 - Treat official schedule Telegram-history sync as reconciliation only; never
   use it to exceed the local 100-message guard.
 - Keep automatic dispatch limited to explicit settings allowlists; unrecognized
