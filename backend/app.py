@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hmac
 import json
 import mimetypes
@@ -16,9 +17,10 @@ from urllib.parse import parse_qs, urlparse
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from backend.config import ACCESS_TOKEN, WEB_DIR
+from backend.config import ACCESS_TOKEN, WEB_DIR, RATE_LIMIT_ENABLED, RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW_SEC
 from backend.api import handlers
 from backend.api.routes import RawResponse, build_get_routes, build_post_routes
+from backend.rate_limiter import RateLimiter
 from backend.server import MiniWebServer
 
 
@@ -52,6 +54,12 @@ class MiniWebHandler(BaseHTTPRequestHandler):
     app_server: MiniWebServer | None = None
     access_token = ACCESS_TOKEN
     web_dir = WEB_DIR
+    rate_limiter: RateLimiter | None = None
+
+    @classmethod
+    def set_rate_limiter(cls, limiter: RateLimiter | None) -> None:
+        """设置速率限制器"""
+        cls.rate_limiter = limiter
 
     def do_GET(self) -> None:
         self._handle_request(include_body=True)
@@ -67,9 +75,14 @@ class MiniWebHandler(BaseHTTPRequestHandler):
         path = parsed.path
         query = parse_qs(parsed.query)
 
-        if path.startswith("/api/") and not self._is_authorized_api_request():
-            self._send_error(HTTPStatus.UNAUTHORIZED, "需要访问口令", include_body=include_body)
-            return
+        # API 请求检查速率限制
+        if path.startswith("/api/"):
+            if not self._check_rate_limit(include_body):
+                return
+
+            if not self._is_authorized_api_request():
+                self._send_error(HTTPStatus.UNAUTHORIZED, "需要访问口令", include_body=include_body)
+                return
 
         route = GET_ROUTES.get(path)
         if route:
@@ -85,6 +98,9 @@ class MiniWebHandler(BaseHTTPRequestHandler):
     def _handle_post(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path.startswith("/api/"):
+            if not self._check_rate_limit(True):
+                return
+
             if not self._is_authorized_api_request():
                 self._send_error(HTTPStatus.UNAUTHORIZED, "需要访问口令")
                 return
@@ -120,6 +136,54 @@ class MiniWebHandler(BaseHTTPRequestHandler):
     def _is_authorized_api_request(self) -> bool:
         return is_authorized_api_headers(self.headers, self.access_token)
 
+    def _check_rate_limit(self, include_body: bool = True) -> bool:
+        """检查速率限制
+
+        Args:
+            include_body: 是否包含响应体
+
+        Returns:
+            True 如果允许请求，False 如果超过限制
+        """
+        if not self.rate_limiter:
+            return True
+
+        client_ip = self.client_address[0]
+
+        if not self.rate_limiter.is_allowed(client_ip):
+            remaining = self.rate_limiter.get_remaining(client_ip)
+            reset_time = int(self.rate_limiter.get_reset_time(client_ip))
+
+            # 发送 429 Too Many Requests
+            body = json.dumps({
+                "ok": False,
+                "error": f"速率限制: 每分钟最多 {self.rate_limiter.max_requests} 次请求",
+                "retry_after": reset_time
+            }, ensure_ascii=False, indent=2).encode("utf-8")
+
+            self.send_response(HTTPStatus.TOO_MANY_REQUESTS)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("X-RateLimit-Limit", str(self.rate_limiter.max_requests))
+            self.send_header("X-RateLimit-Remaining", str(remaining))
+            self.send_header("X-RateLimit-Reset", str(reset_time))
+            self.send_header("Retry-After", str(reset_time))
+            self.end_headers()
+
+            if include_body:
+                try:
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+            return False
+
+        # 添加速率限制头到正常响应
+        remaining = self.rate_limiter.get_remaining(client_ip)
+        # 注意：这里只是记录，实际的头会在 _send_json 中添加
+        self._rate_limit_remaining = remaining
+        return True
+
     def _serve_static(self, path: str, *, include_body: bool) -> None:
         if path == "/":
             path = "/index.html"
@@ -140,10 +204,46 @@ class MiniWebHandler(BaseHTTPRequestHandler):
         body = target.read_bytes()
         if target.suffix == ".html":
             body = _inject_build_id(body)
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store, must-revalidate")
+
+        # 启用 gzip 压缩
+        should_compress = (
+            len(body) > 1024 and  # 只压缩大于 1KB 的文件
+            target.suffix in {'.js', '.css', '.html', '.json', '.svg', '.xml'} and
+            'gzip' in str(self.headers.get('Accept-Encoding', '')).lower()
+        )
+
+        if should_compress:
+            body = gzip.compress(body, compresslevel=6)
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store, must-revalidate")
+        else:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store, must-revalidate")
+
+        # 添加 CSP 头（仅 HTML 文件）
+        if target.suffix == ".html":
+            csp = (
+                "default-src 'self'; "
+                "script-src 'self'; "
+                "style-src 'self' 'unsafe-inline'; "  # 暂时允许内联样式
+                "img-src 'self' data:; "
+                "connect-src 'self'; "
+                "font-src 'self'; "
+                "object-src 'none'; "
+                "base-uri 'self'; "
+                "form-action 'self'"
+            )
+            self.send_header("Content-Security-Policy", csp)
+            # 添加其他安全头
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("X-XSS-Protection", "1; mode=block")
+
         self.end_headers()
         if include_body:
             try:
@@ -162,6 +262,12 @@ class MiniWebHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+
+        # 添加速率限制头
+        if self.rate_limiter and hasattr(self, '_rate_limit_remaining'):
+            self.send_header("X-RateLimit-Limit", str(self.rate_limiter.max_requests))
+            self.send_header("X-RateLimit-Remaining", str(self._rate_limit_remaining))
+
         self.end_headers()
         if include_body:
             try:
@@ -226,6 +332,23 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8787, type=int)
     args = parser.parse_args()
+
+    # 初始化速率限制器
+    if RATE_LIMIT_ENABLED:
+        rate_limiter = RateLimiter(
+            max_requests=RATE_LIMIT_MAX_REQUESTS,
+            window_seconds=RATE_LIMIT_WINDOW_SEC
+        )
+        MiniWebHandler.set_rate_limiter(rate_limiter)
+        print(f"[mini-web] 速率限制已启用: {RATE_LIMIT_MAX_REQUESTS} 次/{RATE_LIMIT_WINDOW_SEC}秒")
+    else:
+        MiniWebHandler.set_rate_limiter(None)
+        print("[mini-web] 速率限制已禁用")
+
+    if not ACCESS_TOKEN:
+        print("[mini-web] 未设置 MINIWEB_ACCESS_TOKEN, API 不需要认证(仅本地使用)")
+    else:
+        print("[mini-web] API 需要认证")
 
     server = create_http_server(args.host, args.port)
     print(f"Xiuxian Mini Web listening on http://{args.host}:{args.port}")

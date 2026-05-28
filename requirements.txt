@@ -1,0 +1,11 @@
+iniconfig==2.3.0
+packaging==26.2
+pluggy==1.6.0
+pyaes==1.6.1
+pyasn1==0.6.3
+Pygments==2.20.0
+PySocks==1.7.1
+pytest==9.0.3
+rsa==4.9.1
+Telethon==1.43.2
+-e git+ssh://git@github.com/kuss0/xiuxian-mini-web.git@08898880260d8ab8b6353283c695d8029f05ee14#egg=xiuxian_mini_web

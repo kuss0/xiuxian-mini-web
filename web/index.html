@@ -213,6 +213,18 @@
     <script src="/static/api.js"></script>
     <script src="/static/ui/modal.js"></script>
     <script src="/static/ui/toast.js"></script>
+    <!-- 模块加载器 -->
+    <script src="/static/module-loader.js"></script>
+    <!-- 性能优化工具 -->
+    <script src="/static/utils/performance.js"></script>
+    <script src="/static/utils/virtual-scroll.js"></script>
+    <!-- 安全 DOM 操作工具 -->
+    <script src="/static/utils/safe-dom.js"></script>
+    <!-- 模块化工具 -->
+    <script src="/static/dom-refs.js"></script>
+    <script src="/static/utils/message-utils.js"></script>
+    <script src="/static/controllers/message-controller.js"></script>
+    <script src="/static/controllers/polling-controller.js"></script>
     <script src="/static/views/logs.js"></script>
     <script src="/static/views/outbox.js"></script>
     <script src="/static/views/game_bots.js"></script>
@@ -246,5 +258,7 @@
     <script src="/static/views/world_report.js"></script>
     <script src="/static/views/world_event.js"></script>
     <script src="/static/app.js"></script>
+    <!-- 性能优化补丁 - 必须在 app.js 之后加载 -->
+    <script src="/static/performance-patch.js"></script>
   </body>
 </html>

@@ -13,11 +13,11 @@
       "🔥", "✨", "⚔️", "🧘‍♂️", "🍃", "💧", "🌙", "🎉",
       "⚠️", "🚫", "✅", "❌", "❓", "💰", "📦", "🧩",
     ],
-    POLL_INTERVAL_MS: 5000,
-    ACCOUNT_POLL_INTERVAL_MS: 30000,
-    BOT_DISCOVERY_POLL_INTERVAL_MS: 60000,
-    IDENTITY_STATE_POLL_INTERVAL_MS: 30000,
-    HEALTH_POLL_INTERVAL_MS: 60000,
-    WORLD_SNAPSHOT_POLL_INTERVAL_MS: 90000,
+    POLL_INTERVAL_MS: 8000,  // 从 5s 改为 8s，减少轮询频率
+    ACCOUNT_POLL_INTERVAL_MS: 45000,  // 从 30s 改为 45s
+    BOT_DISCOVERY_POLL_INTERVAL_MS: 120000,  // 从 60s 改为 120s
+    IDENTITY_STATE_POLL_INTERVAL_MS: 45000,  // 从 30s 改为 45s
+    HEALTH_POLL_INTERVAL_MS: 90000,  // 从 60s 改为 90s
+    WORLD_SNAPSHOT_POLL_INTERVAL_MS: 120000,  // 从 90s 改为 120s
   };
 })();

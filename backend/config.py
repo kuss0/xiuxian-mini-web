@@ -14,6 +14,11 @@ MAX_ACCOUNTS = int(os.environ.get("MINIWEB_MAX_ACCOUNTS", "100") or "100")
 MAX_IDENTITIES = int(os.environ.get("MINIWEB_MAX_IDENTITIES", "100") or "100")
 MAX_LISTENERS = int(os.environ.get("MINIWEB_MAX_LISTENERS", "1") or "1")
 
+# 速率限制配置
+RATE_LIMIT_ENABLED = os.environ.get("MINIWEB_RATE_LIMIT", "true").lower() in {"1", "true", "yes"}
+RATE_LIMIT_MAX_REQUESTS = int(os.environ.get("MINIWEB_RATE_LIMIT_MAX", "60") or "60")
+RATE_LIMIT_WINDOW_SEC = int(os.environ.get("MINIWEB_RATE_LIMIT_WINDOW", "60") or "60")
+
 
 @dataclass(frozen=True)
 class ServerConfig:

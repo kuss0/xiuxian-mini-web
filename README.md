@@ -82,14 +82,25 @@ Web 动作草稿
 
 当前基座可直接启动。Telegram 登录、读取群和监听需要安装项目依赖里的 Telethon。
 
-首次准备环境：
+### 安装依赖
+
+**推荐方式 (使用锁定版本，确保环境一致性)**:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install -e .
+.venv/bin/pip install -r requirements.txt
 ```
 
-启动服务：
+**或使用 pyproject.toml (允许小版本更新，适合开发环境)**:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e .
+```
+
+> **注意**: `requirements.txt` 锁定了精确版本，推荐生产环境使用。`pyproject.toml` 允许小版本更新，适合开发调试。
+
+### 启动服务
 
 ```bash
 .venv/bin/python backend/app.py --host 127.0.0.1 --port 8787
