@@ -1,0 +1,1212 @@
+.chat-client-shell .world-event-card.leader {
+  border-left-color: #22d3ee;
+}
+
+.chat-client-shell .world-event-card.mine {
+  border-left-color: #22c55e;
+}
+
+.chat-client-shell .world-event-card.resource,
+.chat-client-shell .world-event-card.training,
+.chat-client-shell .world-event-card.home {
+  border-left-color: #14b8a6;
+}
+
+.chat-client-shell .world-event-card.empty {
+  min-height: 56px;
+  opacity: 0.82;
+}
+
+.chat-client-shell .quick-action-hotbar {
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 0 0 7px;
+}
+
+.chat-client-shell .quick-action-hotbar .skill-chip {
+  flex: 0 0 auto;
+  min-height: 30px;
+  border-radius: 999px;
+  border-color: rgba(96, 165, 250, 0.18);
+  background: rgba(15, 23, 42, 0.72);
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.chat-client-shell .quick-action-hotbar .skill-chip:hover:not(:disabled) {
+  border-color: rgba(96, 165, 250, 0.46);
+  background: rgba(37, 99, 235, 0.20);
+}
+
+.chat-client-shell .quick-action-hotbar .skill-chip.cooling {
+  border-color: rgba(94, 234, 212, 0.28);
+  background: rgba(20, 83, 45, 0.18);
+}
+
+.chat-client-shell .quick-action-hotbar-empty {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+@media (max-width: 1280px) {
+  .chat-client-shell .game-hud {
+    grid-template-columns: minmax(240px, 1fr) minmax(0, 1.35fr);
+  }
+
+  .chat-client-shell .hud-inbox {
+    grid-column: 1 / -1;
+    min-height: 52px;
+  }
+
+  .chat-client-shell .hud-inbox .cockpit-inbox-line {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .identity-status-profile-grid,
+  .identity-status-grid,
+  .leader-intel-list,
+  .world-report-hero,
+  .world-report-grid,
+  .world-report-intel-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .world-report-section.wide {
+    grid-column: auto;
+  }
+
+  .chat-client-shell .chat-pane {
+    grid-template-rows: auto auto auto auto auto auto auto minmax(48vh, 1fr);
+  }
+
+  .chat-client-shell .game-hud {
+    grid-template-columns: 1fr;
+    padding: 8px;
+  }
+
+  .chat-client-shell .hud-panel {
+    min-height: 0;
+  }
+
+  .chat-client-shell .hud-modules {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .chat-client-shell .game-action-dock {
+    grid-template-columns: 1fr;
+    padding: 7px 8px;
+  }
+
+  .chat-client-shell .live-situation-board {
+    grid-template-columns: 1fr;
+    padding: 7px 8px;
+  }
+
+  .chat-client-shell .live-situation-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .chat-client-shell .game-scene-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 7px 8px;
+  }
+
+  .chat-client-shell .quest-tracker {
+    grid-template-columns: 1fr;
+    padding: 7px 8px;
+  }
+
+  .chat-client-shell .game-dock-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .identity-status-profile-grid,
+  .identity-status-grid,
+  .leader-intel-list,
+  .world-report-hero,
+  .world-report-grid,
+  .world-report-wild,
+  .world-report-rare,
+  .world-report-quests,
+  .world-report-intel-list {
+    grid-template-columns: 1fr;
+  }
+
+  .identity-status-group-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .identity-source-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chat-client-shell .game-hud {
+    display: none;
+  }
+
+  .chat-client-shell .chat-pane {
+    grid-template-rows: auto auto auto auto auto auto minmax(52vh, 1fr);
+  }
+
+  .chat-client-shell .world-event-strip {
+    padding: 7px 8px;
+  }
+
+  .chat-client-shell .live-situation-board {
+    display: flex;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .chat-client-shell .live-situation-hero,
+  .chat-client-shell .live-situation-grid {
+    flex: 0 0 min(86vw, 340px);
+  }
+
+  .chat-client-shell .live-situation-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-client-shell .world-event-card {
+    flex-basis: min(82vw, 300px);
+  }
+
+  .chat-client-shell .game-scene-board {
+    display: flex;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .chat-client-shell .game-scene-card {
+    flex: 0 0 min(82vw, 300px);
+  }
+
+  .chat-client-shell .quest-tracker-list {
+    display: flex;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .chat-client-shell .quest-card {
+    flex: 0 0 min(82vw, 310px);
+  }
+
+  .chat-client-shell .game-dock-context {
+    display: none;
+  }
+
+  .chat-client-shell .game-dock-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* ---------- Chat-first viewport pass ---------- */
+.chat-client-shell {
+  grid-template-columns: clamp(260px, 20vw, 320px) minmax(0, 1fr);
+  width: 100%;
+  max-width: 100vw;
+}
+
+.chat-client-shell .conversation-rail,
+.chat-client-shell .chat-workspace,
+.chat-client-shell .layout-grid,
+.chat-client-shell .chat-pane {
+  min-width: 0;
+}
+
+.chat-client-shell .chat-pane {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.chat-client-shell .message-list {
+  min-height: 0;
+}
+
+.chat-client-shell .game-primary-strip {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.25fr) minmax(220px, 1.15fr) minmax(180px, 0.9fr) auto;
+  align-items: stretch;
+  min-width: 0;
+  min-height: 38px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.10);
+  background: rgba(6, 12, 25, 0.96);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.chat-client-shell .game-primary-item,
+.chat-client-shell .game-primary-more {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+  border: 0;
+  border-right: 1px solid rgba(148, 163, 184, 0.10);
+  border-radius: 0;
+  background: transparent;
+  color: #cbd5e1;
+  padding: 5px 10px;
+  text-align: left;
+}
+
+.chat-client-shell .game-primary-item:hover,
+.chat-client-shell .game-primary-more:hover {
+  background: rgba(30, 41, 59, 0.54);
+}
+
+.chat-client-shell .game-primary-item span {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-client-shell .game-primary-item strong {
+  overflow: hidden;
+  color: #f8fafc;
+  font-size: 12px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-client-shell .game-primary-item small {
+  overflow: hidden;
+  color: #94a3b8;
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-client-shell .game-primary-item.warn strong,
+.chat-client-shell .game-primary-item.risk strong,
+.chat-client-shell .game-primary-item.quest strong,
+.chat-client-shell .game-primary-item.choice strong,
+.chat-client-shell .game-primary-item.active strong {
+  color: #fde68a;
+}
+
+.chat-client-shell .game-primary-item.dungeon strong,
+.chat-client-shell .game-primary-item.open strong,
+.chat-client-shell .game-primary-item.joined strong {
+  color: #ddd6fe;
+}
+
+.chat-client-shell .game-primary-item.ready strong,
+.chat-client-shell .game-primary-item.mine strong,
+.chat-client-shell .game-primary-item.leader strong,
+.chat-client-shell .game-primary-item.focus strong {
+  color: #bbf7d0;
+}
+
+.chat-client-shell .game-primary-more {
+  min-width: 64px;
+  justify-content: center;
+  border-right: 0;
+  color: #bfdbfe;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.chat-client-shell .game-secondary-shell {
+  min-width: 0;
+  margin-top: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.10);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.28);
+}
+
+.chat-client-shell .game-secondary-shell > summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  color: #cbd5e1;
+  padding: 7px 9px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.chat-client-shell .game-secondary-shell > summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-client-shell .game-secondary-shell > summary span {
+  color: #f8fafc;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.chat-client-shell .game-secondary-shell > summary small {
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 10.5px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-client-shell .game-secondary-shell > summary::after {
+  content: "展开";
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  border: 1px solid rgba(96, 165, 250, 0.20);
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.12);
+  color: #bfdbfe;
+  padding: 2px 7px;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.chat-client-shell .game-secondary-shell > summary small {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.chat-client-shell .game-secondary-shell[open] > summary {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.10);
+}
+
+.chat-client-shell .game-secondary-shell[open] > summary::after {
+  content: "收起";
+}
+
+.chat-client-shell .game-secondary-shell:not([open]) .game-secondary-panels {
+  display: none;
+}
+
+.chat-client-shell .game-secondary-panels {
+  display: grid;
+  gap: 8px;
+  max-height: min(62vh, 620px);
+  overflow: auto;
+  padding: 8px;
+}
+
+.chat-client-shell .game-secondary-panels .game-hud,
+.chat-client-shell .game-secondary-panels .live-situation-board,
+.chat-client-shell .game-secondary-panels .game-scene-board,
+.chat-client-shell .game-secondary-panels .quest-tracker,
+.chat-client-shell .game-secondary-panels .game-action-dock {
+  border-bottom: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.chat-client-shell .game-secondary-panels .game-hud,
+.chat-client-shell .game-secondary-panels .live-situation-board,
+.chat-client-shell .game-secondary-panels .game-scene-board,
+.chat-client-shell .game-secondary-panels .quest-tracker,
+.chat-client-shell .game-secondary-panels .game-action-dock {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.chat-client-shell .game-secondary-panels .world-event-strip {
+  border-bottom: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.chat-client-shell .game-secondary-panels .hud-panel,
+.chat-client-shell .game-secondary-panels .live-situation-hero,
+.chat-client-shell .game-secondary-panels .live-situation-tile,
+.chat-client-shell .game-secondary-panels .game-scene-card,
+.chat-client-shell .game-secondary-panels .quest-tracker-head,
+.chat-client-shell .game-secondary-panels .quest-card,
+.chat-client-shell .game-secondary-panels .game-dock-context {
+  border-color: rgba(148, 163, 184, 0.10);
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.chat-client-shell .game-secondary-panels .hud-modules,
+.chat-client-shell .game-secondary-panels .hud-inbox .cockpit-inbox-line,
+.chat-client-shell .game-secondary-panels .live-situation-grid,
+.chat-client-shell .game-secondary-panels .quest-tracker-list,
+.chat-client-shell .game-secondary-panels .game-dock-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.chat-client-shell .game-secondary-panels .game-scene-board {
+  gap: 8px;
+}
+
+.chat-client-shell .game-secondary-panels .game-scene-card,
+.chat-client-shell .game-secondary-panels .live-situation-tile {
+  min-height: 0;
+}
+
+.chat-client-shell .game-secondary-panels .world-event-card {
+  flex-basis: min(100%, 260px);
+}
+
+@media (max-width: 1360px) {
+  .chat-client-shell {
+    grid-template-columns: clamp(248px, 19vw, 292px) minmax(0, 1fr);
+  }
+
+  .chat-client-shell .conversation-rail {
+    padding: 10px;
+  }
+
+  .chat-client-shell .channel-chip {
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    min-height: 58px;
+    padding: 6px;
+  }
+
+  .chat-client-shell .channel-chip-icon {
+    width: 32px;
+    height: 32px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .chat-client-shell {
+    grid-template-columns: clamp(220px, 21vw, 260px) minmax(0, 1fr);
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .chat-client-shell .conversation-rail,
+  .chat-client-shell .chat-workspace {
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .chat-client-shell .conversation-rail {
+    padding: 10px;
+  }
+
+  .chat-client-shell .channel-filters {
+    min-height: 0;
+  }
+
+  .chat-client-shell .stream-channel-tools {
+    flex-wrap: wrap;
+  }
+
+  .chat-client-shell .workspace-tools-toggle small {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .chat-client-shell .game-primary-strip {
+    grid-template-columns: minmax(190px, 1fr) minmax(190px, 1fr) minmax(150px, 0.8fr) auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .chat-client-shell {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+    min-height: 100dvh;
+    overflow: auto;
+  }
+
+  .chat-client-shell .conversation-rail,
+  .chat-client-shell .chat-workspace {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .chat-client-shell .chat-workspace {
+    min-height: 82dvh;
+  }
+
+  .chat-client-shell .stream-channel-tools {
+    flex-wrap: wrap;
+  }
+
+  .chat-client-shell .game-primary-strip {
+    grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(140px, 0.8fr) auto;
+  }
+
+  .chat-client-shell .game-secondary-shell > summary {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .chat-client-shell .game-secondary-shell > summary small {
+    display: none;
+  }
+
+  .chat-client-shell .game-secondary-panels .hud-modules,
+  .chat-client-shell .game-secondary-panels .hud-inbox .cockpit-inbox-line,
+  .chat-client-shell .game-secondary-panels .live-situation-grid,
+  .chat-client-shell .game-secondary-panels .quest-tracker-list,
+  .chat-client-shell .game-secondary-panels .game-dock-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-height: 820px) and (min-width: 901px) {
+  .chat-client-shell .chat-pane .section-head {
+    min-height: 44px;
+    padding-block: 6px;
+  }
+
+  .chat-client-shell .chat-composer {
+    padding: 6px 10px 8px;
+  }
+
+  .chat-client-shell .quick-action-hotbar {
+    padding-bottom: 5px;
+  }
+
+  .chat-client-shell .direct-send-head {
+    margin-bottom: 5px;
+  }
+
+  .chat-client-shell .direct-send-row textarea {
+    min-height: 38px;
+    max-height: 96px;
+    padding-block: 8px;
+  }
+
+  .chat-client-shell #directSendSubmit {
+    min-height: 38px;
+  }
+}
+
+/* ---------- Chat usability recovery pass ---------- */
+.chat-client-shell .chat-pane {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.chat-client-shell .global-banner {
+  grid-row: 1;
+}
+
+.chat-client-shell .layout-grid {
+  grid-row: 2;
+}
+
+.chat-client-shell .chat-composer {
+  grid-row: 3;
+  align-self: end;
+}
+
+.chat-client-shell .message-list {
+  scroll-behavior: auto;
+}
+
+.chat-client-shell .chat-composer {
+  max-height: min(42dvh, 360px);
+  overflow: visible;
+  padding: 7px 10px 9px;
+}
+
+.chat-client-shell .quick-action-hotbar {
+  min-height: 0;
+  padding-bottom: 5px;
+}
+
+.chat-client-shell .quick-action-hotbar .skill-chip {
+  min-height: 28px;
+  padding: 4px 9px;
+}
+
+.chat-client-shell .direct-send-head {
+  min-height: 0;
+  margin-bottom: 5px;
+}
+
+.chat-client-shell .direct-send-title span {
+  max-width: min(62vw, 640px);
+}
+
+.chat-client-shell .direct-send-selection-context,
+.chat-client-shell .direct-send-reply-context,
+.chat-client-shell .direct-send-action-hints {
+  max-height: 48px;
+  margin-bottom: 5px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 5px 8px;
+}
+
+.chat-client-shell .direct-send-selection-context {
+  align-items: center;
+}
+
+.chat-client-shell .direct-selection-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 2px 8px;
+  min-height: 0;
+  border-left-width: 2px;
+  padding-left: 7px;
+}
+
+.chat-client-shell .direct-selection-main span {
+  grid-row: 1;
+  color: #93c5fd;
+  white-space: nowrap;
+}
+
+.chat-client-shell .direct-selection-main strong,
+.chat-client-shell .direct-selection-main small {
+  grid-column: 2;
+}
+
+.chat-client-shell .direct-selection-main p {
+  display: none;
+}
+
+.chat-client-shell .direct-selection-actions {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 1px;
+}
+
+.chat-client-shell .direct-selection-actions button,
+.chat-client-shell .direct-send-action-hints button {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+.chat-client-shell .direct-send-action-hints {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-client-shell .direct-send-action-hints[hidden] {
+  display: none;
+}
+
+.chat-client-shell .direct-action-hints-list {
+  flex-wrap: nowrap;
+  overflow: visible;
+}
+
+.chat-client-shell .direct-send-action-hints button {
+  display: inline-flex;
+  align-items: center;
+  max-width: none;
+}
+
+.chat-client-shell .direct-send-action-hints button small,
+.chat-client-shell .direct-send-reply-main small {
+  display: none;
+}
+
+.chat-client-shell .direct-send-reply-context {
+  align-items: center;
+}
+
+.chat-client-shell .direct-send-reply-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 2px 8px;
+}
+
+.chat-client-shell .direct-send-reply-main span,
+.chat-client-shell .direct-send-reply-main strong {
+  min-width: 0;
+}
+
+.chat-client-shell .direct-send-row {
+  grid-template-columns: clamp(118px, 14vw, 172px) minmax(0, 1fr) 76px;
+  min-height: 42px;
+  border-radius: 9px;
+}
+
+.chat-client-shell .direct-send-row select,
+.chat-client-shell .direct-send-row textarea {
+  min-height: 42px;
+}
+
+.chat-client-shell .direct-send-row select {
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+.chat-client-shell .direct-send-row textarea {
+  min-height: 42px;
+  max-height: 118px;
+  overflow-y: hidden;
+  padding-block: 9px;
+}
+
+.chat-client-shell .direct-send-skill-panel,
+.chat-client-shell .direct-send-emoji-palette {
+  max-height: min(24dvh, 220px);
+  overflow: auto;
+}
+
+.chat-client-shell #directSendSubmit {
+  min-height: 42px;
+}
+
+@media (max-height: 820px) and (min-width: 721px) {
+  .chat-client-shell .chat-composer {
+    max-height: min(38dvh, 300px);
+    padding: 6px 9px 8px;
+  }
+
+  .chat-client-shell .direct-send-selection-context,
+  .chat-client-shell .direct-send-reply-context,
+  .chat-client-shell .direct-send-action-hints {
+    max-height: 40px;
+  }
+
+  .chat-client-shell .direct-send-row textarea {
+    min-height: 38px;
+    max-height: 92px;
+    padding-block: 8px;
+  }
+
+  .chat-client-shell .direct-send-row select,
+  .chat-client-shell #directSendSubmit {
+    min-height: 38px;
+  }
+
+  .chat-client-shell .direct-send-skill-panel,
+  .chat-client-shell .direct-send-emoji-palette {
+    max-height: min(22dvh, 180px);
+  }
+}
+
+@media (max-width: 720px) {
+  .chat-client-shell .chat-composer {
+    position: sticky;
+    bottom: 0;
+    max-height: 56dvh;
+  }
+
+  .chat-client-shell .direct-send-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- Navigation consolidation pass ---------- */
+.chat-client-shell .command-rail {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.chat-client-shell .schedule-rail-panel,
+.chat-client-shell .common-action-panel {
+  margin: 0;
+  border-color: rgba(148, 163, 184, 0.12);
+  background: rgba(15, 23, 42, 0.68);
+}
+
+.chat-client-shell .schedule-rail-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.chat-client-shell .schedule-rail-panel .panel-head,
+.chat-client-shell .common-action-panel .panel-head {
+  min-height: 36px;
+  margin-bottom: 9px;
+}
+
+.chat-client-shell .schedule-rail-panel .panel-head h2,
+.chat-client-shell .common-action-panel .panel-head h2 {
+  color: #e5e7eb;
+  font-size: 14px;
+}
+
+.chat-client-shell .schedule-rail-panel .panel-head button,
+.chat-client-shell .common-action-panel .panel-head button {
+  min-height: 32px;
+  padding: 6px 11px;
+  font-size: 13px;
+}
+
+.chat-client-shell .schedule-rail {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.chat-client-shell .schedule-rail-summary,
+.chat-client-shell .schedule-rail-empty {
+  display: grid;
+  gap: 3px;
+  border: 1px solid rgba(148, 163, 184, 0.10);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.42);
+  padding: 8px 9px;
+}
+
+.chat-client-shell .schedule-rail-summary strong,
+.chat-client-shell .schedule-rail-empty strong {
+  color: #f8fafc;
+  font-size: 13px;
+}
+
+.chat-client-shell .schedule-rail-summary span,
+.chat-client-shell .schedule-rail-empty span {
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.chat-client-shell .schedule-rail-empty.warn strong {
+  color: #fbbf24;
+}
+
+.chat-client-shell .schedule-rail-list {
+  display: grid;
+  gap: 7px;
+}
+
+.chat-client-shell .schedule-rail-row {
+  min-width: 0;
+}
+
+.chat-client-shell .schedule-rail-row-main {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 5px;
+  border: 1px solid rgba(148, 163, 184, 0.11);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.34);
+  color: #cbd5e1;
+  padding: 8px 9px;
+  text-align: left;
+}
+
+.chat-client-shell .schedule-rail-row-main:hover {
+  border-color: rgba(96, 165, 250, 0.36);
+  background: rgba(30, 41, 59, 0.70);
+}
+
+.chat-client-shell .schedule-rail-row.live .schedule-rail-row-main {
+  border-left-color: #22d3ee;
+}
+
+.chat-client-shell .schedule-rail-row.done .schedule-rail-row-main,
+.chat-client-shell .schedule-rail-row.active .schedule-rail-row-main {
+  border-left-color: #22c55e;
+}
+
+.chat-client-shell .schedule-rail-row.warn .schedule-rail-row-main {
+  border-left-color: #f59e0b;
+}
+
+.chat-client-shell .schedule-rail-row.risk .schedule-rail-row-main {
+  border-left-color: #ef4444;
+}
+
+.chat-client-shell .schedule-rail-row.muted .schedule-rail-row-main {
+  border-left-color: #64748b;
+  opacity: 0.82;
+}
+
+.chat-client-shell .schedule-rail-row-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-client-shell .schedule-rail-row-title strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #f8fafc;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-client-shell .schedule-rail-row-title .status-pill {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  font-size: 11px;
+}
+
+.chat-client-shell .schedule-rail-row-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: #94a3b8;
+  font-size: 11.5px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-client-shell .schedule-progress.compact {
+  display: block;
+  height: 4px;
+  margin: 0;
+}
+
+.chat-client-shell .schedule-rail-snippets {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.chat-client-shell .schedule-rail-snippets span {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  min-width: 0;
+}
+
+.chat-client-shell .schedule-rail-snippets code,
+.chat-client-shell .schedule-rail-snippets small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-client-shell .schedule-rail-snippets code {
+  color: #dbeafe;
+  font-size: 11.5px;
+}
+
+.chat-client-shell .schedule-rail-snippets small {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.chat-client-shell .schedule-rail-more {
+  min-height: 32px;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.12);
+  color: #bfdbfe;
+  font-size: 13px;
+}
+
+.chat-client-shell .primary-toolbox {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.chat-client-shell .primary-toolbox button {
+  min-height: 38px;
+  border-color: rgba(148, 163, 184, 0.13);
+  background: rgba(2, 6, 23, 0.34);
+  color: #e5e7eb;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.chat-client-shell .stream-channel-tools {
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+}
+
+.chat-client-shell .stream-filter-inline {
+  flex: 1 1 320px;
+  min-width: min(300px, 32vw);
+  max-width: min(520px, 38vw);
+  overflow: hidden;
+}
+
+.chat-client-shell .stream-filter-inline .quick-filters {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.36);
+  padding: 3px;
+}
+
+.chat-client-shell .stream-filter-inline .quick-filter-chip {
+  flex: 0 0 auto;
+  min-height: 32px;
+  border-color: transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #94a3b8;
+  padding: 4px 9px 4px 5px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.chat-client-shell .stream-filter-inline .quick-filter-chip:hover {
+  background: rgba(30, 41, 59, 0.62);
+  color: #e5e7eb;
+}
+
+.chat-client-shell .stream-filter-inline .quick-filter-chip.active {
+  border-color: rgba(96, 165, 250, 0.34);
+  background: rgba(37, 99, 235, 0.22);
+  color: #f8fafc;
+}
+
+.chat-client-shell .stream-filter-inline .quick-filter-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.74);
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.chat-client-shell .stream-filter-inline .quick-filter-label {
+  line-height: 1;
+}
+
+.chat-client-shell .stream-filter-inline .quick-filter-chip.active .quick-filter-icon {
+  border-color: rgba(96, 165, 250, 0.42);
+  background: rgba(37, 99, 235, 0.38);
+  color: #eff6ff;
+}
+
+.chat-client-shell .stream-filter-inline .quick-filter-chip.risk.active,
+.chat-client-shell .stream-filter-inline .quick-filter-chip.risk:hover {
+  border-color: rgba(248, 113, 113, 0.42);
+  background: rgba(127, 29, 29, 0.32);
+  color: #fecaca;
+}
+
+.chat-client-shell .stream-filter-inline .quick-filter-chip.risk .quick-filter-icon {
+  border-color: rgba(248, 113, 113, 0.24);
+  background: rgba(127, 29, 29, 0.28);
+  color: #fecaca;
+}
+
+.chat-client-shell .stream-filter-inline .quick-filter-count {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  color: #94a3b8;
+  padding: 0 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-client-shell .stream-filter-inline .quick-filter-chip.active .quick-filter-count {
+  background: rgba(255, 255, 255, 0.16);
+  color: #f8fafc;
+}
+
+.chat-client-shell .stream-title strong {
+  font-size: 16px;
+}
+
+.chat-client-shell .stream-title span {
+  font-size: 12.5px;
+}
+
+.chat-client-shell .message-search input,
+.chat-client-shell .stream-tool-button,
+.chat-client-shell .workspace-tools-toggle,
+.chat-client-shell .message-count-pill {
+  min-height: 34px;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.chat-client-shell .workspace-tools-toggle small {
+  font-size: 11.5px;
+}
+
+.chat-client-shell .composer-tool-button {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.82);
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+
+.chat-client-shell .composer-tool-button:hover {
+  border-color: rgba(96, 165, 250, 0.46);
+  color: #bfdbfe;
+}
+
+@media (max-width: 1180px) {
+  .chat-client-shell .stream-channel-tools {
+    flex-wrap: wrap;
+  }
+
+  .chat-client-shell .stream-filter-inline {
+    order: 8;
+    flex-basis: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 900px) {
+  .chat-client-shell .command-rail {
+    grid-template-rows: auto auto auto;
+  }
+
+  .chat-client-shell .schedule-rail {
+    max-height: 42vh;
+  }
+}
+
+/* Put channel navigation in the primary header slot. */
+.chat-client-shell .chat-pane .section-head {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.chat-client-shell .chat-pane .section-head > .stream-filter-inline {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+
+.chat-client-shell .chat-pane .section-head > .stream-channel-tools {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 1180px) {
+  .chat-client-shell .chat-pane .section-head {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .chat-client-shell .chat-pane .section-head > .stream-filter-inline {
+    order: 1;
+    flex-basis: 100%;
+  }
+
+  .chat-client-shell .chat-pane .section-head > .stream-channel-tools {
+    order: 2;
+    width: 100%;
+  }
+}
