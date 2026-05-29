@@ -38,7 +38,7 @@
    * @param {boolean} options.silent - 静默模式
    * @returns {Promise<Object>} 世界快照
    */
-  async function loadWorldSnapshot({ silent = false } = ) {
+  async function loadWorldSnapshot({ silent = false } = {}) {
     if (state.worldSnapshotLoading) {
       return state.worldSnapshot || {};
     }

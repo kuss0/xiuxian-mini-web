@@ -1,0 +1,31 @@
+# Docker Compose for Development
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: xiuxian-web-dev
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    volumes:
+      # Mount source code for hot reload
+      - ./backend:/app/backend
+      - ./web:/app/web
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - MINIWEB_ACCESS_TOKEN=${MINIWEB_ACCESS_TOKEN:-dev-token-123}
+      - MINIWEB_HOST=0.0.0.0
+      - MINIWEB_PORT=8787
+      - RATE_LIMIT_ENABLED=false
+      - PYTHONUNBUFFERED=1
+    command: python backend/app.py --host 0.0.0.0 --port 8787
+    networks:
+      - xiuxian-network
+
+networks:
+  xiuxian-network:
+    driver: bridge

@@ -14,3 +14,7 @@ data/
 node_modules/
 *.session
 *.session-journal
+
+# Docker runtime data (do not commit)
+backups/
+logs/

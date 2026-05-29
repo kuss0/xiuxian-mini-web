@@ -1,0 +1,64 @@
+# Docker Compose for Production
+version: '3.8'
+
+services:
+  web:
+    image: xiuxian-mini-web:latest
+    container_name: xiuxian-web-prod
+    restart: always
+    ports:
+      - "8787:8787"
+    volumes:
+      - data:/app/data
+      - logs:/app/logs
+    environment:
+      - MINIWEB_ACCESS_TOKEN=${MINIWEB_ACCESS_TOKEN}
+      - MINIWEB_HOST=0.0.0.0
+      - MINIWEB_PORT=8787
+      - RATE_LIMIT_ENABLED=true
+      - RATE_LIMIT_MAX_REQUESTS=100
+      - RATE_LIMIT_WINDOW_SEC=60
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8787/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - xiuxian-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  backup:
+    image: alpine:latest
+    container_name: xiuxian-backup-prod
+    restart: always
+    volumes:
+      - data:/data:ro
+      - backups:/backups
+    command: sh -c "
+      apk add --no-cache tar gzip &&
+      while true; do
+        DATE=$$(date +%Y%m%d_%H%M%S) &&
+        tar czf /backups/data-$$DATE.tar.gz /data &&
+        find /backups -name 'data-*.tar.gz' -mtime +7 -delete &&
+        sleep 86400
+      done
+    "
+    networks:
+      - xiuxian-network
+
+networks:
+  xiuxian-network:
+    driver: bridge
+
+volumes:
+  data:
+    driver: local
+  logs:
+    driver: local
+  backups:
+    driver: local

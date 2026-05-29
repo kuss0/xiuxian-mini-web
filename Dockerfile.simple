@@ -1,0 +1,29 @@
+# Simplified Dockerfile for Oracle Cloud
+# Minimal dependencies, faster build
+
+FROM python:3.13-slim
+
+WORKDIR /app
+
+# Copy requirements and install Python dependencies only
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY backend/ ./backend/
+COPY web/ ./web/
+
+# Create necessary directories
+RUN mkdir -p data logs
+
+# Set environment variables
+ENV PATH=/root/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    MINIWEB_HOST=0.0.0.0 \
+    MINIWEB_PORT=8787
+
+# Expose port
+EXPOSE 8787
+
+# Run application
+CMD ["python", "backend/app.py", "--host", "0.0.0.0", "--port", "8787"]

@@ -8,4 +8,3 @@ PySocks==1.7.1
 pytest==9.0.3
 rsa==4.9.1
 Telethon==1.43.2
--e git+ssh://git@github.com/kuss0/xiuxian-mini-web.git@08898880260d8ab8b6353283c695d8029f05ee14#egg=xiuxian_mini_web
