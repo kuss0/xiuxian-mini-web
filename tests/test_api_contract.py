@@ -81,9 +81,9 @@ def test_static_modules_are_loaded_and_cache_busted():
     ]
     assert missing_assets == []
     assert view_assets <= set(loaded_assets)
-    assert "styles.css" in loaded_assets
+    assert "styles/base/reset.css" in loaded_assets
     assert "chat-layout.css" in loaded_assets
-    assert loaded_assets.index("styles.css") < loaded_assets.index("chat-layout.css")
+    assert loaded_assets.index("styles/base/reset.css") < loaded_assets.index("chat-layout.css")
 
     injected = _inject_build_id(html.encode("utf-8")).decode("utf-8")
     for asset in loaded_assets:
@@ -102,7 +102,8 @@ def test_frontend_bootstrap_loads_registered_views_before_app():
     app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
     scripts = re.findall(r'<script src="/static/([^"?]+)"', html)
 
-    assert scripts[-1] == "app.js"
+    assert scripts[-1] == "performance-patch.js"
+    assert scripts[-2] == "app.js"
     for required in [
         "state.js",
         "constants.js",
@@ -1837,13 +1838,12 @@ def test_inventory_modal_keeps_auto_refresh_with_manual_owner_fallback():
 def test_chat_viewport_layout_contract_keeps_composer_visible():
     root = Path(__file__).resolve().parents[1]
     html = (root / "web" / "index.html").read_text(encoding="utf-8")
-    base_css = (root / "web" / "static" / "styles.css").read_text(encoding="utf-8")
     css = (root / "web" / "static" / "chat-layout.css").read_text(encoding="utf-8")
 
     workspace = html.index('<main class="main chat-workspace">')
     layout = html.index('<section class="layout-grid detail-closed">')
     composer = html.index('<footer id="directSendComposer" class="direct-send-composer chat-composer"')
-    styles_link = html.index('<link rel="stylesheet" href="/static/styles.css"')
+    styles_link = html.index('<link rel="stylesheet" href="/static/styles/base/reset.css"')
     layout_link = html.index('<link rel="stylesheet" href="/static/chat-layout.css"')
     assert styles_link < layout_link
     assert workspace < layout < composer
@@ -1851,14 +1851,6 @@ def test_chat_viewport_layout_contract_keeps_composer_visible():
     assert '<div id="messageList" class="message-list"></div>' in html
     assert '<div id="quickActionHotbar" class="quick-action-hotbar"' in html
     assert '<textarea id="directSendInput"' in html
-    assert "/* ---------- Final chat viewport stability contract ---------- */" not in base_css
-    stale_base_fragments = [
-        ".chat-client-shell .quick-action-hotbar .skill-chip {\n  min-height: 34px;",
-        ".chat-client-shell .direct-send-row {\n  grid-template-columns: clamp(140px, 15vw, 190px)",
-        ".chat-client-shell .message-count-pill,\n.chat-client-shell .composer-tool-button",
-    ]
-    for fragment in stale_base_fragments:
-        assert fragment not in base_css
 
     final_contract = css
     required_fragments = [
