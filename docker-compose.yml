@@ -17,6 +17,8 @@ services:
       - ./logs:/app/logs
       # Serve frontend from host source (no image rebuild needed for web/ changes)
       - ./web:/app/web:ro
+      # Run backend from host source too (keep-alive/backlog fix lives here; no rebuild needed)
+      - ./backend:/app/backend:ro
     environment:
       - MINIWEB_ACCESS_TOKEN=${MINIWEB_ACCESS_TOKEN:-}
       - MINIWEB_HOST=0.0.0.0

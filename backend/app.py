@@ -51,6 +51,8 @@ def _inject_build_id(body: bytes) -> bytes:
 
 class MiniWebHandler(BaseHTTPRequestHandler):
     server_version = "XiuxianMiniWeb/0.1"
+    protocol_version = "HTTP/1.1"  # 开启 keep-alive: 反代复用连接, 避免首屏几十个静态请求把短连接打满导致 502
+    timeout = 30  # 空闲 keep-alive 连接最多占用线程 30s, 防止线程堆积
     app_server: MiniWebServer | None = None
     access_token = ACCESS_TOKEN
     web_dir = WEB_DIR
@@ -323,8 +325,16 @@ def create_handler(
     return ConfiguredMiniWebHandler
 
 
-def create_http_server(host: str, port: int, app_server: MiniWebServer | None = None) -> ThreadingHTTPServer:
-    return ThreadingHTTPServer((host, port), create_handler(app_server))
+class MiniWebHTTPServer(ThreadingHTTPServer):
+    # socketserver 默认 listen backlog 只有 5; 模块化后首屏要并发拉 ~60 个静态文件,
+    # backlog 太小 -> 突发连接被丢 -> 反代收到连接失败 -> 502。调大到 128。
+    request_queue_size = 128
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+def create_http_server(host: str, port: int, app_server: MiniWebServer | None = None) -> MiniWebHTTPServer:
+    return MiniWebHTTPServer((host, port), create_handler(app_server))
 
 
 def main() -> None:

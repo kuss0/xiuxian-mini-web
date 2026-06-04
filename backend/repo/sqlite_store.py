@@ -2372,26 +2372,6 @@ class SQLiteStore:
             "notify_tg_chat_id": "",
             "notify_card_titles": [],
             "schedule_saved_templates": [],
-            "automation_enabled": False,
-            "automation_dry_run": True,
-            "automation_allowed_skill_keys": [
-                "battle_power",
-                "concubine_status",
-                "deep_retreat_query",
-                "identity_info",
-                "second_soul_status",
-                "sect_list",
-                "storage_bag",
-                "tianti_status",
-                "tree_status",
-                "yuanying_status",
-            ],
-            "automation_allowed_identity_ids": [],
-            "automation_max_per_minute": 6,
-            "automation_sender_adapter": "user_session",
-            "automation_worker_enabled": False,
-            "automation_worker_interval_seconds": 15,
-            "automation_worker_batch_size": 3,
         }
         with self._connect() as conn:
             rows = conn.execute("SELECT key, value_json FROM settings").fetchall()

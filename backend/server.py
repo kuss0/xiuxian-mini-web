@@ -16,14 +16,7 @@ from backend.features.dungeon_status import (
 )
 from backend.features.cangkun_guide import build_cangkun_guide_payload
 from backend.features.xutian_guide import build_xutian_oracle_guide_payload
-from backend.outbox import (
-    OutboxAutomation,
-    OutboxAutomationWorker,
-    OutboxPlanner,
-    SenderAdapterRegistry,
-    SendRequest,
-    UserSessionSenderAdapter,
-)
+from backend.outbox import OutboxPlanner
 from backend.outbox.schedule import (
     MAX_SCHEDULED_MESSAGES_PER_IDENTITY,
     OfficialScheduleService,
@@ -353,20 +346,10 @@ class MiniWebServer:
         )
         # 技能盘:登记好的常用命令 + 一键 send_message(reply_to 可选)
         self._skill_registry = SkillRegistry()
-        self._automation = OutboxAutomation(self._skill_registry, self._store)
         self._skill_send = SkillSendService(
             self._skill_registry,
             listener_lookup=lambda local_id: self._listeners.get_listener(local_id),
             event_sink=lambda event: self._store.ingest_event(event),
-        )
-        self._sender_adapters = SenderAdapterRegistry(
-            [
-                UserSessionSenderAdapter(lambda payload: self._send_skill_command(payload)),
-            ]
-        )
-        self._automation_worker = OutboxAutomationWorker(
-            self._store,
-            dispatch=lambda payload: self.outbox_auto_dispatch_payload(payload),
         )
         # 通知调度器(MVP 只支持 TG bot,后续可加 Bark/钉钉/浏览器推送)
         self._notify = NotificationDispatcher(get_settings=self._store.get_settings)
@@ -378,7 +361,6 @@ class MiniWebServer:
 
     def health_payload(self) -> dict:
         self._ensure_collector_running()
-        self._sync_automation_worker()
         messages = {}
         summary = getattr(self._store, "message_health_summary", None)
         if callable(summary):
@@ -392,7 +374,6 @@ class MiniWebServer:
             "time": utc_now_iso(),
             "listener": self._listeners.status(),
             "messages": messages,
-            "automation": self._automation_status_payload(sync=False),
         }
 
     def message_audit_payload(
@@ -747,8 +728,6 @@ class MiniWebServer:
         }
 
     def outbox_payload(self) -> dict:
-        settings = self._store.get_settings()
-        automation = self._automation_status_payload(sync=True)
         return {
             "items": [public_outbox_draft(item) for item in self._store.list_outbox_drafts()],
             "capabilities": {
@@ -757,12 +736,8 @@ class MiniWebServer:
                 "manual_api_reply": True,
                 "official_schedule": False,
                 "direct_send": False,
-                "auto_dispatch": bool(settings.get("automation_enabled")),
-                "auto_dispatch_dry_run": bool(settings.get("automation_dry_run", True)),
-                "auto_worker": bool(settings.get("automation_worker_enabled")),
             },
-            "automation": automation,
-            "note": "动作会先进入 outbox 计划和策略守卫。默认自动发送为 dry-run;只有显式启用、命中白名单且通过幂等/限速后才会交给发送适配器。",
+            "note": "动作会先进入 outbox 计划,由用户人工确认后复制或经官方定时发送。",
         }
 
     def outbox_plan_payload(self, payload: dict) -> dict:
@@ -771,177 +746,6 @@ class MiniWebServer:
             return plan.to_api(public_account=public_account, public_identity=public_identity)
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
-
-    def outbox_auto_plan_payload(self, payload: dict) -> dict:
-        try:
-            plan = self._outbox.plan(payload)
-            source_message_id = _source_message_id_from_payload(payload)
-            plan_payload = plan.to_api(public_account=public_account, public_identity=public_identity)
-            decision = self._automation.decision_for_plan(
-                plan,
-                settings=self._store.get_settings(),
-                source_message_id=source_message_id,
-                supported_adapters=self._supported_sender_adapters(),
-            )
-            return {
-                **plan_payload,
-                "automation": decision.to_api(),
-                "source_message_id": source_message_id,
-            }
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-
-    def outbox_auto_dispatch_payload(self, payload: dict) -> dict:
-        try:
-            plan = self._outbox.plan(payload)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        source_message_id = _source_message_id_from_payload(payload)
-        plan_payload = plan.to_api(public_account=public_account, public_identity=public_identity)
-        settings = self._store.get_settings()
-        decision = self._automation.decision_for_plan(
-            plan,
-            settings=settings,
-            source_message_id=source_message_id,
-            supported_adapters=self._supported_sender_adapters(),
-        )
-        automation_payload = decision.to_api()
-        base = {
-            **plan_payload,
-            "automation": automation_payload,
-            "source_message_id": source_message_id,
-        }
-
-        if not decision.can_auto_dispatch:
-            self._record_automation_log(
-                plan=plan,
-                decision=decision,
-                source_message_id=source_message_id,
-                status="blocked",
-                error=decision.message,
-            )
-            return {
-                **base,
-                "ok": False,
-                "manual_required": True,
-                "error": decision.message,
-            }
-
-        if decision.dry_run:
-            self._record_automation_log(
-                plan=plan,
-                decision=decision,
-                source_message_id=source_message_id,
-                status="dry_run",
-            )
-            return {
-                **base,
-                "ok": True,
-                "sent": False,
-                "dry_run": True,
-                "message": decision.message,
-            }
-
-        adapter = self._sender_adapters.get(decision.adapter)
-        send_result = adapter.send(
-            SendRequest(
-                skill_key=decision.skill_key,
-                identity_id=_safe_int(plan_payload.get("identity_id")),
-                chat_id=plan_payload.get("chat_id") or plan_payload.get("target_chat"),
-                reply_to_msg_id=_safe_int(plan_payload.get("reply_to_msg_id")),
-                command=str(plan_payload.get("command") or ""),
-                source_message_id=source_message_id,
-            )
-        )
-        self._record_automation_log(
-            plan=plan,
-            decision=decision,
-            source_message_id=source_message_id,
-            status="success" if send_result.ok else "failed",
-            tg_msg_id=send_result.sent_msg_id,
-            error=send_result.error,
-        )
-        send_payload = send_result.raw or send_result.to_api()
-        return {
-            **base,
-            "ok": send_result.ok,
-            "sent": send_result.sent,
-            "send_result": send_payload,
-            "error": send_result.error,
-        }
-
-    def outbox_auto_queue_payload(self, payload: dict) -> dict:
-        try:
-            plan = self._outbox.plan(payload)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        source_message_id = _source_message_id_from_payload(payload)
-        plan_payload = plan.to_api(public_account=public_account, public_identity=public_identity)
-        decision = self._automation.decision_for_plan(
-            plan,
-            settings=self._store.get_settings(),
-            source_message_id=source_message_id,
-            supported_adapters=self._supported_sender_adapters(),
-        )
-        if not decision.can_auto_dispatch:
-            return {
-                **plan_payload,
-                "ok": False,
-                "manual_required": True,
-                "automation": decision.to_api(),
-                "source_message_id": source_message_id,
-                "error": decision.message,
-            }
-        draft = self._store.save_outbox_draft(
-            {
-                **plan_payload,
-                "source_message_id": source_message_id,
-                "status": "auto_pending",
-                "note": "等待自动调度 worker 处理。",
-            }
-        )
-        self._sync_automation_worker()
-        return {
-            "ok": True,
-            "draft": public_outbox_draft(draft),
-            "automation": decision.to_api(),
-            "worker": self._automation_worker.status(),
-        }
-
-    def outbox_automation_payload(self) -> dict:
-        return {
-            "ok": True,
-            "automation": self._automation_status_payload(sync=True),
-        }
-
-    def outbox_automation_tick_payload(self, payload: dict | None = None) -> dict:
-        result = self._automation_worker.tick_once()
-        return {
-            "ok": bool(result.get("ok", True)),
-            "result": result,
-            "automation": self._automation_status_payload(sync=False),
-        }
-
-    def _supported_sender_adapters(self) -> list[str]:
-        return self._sender_adapters.names()
-
-    def _sync_automation_worker(self) -> None:
-        try:
-            self._automation_worker.sync()
-        except Exception as exc:
-            print(f"[outbox-automation] worker sync failed: {exc}")
-
-    def _automation_status_payload(self, *, sync: bool = True) -> dict:
-        if sync:
-            self._sync_automation_worker()
-        settings = self._store.get_settings()
-        return {
-            "enabled": bool(settings.get("automation_enabled")),
-            "dry_run": bool(settings.get("automation_dry_run", True)),
-            "sender_adapter": str(settings.get("automation_sender_adapter") or "user_session"),
-            "supported_adapters": self._supported_sender_adapters(),
-            "worker": self._automation_worker.status(),
-        }
 
     def outbox_drafts_payload(self, status: str = "draft") -> dict:
         return {
@@ -2180,56 +1984,6 @@ class MiniWebServer:
             append(payload or {})
         except Exception as exc:
             print(f"[send-log] append failed: {exc}")
-
-    def _record_automation_log(
-        self,
-        *,
-        plan,
-        decision,
-        source_message_id: str = "",
-        status: str,
-        tg_msg_id: int = 0,
-        error: str = "",
-    ) -> None:
-        identity_id = 0
-        try:
-            identity_id = int((plan.identity or {}).get("send_as_id") if plan.identity else plan.action.identity_id or 0)
-        except (TypeError, ValueError):
-            identity_id = 0
-        send_as_id = 0
-        account_id = 0
-        try:
-            account_id = int((plan.account or {}).get("account_id") or 0)
-        except (TypeError, ValueError):
-            account_id = 0
-        if identity_id and account_id and identity_id != account_id:
-            send_as_id = identity_id
-        try:
-            chat_id = int(plan.action.chat_id or plan.target_chat or 0)
-        except (TypeError, ValueError):
-            chat_id = 0
-        self._record_send_log(
-            {
-                "kind": "auto_send",
-                "status": status,
-                "account_local_id": plan.account_local_id,
-                "identity_id": identity_id,
-                "send_as_id": send_as_id,
-                "chat_id": chat_id,
-                "reply_to_msg_id": plan.action.reply_to_msg_id or 0,
-                "command": plan.command,
-                "source_message_id": source_message_id,
-                "tg_msg_id": tg_msg_id,
-                "error": error,
-                "meta": {
-                    "skill_key": decision.skill_key,
-                    "reason": decision.reason,
-                    "dry_run": decision.dry_run,
-                    "idempotency_key": decision.idempotency_key,
-                    "adapter": decision.adapter,
-                },
-            }
-        )
 
     def schedule_preview_payload(self, payload: dict) -> dict:
         try:

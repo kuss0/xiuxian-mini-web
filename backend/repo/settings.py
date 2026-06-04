@@ -116,20 +116,6 @@ def _normalize_settings(payload: dict) -> dict:
         "notify_tg_chat_id": text("notify_tg_chat_id"),
         "notify_card_titles": notify_card_titles,
         "schedule_saved_templates": schedule_saved_templates,
-        "automation_enabled": bool_value("automation_enabled"),
-        "automation_dry_run": bool_value("automation_dry_run") if "automation_dry_run" in payload else True,
-        "automation_allowed_skill_keys": sorted(set(str_list("automation_allowed_skill_keys"))),
-        "automation_allowed_identity_ids": int_list("automation_allowed_identity_ids"),
-        "automation_max_per_minute": int_value("automation_max_per_minute", 6, minimum=1, maximum=60),
-        "automation_sender_adapter": text("automation_sender_adapter") or "user_session",
-        "automation_worker_enabled": bool_value("automation_worker_enabled"),
-        "automation_worker_interval_seconds": int_value(
-            "automation_worker_interval_seconds",
-            15,
-            minimum=5,
-            maximum=300,
-        ),
-        "automation_worker_batch_size": int_value("automation_worker_batch_size", 3, minimum=1, maximum=20),
     }
 
 

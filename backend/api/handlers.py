@@ -87,10 +87,6 @@ def _get_outbox(request: MiniWebRequest, query: dict) -> dict:
     return _app(request).outbox_payload()
 
 
-def _get_outbox_automation(request: MiniWebRequest, query: dict) -> dict:
-    return _app(request).outbox_automation_payload()
-
-
 def _get_outbox_drafts(request: MiniWebRequest, query: dict) -> dict:
     status = (query.get("status") or ["draft"])[0]
     return _app(request).outbox_drafts_payload(status)
@@ -310,34 +306,6 @@ def _post_identity_delete(request: MiniWebRequest, payload: dict) -> dict:
 def _post_outbox_plan(request: MiniWebRequest, payload: dict) -> dict:
     try:
         return _app(request).outbox_plan_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_outbox_auto_plan(request: MiniWebRequest, payload: dict) -> dict:
-    try:
-        return _app(request).outbox_auto_plan_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_outbox_auto_dispatch(request: MiniWebRequest, payload: dict) -> dict:
-    try:
-        return _app(request).outbox_auto_dispatch_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_outbox_auto_queue(request: MiniWebRequest, payload: dict) -> dict:
-    try:
-        return _app(request).outbox_auto_queue_payload(payload)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _post_outbox_automation_tick(request: MiniWebRequest, payload: dict) -> dict:
-    try:
-        return _app(request).outbox_automation_tick_payload(payload)
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 

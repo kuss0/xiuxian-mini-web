@@ -1,4 +1,4 @@
-// MINIWEB-VIEW: access settings modal and automation guard form
+// MINIWEB-VIEW: access settings modal
 (function () {
   "use strict";
 
@@ -24,8 +24,6 @@
 
   function renderSettingsBody(deps = {}, state = {}, settings = {}) {
     const botIds = (settings.game_bot_ids || []).join("\n");
-    const automationSkillKeys = (settings.automation_allowed_skill_keys || []).join("\n");
-    const automationIdentityIds = (settings.automation_allowed_identity_ids || []).join("\n");
     const savedSecrets = settings.saved_secrets || {};
     const dialogOptions = renderDialogOptions(deps, settings.target_chat);
     const topicOptions = renderTopicOptions(deps, settings.target_topic_id);
@@ -100,55 +98,6 @@
           <span>已知天尊 sender IDs</span>
           <textarea name="game_bot_ids" rows="6" placeholder="-1003983937918&#10;7900199668">${escapeHtml(botIds)}</textarea>
         </label>
-
-        <div class="detail-block">
-          <h4>自动发送守卫</h4>
-          <p class="muted" style="font-size:12px;">默认只做 dry-run 演练。只有开启自动发送、命中技能/身份白名单、通过幂等和限速后，才会交给 user-session 发送适配器。</p>
-          <div class="form-grid">
-            <label class="toggle-field">
-              <input type="checkbox" name="automation_enabled" ${settings.automation_enabled ? "checked" : ""} />
-              <span>启用自动发送</span>
-            </label>
-            <label class="toggle-field">
-              <input type="checkbox" name="automation_dry_run" ${settings.automation_dry_run !== false ? "checked" : ""} />
-              <span>dry-run 演练</span>
-            </label>
-            <label>
-              <span>每分钟上限</span>
-              <input name="automation_max_per_minute" inputmode="numeric" value="${escapeAttr(settings.automation_max_per_minute || 6)}" />
-            </label>
-            <label>
-              <span>发送适配器</span>
-              <select name="automation_sender_adapter">
-                <option value="user_session" ${(settings.automation_sender_adapter || "user_session") === "user_session" ? "selected" : ""}>user_session</option>
-                <option value="ayugram_ipc" ${settings.automation_sender_adapter === "ayugram_ipc" ? "selected" : ""}>ayugram_ipc（未接入）</option>
-                <option value="ayugram_gui" ${settings.automation_sender_adapter === "ayugram_gui" ? "selected" : ""}>ayugram_gui（未接入）</option>
-              </select>
-            </label>
-          </div>
-          <div class="form-grid">
-            <label>
-              <span>技能白名单</span>
-              <textarea name="automation_allowed_skill_keys" rows="5" placeholder="storage_bag&#10;battle_power">${escapeHtml(automationSkillKeys)}</textarea>
-            </label>
-            <label>
-              <span>身份白名单</span>
-              <textarea name="automation_allowed_identity_ids" rows="5" placeholder="留空=所有已解析身份">${escapeHtml(automationIdentityIds)}</textarea>
-            </label>
-            <label>
-              <span>worker 间隔秒</span>
-              <input name="automation_worker_interval_seconds" inputmode="numeric" value="${escapeAttr(settings.automation_worker_interval_seconds || 15)}" />
-            </label>
-            <label>
-              <span>worker 批量</span>
-              <input name="automation_worker_batch_size" inputmode="numeric" value="${escapeAttr(settings.automation_worker_batch_size || 3)}" />
-            </label>
-            <label class="toggle-field">
-              <input type="checkbox" name="automation_worker_enabled" ${settings.automation_worker_enabled ? "checked" : ""} />
-              <span>启用自动队列 worker</span>
-            </label>
-          </div>
-        </div>
 
         <div class="form-grid">
           <label>
@@ -502,15 +451,6 @@
       notify_tg_bot_token: data.get("notify_tg_bot_token"),
       notify_tg_chat_id: data.get("notify_tg_chat_id"),
       notify_card_titles: notifyTitles,
-      automation_enabled: !!form.querySelector('input[name="automation_enabled"]:checked'),
-      automation_dry_run: !!form.querySelector('input[name="automation_dry_run"]:checked'),
-      automation_allowed_skill_keys: splitLines(data.get("automation_allowed_skill_keys")),
-      automation_allowed_identity_ids: splitLines(data.get("automation_allowed_identity_ids")),
-      automation_max_per_minute: data.get("automation_max_per_minute"),
-      automation_sender_adapter: data.get("automation_sender_adapter"),
-      automation_worker_enabled: !!form.querySelector('input[name="automation_worker_enabled"]:checked'),
-      automation_worker_interval_seconds: data.get("automation_worker_interval_seconds"),
-      automation_worker_batch_size: data.get("automation_worker_batch_size"),
     };
   }
 

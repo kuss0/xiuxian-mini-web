@@ -1422,18 +1422,6 @@ async function planOutboxAction(action) {
   return data;
 }
 
-async function planOutboxAutomation(action) {
-  return postJson("/api/outbox/auto-plan", { action });
-}
-
-async function dispatchOutboxAutomation(action) {
-  return postJson("/api/outbox/auto-dispatch", { action });
-}
-
-async function queueOutboxAutomation(action) {
-  return postJson("/api/outbox/auto-queue", { action });
-}
-
 function chatStreamDeps() {
   return {
     state,
@@ -2499,9 +2487,6 @@ function outboxDeps() {
     loadOutboxDrafts,
     selectMessage: (message) => setWorkspaceSelectedMessage(message, { rerenderList: true }),
     planOutboxAction,
-    planOutboxAutomation,
-    dispatchOutboxAutomation,
-    queueOutboxAutomation,
   };
 }
 
@@ -2519,14 +2504,6 @@ function renderOutboxPlan(plan, action, container) {
 
 function renderOutboxPlanError(error, container) {
   return outboxView().renderOutboxPlanError(outboxDeps(), error, container);
-}
-
-function renderOutboxAutomationResult(result, container) {
-  return outboxView().renderOutboxAutomationResult(outboxDeps(), result, container);
-}
-
-function renderOutboxAutomationError(error, container) {
-  return outboxView().renderOutboxAutomationError(outboxDeps(), error, container);
 }
 
 function actionWithPlanOverrides(action, container) {
