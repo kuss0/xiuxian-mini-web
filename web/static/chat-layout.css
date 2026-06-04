@@ -534,7 +534,14 @@ body {
     grid-column: 1;
     grid-row: 1;
     position: relative;
+    left: auto;
+    top: auto;
+    bottom: auto;
     z-index: 2;
+    width: 100%;
+    max-width: 100%;
+    transform: none;
+    transition: none;
   }
 
   .chat-client-shell .chat-workspace {
