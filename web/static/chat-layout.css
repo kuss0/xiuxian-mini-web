@@ -1,6 +1,6 @@
 /* Final chat viewport stability contract.
-   Keep these rules last-loaded so older visual passes in styles.css cannot
-   push the message list or composer out of the viewport. */
+   Keep these rules last-loaded so older visual passes in the base/page styles
+   cannot push the message list or composer out of the viewport. */
 .chat-client-shell {
   height: 100dvh;
   max-height: 100dvh;

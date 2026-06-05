@@ -1786,7 +1786,7 @@ def test_schedule_manual_required_details_persist_in_status_line():
     root = Path(__file__).resolve().parents[1]
     app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
     schedule_js = (root / "web" / "static" / "views" / "schedule.js").read_text(encoding="utf-8")
-    css = (root / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+    css = (root / "web" / "static" / "styles" / "pages" / "detail.css").read_text(encoding="utf-8")
 
     assert "function scheduleManualMessages(result)" in app_js
     assert "function scheduleStatusWithManualMessages(baseText, manualMessages)" in app_js
@@ -1893,7 +1893,10 @@ def test_dungeon_playbook_panel_contract_is_read_only_until_composer_send():
     app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
     playbook_js = (root / "web" / "static" / "views" / "dungeon_playbook.js").read_text(encoding="utf-8")
     status_js = (root / "web" / "static" / "views" / "dungeon_status.js").read_text(encoding="utf-8")
-    css = (root / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+    css = "\n".join(
+        p.read_text(encoding="utf-8")
+        for p in sorted((root / "web" / "static" / "styles").rglob("*.css"))
+    )
 
     required_app_fragments = [
         "window.MiniwebViews.dungeonStatus.openDungeonStatusModal",
