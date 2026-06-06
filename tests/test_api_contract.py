@@ -5,6 +5,7 @@ from backend.domain import CHANNELS
 from backend.domain.models import ActionSuggestion, ParsedCard, RawMessageEvent, utc_now_iso
 from backend.app import MiniWebHandler, create_handler, is_authorized_api_headers
 from backend.config import MAX_ACCOUNTS, MAX_IDENTITIES, MAX_LISTENERS
+from backend.external.tianjige import TianjigeConfig, TianjigeGateway
 import backend.server as server_module
 from backend.repo.sample_store import SAMPLE_EVENTS, SampleStore
 from backend.repo.sqlite_store import SQLiteStore
@@ -716,6 +717,9 @@ def test_game_cockpit_view_module_keeps_wrappers_and_panel_action_contract():
         "// MINIWEB-VIEW: game cockpit, primary strip, and action dock",
         "function renderGameCockpit(deps = {})",
         "function renderGamePrimaryStrip(deps = {})",
+        "function isPrimaryStripVisible(gamePrimaryStrip)",
+        'gamePrimaryStrip.setAttribute("aria-hidden", "true");',
+        'aria-label="${escapeAttr(primaryStripButtonLabel(focus))}"',
         "function primaryFocusStripModel(deps = {})",
         "function primaryFocusMessage(deps = {})",
         "function primaryDungeonStripModel(deps = {})",
@@ -910,11 +914,16 @@ def test_direct_composer_view_module_keeps_wrappers_and_explicit_send_contract()
         "renderSkillViews,",
         "directComposerView().bindDirectComposer(directComposerDeps());",
         "async function sendDirectComposerMessage()",
+        "if (state.directSendSending)",
+        "state.directSendSending = true;",
+        "state.directSendLastKey = sendKey;",
         'postJson("/api/skills/send", payload)',
     ]
     required_module_fragments = [
         "// MINIWEB-VIEW: direct composer, emoji palette, and quick command hotbar",
         "function bindDirectComposer(deps = {})",
+        'dataset.directComposerBound === "1"',
+        "if (event.repeat || state.directSendSending) return;",
         "function fillDirectSendComposer(deps = {}, command, opts = {})",
         "function renderDirectSendComposer(deps = {})",
         "function renderQuickActionHotbar(deps = {})",
@@ -1798,8 +1807,8 @@ def test_schedule_manual_required_details_persist_in_status_line():
     assert 'return `${baseText || "官方定时需要手动处理"}\\n需手动处理 ${messages.length} 条:\\n${detail}`;' in schedule_js
 
     create_start = schedule_js.index('if (action === "create")')
-    cancel_start = schedule_js.index('if (action === "cancel")', create_start)
-    create_handler = schedule_js[create_start:cancel_start]
+    sync_start = schedule_js.index("if (syncButton && syncSelect)", create_start)
+    create_handler = schedule_js[create_start:sync_start]
     assert "scheduleStatusWithManualMessages(\"官方定时未创建\", manualMessages)" in create_handler
     assert "scheduleStatusWithManualMessages(stats, manualMessages)" in create_handler
     assert 'stats += `｜需手动处理 ${manualMessages.length}`' not in create_handler
@@ -1824,6 +1833,10 @@ def test_inventory_modal_keeps_auto_refresh_with_manual_owner_fallback():
     assert "window.setTimeout(tick, INVENTORY_AUTO_REFRESH_MS)" in inventory_js
     assert 'dialog.querySelector("#inventoryRefresh")?.addEventListener("click"' in inventory_js
     assert "refreshInventorySnapshots(dialog, { manual: true })" in inventory_js
+    assert 'id="inventoryTianjigeLookup"' in inventory_js
+    assert "function lookupTianjigeInventory(dialog)" in inventory_js
+    assert 'postJson("/api/tianjige/cultivator", { username: owner })' in inventory_js
+    assert 'payload.inventory?.note || "仅作参考。"' in inventory_js
 
     assert "function inventoryManualRefreshLines(dialog)" in inventory_js
     assert "function inventoryManualRefreshReason(state)" in inventory_js
@@ -1839,6 +1852,8 @@ def test_chat_viewport_layout_contract_keeps_composer_visible():
     root = Path(__file__).resolve().parents[1]
     html = (root / "web" / "index.html").read_text(encoding="utf-8")
     css = (root / "web" / "static" / "chat-layout.css").read_text(encoding="utf-8")
+    app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    state_js = (root / "web" / "static" / "state.js").read_text(encoding="utf-8")
 
     workspace = html.index('<main class="main chat-workspace">')
     layout = html.index('<section class="layout-grid detail-closed">')
@@ -1858,8 +1873,9 @@ def test_chat_viewport_layout_contract_keeps_composer_visible():
         ".chat-client-shell {\n  height: 100dvh;\n  max-height: 100dvh;\n  overflow: hidden;",
         ".chat-client-shell .chat-workspace {\n  display: grid;\n  grid-template-rows: auto minmax(0, 1fr) auto;",
         ".chat-client-shell .layout-grid,\n.chat-client-shell .layout-grid.detail-open,\n.chat-client-shell .layout-grid.detail-closed {\n  grid-row: 2;\n  display: grid;\n  min-height: 0;\n  height: 100%;\n  overflow: hidden;",
-        ".chat-client-shell .chat-pane {\n  display: grid;\n  grid-template-rows: auto auto minmax(0, 1fr);\n  min-height: 0;\n  height: 100%;\n  overflow: hidden;",
-        ".chat-client-shell .message-list {\n  grid-row: 3;\n  min-height: 0;\n  height: auto;\n  overflow-y: auto;",
+        ".chat-client-shell .chat-pane {\n  display: grid;\n  grid-template-rows: auto minmax(0, 1fr);\n  min-height: 0;\n  height: 100%;\n  overflow: hidden;",
+        ".chat-client-shell .game-primary-strip {\n  display: none;\n  grid-row: 2;\n  min-height: 0;\n  max-height: 0;\n  border: 0;",
+        ".chat-client-shell .message-list {\n  grid-row: 2;\n  min-height: 0;\n  height: auto;\n  overflow-y: auto;",
         ".chat-client-shell .chat-composer {\n  grid-row: 3;\n  align-self: stretch;\n  max-height: min(34dvh, 310px);",
         ".chat-client-shell .quick-action-hotbar {\n  display: grid;\n  grid-template-columns: repeat(var(--hotbar-columns, 6), minmax(0, 1fr));\n  grid-template-rows: repeat(2, 18px);",
         "justify-content: start;",
@@ -1883,9 +1899,21 @@ def test_chat_viewport_layout_contract_keeps_composer_visible():
         ".chat-client-shell .workspace-tools-panel .tool-panel {\n  order: -1;",
         ".chat-client-shell .workspace-tools-panel .tool-panel .sidebar-toolbox {\n  grid-template-columns: repeat(3, minmax(0, 1fr));",
         ".chat-client-shell .workspace-tools-toggle {\n  justify-content: center;\n  min-width: 96px;",
+        ".chat-client-shell {\n    width: 100%;\n    max-width: 100%;\n    grid-template-rows: 124px minmax(0, 1fr);",
+        ".chat-client-shell .conversation-rail {\n    grid-column: 1;\n    grid-row: 1;\n    display: grid;\n    grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);",
+        ".chat-client-shell .stream-channel-tools {\n    position: static;\n    justify-self: end;",
+        ".chat-client-shell .workspace-tools-panel {\n    top: 174px;\n    max-height: calc(100dvh - 188px);",
+        "@media (max-width: 460px)",
+        ".chat-client-shell {\n    grid-template-rows: 168px minmax(0, 1fr);",
+        ".chat-client-shell .conversation-rail {\n    grid-template-columns: minmax(0, 1fr);\n    grid-template-rows: 54px minmax(0, 1fr);",
     ]
     for fragment in required_fragments:
         assert fragment in final_contract
+
+    assert "messageLoading: false" in state_js
+    assert "messageError: \"\"" in state_js
+    assert "state.messageLoading = true;" in app_js
+    assert "return \"正在读取消息...\";" in app_js
 
 
 def test_dungeon_playbook_panel_contract_is_read_only_until_composer_send():
@@ -3847,6 +3875,47 @@ def test_identity_payload_drops_legacy_profile_fields(tmp_path):
     assert saved["label"] == "WA2000"
 
 
+def test_tianjige_routes_and_mock_payloads(tmp_path):
+    from backend.app import GET_ROUTES, POST_ROUTES
+
+    assert "/api/tianjige/status" in GET_ROUTES
+    assert "/api/tianjige/bootstrap" in GET_ROUTES
+    assert "/api/tianjige/me" in POST_ROUTES
+    assert "/api/tianjige/cultivator" in POST_ROUTES
+
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "miniweb.db"))
+    status = server.tianjige_status_payload()["status"]
+    bootstrap = server.tianjige_bootstrap_payload()
+    me = server.tianjige_me_payload({})
+    role = server.tianjige_cultivator_payload({"username": "mock_main"})
+
+    assert status["mode"] == "mock"
+    assert status["authenticated"] is True
+    assert bootstrap["ok"] is True
+    assert "game_items" in bootstrap["bootstrap"]
+    assert me["ok"] is True
+    assert me["characters"]
+    assert role["ok"] is True
+    assert role["cultivator"]["username"] == "mock_main"
+    assert role["inventory"]["authoritative"] is False
+    assert "不会覆盖本地 .储物袋 快照" in role["inventory"]["note"]
+    assert role["inventory"]["items"]
+    assert {patch["key"] for patch in role["profile_patches"]} >= {"道号", "境界", "宗门", "灵根", "修为"}
+
+
+def test_tianjige_real_mode_without_credentials_degrades_without_network(tmp_path):
+    gateway = TianjigeGateway(TianjigeConfig(mode="real", api_token="", cookie=""))
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "miniweb.db"), tianjige_gateway=gateway)
+
+    status = server.tianjige_status_payload()["status"]
+    role = server.tianjige_cultivator_payload({"username": "mock_main"})
+
+    assert status["needs_oauth"] is True
+    assert role["ok"] is False
+    assert role["status"] == "unauthorized"
+    assert role["inventory"]["items"] == []
+
+
 def test_identities_payload_classifies_self_and_channel_kinds(tmp_path):
     """UI 友好分类:
     send_as_id == 已登录账号 account_id => self;负数 => channel;
@@ -5597,6 +5666,124 @@ def test_schedule_sync_reconciles_with_local_records(tmp_path):
     assert any(l["scheduled_msg_id"] == 555 for l in result["lost"]), "本地标已排但 TG 没找到的应在 lost"
 
 
+def test_schedule_sync_repair_marks_lost_rows_failed_and_clears_tg_id(tmp_path):
+    class FakeListenerManager:
+        def get_listener(self, local_id):
+            if local_id != "main":
+                return None
+
+            class FakeListener:
+                def submit(self, coro_factory, *, timeout=30.0):
+                    return [
+                        {"scheduled_msg_id": 100, "message": ".签到", "schedule_at": 0, "schedule_text": ""},
+                        {"scheduled_msg_id": 999, "message": "external", "schedule_at": 0, "schedule_text": ""},
+                    ]
+
+            return FakeListener()
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "123", "api_hash": "hash", "account_id": "12345"}
+    )
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+    server.schedule_create_payload(
+        {"send_as_id": 12345, "preset_key": "custom", "command": ".签到", "interval_sec": 60, "count": 2, "dry_run": True}
+    )
+    msgs = store.list_schedule_messages(send_as_id=12345)
+    store.mark_schedule_message(msgs[0]["id"], scheduled_msg_id=100, status="scheduled")
+    store.mark_schedule_message(msgs[1]["id"], scheduled_msg_id=555, status="scheduled")
+    server._listeners = FakeListenerManager()
+
+    result = server.schedule_sync_repair_payload({"send_as_id": 12345})
+
+    assert result["ok"] is True
+    assert result["repaired_lost"] == 1
+    assert result["orphans_unchanged"] == 1
+    repaired = store.list_schedule_messages(send_as_id=12345, include_inactive=True)
+    by_id = {item["id"]: item for item in repaired}
+    assert by_id[msgs[0]["id"]]["status"] == "scheduled"
+    assert by_id[msgs[0]["id"]]["scheduled_msg_id"] == 100
+    assert by_id[msgs[1]["id"]]["status"] == "failed"
+    assert by_id[msgs[1]["id"]]["scheduled_msg_id"] == 0
+    assert "TG 对账" in by_id[msgs[1]["id"]]["last_error"]
+    assert result["sync"]["lost"] == []
+
+
+def test_schedule_retry_failed_route_and_ui_are_wired():
+    from backend.app import POST_ROUTES
+
+    repo_root = Path(__file__).resolve().parents[1]
+    schedule_js = (repo_root / "web/static/views/schedule.js").read_text(encoding="utf-8")
+
+    assert "/api/schedule/retry-failed" in POST_ROUTES
+    assert "/api/schedule/sync/repair" in POST_ROUTES
+    assert 'data-schedule-action="retry-failed"' in schedule_js
+    assert 'id="scheduleSyncRepairButton"' in schedule_js
+    assert 'postJson("/api/schedule/sync/repair"' in schedule_js
+    assert 'form.querySelectorAll("[data-schedule-action]")' in schedule_js
+    assert "function bindScheduleBatchActions(deps = {}, dialog, setStatus = null)" in schedule_js
+    assert 'btn.textContent = "重排中";' in schedule_js
+    assert 'aria-label="重排批次 #' in schedule_js
+
+
+def test_schedule_retry_failed_clears_old_tg_id_and_retimes_expired_items(tmp_path):
+    import time
+
+    class FakeListener:
+        def __init__(self):
+            self.background_calls = 0
+
+        def submit_background(self, coro_factory):
+            self.background_calls += 1
+
+    class FakeListenerManager:
+        def __init__(self):
+            self.listener = FakeListener()
+
+        def get_listener(self, local_id):
+            return self.listener if local_id == "main" else None
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_settings_payload({"target_chat": "-1001680975844", "target_topic_id": 7310786})
+    listeners = FakeListenerManager()
+    server._listeners = listeners
+    batch_id = store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "account_local_id": "main",
+            "preset_key": "custom",
+            "label": "自定义",
+            "anchor_at": time.time() - 3600,
+            "horizon_days": 1,
+            "options": {},
+        },
+        [
+            {
+                "command": ".签到",
+                "schedule_at": time.time() - 60,
+                "scheduled_msg_id": 555,
+                "status": "failed",
+                "last_error": "old failure",
+            }
+        ],
+    )
+
+    before = time.time()
+    result = server.schedule_retry_failed_payload({"batch_id": batch_id})
+
+    assert result["ok"] is True
+    assert result["retried"] == 1
+    assert result["retimed"] == 1
+    assert listeners.listener.background_calls == 1
+    refreshed = store.list_schedule_messages(batch_id=batch_id, include_inactive=True)[0]
+    assert refreshed["status"] == "planned"
+    assert refreshed["scheduled_msg_id"] == 0
+    assert refreshed["last_error"] == ""
+    assert refreshed["schedule_at"] >= before + 100
+
+
 
 # ====================================================================
 # Identity state machine framework (deep_retreat / pet_touch / pet_warm)
@@ -5679,6 +5866,72 @@ def test_deep_retreat_module_ignores_player_messages():
     ctx = _fake_ctx(parent=parent, sender_kind="player")
     # resolve_target 要求 sender_kind=='bot',player 不会被处理
     assert module.resolve_target(event, ctx) is None
+
+
+def test_deep_retreat_module_enters_post_summary_wait_after_summary():
+    from backend.identity_state.deep_retreat import DeepRetreatModule
+    module = DeepRetreatModule()
+    parent = _evt(id="p", msg_id=110, text=".查看闭关", sender_id=12345)
+    event = _evt(
+        id="e",
+        msg_id=111,
+        text="【深度闭关总结】修士神魂归位，本次闭关收获若干。",
+        sender_id=-1003983937918,
+        reply_to_msg_id=110,
+    )
+    ctx = _fake_ctx(parent=parent, sender_kind="bot", now=2_000.0)
+    state = module.observe(event, ctx, {"phase": "running", "cooldown_until": 1_990.0})
+    assert state["phase"] == "post_summary_wait"
+    assert state["finished_at"] == ctx.now
+    assert state["post_summary_until"] == ctx.now + 30
+    assert module.compute_anchor(state, now=ctx.now) == ctx.now + 30
+    summary = module.status_summary(state, now=ctx.now)
+    assert summary["ready"] is False
+    assert "总结后缓冲" in summary["text"]
+
+
+def test_yuanying_module_tracks_launch_countdown_and_ready_status():
+    from backend.identity_state.yuanying import YuanyingModule, YUANYING_DEFAULT_CD
+    module = YuanyingModule()
+    launch_parent = _evt(id="p1", msg_id=120, text=".元婴出窍", sender_id=12345)
+    launch = _evt(
+        id="e1",
+        msg_id=121,
+        text="你心念一动，元婴化作一道流光飞出，开始神游太虚。",
+        sender_id=-1003983937918,
+        reply_to_msg_id=120,
+    )
+    ctx = _fake_ctx(parent=launch_parent, sender_kind="bot", now=3_000.0)
+    state = module.observe(launch, ctx, dict(module.default_state))
+    assert state["phase"] == "running"
+    assert state["cooldown_until"] == ctx.now + YUANYING_DEFAULT_CD
+
+    status_parent = _evt(id="p2", msg_id=122, text=".元婴状态", sender_id=12345)
+    status = _evt(
+        id="e2",
+        msg_id=123,
+        text="你的本命元婴\n状态: 元神出窍\n归来倒计时：1小时2分钟",
+        sender_id=-1003983937918,
+        reply_to_msg_id=122,
+    )
+    state = module.observe(status, _fake_ctx(parent=status_parent, sender_kind="bot", now=3_600.0), state)
+    assert state["phase"] == "running"
+    assert state["cooldown_until"] == 3_600.0 + 3720
+    assert state["probe_pending"] is False
+
+    ready = _evt(
+        id="e3",
+        msg_id=124,
+        text="你的本命元婴\n状态: 窍中温养",
+        sender_id=-1003983937918,
+        reply_to_msg_id=122,
+    )
+    ready_ctx = _fake_ctx(parent=status_parent, sender_kind="bot", now=8_000.0)
+    state = module.observe(ready, ready_ctx, state)
+    assert state["phase"] == "idle"
+    assert state["cooldown_until"] == ready_ctx.now
+    summary = module.status_summary(state, now=ready_ctx.now)
+    assert summary["ready"] is True
 
 
 def test_pet_touch_module_records_pet_name_from_parent_command():
@@ -7798,7 +8051,11 @@ def test_skill_send_allows_non_self_send_as_identity(tmp_path, monkeypatch):
     class FakeListener:
         def submit(self, coro_factory, *, timeout=30.0):
             import asyncio
-            return asyncio.new_event_loop().run_until_complete(coro_factory(FakeClient()))
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(coro_factory(FakeClient()))
+            finally:
+                loop.close()
     monkeypatch.setattr(server._listeners, "get_listener", lambda _id: FakeListener())
 
     result = server.skill_send_payload(
@@ -8001,6 +8258,46 @@ def test_manual_send_uses_command_override_and_optional_reply(tmp_path, monkeypa
     assert logs[0]["reply_to_msg_id"] == 7000
     assert logs[0]["tg_msg_id"] == 88001
     assert logs[0]["meta"]["skill_key"] == "manual_send"
+
+
+def test_skill_send_blocks_immediate_duplicate_payload(tmp_path, monkeypatch):
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "1", "api_hash": "h",
+         "account_id": "8574677796", "target_chat": "-1001680975844"}
+    )
+    server.save_identity_payload(
+        {"send_as_id": "8574677796", "account_local_id": "main", "label": "self"}
+    )
+    calls = {"n": 0}
+
+    class FakeClient:
+        async def send_message(self, chat_id, command, **kwargs):
+            calls["n"] += 1
+            class _Sent:
+                id = 88004 + calls["n"]
+            return _Sent()
+
+    class FakeListener:
+        def submit(self, coro_factory, *, timeout=30.0):
+            import asyncio
+            return asyncio.new_event_loop().run_until_complete(coro_factory(FakeClient()))
+
+    monkeypatch.setattr(server._listeners, "get_listener", lambda _id: FakeListener())
+    payload = {
+        "skill_key": "manual_send",
+        "identity_id": 8574677796,
+        "command_override": "今晚手动看一下",
+        "reply_to_msg_id": 7000,
+    }
+
+    first = server.skill_send_payload(dict(payload))
+    second = server.skill_send_payload(dict(payload))
+
+    assert first["ok"] is True
+    assert second["ok"] is False
+    assert second["duplicate"] is True
+    assert calls["n"] == 1
 
 
 def test_skill_send_records_failed_send_log_for_reply_required_skill(tmp_path):

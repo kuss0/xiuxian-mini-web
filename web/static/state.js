@@ -9,6 +9,8 @@
     selectedMessageId: null,
     expandedMessages: new Set(),
     messageSearch: "",
+    messageLoading: false,
+    messageError: "",
     settings: null,
     accounts: [],
     identities: [],
@@ -55,6 +57,9 @@
     directSendIdentityId: null,
     directSendLastActiveId: null,
     directSendReply: null,
+    directSendSending: false,
+    directSendLastKey: "",
+    directSendLastAt: 0,
   };
 
   window.MiniwebState = { state };

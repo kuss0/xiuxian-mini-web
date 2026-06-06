@@ -356,6 +356,11 @@ PROBE_SCRIPT = """
   var boxes = {
     shell: rect(".chat-client-shell"),
     rail: rect(".conversation-rail"),
+    schedulePanel: rect(".schedule-rail-panel"),
+    scheduleRefresh: rect("#scheduleRailRefreshButton"),
+    scheduleNew: rect("#scheduleButton"),
+    commonPanel: rect(".common-action-panel"),
+    logsButton: rect("#logsButton"),
     workspace: rect(".chat-workspace"),
     header: rect(".chat-pane .section-head"),
     toolsToggle: rect(".workspace-tools-toggle"),
@@ -377,6 +382,22 @@ PROBE_SCRIPT = """
     document.documentElement.scrollWidth + " <= " + window.innerWidth);
   check("no body horizontal overflow", document.body.scrollWidth <= window.innerWidth + 1,
     document.body.scrollWidth + " <= " + window.innerWidth);
+  check("schedule panel visible", visible(boxes.schedulePanel, 160, 42), JSON.stringify(boxes.schedulePanel));
+  check("schedule panel stays inside rail",
+    boxes.schedulePanel.left >= boxes.rail.left - 1 && boxes.schedulePanel.right <= boxes.rail.right + 1,
+    JSON.stringify({ schedulePanel: boxes.schedulePanel, rail: boxes.rail }));
+  if (window.innerWidth > 900) {
+    check("desktop rail touches workspace",
+      Math.abs(boxes.workspace.left - boxes.rail.right) <= 1,
+      JSON.stringify({ rail: boxes.rail, workspace: boxes.workspace }));
+  }
+  check("schedule refresh clickable", visible(boxes.scheduleRefresh, 34, 24) && centerHit("#scheduleRailRefreshButton"),
+    hitDetail("#scheduleRailRefreshButton"));
+  check("schedule new clickable", visible(boxes.scheduleNew, 34, 24) && centerHit("#scheduleButton"),
+    hitDetail("#scheduleButton"));
+  check("common panel visible", visible(boxes.commonPanel, 160, 48), JSON.stringify(boxes.commonPanel));
+  check("logs button clickable", visible(boxes.logsButton, 34, 24) && centerHit("#logsButton"),
+    hitDetail("#logsButton"));
   check("message list visible", visible(boxes.messageList, 180, 120), JSON.stringify(boxes.messageList));
   check("composer visible", visible(boxes.composer, 180, 80), JSON.stringify(boxes.composer));
   check("composer within viewport", boxes.composer.bottom <= window.innerHeight + 1 && boxes.composer.top >= -1,

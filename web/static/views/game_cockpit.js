@@ -19,32 +19,56 @@
   function renderGamePrimaryStrip(deps = {}) {
     const gamePrimaryStrip = deps.gamePrimaryStrip;
     if (!gamePrimaryStrip) return;
+    if (!isPrimaryStripVisible(gamePrimaryStrip)) {
+      gamePrimaryStrip.innerHTML = "";
+      gamePrimaryStrip.setAttribute("aria-hidden", "true");
+      return;
+    }
     const focus = primaryFocusStripModel(deps);
     const dungeon = primaryDungeonStripModel(deps);
     const status = primaryStatusStripModel(deps);
+    gamePrimaryStrip.removeAttribute("aria-hidden");
     gamePrimaryStrip.innerHTML = `
-      <button type="button" class="game-primary-item focus ${escapeAttr(focus.kind)}" data-primary-strip-action="${escapeAttr(focus.action)}">
+      <button type="button" class="game-primary-item focus ${escapeAttr(focus.kind)}" data-primary-strip-action="${escapeAttr(focus.action)}"
+              aria-label="${escapeAttr(primaryStripButtonLabel(focus))}" title="${escapeAttr(primaryStripButtonLabel(focus))}">
         <span>${escapeHtml(focus.label)}</span>
         <strong>${escapeHtml(focus.title)}</strong>
         <small>${escapeHtml(focus.meta)}</small>
       </button>
-      <button type="button" class="game-primary-item dungeon ${escapeAttr(dungeon.kind)}" data-primary-strip-action="dungeon">
+      <button type="button" class="game-primary-item dungeon ${escapeAttr(dungeon.kind)}" data-primary-strip-action="dungeon"
+              aria-label="${escapeAttr(primaryStripButtonLabel(dungeon))}" title="${escapeAttr(primaryStripButtonLabel(dungeon))}">
         <span>${escapeHtml(dungeon.label)}</span>
         <strong>${escapeHtml(dungeon.title)}</strong>
         <small>${escapeHtml(dungeon.meta)}</small>
       </button>
-      <button type="button" class="game-primary-item status ${escapeAttr(status.kind)}" data-primary-strip-action="status">
+      <button type="button" class="game-primary-item status ${escapeAttr(status.kind)}" data-primary-strip-action="status"
+              aria-label="${escapeAttr(primaryStripButtonLabel(status))}" title="${escapeAttr(primaryStripButtonLabel(status))}">
         <span>${escapeHtml(status.label)}</span>
         <strong>${escapeHtml(status.title)}</strong>
         <small>${escapeHtml(status.meta)}</small>
       </button>
-      <button type="button" class="game-primary-more" data-primary-strip-action="secondary">工具</button>
+      <button type="button" class="game-primary-more" data-primary-strip-action="secondary" aria-label="打开工具中心" title="打开工具中心">工具</button>
     `;
     gamePrimaryStrip.querySelectorAll("[data-primary-strip-action]").forEach((button) => {
       button.addEventListener("click", () => {
         handlePrimaryStripAction(deps, button.dataset.primaryStripAction || "").catch((error) => deps.showError?.(error));
       });
     });
+  }
+
+  function isPrimaryStripVisible(gamePrimaryStrip) {
+    if (!gamePrimaryStrip || gamePrimaryStrip.hidden) return false;
+    if (typeof window.getComputedStyle !== "function") return true;
+    try {
+      const style = window.getComputedStyle(gamePrimaryStrip);
+      return style.display !== "none" && style.visibility !== "hidden";
+    } catch (error) {
+      return true;
+    }
+  }
+
+  function primaryStripButtonLabel(item = {}) {
+    return [item.label, item.title, item.meta].filter(Boolean).join("｜");
   }
 
   function primaryFocusStripModel(deps = {}) {

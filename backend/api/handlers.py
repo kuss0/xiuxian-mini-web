@@ -213,6 +213,14 @@ def _get_identity_state(request: MiniWebRequest, query: dict) -> dict:
     return _app(request).identity_state_payload(send_as_id)
 
 
+def _get_tianjige_status(request: MiniWebRequest, query: dict) -> dict:
+    return _app(request).tianjige_status_payload()
+
+
+def _get_tianjige_bootstrap(request: MiniWebRequest, query: dict) -> dict:
+    return _app(request).tianjige_bootstrap_payload()
+
+
 def _get_listener_status(request: MiniWebRequest, query: dict) -> dict:
     return _app(request).listener_status_payload()
 
@@ -301,6 +309,14 @@ def _post_identity_delete(request: MiniWebRequest, payload: dict) -> dict:
         return _app(request).delete_identity_payload(payload)
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+def _post_tianjige_me(request: MiniWebRequest, payload: dict) -> dict:
+    return _app(request).tianjige_me_payload(payload)
+
+
+def _post_tianjige_cultivator(request: MiniWebRequest, payload: dict) -> dict:
+    return _app(request).tianjige_cultivator_payload(payload)
 
 
 def _post_outbox_plan(request: MiniWebRequest, payload: dict) -> dict:
@@ -424,6 +440,14 @@ def _post_schedule_template_delete(request: MiniWebRequest, payload: dict) -> di
 
 def _post_schedule_cancel(request: MiniWebRequest, payload: dict) -> dict:
     return _app(request).schedule_cancel_payload(payload)
+
+
+def _post_schedule_retry_failed(request: MiniWebRequest, payload: dict) -> dict:
+    return _app(request).schedule_retry_failed_payload(payload)
+
+
+def _post_schedule_sync_repair(request: MiniWebRequest, payload: dict) -> dict:
+    return _app(request).schedule_sync_repair_payload(payload)
 
 
 # ---------- 技能盘(直接 / 回复发送)----------

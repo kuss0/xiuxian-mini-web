@@ -257,6 +257,8 @@ async function loadMessages({ incremental = false } = {}) {
   // channel/channels:默认 focus(重点流);多频道组合由后端 OR 过滤;日志按钮单独走全量 modal
   if (state.channels.length > 0 && selectedChannelKeys().length === 0) {
     if (!incremental) {
+      state.messageLoading = false;
+      state.messageError = "";
       state.lastMessageSeq = 0;
       state.messages = [];
       state.selectedMessageId = null;
@@ -283,7 +285,22 @@ async function loadMessages({ incremental = false } = {}) {
   if (!selectedChannelKeys().includes("focus")) {
     params.set("compact", "1");
   }
-  const payload = await fetchJson(`/api/messages?${params.toString()}`);
+  if (!incremental) {
+    state.messageLoading = true;
+    state.messageError = "";
+    renderMessages();
+  }
+  let payload;
+  try {
+    payload = await fetchJson(`/api/messages?${params.toString()}`);
+  } catch (error) {
+    if (!incremental) {
+      state.messageLoading = false;
+      state.messageError = error?.message || String(error || "读取消息失败");
+      renderMessages();
+    }
+    throw error;
+  }
   const incoming = payload.messages || [];
   const serverMax = Number(payload.max_seq || 0);
   const wasNearLatest = !incremental || isMessageListNearLatest();
@@ -314,6 +331,8 @@ async function loadMessages({ incremental = false } = {}) {
     // 初始化:直接替换
     state.messages = sortMessagesByRecency(incoming);
     state.chatUnreadCount = 0;
+    state.messageLoading = false;
+    state.messageError = "";
   }
   state.lastMessageSeq = incremental ? Math.max(state.lastMessageSeq, serverMax) : serverMax;
 
@@ -2171,6 +2190,12 @@ async function findOrFetchMessage(id) {
 
 function emptyMessageHint() {
   const query = String(state.messageSearch || "").trim();
+  if (state.messageLoading && state.messages.length === 0) {
+    return "正在读取消息...";
+  }
+  if (state.messageError && state.messages.length === 0) {
+    return `消息读取失败: ${state.messageError}`;
+  }
   if (query) {
     return `当前频道里没有匹配「${query}」的消息。按 Esc 或清空搜索框恢复。`;
   }
@@ -3191,38 +3216,53 @@ function setDirectSendStatus(text, kind = "info") {
 
 async function sendDirectComposerMessage() {
   if (!directSendInput || !directSendIdentitySelect || !directSendSubmit) return;
-  if (!state.identities.length || !state.accounts.length) {
-    await Promise.all([loadAccounts(), loadIdentities()]);
-  }
-  const command = directSendInput.value.trim();
-  const identityId = Number(directSendIdentitySelect.value || 0);
-  const identity = identityById(identityId);
-  if (!identityId || !identity) {
-    setDirectSendStatus("请选择发送身份。", "error");
+  if (state.directSendSending) {
+    setDirectSendStatus("上一条还在发送中,请等结果返回。", "warn");
     return;
   }
-  if (!identityCanSend(identity)) {
-    setDirectSendStatus("当前只支持账号本体身份发送，请切换到可发送身份。", "warn");
-    return;
-  }
-  if (!command) {
-    setDirectSendStatus("发送内容不能为空。", "error");
-    focusDirectSendInput();
-    return;
-  }
-
+  state.directSendSending = true;
   directSendSubmit.disabled = true;
-  setDirectSendStatus("正在发送...", "info");
-  const reply = state.directSendReply;
-  const payload = {
-    skill_key: "manual_send",
-    identity_id: identityId,
-    command_override: command,
-  };
-  if (reply?.chatId) payload.chat_id = reply.chatId;
-  if (reply?.replyToMsgId) payload.reply_to_msg_id = reply.replyToMsgId;
-  if (reply?.topMsgId) payload.top_msg_id = reply.topMsgId;
   try {
+    if (!state.identities.length || !state.accounts.length) {
+      setDirectSendStatus("正在准备发送身份...", "info");
+      await Promise.all([loadAccounts(), loadIdentities()]);
+    }
+    const command = directSendInput.value.trim();
+    const identityId = Number(directSendIdentitySelect.value || 0);
+    const identity = identityById(identityId);
+    if (!identityId || !identity) {
+      setDirectSendStatus("请选择发送身份。", "error");
+      return;
+    }
+    if (!identityCanSend(identity)) {
+      setDirectSendStatus("当前只支持账号本体身份发送，请切换到可发送身份。", "warn");
+      return;
+    }
+    if (!command) {
+      setDirectSendStatus("发送内容不能为空。", "error");
+      focusDirectSendInput();
+      return;
+    }
+
+    const reply = state.directSendReply;
+    const payload = {
+      skill_key: "manual_send",
+      identity_id: identityId,
+      command_override: command,
+    };
+    if (reply?.chatId) payload.chat_id = reply.chatId;
+    if (reply?.replyToMsgId) payload.reply_to_msg_id = reply.replyToMsgId;
+    if (reply?.topMsgId) payload.top_msg_id = reply.topMsgId;
+    const sendKey = JSON.stringify(payload);
+    const now = Date.now();
+    if (state.directSendLastKey === sendKey && now - Number(state.directSendLastAt || 0) < 2500) {
+      setDirectSendStatus("刚刚已经提交过同一条消息,已拦截重复发送。", "warn");
+      return;
+    }
+    state.directSendLastKey = sendKey;
+    state.directSendLastAt = now;
+
+    setDirectSendStatus("正在发送...", "info");
     const result = await postJson("/api/skills/send", payload);
     if (result.ok) {
       setDirectSendStatus(sentStatusText(result, { skillKey: "manual_send", command }), "ok");
@@ -3230,7 +3270,7 @@ async function sendDirectComposerMessage() {
       directSendInput.value = "";
       resizeDirectSendInput();
       clearDirectSendReply();
-      await refreshChatViewport().catch((err) => console.warn("[direct-send] refresh failed:", err));
+      refreshChatViewport().catch((err) => console.warn("[direct-send] refresh failed:", err));
     } else {
       setDirectSendStatus(result.error || "发送失败", "error");
       showSkillToast(`❌ ${result.error || "发送失败"}`, "err");
@@ -3240,6 +3280,7 @@ async function sendDirectComposerMessage() {
     setDirectSendStatus(message, "error");
     showSkillToast(`❌ ${message}`, "err");
   } finally {
+    state.directSendSending = false;
     renderDirectSendComposer();
   }
 }

@@ -377,7 +377,7 @@
 
     const identity = deps.identityById?.(selectedId);
     const canSend = identity && deps.identityCanSend?.(identity);
-    directSendSubmit.disabled = !canSend;
+    directSendSubmit.disabled = Boolean(state.directSendSending) || !canSend;
     if (directSendIdentityLine) {
       if (!identity) {
         directSendIdentityLine.textContent = "未选身份";
@@ -701,6 +701,8 @@
       openSkillMenuButton,
       openCultivationButton,
     } = elements;
+    if (elements.directSendComposer?.dataset.directComposerBound === "1") return;
+    if (elements.directSendComposer) elements.directSendComposer.dataset.directComposerBound = "1";
 
     if (directSendIdentitySelect) {
       directSendIdentitySelect.addEventListener("change", () => {
@@ -715,6 +717,7 @@
       directSendInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter" && !event.shiftKey) {
           event.preventDefault();
+          if (event.repeat || state.directSendSending) return;
           deps.sendComposerMessage?.();
         }
       });

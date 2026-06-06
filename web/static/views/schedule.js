@@ -283,6 +283,7 @@
           </div>
           <div class="form-actions">
             <button type="button" id="scheduleSyncButton">拉 TG 状态对账</button>
+            <button type="button" id="scheduleSyncRepairButton">修复本地漂移</button>
           </div>
           <p class="modal-status-line info" id="scheduleSyncStatus" hidden></p>
           <div id="scheduleSyncResult" class="send-as-result" hidden></div>
@@ -324,7 +325,7 @@
                 <code>${escapeHtml(m.command)}</code>
                 <small>${escapeHtml(m.schedule_text || "")}</small>
                 ${stat}
-                ${m.scheduled_msg_id ? `<small>TG #${m.scheduled_msg_id}</small>` : ""}
+                ${m.scheduled_msg_id ? `<small>TG #${escapeHtml(String(m.scheduled_msg_id))}</small>` : ""}
                 ${m.last_error ? `<small class="error">${escapeHtml(m.last_error)}</small>` : ""}
               </li>
             `;
@@ -339,7 +340,10 @@
         const statusPill = scheduleStatusPill(statusKey);
         const showProgress = statusKey === "sending" || (counts.planned > 0 && counts.scheduled > 0);
         const cancelBtn = statusKey === "sending"
-          ? `<button type="button" data-schedule-action="cancel" data-batch-id="${escapeAttr(String(b.id))}">取消</button>`
+          ? `<button type="button" data-schedule-action="cancel" data-batch-id="${escapeAttr(String(b.id))}" aria-label="取消批次 #${escapeAttr(String(b.id))}">取消</button>`
+          : "";
+        const retryBtn = counts.failed > 0 && statusKey !== "sending" && statusKey !== "deleted"
+          ? `<button type="button" data-schedule-action="retry-failed" data-batch-id="${escapeAttr(String(b.id))}" aria-label="重排批次 #${escapeAttr(String(b.id))} 的失败项">重排失败</button>`
           : "";
         return `
           <article class="account-row" data-schedule-batch-id="${escapeAttr(String(b.id))}">
@@ -348,14 +352,15 @@
               <div class="account-row-title">
                 <strong>${escapeHtml(b.label || b.preset_key)}</strong>
                 ${statusPill}
-                <span class="account-row-meta">send_as ${b.send_as_id}｜${b.anchor_text || ""}｜${b.horizon_days} 天｜${escapeHtml(statusText)}</span>
+                <span class="account-row-meta">send_as ${escapeHtml(String(b.send_as_id || ""))}｜${escapeHtml(b.anchor_text || "")}｜${escapeHtml(String(b.horizon_days || ""))} 天｜${escapeHtml(statusText)}</span>
               </div>
               ${showProgress ? `<div class="schedule-progress"><div class="schedule-progress-bar" style="width:${pct}%"></div></div>` : ""}
               <ul class="schedule-item-list">${items}</ul>
             </div>
             <div class="account-row-actions">
               ${cancelBtn}
-              <button type="button" data-schedule-action="delete" data-batch-id="${escapeAttr(String(b.id))}">删除</button>
+              ${retryBtn}
+              <button type="button" data-schedule-action="delete" data-batch-id="${escapeAttr(String(b.id))}" aria-label="删除批次 #${escapeAttr(String(b.id))}">删除</button>
             </div>
           </article>
         `;
@@ -458,6 +463,7 @@
     const preview = dialog.querySelector("#schedulePreview");
     const batchList = dialog.querySelector("#scheduleBatchList");
     const syncButton = dialog.querySelector("#scheduleSyncButton");
+    const syncRepairButton = dialog.querySelector("#scheduleSyncRepairButton");
     const syncSelect = dialog.querySelector("#scheduleSyncSelect");
     const syncStatus = dialog.querySelector("#scheduleSyncStatus");
     const syncResult = dialog.querySelector("#scheduleSyncResult");
@@ -663,7 +669,7 @@
       });
     }
 
-    dialog.querySelectorAll("[data-schedule-action]").forEach((btn) => {
+    form.querySelectorAll("[data-schedule-action]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const action = btn.dataset.scheduleAction;
         if (action === "preview") {
@@ -731,46 +737,7 @@
             setStatus(result.errors?.length || result.failed || manualMessages.length ? "warn" : "ok", scheduleStatusWithManualMessages(stats, manualMessages));
             const refreshed = await fetchJson("/api/schedule");
             if (batchList) batchList.innerHTML = renderScheduleBatches(deps, syncScheduleBatches(deps, refreshed));
-            bindScheduleBatchActions(deps, dialog);
-          } catch (error) {
-            setStatus("error", error.message);
-          } finally {
-            btn.disabled = false;
-          }
-          return;
-        }
-        if (action === "cancel") {
-          const batchId = btn.dataset.batchId;
-          if (!batchId) return;
-          if (!window.confirm(`取消批次 #${batchId}?已经排到 TG 的会保留(可再点删除一并清掉)。`)) return;
-          btn.disabled = true;
-          try {
-            const result = await postJson("/api/schedule/cancel", { batch_id: Number(batchId) });
-            if (!result.ok) throw new Error(result.error || "取消失败");
-            setStatus("ok", `批次 #${batchId} 已取消(后台 loop 在下条时退出)`);
-            const refreshed = await fetchJson("/api/schedule");
-            if (batchList) batchList.innerHTML = renderScheduleBatches(deps, syncScheduleBatches(deps, refreshed));
-            bindScheduleBatchActions(deps, dialog);
-          } catch (error) {
-            setStatus("error", error.message);
-          } finally {
-            btn.disabled = false;
-          }
-          return;
-        }
-        if (action === "delete") {
-          const batchId = btn.dataset.batchId;
-          if (!batchId) return;
-          if (!window.confirm(`删除批次 #${batchId}?如果是真排过 TG,也会一起从 TG 取消。`)) return;
-          btn.disabled = true;
-          setStatus("info", "删除中…");
-          try {
-            const result = await postJson("/api/schedule/delete", { batch_id: Number(batchId) });
-            if (!result.ok) throw new Error(result.error || "删除失败");
-            setStatus("ok", `已删除批次 #${batchId}｜本地 ${result.local?.messages || 0} 条｜TG 取消 ${result.tg_deleted || 0} 条${result.tg_error ? `｜TG 错误:${result.tg_error}` : ""}`);
-            const refreshed = await fetchJson("/api/schedule");
-            if (batchList) batchList.innerHTML = renderScheduleBatches(deps, syncScheduleBatches(deps, refreshed));
-            bindScheduleBatchActions(deps, dialog);
+            bindScheduleBatchActions(deps, dialog, setStatus);
           } catch (error) {
             setStatus("error", error.message);
           } finally {
@@ -780,7 +747,7 @@
         }
       });
     });
-    bindScheduleBatchActions(deps, dialog);
+    bindScheduleBatchActions(deps, dialog, setStatus);
 
     if (syncButton && syncSelect) {
       const setSyncStatus = (kind, text) => {
@@ -788,13 +755,30 @@
         syncStatus.className = `modal-status-line ${kind}`;
         syncStatus.textContent = text || "";
       };
+      const renderSyncResult = (result) => {
+        const tg = result.tg_messages || [];
+        const orphans = result.orphans || [];
+        const lost = result.lost || [];
+        if (!syncResult) return;
+        syncResult.hidden = false;
+        syncResult.innerHTML = `
+          <p><strong>Telegram 端当前 ${tg.length} 条 scheduled message</strong></p>
+          <ul class="send-as-result-list">
+            ${tg.map((m) => `<li class="ok"><code>${escapeHtml(clipGraphemes(m.message || "", 40))}</code> <small>${escapeHtml(m.schedule_text || "")}｜TG #${escapeHtml(String(m.scheduled_msg_id || ""))}</small></li>`).join("") || "<li>(空)</li>"}
+          </ul>
+          ${orphans.length ? `<p><strong>⚠ TG 有但 mini-web 没记录的 ${escapeHtml(String(orphans.length))} 条</strong>(可能是从其它工具或手机端排的):</p><ul class="send-as-result-list">${orphans.map((m) => `<li class="warn"><code>${escapeHtml(clipGraphemes(m.message || "", 40))}</code> <small>TG #${escapeHtml(String(m.scheduled_msg_id || ""))}｜${escapeHtml(m.schedule_text || "")}</small></li>`).join("")}</ul>` : ""}
+          ${lost.length ? `<p><strong>⚠ 本地标已排但 TG 找不到的 ${escapeHtml(String(lost.length))} 条</strong>(可能被 TG 端取消了):</p><ul class="send-as-result-list">${lost.map((m) => `<li class="warn"><code>${escapeHtml(m.command)}</code> <small>本地 #${escapeHtml(String(m.id || ""))}｜TG 期望 #${escapeHtml(String(m.scheduled_msg_id || ""))}</small></li>`).join("")}</ul>` : ""}
+        `;
+      };
       syncButton.addEventListener("click", async () => {
         const sendAs = syncSelect.value;
         if (!sendAs) {
           setSyncStatus("warn", "请选身份");
           return;
         }
+        const originalText = syncButton.textContent;
         syncButton.disabled = true;
+        syncButton.textContent = "对账中";
         setSyncStatus("info", "正在调 GetScheduledHistory 对账…");
         try {
           const result = await fetchJson(`/api/schedule/sync?send_as_id=${encodeURIComponent(sendAs)}`);
@@ -804,25 +788,53 @@
           const orphans = result.orphans || [];
           const lost = result.lost || [];
           setSyncStatus(orphans.length || lost.length ? "warn" : "ok", `TG ${tg.length} 条｜对得上 ${matched.length}｜TG 有本地没的 ${orphans.length}｜本地标排 TG 没找到 ${lost.length}`);
-          syncResult.hidden = false;
-          syncResult.innerHTML = `
-            <p><strong>Telegram 端当前 ${tg.length} 条 scheduled message</strong></p>
-            <ul class="send-as-result-list">
-              ${tg.map((m) => `<li class="ok"><code>${escapeHtml(clipGraphemes(m.message || "", 40))}</code> <small>${escapeHtml(m.schedule_text || "")}｜TG #${m.scheduled_msg_id}</small></li>`).join("") || "<li>(空)</li>"}
-            </ul>
-            ${orphans.length ? `<p><strong>⚠ TG 有但 mini-web 没记录的 ${orphans.length} 条</strong>(可能是从其它工具或手机端排的):</p><ul class="send-as-result-list">${orphans.map((m) => `<li class="warn"><code>${escapeHtml(clipGraphemes(m.message || "", 40))}</code> <small>TG #${m.scheduled_msg_id}｜${escapeHtml(m.schedule_text || "")}</small></li>`).join("")}</ul>` : ""}
-            ${lost.length ? `<p><strong>⚠ 本地标已排但 TG 找不到的 ${lost.length} 条</strong>(可能被 TG 端取消了):</p><ul class="send-as-result-list">${lost.map((m) => `<li class="warn"><code>${escapeHtml(m.command)}</code> <small>本地 #${m.id}｜TG 期望 #${m.scheduled_msg_id}</small></li>`).join("")}</ul>` : ""}
-          `;
+          renderSyncResult(result);
         } catch (error) {
           setSyncStatus("error", error.message);
         } finally {
           syncButton.disabled = false;
+          syncButton.textContent = originalText;
         }
       });
+      if (syncRepairButton) {
+        syncRepairButton.addEventListener("click", async () => {
+          const sendAs = syncSelect.value;
+          if (!sendAs) {
+            setSyncStatus("warn", "请选身份");
+            return;
+          }
+          if (!window.confirm("确认修复本地漂移?本地丢失项会标记为失败,方便之后重排;TG 外部定时不会被删除。")) return;
+          const originalText = syncRepairButton.textContent;
+          syncRepairButton.disabled = true;
+          syncRepairButton.textContent = "修复中";
+          setSyncStatus("info", "正在修复本地漂移…");
+          try {
+            const result = await postJson("/api/schedule/sync/repair", { send_as_id: Number(sendAs) });
+            if (!result.ok) throw new Error(result.error || "修复失败");
+            const sync = result.sync || result;
+            const orphans = sync.orphans || [];
+            const lost = sync.lost || [];
+            setSyncStatus(
+              orphans.length || lost.length ? "warn" : "ok",
+              `${result.message || "本地漂移修复完成"}｜当前 lost ${lost.length}｜orphans ${orphans.length}`
+            );
+            renderSyncResult(sync);
+            const refreshed = await fetchJson("/api/schedule");
+            if (batchList) batchList.innerHTML = renderScheduleBatches(deps, syncScheduleBatches(deps, refreshed));
+            bindScheduleBatchActions(deps, dialog, setStatus);
+          } catch (error) {
+            setSyncStatus("error", error.message || "修复失败");
+          } finally {
+            syncRepairButton.disabled = false;
+            syncRepairButton.textContent = originalText;
+          }
+        });
+      }
     }
   }
 
-  function bindScheduleBatchActions(deps = {}, dialog) {
+  function bindScheduleBatchActions(deps = {}, dialog, setStatus = null) {
+    const setBatchStatus = typeof setStatus === "function" ? setStatus : () => {};
     dialog.querySelectorAll('[data-schedule-action="delete"]').forEach((btn) => {
       if (btn.dataset.bound === "1") return;
       btn.dataset.bound = "1";
@@ -830,15 +842,23 @@
         const batchId = btn.dataset.batchId;
         if (!batchId) return;
         if (!window.confirm(`删除批次 #${batchId}?`)) return;
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "删除中";
+        setBatchStatus("info", `正在删除批次 #${batchId}…`);
         try {
           const result = await postJson("/api/schedule/delete", { batch_id: Number(batchId) });
           if (!result.ok) throw new Error(result.error || "删除失败");
+          setBatchStatus("ok", `已删除批次 #${batchId}`);
           const refreshed = await fetchJson("/api/schedule");
           const batchList = dialog.querySelector("#scheduleBatchList");
           if (batchList) batchList.innerHTML = renderScheduleBatches(deps, syncScheduleBatches(deps, refreshed));
-          bindScheduleBatchActions(deps, dialog);
+          bindScheduleBatchActions(deps, dialog, setStatus);
         } catch (error) {
+          setBatchStatus("error", error.message || "删除失败");
           window.alert(error.message || "删除失败");
+          btn.disabled = false;
+          btn.textContent = originalText;
         }
       });
     });
@@ -849,15 +869,51 @@
         const batchId = btn.dataset.batchId;
         if (!batchId) return;
         if (!window.confirm(`取消批次 #${batchId}?已经排到 TG 的会保留(可点删除一并清掉)。`)) return;
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "取消中";
+        setBatchStatus("info", `正在取消批次 #${batchId}…`);
         try {
           const result = await postJson("/api/schedule/cancel", { batch_id: Number(batchId) });
           if (!result.ok) throw new Error(result.error || "取消失败");
+          setBatchStatus("ok", `批次 #${batchId} 已取消`);
           const refreshed = await fetchJson("/api/schedule");
           const batchList = dialog.querySelector("#scheduleBatchList");
           if (batchList) batchList.innerHTML = renderScheduleBatches(deps, syncScheduleBatches(deps, refreshed));
-          bindScheduleBatchActions(deps, dialog);
+          bindScheduleBatchActions(deps, dialog, setStatus);
         } catch (error) {
+          setBatchStatus("error", error.message || "取消失败");
           window.alert(error.message || "取消失败");
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }
+      });
+    });
+    dialog.querySelectorAll('[data-schedule-action="retry-failed"]').forEach((btn) => {
+      if (btn.dataset.bound === "1") return;
+      btn.dataset.bound = "1";
+      btn.addEventListener("click", async () => {
+        const batchId = btn.dataset.batchId;
+        if (!batchId) return;
+        if (!window.confirm(`重排批次 #${batchId} 的失败项?已过期的会改到近期错峰时间,仍是官方定时、需已登录。`)) return;
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "重排中";
+        setBatchStatus("info", `正在重排批次 #${batchId} 的失败项…`);
+        try {
+          const result = await postJson("/api/schedule/retry-failed", { batch_id: Number(batchId) });
+          if (!result.ok) throw new Error(result.error || "重排失败");
+          setBatchStatus("ok", `批次 #${batchId} 已重新排入后台发送`);
+          const refreshed = await fetchJson("/api/schedule");
+          const batchList = dialog.querySelector("#scheduleBatchList");
+          if (batchList) batchList.innerHTML = renderScheduleBatches(deps, syncScheduleBatches(deps, refreshed));
+          bindScheduleBatchActions(deps, dialog, setStatus);
+          if (result.batch_id) scheduleProgressPolling(deps, dialog, result.batch_id);
+        } catch (error) {
+          setBatchStatus("error", error.message || "重排失败");
+          window.alert(error.message || "重排失败");
+          btn.disabled = false;
+          btn.textContent = originalText;
         }
       });
     });

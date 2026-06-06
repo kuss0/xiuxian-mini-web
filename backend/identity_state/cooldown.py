@@ -245,15 +245,6 @@ DEFAULT_COOLDOWN_SPECS: tuple[CooldownSpec, ...] = (
         cooldown_patterns=("打坐调息", "再次闭关"),
     ),
     CooldownSpec(
-        key="yuanying",
-        label="元婴出窍",
-        commands=(".元婴出窍", ".元婴状态"),
-        default_cd_sec=8 * 3600,
-        success_patterns=("你心念一动", "元婴化作一道流光飞出"),
-        cooldown_patterns=("尚未恢复", "冷却", "等待", "不足", "休息", "归来倒计时"),
-        ready_patterns=("窍中温养",),
-    ),
-    CooldownSpec(
         key="pet_trial",
         label="器灵试炼",
         commands=(".器灵试炼",),

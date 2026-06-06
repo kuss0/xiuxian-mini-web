@@ -3228,11 +3228,11 @@ class SQLiteStore:
             for row in rows
         ]
 
-    def mark_schedule_message(self, message_id: int, *, scheduled_msg_id: int = 0, status: str = "", last_error: str = "") -> None:
+    def mark_schedule_message(self, message_id: int, *, scheduled_msg_id: int | None = None, status: str = "", last_error: str = "", schedule_at: float = -1.0) -> None:
         import time
         sets = ["updated_at=?"]
         params: list = [time.time()]
-        if scheduled_msg_id:
+        if scheduled_msg_id is not None:
             sets.append("scheduled_msg_id=?")
             params.append(int(scheduled_msg_id))
         if status:
@@ -3241,6 +3241,9 @@ class SQLiteStore:
         if last_error is not None:
             sets.append("last_error=?")
             params.append(str(last_error))
+        if schedule_at is not None and schedule_at >= 0:
+            sets.append("schedule_at=?")
+            params.append(float(schedule_at))
         params.append(int(message_id))
         with self._connect() as conn:
             conn.execute(

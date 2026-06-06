@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Iterable, Protocol
 
@@ -16,6 +17,7 @@ from backend.features.dungeon_status import (
 )
 from backend.features.cangkun_guide import build_cangkun_guide_payload
 from backend.features.xutian_guide import build_xutian_oracle_guide_payload
+from backend.external.tianjige import TianjigeGateway, tianjige_inventory_items, tianjige_profile_patches
 from backend.outbox import OutboxPlanner
 from backend.outbox.schedule import (
     MAX_SCHEDULED_MESSAGES_PER_IDENTITY,
@@ -297,7 +299,7 @@ def _looks_like_schedule_quota_error(exc: object) -> bool:
 
 
 class MiniWebServer:
-    def __init__(self, store: CardStore | None = None) -> None:
+    def __init__(self, store: CardStore | None = None, tianjige_gateway: TianjigeGateway | None = None) -> None:
         if store is None:
             sqlite_store = SQLiteStore.default()
             sqlite_store.seed_samples_if_empty()
@@ -335,6 +337,7 @@ class MiniWebServer:
                 )
             store = sqlite_store
         self._store = store
+        self._tianjige = tianjige_gateway or TianjigeGateway()
         self._outbox = OutboxPlanner(self._store)
         self._dialogs = TelegramDialogService()
         self._login = TelegramLoginService()
@@ -358,6 +361,8 @@ class MiniWebServer:
         # ThreadingHTTPServer 下并发 schedule_create 会撞 dedup 秒级唯一约束。
         # 用锁串行化整个 _create_one_schedule，确保 list/dedup/insert 原子化。
         self._schedule_create_lock = threading.Lock()
+        self._skill_send_recent_lock = threading.Lock()
+        self._skill_send_recent: dict[str, float] = {}
 
     def health_payload(self) -> dict:
         self._ensure_collector_running()
@@ -805,6 +810,45 @@ class MiniWebServer:
             "ok": True,
             "state": self._store.list_state_patches(scope, send_as_id=send_as_id),
         }
+
+    def tianjige_status_payload(self) -> dict:
+        return {"ok": True, "status": self._tianjige.status()}
+
+    def tianjige_bootstrap_payload(self) -> dict:
+        result = self._tianjige.bootstrap()
+        payload = result.to_api()
+        payload["bootstrap"] = result.data if result.ok else {}
+        return payload
+
+    def tianjige_me_payload(self, payload: dict | None = None) -> dict:
+        result = self._tianjige.me()
+        api = result.to_api()
+        data = result.data if isinstance(result.data, dict) else {}
+        api["me"] = data if result.ok else {}
+        api["characters"] = data.get("characters") if result.ok else []
+        return api
+
+    def tianjige_cultivator_payload(self, payload: dict) -> dict:
+        payload = payload or {}
+        username = str(payload.get("username") or "").strip().lstrip("@")
+        send_as_id = _safe_int(payload.get("send_as_id"))
+        identity = self._store.get_identity(send_as_id) if send_as_id else None
+        if not username and identity:
+            username = str(identity.get("username") or "").strip().lstrip("@")
+        result = self._tianjige.cultivator(username)
+        api = result.to_api()
+        data = result.data if isinstance(result.data, dict) else {}
+        api["cultivator"] = data if result.ok else {}
+        api["profile_patches"] = tianjige_profile_patches(data) if result.ok else []
+        api["inventory"] = {
+            "source": "tianjige",
+            "authoritative": False,
+            "note": "天机阁仅作 API 参考,不会覆盖本地 .储物袋 快照。",
+            "items": tianjige_inventory_items(data) if result.ok else [],
+        }
+        if identity:
+            api["identity"] = public_identity(identity, account=self._store.get_account(identity.get("account_local_id") or ""))
+        return api
 
     def resource_stats_payload(
         self,
@@ -1844,6 +1888,9 @@ class MiniWebServer:
         return {"ok": True, "titles": titles}
 
     def skill_send_payload(self, payload: dict) -> dict:
+        duplicate_key = self._skill_send_duplicate_key(payload or {})
+        if duplicate_key and self._claim_recent_skill_send(duplicate_key):
+            return {"ok": False, "duplicate": True, "error": "重复发送已拦截: 同一条消息刚刚已经提交过。"}
         api, context = self._send_skill_command(payload)
         if context:
             self._record_send_log(
@@ -1867,6 +1914,33 @@ class MiniWebServer:
                 }
             )
         return api
+
+    def _skill_send_duplicate_key(self, payload: dict) -> str:
+        skill_key = str(payload.get("skill_key") or "").strip()
+        identity_id = str(payload.get("identity_id") or "").strip()
+        command = str(payload.get("command_override") or "").strip()
+        chat_id = str(payload.get("chat_id") or "").strip()
+        reply_to = str(payload.get("reply_to_msg_id") or "").strip()
+        top_msg = str(payload.get("top_msg_id") or "").strip()
+        if not skill_key or not identity_id:
+            return ""
+        return json.dumps(
+            [skill_key, identity_id, command, chat_id, reply_to, top_msg],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+    def _claim_recent_skill_send(self, key: str, *, window_sec: float = 2.5) -> bool:
+        now = time.monotonic()
+        with self._skill_send_recent_lock:
+            stale = [item_key for item_key, ts in self._skill_send_recent.items() if now - ts > window_sec * 4]
+            for item_key in stale:
+                self._skill_send_recent.pop(item_key, None)
+            last = self._skill_send_recent.get(key)
+            if last is not None and now - last < window_sec:
+                return True
+            self._skill_send_recent[key] = now
+            return False
 
     def _send_skill_command(self, payload: dict) -> tuple[dict, dict]:
         payload = payload or {}
@@ -2269,7 +2343,18 @@ class MiniWebServer:
             log_chat_id = int(target_chat) if str(target_chat).lstrip("-").isdigit() else 0
         except (TypeError, ValueError):
             log_chat_id = 0
+
+        def _batch_stopped() -> bool:
+            try:
+                current = self._store.list_schedule_batches(include_inactive=True)
+                this_batch = next((b for b in current if b["id"] == batch_id), None)
+                return bool(this_batch and this_batch.get("status") in {"cancelled", "deleted"})
+            except Exception:
+                return False
+
         try:
+            if _batch_stopped():
+                return
             # GetSendAs precheck —— 错就早错,整批标失败
             try:
                 peers_payload = await self._send_as.list_send_as_peers_on_client(
@@ -2280,6 +2365,8 @@ class MiniWebServer:
                     for p in (peers_payload.get("peers") or [])
                 }
                 if send_as_id not in available_ids:
+                    if _batch_stopped():
+                        return
                     err = (
                         f"send_as_id {send_as_id} 不在该群可用 send_as 列表里。"
                         f"用「+ 新增身份」模态的「获取可用身份」按钮核对,或换登录账号。"
@@ -2314,6 +2401,8 @@ class MiniWebServer:
             except Exception as exc:
                 # 关键: 解析会话/发送身份失败时, 必须把整批标 failed 并 return,
                 # 否则会跳到 finally 的 0/0 分支被误标 completed(假成功), 消息却全留 planned。
+                if _batch_stopped():
+                    return
                 err = f"排定时前解析会话/发送身份失败(get_input_entity): {exc}"
                 print(f"[mini-web] schedule entity resolution failed for batch {batch_id}: {exc!r}")
                 for m in messages:
@@ -2341,9 +2430,7 @@ class MiniWebServer:
             last_index = len(messages) - 1
             for index, msg in enumerate(messages):
                 # cancel / delete 早退
-                current = self._store.list_schedule_batches(include_inactive=True)
-                this_batch = next((b for b in current if b["id"] == batch_id), None)
-                if this_batch and this_batch.get("status") in {"cancelled", "deleted"}:
+                if _batch_stopped():
                     print(f"[mini-web] schedule batch {batch_id} cancelled at {index}/{len(messages)}")
                     return
 
@@ -2505,6 +2592,85 @@ class MiniWebServer:
             "use _run_official_send_background; this sync helper is retained only for tests"
         )
 
+    def schedule_retry_failed_payload(self, payload: dict) -> dict:
+        """重排某批次里 status=failed 的官方定时项: 标回 planned 并重新走后台发送。
+        仍在未来的保留原时间; 已过期/临近的从现在起错峰重排, 整体仍 clamp 在 7 天内。
+        不碰红线: 仍是 Telegram 官方 scheduled message + 人工触发, 不是后台自动连发。"""
+        try:
+            batch_id = int((payload or {}).get("batch_id") or 0)
+        except (TypeError, ValueError):
+            batch_id = 0
+        if not batch_id:
+            return {"ok": False, "error": "缺少 batch_id"}
+        batch = next(
+            (b for b in self._store.list_schedule_batches(include_inactive=True)
+             if int(b.get("id") or 0) == batch_id),
+            None,
+        )
+        if not batch:
+            return {"ok": False, "error": f"找不到批次 {batch_id}"}
+        if str(batch.get("status") or "") == "deleted":
+            return {"ok": False, "error": "批次已删除"}
+        send_as_id = int(batch.get("send_as_id") or 0)
+        account_local_id = str(batch.get("account_local_id") or "")
+        failed = [
+            m for m in self._store.list_schedule_messages(batch_id=batch_id, include_inactive=True)
+            if str(m.get("status") or "") == "failed"
+        ]
+        if not failed:
+            return {"ok": True, "batch_id": batch_id, "retried": 0, "message": "该批次没有失败项"}
+        listener = self._listeners.get_listener(account_local_id) if account_local_id else None
+        if listener is None:
+            return {"ok": False, "error": "该身份的账号未在采集运行, 无法重排(需先登录并启动监听)"}
+        current_usage = self._official_schedule_identity_usage(send_as_id)
+        if current_usage + len(failed) > MAX_SCHEDULED_MESSAGES_PER_IDENTITY:
+            return self._schedule_quota_block_payload(
+                send_as_id=send_as_id, current=current_usage, incoming=len(failed)
+            )
+        settings = self._store.get_settings()
+        target_chat = settings.get("target_chat") or ""
+        try:
+            target_topic_id = int(settings.get("target_topic_id") or 0)
+        except (TypeError, ValueError):
+            target_topic_id = 0
+        if not target_chat:
+            return {"ok": False, "error": "settings.target_chat 未配置, 无法定位目标群"}
+        import time as _t
+        now = _t.time()
+        buffer_sec = 120.0
+        stagger_sec = 180.0
+        horizon_end = now + 7 * 86400  # = MAX_HORIZON_DAYS 天
+        failed.sort(key=lambda m: float(m.get("schedule_at") or 0))
+        retimed = 0
+        shift_n = 0
+        for m in failed:
+            orig = float(m.get("schedule_at") or 0)
+            if now + buffer_sec < orig <= horizon_end:
+                new_at = orig  # 仍是未来有效时间, 保留
+            else:
+                new_at = min(now + buffer_sec + shift_n * stagger_sec, horizon_end)
+                shift_n += 1
+                retimed += 1
+            self._store.mark_schedule_message(
+                int(m["id"]), scheduled_msg_id=0, status="planned", last_error="", schedule_at=new_at
+            )
+        retry_ids = {int(m["id"]) for m in failed}
+        msgs = [
+            m for m in self._store.list_schedule_messages(batch_id=batch_id, include_inactive=False)
+            if int(m.get("id") or 0) in retry_ids
+        ]
+        self._store.set_schedule_batch_status(batch_id, "sending")
+        try:
+            listener.submit_background(
+                lambda client: self._run_official_send_background(
+                    client, batch_id, target_chat, target_topic_id, send_as_id, msgs
+                )
+            )
+        except Exception as exc:
+            self._store.set_schedule_batch_status(batch_id, "failed")
+            return {"ok": False, "error": f"提交后台重排失败: {exc}", "batch_id": batch_id}
+        return {"ok": True, "batch_id": batch_id, "retried": len(msgs), "retimed": retimed, "status": "sending"}
+
     def schedule_list_payload(self) -> dict:
         """返回所有 active batch 及其 items。前端按 identity 分组渲染。"""
         batches = self._store.list_schedule_batches(include_inactive=False)
@@ -2628,7 +2794,11 @@ class MiniWebServer:
             local_messages = self._store.list_schedule_messages(
                 send_as_id=send_as_id, include_inactive=False
             )
-            local_by_tg_id = {m["scheduled_msg_id"]: m for m in local_messages if m["scheduled_msg_id"]}
+            local_by_tg_id = {
+                m["scheduled_msg_id"]: m
+                for m in local_messages
+                if m["scheduled_msg_id"] and str(m.get("status") or "") == "scheduled"
+            }
             tg_ids = {m["scheduled_msg_id"] for m in tg_messages}
 
             matched = []
@@ -2639,7 +2809,12 @@ class MiniWebServer:
                     matched.append({"local_id": local["id"], "tg": tg_msg, "local": local})
                 else:
                     orphans.append(tg_msg)
-            lost = [m for m in local_messages if m["scheduled_msg_id"] and m["scheduled_msg_id"] not in tg_ids]
+            lost = [
+                m for m in local_messages
+                if str(m.get("status") or "") == "scheduled"
+                and m["scheduled_msg_id"]
+                and m["scheduled_msg_id"] not in tg_ids
+            ]
 
             return {
                 "ok": True,
@@ -2652,6 +2827,53 @@ class MiniWebServer:
             }
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    def schedule_sync_repair_payload(self, payload: dict) -> dict:
+        """Repair local drift found by schedule sync.
+
+        Only local-lost rows are changed: if mini-web marked a message as
+        scheduled but Telegram no longer returns that scheduled id, mark the
+        local row failed and clear scheduled_msg_id. TG-side orphans are left
+        untouched because they may have been created intentionally elsewhere.
+        """
+        try:
+            send_as_id = int((payload or {}).get("send_as_id") or 0)
+        except (TypeError, ValueError):
+            send_as_id = 0
+        if not send_as_id:
+            return {"ok": False, "error": "请指定 send_as_id"}
+        sync = self.schedule_sync_payload(send_as_id)
+        if not sync.get("ok"):
+            return sync
+        lost = list(sync.get("lost") or [])
+        repaired = 0
+        repair_error = "TG 对账未找到该官方定时,已标记失败;可确认后重排失败项。"
+        for item in lost:
+            try:
+                message_id = int(item.get("id") or 0)
+            except (TypeError, ValueError):
+                message_id = 0
+            if not message_id:
+                continue
+            self._store.mark_schedule_message(
+                message_id,
+                scheduled_msg_id=0,
+                status="failed",
+                last_error=repair_error,
+            )
+            repaired += 1
+        refreshed = self.schedule_sync_payload(send_as_id)
+        return {
+            "ok": True,
+            "send_as_id": send_as_id,
+            "repaired_lost": repaired,
+            "orphans_unchanged": len(sync.get("orphans") or []),
+            "sync": refreshed if refreshed.get("ok") else sync,
+            "message": (
+                f"已修复本地丢失记录 {repaired} 条;"
+                f"TG 外部定时 {len(sync.get('orphans') or [])} 条未自动处理。"
+            ),
+        }
 
     async def _do_list_official_messages(self, client, target_chat) -> list[dict]:
         peer = await client.get_input_entity(int(target_chat) if str(target_chat).lstrip("-").isdigit() else target_chat)

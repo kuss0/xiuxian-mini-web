@@ -22,10 +22,10 @@ do not prove success.
 | --- | --- |
 | State source | `official_schedule_batches` and `official_scheduled_messages`; real Telegram scheduled messages are represented by local rows with `scheduled` status. |
 | Trigger | User opens an official schedule preset. `build_plan` clamps horizon to 7 days and expands the preset into scheduled commands. |
-| Refresh path | `/api/schedule` lists batch/message status. Background send updates each item to `scheduled` or `failed`; the UI polls active sending batches. The official schedule rail and modal are isolated in `web/static/views/schedule.js`, with `web/static/app.js` only keeping orchestration wrappers. |
-| Failure/manual fallback | A single send-as identity is capped at 100 planned/scheduled official messages. If creation would exceed 100, the API returns `quota_blocked`, `manual_required`, and a manual handling message. If Telegram reports the same limit during background send, remaining items are marked failed and sending stops. The UI keeps the detailed manual-handling messages in the modal status line instead of relying only on an alert. |
-| Current gap | The local count is an estimate until scheduled history is reconciled against Telegram. Local deletion marks rows deleted, but externally deleted Telegram scheduled messages still need explicit sync. |
-| Next action | Keep the 100-message guard local and strict; add Telegram history sync only as a reconciliation tool, not as a reason to exceed the local guard. |
+| Refresh path | `/api/schedule` lists batch/message status. Background send updates each item to `scheduled` or `failed`; the UI polls active sending batches. Failed items can be manually requeued through `/api/schedule/retry-failed`; Telegram history sync can mark local-lost rows failed through `/api/schedule/sync/repair`. The official schedule rail and modal are isolated in `web/static/views/schedule.js`, with `web/static/app.js` only keeping orchestration wrappers. |
+| Failure/manual fallback | A single send-as identity is capped at 100 planned/scheduled official messages. If creation or retry would exceed 100, the API returns `quota_blocked`, `manual_required`, and a manual handling message. If Telegram reports the same limit during background send, remaining items are marked failed and sending stops. The UI keeps the detailed manual-handling messages in the modal status line instead of relying only on an alert. |
+| Current gap | The local count is an estimate until scheduled history is reconciled against Telegram. Local deletion marks rows deleted. Sync repair fixes only local rows that drifted away from Telegram; TG-side orphan scheduled messages remain explicit manual-review items. |
+| Next action | Keep the 100-message guard local and strict; use Telegram history sync only as reconciliation and manual repair, not as a reason to exceed the local guard. |
 
 ## Resource Stats
 
@@ -42,12 +42,12 @@ do not prove success.
 
 | Field | Current contract |
 | --- | --- |
-| State source | `identity_module_state` rows keyed by `(send_as_id, module_key)`. Modules live under `backend/identity_state/`. |
+| State source | `identity_module_state` rows keyed by `(send_as_id, module_key)`. Modules live under `backend/identity_state/`; long-running flows share `backend/identity_state/phaseful.py`. |
 | Trigger | `ModuleRegistry.observe_all` observes real game-bot replies. Most modules resolve the target identity from the replied-to user command. |
 | Refresh path | `/api/identity-state` returns module state plus `status_summary`; identity loading and manual refresh both refresh module state, and official schedules can ask modules for an auto anchor. Sidebar identity list, identity snapshot, sidebar module chips, add-identity modal renderers/event flow, and send_as list/selection/status renderers are isolated in `web/static/views/identity_management.js`, while `web/static/app.js` keeps injected Telegram account/identity/send_as API binding, global timer orchestration, and event orchestration. |
 | Failure/manual fallback | No bot reply means no state update. If a module cannot compute an anchor, schedule planning falls back to the normal anchor/default time. |
-| Current gap | Coverage is uneven: deep retreat, pet touch/warm, weakness, small world, and generic cooldowns are represented, but some newer gameplay loops remain message-only. |
-| Next action | Add modules only where replies expose stable cooldown or readiness text; otherwise keep the result in message cards or dungeon panels. |
+| Current gap | Coverage is uneven: deep retreat and Yuanying now use a shared phaseful model (`running`, `waiting_summary`, `post_summary_wait`, `idle`), pet touch/warm, weakness, small world, and generic cooldowns are represented, but richer reply-state fields for ranch, wild training, search node, rift, stargazer, tianti, and tree still need dedicated observe-only modules. |
+| Next action | Migrate old-script business state in backend-only slices: first phaseful/long-running flows, then reply-pending result modules, then multi-field panel modules. Do not migrate old send loops, retry loops, or cross-module runtime control flow. |
 
 ## Dungeon Status And Guides
 

@@ -230,9 +230,11 @@ def build_default_registry() -> ModuleRegistry:
     from backend.identity_state.pet_warm import PetWarmModule
     from backend.identity_state.small_world import SmallWorldModule
     from backend.identity_state.weakness import WeaknessModule
+    from backend.identity_state.yuanying import YuanyingModule
 
     reg = ModuleRegistry()
     reg.register(DeepRetreatModule())
+    reg.register(YuanyingModule())
     reg.register(PetTouchModule())
     reg.register(PetWarmModule())
     reg.register(WeaknessModule())

@@ -38,6 +38,7 @@
           </div>
           <div class="form-actions">
             <button type="button" id="inventoryRefresh">刷新快照</button>
+            <button type="button" id="inventoryTianjigeLookup">天机阁</button>
             <button type="button" class="primary" id="inventoryPlan">生成转移命令</button>
           </div>
           <p class="modal-status-line info" id="inventoryStatus" hidden></p>
@@ -52,6 +53,7 @@
             <button type="button" data-inventory-batch="qty-one">数量填 1</button>
           </div>
           <div id="inventoryItems" class="inventory-items"></div>
+          <div id="inventoryTianjigeResult" class="send-as-result" hidden></div>
           <div id="inventoryPlanResult" class="send-as-result" hidden></div>
         </section>
       `,
@@ -67,6 +69,9 @@
   function bindInventoryModal(dialog, deps) {
     dialog.querySelector("#inventoryRefresh")?.addEventListener("click", () => {
       refreshInventorySnapshots(dialog, { manual: true }).catch((error) => setInventoryStatus(dialog, "error", error.message));
+    });
+    dialog.querySelector("#inventoryTianjigeLookup")?.addEventListener("click", () => {
+      lookupTianjigeInventory(dialog).catch((error) => setInventoryStatus(dialog, "error", error.message));
     });
     dialog.querySelector("#inventoryOwnerSelect")?.addEventListener("change", () => {
       renderInventoryItems(dialog).catch((error) => setInventoryStatus(dialog, "error", error.message));
@@ -440,6 +445,45 @@
     if (!payload.ok) throw new Error(payload.error || "生成失败");
     renderInventoryPlan(dialog, payload, deps);
     setInventoryStatus(dialog, "ok", `已生成 ${payload.commands.length} 条命令。`);
+  }
+
+  async function lookupTianjigeInventory(dialog) {
+    const owner = String(dialog.querySelector("#inventoryOwnerSelect")?.value || "").trim().replace(/^@/, "");
+    if (!owner) throw new Error("请先选择资源号。");
+    setInventoryStatus(dialog, "info", "正在读取天机阁 API…");
+    const payload = await postJson("/api/tianjige/cultivator", { username: owner });
+    if (!payload.ok) throw new Error(payload.error || "天机阁读取失败");
+    renderTianjigeInventory(dialog, payload);
+    const items = payload.inventory?.items || [];
+    setInventoryStatus(dialog, "ok", `天机阁 API 已返回 @${owner}: ${formatNumber(items.length)} 类参考物品。`);
+  }
+
+  function renderTianjigeInventory(dialog, payload) {
+    const box = dialog.querySelector("#inventoryTianjigeResult");
+    if (!box) return;
+    const role = payload.cultivator || {};
+    const items = (payload.inventory?.items || []).slice(0, 20);
+    box.hidden = false;
+    box.innerHTML = `
+      <p>
+        <strong>天机阁参考</strong>
+        ｜@${escapeHtml(role.username || "")}
+        ｜${escapeHtml(role.dao_name || "未知道号")}
+        ｜${escapeHtml(role.cultivation_level || "未知境界")}
+        ｜${escapeHtml(role.sect_name || "未知宗门")}
+      </p>
+      <p class="muted">${escapeHtml(payload.inventory?.note || "仅作参考。")}</p>
+      ${items.length ? `
+        <ul class="send-as-result-list">
+          ${items.map((item) => `
+            <li>
+              <code>${escapeHtml(item.name || item.item_id || "")}</code>
+              <small>${escapeHtml(item.type || "item")} x ${escapeHtml(formatNumber(item.amount || 0))}</small>
+            </li>
+          `).join("")}
+        </ul>
+      ` : '<p class="empty inline">天机阁未返回背包物品。</p>'}
+    `;
   }
 
   function renderInventoryPlan(dialog, plan, deps) {
