@@ -5,6 +5,7 @@ Simple sliding window rate limiter to prevent API abuse.
 
 from __future__ import annotations
 
+import threading
 from collections import defaultdict
 from time import time
 from typing import Dict, List
@@ -36,6 +37,7 @@ class RateLimiter:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self.requests: Dict[str, List[float]] = defaultdict(list)
+        self._lock = threading.Lock()
 
     def is_allowed(self, client_id: str) -> bool:
         """检查是否允许请求
@@ -48,19 +50,22 @@ class RateLimiter:
         """
         now = time()
 
-        # 清理过期请求
-        self.requests[client_id] = [
-            timestamp for timestamp in self.requests[client_id]
-            if now - timestamp < self.window_seconds
-        ]
+        with self._lock:
+            # 清理过期请求
+            recent = [
+                timestamp for timestamp in self.requests[client_id]
+                if now - timestamp < self.window_seconds
+            ]
 
-        # 检查是否超过限制
-        if len(self.requests[client_id]) >= self.max_requests:
-            return False
+            # 检查是否超过限制
+            if len(recent) >= self.max_requests:
+                self.requests[client_id] = recent
+                return False
 
-        # 记录新请求
-        self.requests[client_id].append(now)
-        return True
+            # 记录新请求
+            recent.append(now)
+            self.requests[client_id] = recent
+            return True
 
     def get_remaining(self, client_id: str) -> int:
         """获取剩余请求数
@@ -72,10 +77,11 @@ class RateLimiter:
             剩余可用请求数
         """
         now = time()
-        recent = [
-            t for t in self.requests[client_id]
-            if now - t < self.window_seconds
-        ]
+        with self._lock:
+            recent = [
+                t for t in self.requests.get(client_id, [])
+                if now - t < self.window_seconds
+            ]
         return max(0, self.max_requests - len(recent))
 
     def get_reset_time(self, client_id: str) -> float:
@@ -87,10 +93,12 @@ class RateLimiter:
         Returns:
             距离重置的秒数
         """
-        if not self.requests[client_id]:
+        with self._lock:
+            timestamps = list(self.requests.get(client_id, []))
+        if not timestamps:
             return 0.0
 
         now = time()
-        oldest = min(self.requests[client_id])
+        oldest = min(timestamps)
         reset_at = oldest + self.window_seconds
         return max(0.0, reset_at - now)

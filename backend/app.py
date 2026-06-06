@@ -87,15 +87,19 @@ class MiniWebHandler(BaseHTTPRequestHandler):
                 return
 
         route = GET_ROUTES.get(path)
-        if route:
-            result = route(self, query)
-            if isinstance(result, RawResponse):
-                self._send_raw(result, include_body=include_body)
-            else:
-                self._send_json(result, include_body=include_body)
+        try:
+            if route:
+                result = route(self, query)
+                if isinstance(result, RawResponse):
+                    self._send_raw(result, include_body=include_body)
+                else:
+                    self._send_json(result, include_body=include_body)
+                return
+            self._serve_static(path, include_body=include_body)
+        except (BrokenPipeError, ConnectionResetError):
             return
-
-        self._serve_static(path, include_body=include_body)
+        except Exception as exc:
+            self._safe_send_500(exc, include_body=include_body)
 
     def _handle_post(self) -> None:
         parsed = urlparse(self.path)
@@ -111,13 +115,52 @@ class MiniWebHandler(BaseHTTPRequestHandler):
                 self._send_error(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "POST 请求必须使用 application/json")
                 return
 
-        route = POST_ROUTES.get(parsed.path)
-        if route is None:
-            self._send_error(HTTPStatus.NOT_FOUND, "Not found")
+        try:
+            route = POST_ROUTES.get(parsed.path)
+            if route is None:
+                self._send_error(HTTPStatus.NOT_FOUND, "Not found")
+                return
+            if route.needs_payload:
+                payload = self._read_json_payload()
+            else:
+                self._discard_body()
+                payload = {}
+            if payload is not None:
+                self._send_json(route(self, payload))
+        except (BrokenPipeError, ConnectionResetError):
             return
-        payload = self._read_json_payload() if route.needs_payload else {}
-        if payload is not None:
-            self._send_json(route(self, payload))
+        except Exception as exc:
+            self._safe_send_500(exc)
+
+    def _safe_send_500(self, exc: Exception, *, include_body: bool = True) -> None:
+        print(f"[mini-web] unhandled error on {self.command} {self.path}: {exc!r}")
+        try:
+            self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, "服务器内部错误", include_body=include_body)
+        except Exception:
+            pass
+
+    def _discard_body(self) -> None:
+        """读掉并丢弃请求体。开启 HTTP/1.1 keep-alive 后, 不读完 body 会污染下一请求。"""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            length = 0
+        if length > 0:
+            try:
+                self.rfile.read(length)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+    def _rate_limit_client_id(self) -> str:
+        # 反代(cloudflared)后所有连接都来自同一上游 IP, 会把限流塌缩成一个共享桶。
+        # 优先用 Cloudflare 注入的真实访客 IP 做 key, 退回直连地址。
+        cf_ip = str(self.headers.get("CF-Connecting-IP") or "").strip()
+        if cf_ip:
+            return cf_ip
+        try:
+            return self.client_address[0]
+        except Exception:
+            return "unknown"
 
     def _read_json_payload(self) -> dict | None:
         try:
@@ -150,7 +193,7 @@ class MiniWebHandler(BaseHTTPRequestHandler):
         if not self.rate_limiter:
             return True
 
-        client_ip = self.client_address[0]
+        client_ip = self._rate_limit_client_id()
 
         if not self.rate_limiter.is_allowed(client_ip):
             remaining = self.rate_limiter.get_remaining(client_ip)
