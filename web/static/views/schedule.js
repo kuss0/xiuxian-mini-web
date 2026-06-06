@@ -363,6 +363,55 @@
       .join("");
   }
 
+  // 排前预检: 配额(已排/100) + 撞分冲突 + 未来时间线。纯预览, 不改发送出口。
+  const SCHEDULE_MAX_PER_IDENTITY = 100; // = backend MAX_SCHEDULED_MESSAGES_PER_IDENTITY
+
+  function scheduleQuotaConflictHtml(deps, payload, result, batches) {
+    const items = result.items || [];
+    if (!items.length) return "";
+    const ids = (payload.send_as_ids && payload.send_as_ids.length)
+      ? payload.send_as_ids
+      : (payload.send_as_id ? [payload.send_as_id] : []);
+    const rows = ids.map((id) => {
+      const mine = (batches || []).filter((b) => Number(b.send_as_id) === Number(id));
+      const existingCount = mine.reduce((n, b) => n + Number((b.counts || {}).scheduled || 0), 0);
+      const existingTimes = new Set(
+        mine.flatMap((b) => (b.items || []).filter((it) => it.status === "scheduled").map((it) => it.schedule_text))
+      );
+      const total = existingCount + items.length;
+      const over = total > SCHEDULE_MAX_PER_IDENTITY;
+      const hits = items.filter((it) => it.schedule_text && existingTimes.has(it.schedule_text));
+      const label = scheduleIdentityLabel(deps, id) || `身份 ${id}`;
+      const hitNote = hits.length
+        ? ` · ⚠ ${hits.length} 条与已排撞分: ${hits.slice(0, 3).map((h) => escapeHtml(h.schedule_text)).join("、")}${hits.length > 3 ? "…" : ""}`
+        : "";
+      return `<div class="modal-status-line ${over || hits.length ? "warn" : "info"}" style="margin:2px 0">`
+        + `<strong>${escapeHtml(label)}</strong>: 已排 ${existingCount}/${SCHEDULE_MAX_PER_IDENTITY} · 本批 +${items.length} → `
+        + `<b>${total}/${SCHEDULE_MAX_PER_IDENTITY}</b>${over ? " ⚠ 超额(会被拦/失败)" : ""}${hitNote}</div>`;
+    }).join("");
+    const byDay = new Map();
+    for (const it of items) {
+      const parts = String(it.schedule_text || "").split(" ");
+      const day = parts[0] || "?";
+      if (!byDay.has(day)) byDay.set(day, []);
+      byDay.get(day).push(parts[1] || String(it.schedule_text || ""));
+    }
+    const timeline = Array.from(byDay.entries())
+      .map(([day, times]) => `<li><strong>${escapeHtml(day)}</strong> <span class="status-pill">${times.length}</span> <small>${times.map((t) => escapeHtml(t)).join(" · ")}</small></li>`)
+      .join("");
+    const multiNote = ids.length > 1
+      ? `<small class="muted">多身份:配额按各身份分别校验;撞分/时间线按基准时间(首身份,其余按阶梯偏移错开)。</small>`
+      : "";
+    return `
+      <div class="schedule-preview-extras" style="margin-top:8px">
+        ${rows}
+        <p class="muted" style="margin:6px 0 2px">未来时间线(${byDay.size} 天):</p>
+        <ul class="send-as-result-list">${timeline}</ul>
+        ${multiNote}
+      </div>
+    `;
+  }
+
   function scheduleStatusText(statusKey, counts) {
     const c = counts || {};
     const total = (c.planned || 0) + (c.scheduled || 0) + (c.failed || 0);
@@ -620,13 +669,20 @@
         if (action === "preview") {
           setStatus("info", "计算预览…");
           try {
-            const result = await postJson("/api/schedule/preview", collectPayload());
+            const payload = collectPayload();
+            const result = await postJson("/api/schedule/preview", payload);
             if (!result.ok) throw new Error(result.error || "预览失败");
+            let curBatches = Array.isArray(_initialBatches) ? _initialBatches : [];
+            try {
+              const sched = await fetchJson("/api/schedule");
+              if (Array.isArray(sched.batches)) curBatches = sched.batches;
+            } catch (e) { /* 用打开模态时的批次兜底 */ }
             showPreview(`
               <p>预设 <strong>${escapeHtml(result.preset_label)}</strong>｜锚点 ${escapeHtml(result.anchor_text)}${result.auto_anchor_used ? '<small class="status-pill ok" style="margin-left:6px">自动锚点</small>' : ""}｜首次发送 ${escapeHtml(result.first_due_text || result.anchor_text)}｜${result.horizon_days} 天</p>
               <ul class="send-as-result-list">
                 ${(result.items || []).map((it) => `<li class="ok"><code>${escapeHtml(it.command)}</code> <small>${escapeHtml(it.schedule_text || "")}</small></li>`).join("") || "<li>(0 条)</li>"}
               </ul>
+              ${scheduleQuotaConflictHtml(deps, payload, result, curBatches)}
             `);
             setStatus("ok", `共 ${(result.items || []).length} 条`);
           } catch (error) {
