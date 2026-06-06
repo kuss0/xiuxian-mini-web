@@ -242,19 +242,26 @@ def _build_pet_periodic(
     return items
 
 
-def _build_custom(*, anchor: float, command: str, interval_sec: int, count: int, **_kw) -> list[dict]:
+def _build_custom(*, anchor: float, command: str, interval_sec: int, count: int, end_at: float = 0.0, **_kw) -> list[dict]:
     command = _norm(command)
     if not command:
         return []
     interval_sec = _positive_int(interval_sec, 3600)
     count = _positive_int(count, 1)
+    # 红线护栏: 自定义与其它 preset 一样, 不得超过 7 天窗口、单批不超过 100 条。
+    # 否则 count×interval 能把官方定时排到任意远的未来, 绕过"一次最多 7 天"上限。
+    count = min(count, MAX_SCHEDULED_MESSAGES_PER_IDENTITY)
+    horizon_end = float(end_at) if end_at and end_at > 0 else (anchor + MAX_HORIZON_DAYS * 86400)
     items = []
     # 自定义把 anchor 当作第一条预计发送时间;后续按 interval 递推。
     # 每条加少量 jitter,避免精确等距。
     for i in range(count):
+        schedule_at = anchor + i * interval_sec + _jitter(0)
+        if schedule_at > horizon_end:
+            break
         items.append({
             "command": command,
-            "schedule_at": anchor + i * interval_sec + _jitter(0),
+            "schedule_at": schedule_at,
         })
     return items
 
@@ -404,6 +411,8 @@ def build_plan(payload: dict, *, anchor_resolver: Callable[[int, str], float | N
     if auto_anchor_used:
         builder_kwargs["end_at"] = anchor + horizon_days * 86400
     items = spec.builder(**builder_kwargs)
+    # 统一红线兜底: 任何 preset 产出都不超过单身份 100 条上限。
+    items = items[:MAX_SCHEDULED_MESSAGES_PER_IDENTITY]
     first_due_at = float(items[0]["schedule_at"]) if items else 0.0
     return {
         "preset_key": spec.key,

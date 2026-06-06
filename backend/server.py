@@ -2307,9 +2307,35 @@ class MiniWebServer:
             except Exception as exc:
                 print(f"[mini-web] schedule precheck GetSendAs failed: {exc}")
 
-            peer = await client.get_input_entity(int(target_chat) if str(target_chat).lstrip("-").isdigit() else target_chat)
-            send_as_peer = await client.get_input_entity(send_as_id)
-            reply_to = input_reply_to_message(reply_to_msg_id=target_topic_id) if target_topic_id > 0 else None
+            try:
+                peer = await client.get_input_entity(int(target_chat) if str(target_chat).lstrip("-").isdigit() else target_chat)
+                send_as_peer = await client.get_input_entity(send_as_id)
+                reply_to = input_reply_to_message(reply_to_msg_id=target_topic_id) if target_topic_id > 0 else None
+            except Exception as exc:
+                # 关键: 解析会话/发送身份失败时, 必须把整批标 failed 并 return,
+                # 否则会跳到 finally 的 0/0 分支被误标 completed(假成功), 消息却全留 planned。
+                err = f"排定时前解析会话/发送身份失败(get_input_entity): {exc}"
+                print(f"[mini-web] schedule entity resolution failed for batch {batch_id}: {exc!r}")
+                for m in messages:
+                    self._store.mark_schedule_message(int(m["id"]), status="failed", last_error=err)
+                    self._record_send_log(
+                        {
+                            "kind": "official_schedule",
+                            "status": "failed",
+                            "account_local_id": account_local_id,
+                            "identity_id": send_as_id,
+                            "send_as_id": send_as_id,
+                            "chat_id": log_chat_id,
+                            "topic_id": target_topic_id,
+                            "command": m.get("command") or "",
+                            "batch_id": batch_id,
+                            "schedule_message_id": m.get("id") or 0,
+                            "error": err,
+                            "meta": {"schedule_at": m.get("schedule_at") or 0},
+                        }
+                    )
+                self._store.set_schedule_batch_status(batch_id, "failed")
+                return
 
             countdown_to_long = next_long_pause_gap()
             last_index = len(messages) - 1
@@ -2438,6 +2464,8 @@ class MiniWebServer:
                     else:
                         pause = humanized_send_pause()
                     await _asyncio.sleep(pause)
+        except Exception as exc:
+            print(f"[mini-web] schedule background loop unexpected error for batch {batch_id}: {exc!r}")
         finally:
             # 决定最终批次状态。
             # 但要先看当前 status —— 如果用户在中途 cancel 或 batch 被 delete,
@@ -2456,7 +2484,9 @@ class MiniWebServer:
             elif fail_count and not ok_count:
                 final = "failed"
             else:
-                final = "completed"  # 0 条 — 标完成,batch 上能反映
+                # 0 成功 0 失败: 只有"本来就 0 条 plan"才算完成;
+                # 有 plan 却一条没处理(早退/异常)标 failed, 不再假成功。
+                final = "completed" if not messages else "failed"
             try:
                 self._store.set_schedule_batch_status(batch_id, final)
             except Exception:
