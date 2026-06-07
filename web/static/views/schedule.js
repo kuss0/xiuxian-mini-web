@@ -953,6 +953,7 @@
       const renderSyncResult = (result) => {
         const tg = result.tg_messages || [];
         const orphans = result.orphans || [];
+        const otherIdentity = result.other_identity || [];
         const lost = result.lost || [];
         const expired = result.expired || [];
         if (!syncResult) return;
@@ -962,6 +963,7 @@
           <ul class="send-as-result-list">
             ${tg.map((m) => `<li class="ok"><code>${escapeHtml(clipGraphemes(m.message || "", 40))}</code> <small>${escapeHtml(m.schedule_text || "")}｜TG #${escapeHtml(String(m.scheduled_msg_id || ""))}</small></li>`).join("") || "<li>(空)</li>"}
           </ul>
+          ${otherIdentity.length ? `<p><strong>其它身份已记录的 ${escapeHtml(String(otherIdentity.length))} 条</strong>(不是当前身份漂移):</p><ul class="send-as-result-list">${otherIdentity.map((m) => `<li class="ok"><code>${escapeHtml(clipGraphemes(m.tg?.message || m.local?.command || "", 40))}</code> <small>send_as ${escapeHtml(String(m.local?.send_as_id || ""))}｜TG #${escapeHtml(String(m.tg?.scheduled_msg_id || ""))}｜${escapeHtml(m.tg?.schedule_text || m.local?.schedule_text || "")}</small></li>`).join("")}</ul>` : ""}
           ${orphans.length ? `<p><strong>⚠ TG 有但 mini-web 没记录的 ${escapeHtml(String(orphans.length))} 条</strong>(可能是从其它工具或手机端排的):</p><ul class="send-as-result-list">${orphans.map((m) => `<li class="warn"><code>${escapeHtml(clipGraphemes(m.message || "", 40))}</code> <small>TG #${escapeHtml(String(m.scheduled_msg_id || ""))}｜${escapeHtml(m.schedule_text || "")}</small></li>`).join("")}</ul>` : ""}
           ${lost.length ? `<p><strong>⚠ 未来应存在但 TG 找不到的 ${escapeHtml(String(lost.length))} 条</strong>(可能被 TG 端取消了):</p><ul class="send-as-result-list">${lost.map((m) => `<li class="warn"><code>${escapeHtml(m.command)}</code> <small>本地 #${escapeHtml(String(m.id || ""))}｜TG 期望 #${escapeHtml(String(m.scheduled_msg_id || ""))}</small></li>`).join("")}</ul>` : ""}
           ${expired.length ? `<p><strong>已过期可释放的 ${escapeHtml(String(expired.length))} 条</strong>(计划时间已过且 TG 待发送列表不再返回):</p><ul class="send-as-result-list">${expired.map((m) => `<li class="ok"><code>${escapeHtml(m.command)}</code> <small>本地 #${escapeHtml(String(m.id || ""))}｜原 TG #${escapeHtml(String(m.scheduled_msg_id || ""))}｜${escapeHtml(m.schedule_text || "")}</small></li>`).join("")}</ul>` : ""}
@@ -983,9 +985,10 @@
           const tg = result.tg_messages || [];
           const matched = result.matched || [];
           const orphans = result.orphans || [];
+          const otherIdentity = result.other_identity || [];
           const lost = result.lost || [];
           const expired = result.expired || [];
-          setSyncStatus(orphans.length || lost.length || expired.length ? "warn" : "ok", `TG ${tg.length} 条｜对得上 ${matched.length}｜TG 有本地没的 ${orphans.length}｜未来丢失 ${lost.length}｜过期可释放 ${expired.length}`);
+          setSyncStatus(orphans.length || lost.length || expired.length ? "warn" : "ok", `TG ${tg.length} 条｜对得上 ${matched.length}｜其它身份 ${otherIdentity.length}｜TG 有本地没的 ${orphans.length}｜未来丢失 ${lost.length}｜过期可释放 ${expired.length}`);
           renderSyncResult(result);
         } catch (error) {
           setSyncStatus("error", error.message);
@@ -1011,11 +1014,12 @@
             if (!result.ok) throw new Error(result.error || "修复失败");
             const sync = result.sync || result;
             const orphans = sync.orphans || [];
+            const otherIdentity = sync.other_identity || [];
             const lost = sync.lost || [];
             const expired = sync.expired || [];
             setSyncStatus(
               orphans.length || lost.length || expired.length ? "warn" : "ok",
-              `${result.message || "本地漂移修复完成"}｜当前 lost ${lost.length}｜expired ${expired.length}｜orphans ${orphans.length}`
+              `${result.message || "本地漂移修复完成"}｜当前 lost ${lost.length}｜expired ${expired.length}｜orphans ${orphans.length}｜其它身份 ${otherIdentity.length}`
             );
             renderSyncResult(sync);
             const refreshed = await fetchJson("/api/schedule");

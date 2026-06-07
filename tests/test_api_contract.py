@@ -5445,6 +5445,25 @@ def test_schedule_create_dry_run_writes_batch_without_telegram(tmp_path):
     assert listing["batches"][0]["counts"]["planned"] > 0
 
 
+def test_schedule_create_rejects_empty_plan_without_writing_batch(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "123", "api_hash": "hash", "account_id": "12345"}
+    )
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+
+    result = server.schedule_create_payload(
+        {"send_as_id": 12345, "preset_key": "custom", "command": "", "dry_run": True}
+    )
+
+    assert result["ok"] is False
+    assert result["planned_count"] == 0
+    assert "没有可创建的定时项" in result["error"]
+    assert store.list_schedule_batches(include_inactive=True) == []
+    assert store.list_schedule_messages(send_as_id=12345, include_inactive=True) == []
+
+
 def test_schedule_create_blocks_real_batch_when_identity_quota_is_full(tmp_path):
     import time
 
@@ -5868,6 +5887,51 @@ def test_schedule_sync_reconciles_with_local_records(tmp_path):
     assert any(l["scheduled_msg_id"] == 555 for l in result["lost"]), "本地标已排但 TG 没找到的应在 lost"
 
 
+def test_schedule_sync_separates_other_identity_records_from_orphans(tmp_path):
+    """TG scheduled history 是按群返回的;同步单个身份时,其它身份的本地记录不能误报 orphan。"""
+    class FakeListenerManager:
+        def get_listener(self, local_id):
+            if local_id != "main":
+                return None
+
+            class FakeListener:
+                def submit(self, coro_factory, *, timeout=30.0):
+                    return [
+                        {"scheduled_msg_id": 100, "message": ".本号", "schedule_at": 0, "schedule_text": ""},
+                        {"scheduled_msg_id": 200, "message": ".其它号", "schedule_at": 0, "schedule_text": ""},
+                        {"scheduled_msg_id": 300, "message": "external", "schedule_at": 0, "schedule_text": ""},
+                    ]
+
+            return FakeListener()
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_settings_payload({"target_chat": "-1001680975844"})
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "123", "api_hash": "hash", "account_id": "12345"}
+    )
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+    server.save_identity_payload({"send_as_id": "67890", "account_local_id": "main"})
+    server.schedule_create_payload(
+        {"send_as_id": 12345, "preset_key": "custom", "command": ".本号", "interval_sec": 60, "count": 1, "dry_run": True}
+    )
+    server.schedule_create_payload(
+        {"send_as_id": 67890, "preset_key": "custom", "command": ".其它号", "interval_sec": 60, "count": 1, "dry_run": True}
+    )
+    mine = store.list_schedule_messages(send_as_id=12345)
+    other = store.list_schedule_messages(send_as_id=67890)
+    store.mark_schedule_message(mine[0]["id"], scheduled_msg_id=100, status="scheduled")
+    store.mark_schedule_message(other[0]["id"], scheduled_msg_id=200, status="scheduled")
+    server._listeners = FakeListenerManager()
+
+    result = server.schedule_sync_payload(12345)
+
+    assert result["ok"] is True
+    assert [item["tg"]["scheduled_msg_id"] for item in result["matched"]] == [100]
+    assert [item["tg"]["scheduled_msg_id"] for item in result["other_identity"]] == [200]
+    assert [item["scheduled_msg_id"] for item in result["orphans"]] == [300]
+
+
 def test_schedule_sync_repair_marks_lost_rows_failed_and_clears_tg_id(tmp_path):
     class FakeListenerManager:
         def get_listener(self, local_id):
@@ -6001,6 +6065,8 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert "function renderScheduleModuleOptions(modules)" in schedule_js
     assert "m.status === \"expired\"" in schedule_js
     assert "过期可释放" in schedule_js
+    assert "other_identity" in schedule_js
+    assert "其它身份" in schedule_js
     assert "tianjige: scheduleModules.tianjige" in schedule_js
     assert "syncStateModuleToPreset" in schedule_js
     assert 'presetMap.get(key)?.module_key' in schedule_js

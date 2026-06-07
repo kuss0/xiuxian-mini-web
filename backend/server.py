@@ -2436,6 +2436,15 @@ class MiniWebServer:
             plan = build_schedule_plan(payload or {}, anchor_resolver=self._resolve_module_anchor)
             preset_key = plan["preset_key"]
             label = plan.get("preset_label") or PRESET_LABELS.get(preset_key, preset_key)
+            if not plan["items"]:
+                return {
+                    "ok": False,
+                    "error": "没有可创建的定时项: 请填写命令,或调整锚点/天数让计划落在 1-7 天窗口内。",
+                    "preset_key": preset_key,
+                    "preset_label": label,
+                    "planned_count": 0,
+                    "items": [],
+                }
 
             dry_run = bool(payload.get("dry_run"))
             listener = self._listeners.get_listener(account_local_id) if account_local_id else None
@@ -3036,9 +3045,17 @@ class MiniWebServer:
             )
             for m in local_messages:
                 m["schedule_text"] = schedule_fmt_ts(m.get("schedule_at") or 0)
+            all_local_messages = self._store.list_schedule_messages(include_inactive=False)
+            for m in all_local_messages:
+                m["schedule_text"] = schedule_fmt_ts(m.get("schedule_at") or 0)
             local_by_tg_id = {
                 m["scheduled_msg_id"]: m
                 for m in local_messages
+                if m["scheduled_msg_id"] and str(m.get("status") or "") == "scheduled"
+            }
+            local_any_by_tg_id = {
+                m["scheduled_msg_id"]: m
+                for m in all_local_messages
                 if m["scheduled_msg_id"] and str(m.get("status") or "") == "scheduled"
             }
             tg_ids = {m["scheduled_msg_id"] for m in tg_messages}
@@ -3047,10 +3064,14 @@ class MiniWebServer:
 
             matched = []
             orphans = []
+            other_identity = []
             for tg_msg in tg_messages:
                 local = local_by_tg_id.get(tg_msg["scheduled_msg_id"])
                 if local:
                     matched.append({"local_id": local["id"], "tg": tg_msg, "local": local})
+                elif tg_msg["scheduled_msg_id"] in local_any_by_tg_id:
+                    other = local_any_by_tg_id[tg_msg["scheduled_msg_id"]]
+                    other_identity.append({"local_id": other["id"], "tg": tg_msg, "local": other})
                 else:
                     orphans.append(tg_msg)
             lost = []
@@ -3072,6 +3093,7 @@ class MiniWebServer:
                 "tg_messages": tg_messages,
                 "matched": matched,
                 "orphans": orphans,
+                "other_identity": other_identity,
                 "lost": lost,
                 "expired": expired,
             }
