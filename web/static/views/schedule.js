@@ -518,9 +518,14 @@
       semiauto_ready: false,
       one_click_ready: false,
       confidence: "unknown",
+      tianjige: catalog?.tianjige || null,
     };
     const suggestion = source.suggestion || {};
     const warnings = source.warnings || [];
+    const tianjige = source.tianjige || null;
+    const tianjigeText = tianjige
+      ? `天机阁 API ${tianjige.enabled ? (tianjige.mode || "on") : "off"}｜${tianjige.authenticated ? "已认证" : "未认证"}${tianjige.message ? `｜${tianjige.message}` : ""}`
+      : "";
     const warnHtml = warnings.length
       ? `<ul class="send-as-result-list">${warnings.map((w) => `<li class="${w.severity === "risk" ? "warn" : "ok"}"><small>${escapeHtml(w.message || w.code || "")}</small></li>`).join("")}</ul>`
       : '<p class="muted">当前没有阻断告警。</p>';
@@ -532,6 +537,7 @@
         <small>${escapeHtml(source.summary?.text || "")}</small>
       </p>
       <p class="muted">起点 ${escapeHtml(source.next_at ? "状态机 next_at" : "未确定")}｜置信 ${escapeHtml(source.confidence || "unknown")}｜建议 <code>${escapeHtml(command)}</code>${suggestion.interval_sec ? `｜间隔 ${escapeHtml(String(suggestion.interval_sec))}s` : ""}</p>
+      ${tianjigeText ? `<p class="muted">${escapeHtml(tianjigeText)}</p>` : ""}
       ${warnHtml}
     `;
   }
@@ -635,8 +641,9 @@
       }
       const contract = findScheduleContract(scheduleModules, selectedPrimarySendAs(), moduleKey);
       const catalog = findModuleCatalog(scheduleModules, moduleKey);
+      const catalogWithStatus = catalog ? { ...catalog, tianjige: scheduleModules.tianjige || null } : null;
       stateHint.hidden = false;
-      stateHint.innerHTML = scheduleContractHtml(contract, catalog);
+      stateHint.innerHTML = scheduleContractHtml(contract, catalogWithStatus);
     };
     if (presetSelect) {
       presetSelect.addEventListener("change", () => {

@@ -278,7 +278,8 @@ def _build_fixed_periodic(
 
 def _build_custom(
     *, anchor: float, command: str, interval_sec: int, count: int,
-    command_gap_sec: int = 180, end_at: float = 0.0, **_kw,
+    command_gap_sec: int = 180, horizon_days: int = DEFAULT_HORIZON_DAYS,
+    end_at: float = 0.0, **_kw,
 ) -> list[dict]:
     commands = _split_commands(command)
     if not commands:
@@ -289,7 +290,11 @@ def _build_custom(
     # 红线护栏: 自定义与其它 preset 一样, 不得超过 7 天窗口、单批不超过 100 条。
     # 否则 count×interval 能把官方定时排到任意远的未来, 绕过"一次最多 7 天"上限。
     count = min(count, MAX_SCHEDULED_MESSAGES_PER_IDENTITY)
-    horizon_end = float(end_at) if end_at and end_at > 0 else (anchor + MAX_HORIZON_DAYS * 86400)
+    horizon_end = (
+        float(end_at)
+        if end_at and end_at > 0
+        else (anchor + _clamp_horizon_days(horizon_days) * 86400)
+    )
     items = []
     # 自定义支持多条命令:count 表示轮数;每轮内部按 command_gap_sec 错开。
     # 每条加少量 jitter,避免精确等距。

@@ -5360,6 +5360,25 @@ def test_schedule_preview_custom_supports_multiple_commands(tmp_path):
     assert 120 <= result["items"][1]["schedule_at"] - result["items"][0]["schedule_at"] <= 240
 
 
+def test_schedule_preview_custom_respects_horizon_days_for_multiple_commands():
+    from backend.outbox.schedule import build_plan
+
+    now = 1700000000.0
+    plan = build_plan({
+        "preset_key": "custom",
+        "anchor_at": now,
+        "horizon_days": 1,
+        "command": ".宗门点卯\n.闯塔",
+        "interval_sec": 13 * 3600,
+        "count": 10,
+        "command_gap_sec": 180,
+    })
+
+    assert plan["horizon_days"] == 1
+    assert len(plan["items"]) == 4
+    assert max(item["schedule_at"] for item in plan["items"]) <= now + 86400
+
+
 def test_schedule_preview_state_machine_preset_uses_fixed_command(tmp_path):
     server = MiniWebServer(store=SQLiteStore(tmp_path / "miniweb.db"))
     result = server.schedule_preview_payload({"preset_key": "concubine_tianji", "horizon_days": 1})
@@ -5368,6 +5387,24 @@ def test_schedule_preview_state_machine_preset_uses_fixed_command(tmp_path):
     assert result["preset_label"] == "天机代卜"
     assert result["items"]
     assert {item["command"] for item in result["items"]} == {".天机代卜"}
+
+
+def test_schedule_create_state_machine_preset_keeps_human_label(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "123", "api_hash": "hash", "account_id": "12345"}
+    )
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+
+    result = server.schedule_create_payload(
+        {"send_as_id": 12345, "preset_key": "concubine_tianji", "horizon_days": 1, "dry_run": True}
+    )
+
+    assert result["ok"] is True
+    assert result["preset_label"] == "天机代卜"
+    batch = store.list_schedule_batches(include_inactive=True)[0]
+    assert batch["label"] == "天机代卜"
 
 
 def test_schedule_create_dry_run_writes_batch_without_telegram(tmp_path):
@@ -5846,6 +5883,7 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert 'textarea name="command"' in schedule_js
     assert 'name="command_gap_sec"' in schedule_js
     assert "function renderScheduleModuleOptions(modules)" in schedule_js
+    assert "tianjige: scheduleModules.tianjige" in schedule_js
     assert "syncStateModuleToPreset" in schedule_js
     assert 'presetMap.get(key)?.module_key' in schedule_js
     assert 'payload.auto_anchor_module = stateModule || data.get("preset_key");' in schedule_js

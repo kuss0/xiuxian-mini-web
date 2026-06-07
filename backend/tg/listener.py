@@ -197,6 +197,8 @@ class TelegramReadOnlyListener:
 
                 @client.on(telethon.events.NewMessage(chats=target_chat, incoming=True, outgoing=True))
                 async def _on_new_message(event):
+                    if _message_is_scheduled_placeholder(getattr(event, "message", None)):
+                        return
                     if topic_id and _event_topic_id(event) != topic_id:
                         return
                     raw_event = _raw_event_from_telethon(event, account_key=self._account_key)
@@ -217,6 +219,8 @@ class TelegramReadOnlyListener:
                     # 不监听 edited 就只能看到「正在推演...」,拿不到结果。
                     # 走和 NewMessage 完全相同的 ingest 路径(ON CONFLICT(id) DO UPDATE
                     # 在 raw_messages 上是幂等的,会用最新 text 覆盖旧 text)。
+                    if _message_is_scheduled_placeholder(getattr(event, "message", None)):
+                        return
                     if topic_id and _event_topic_id(event) != topic_id:
                         return
                     raw_event = _raw_event_from_telethon(event, account_key=self._account_key)
@@ -319,6 +323,8 @@ class TelegramReadOnlyListener:
                     if self._stop_flag.is_set():
                         break
                     scanned += 1
+                    if _message_is_scheduled_placeholder(message):
+                        continue
                     if topic_id and _message_topic_id(message) != topic_id:
                         continue
                     raw_event = await _raw_event_from_message(
@@ -360,6 +366,8 @@ class TelegramReadOnlyListener:
                 for message in reversed(recent):
                     if self._stop_flag.is_set():
                         break
+                    if _message_is_scheduled_placeholder(message):
+                        continue
                     if topic_id and _message_topic_id(message) != topic_id:
                         continue
                     raw_event = await _raw_event_from_message(
@@ -436,6 +444,8 @@ class TelegramReadOnlyListener:
                     msg_id = int(getattr(message, "id", 0) or 0)
                     if msg_id > last_scanned_id:
                         last_scanned_id = msg_id
+                    if _message_is_scheduled_placeholder(message):
+                        continue
                     if topic_id and _message_topic_id(message) != topic_id:
                         continue
                     raw_event = await _raw_event_from_message(
@@ -561,6 +571,8 @@ class TelegramReadOnlyListener:
             return False
         if parent is None:
             return False
+        if _message_is_scheduled_placeholder(parent):
+            return False
         if topic_id and _message_topic_id(parent) != topic_id:
             return False
         parent_event = await _raw_event_from_message(
@@ -621,6 +633,10 @@ def _event_topic_id(event) -> int:
 def _message_topic_id(message) -> int:
     reply_to = getattr(message, "reply_to", None)
     return int(getattr(reply_to, "reply_to_top_id", 0) or getattr(message, "reply_to_msg_id", 0) or 0)
+
+
+def _message_is_scheduled_placeholder(message) -> bool:
+    return bool(getattr(message, "schedule_date", None))
 
 
 def _raw_event_from_telethon(event, *, account_key: str = "default") -> RawMessageEvent:

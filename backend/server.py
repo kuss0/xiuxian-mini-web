@@ -2374,7 +2374,7 @@ class MiniWebServer:
 
             plan = build_schedule_plan(payload or {}, anchor_resolver=self._resolve_module_anchor)
             preset_key = plan["preset_key"]
-            label = PRESET_LABELS.get(preset_key, preset_key)
+            label = plan.get("preset_label") or PRESET_LABELS.get(preset_key, preset_key)
 
             dry_run = bool(payload.get("dry_run"))
             listener = self._listeners.get_listener(account_local_id) if account_local_id else None

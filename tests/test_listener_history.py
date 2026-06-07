@@ -37,11 +37,20 @@ class FakeSender:
 
 
 class FakeMessage:
-    def __init__(self, msg_id: int, text: str, *, topic_id: int, reply_to_msg_id: int | None = None):
+    def __init__(
+        self,
+        msg_id: int,
+        text: str,
+        *,
+        topic_id: int,
+        reply_to_msg_id: int | None = None,
+        schedule_date=None,
+    ):
         self.id = msg_id
         self.message = text
         self.date = None
         self.edit_date = None
+        self.schedule_date = schedule_date
         self.sender_id = 8757550896
         self.chat_id = -1001680975844
         self.reply_to_msg_id = topic_id if reply_to_msg_id is None else reply_to_msg_id
@@ -105,6 +114,22 @@ def test_listener_backfills_history_after_latest_message_id():
     assert [event.msg_id for event in sink.events] == [102]
     assert sink.events[0].source == "韩天尊"
     assert client.calls == [{"min_id": 100, "reverse": True, "limit": listener._HISTORY_BACKFILL_LIMIT}]
+
+
+def test_listener_backfill_skips_scheduled_message_placeholders():
+    sink = FakeSink(latest=100)
+    listener = TelegramReadOnlyListener(sink)
+    client = FakeClient(
+        [
+            FakeMessage(101, ".宗门点卯", topic_id=7310786, schedule_date=object()),
+            FakeMessage(102, "到点后真实发送", topic_id=7310786),
+        ]
+    )
+
+    message = asyncio.run(listener._backfill_history(client, -1001680975844, 7310786))
+
+    assert "历史补采 1 条" in message
+    assert [event.msg_id for event in sink.events] == [102]
 
 
 def test_listener_backfills_known_message_id_gaps():
