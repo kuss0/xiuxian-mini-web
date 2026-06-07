@@ -295,7 +295,7 @@ def _parse_tg_card_ref(value: str) -> tuple[int, int]:
 
 
 def _estimate_send_seconds(n: int) -> int:
-    """根据条数估算后台发送总时长(秒)。前端展示给用户「大约还要 X 分钟」。
+    """根据条数估算后台排 Telegram 官方定时的总时长(秒)。
 
     平均短停顿 SHORT_PAUSE_MEAN_SEC 一条;每 (LONG_EVERY_MIN+MAX)/2 条插一次长停顿
     LONG_PAUSE_(MIN+MAX)/2,再加上每条的请求耗时(估 1.5s/条)。"""
@@ -2553,7 +2553,7 @@ class MiniWebServer:
         """payload: {send_as_id, preset_key, anchor_at?, horizon_days?, pet_name?,
                      command?, interval_sec?, count?, dry_run?, offset_minutes?, trigger_command?, ...}
         - dry_run=True 或没有 listener 对应 client → 只在本地落 batch + planned items,不发 TG
-        - dry_run=False 且 listener 在跑 → 后台拟人节奏排 Telegram scheduled message
+        - dry_run=False 且 listener 在跑 → 后台错峰排 Telegram scheduled message
         """
         try:
             send_as_id = int(payload.get("send_as_id") or 0)
@@ -2671,7 +2671,7 @@ class MiniWebServer:
             sending_status = "queued"
             if not dry_run and listener is not None:
                 msgs = self._store.list_schedule_messages(batch_id=batch_id, include_inactive=False)
-                # 拟人节奏发送可能要 30+ 分钟,不能阻塞 HTTP 响应。
+                # 批量排官方定时不能阻塞 HTTP 响应。
                 # 走后台:listener loop 上 fire-and-forget,DB 实时更新每条状态,
                 # 前端轮询 /api/schedule 看 planned/scheduled/failed 计数。
                 self._store.set_schedule_batch_status(batch_id, "sending")
@@ -2715,7 +2715,7 @@ class MiniWebServer:
         send_as_id: int,
         messages: list[dict],
     ) -> None:
-        """在 listener loop 上跑的后台发送。逐条排 + 实时更新 DB + 拟人节奏停顿。
+        """在 listener loop 上跑的后台发送。逐条排 + 实时更新 DB + 短暂停顿。
         每次循环前看一眼 batch.status,如果被改成 cancelled / deleted 就早退。"""
         import asyncio as _asyncio
         from backend.outbox.schedule import (
@@ -3087,7 +3087,7 @@ class MiniWebServer:
         return {"ok": True, "batches": batches}
 
     def schedule_cancel_payload(self, payload: dict) -> dict:
-        """中途取消正在拟人节奏发送的 batch。
+        """中途取消正在后台排 TG 定时的 batch。
         把 batch.status 改成 'cancelled',后台 loop 在下一次循环开头检查到就早退。
         已经成功排到 TG 的不动(可以再用 schedule_delete_payload 一并清掉)。"""
         try:

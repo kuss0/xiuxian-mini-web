@@ -6261,11 +6261,16 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert "function scheduleBatchHasCurrentWork(batch)" in schedule_js
     assert "function scheduleMessageHasCurrentWork(message)" in schedule_js
     assert "function scheduleMessageStatusView(message)" in schedule_js
+    assert "function scheduleEstimateText(seconds)" in schedule_js
+    assert "function scheduleBatchIsDryRun(batch)" in schedule_js
     assert "const railBatches = batches.filter(scheduleBatchHasCurrentWork);" in schedule_js
     assert "const currentItems = (batch.items || []).filter(scheduleMessageHasCurrentWork);" in schedule_js
     assert "已收起" in schedule_js
     assert 'return "needs_retry";' in schedule_js
     assert "待重排" in schedule_js
+    assert "后台排定时" in schedule_js
+    assert "本地预演" in schedule_js
+    assert "30+" not in schedule_js
     assert "已从 TG 待发送列表释放" in schedule_js
     assert "const done = (counts.scheduled || 0) + (counts.expired || 0);" in schedule_js
     assert 'if (status === "expired")' in schedule_js
@@ -7418,14 +7423,14 @@ def test_schedule_build_plan_auto_anchor_first_due_lands_on_cooldown_until():
 
 
 def test_estimate_send_seconds_scales_with_count():
-    """估算函数随条数线性增长,21 天 60 条应该落在 30-50 分钟区间。"""
+    """估算函数随条数增长,但官方定时排 TG 端不应慢到几十分钟。"""
     from backend.server import _estimate_send_seconds
     assert _estimate_send_seconds(0) == 0
     assert _estimate_send_seconds(1) == 1
     six = _estimate_send_seconds(6)
-    assert 100 < six < 250
+    assert 10 < six < 40
     sixty = _estimate_send_seconds(60)
-    assert 30 * 60 < sixty < 50 * 60
+    assert 3 * 60 < sixty < 8 * 60
 
 
 def test_schedule_create_returns_immediately_with_sending_status(tmp_path):

@@ -114,7 +114,7 @@ class TelegramReadOnlyListener:
     def submit_background(self, coro_factory):
         """提交一个不等结果的协程到 listener loop。
 
-        给「拟人节奏排官方定时」这种长任务用 — 主线程不能等 30+ 分钟。
+        给「后台批量排官方定时」这种长任务用 — 主线程不能等它跑完。
         callee 自己负责更新 DB(否则前端就看不见进度)。
         返回 concurrent.futures.Future,调用方可以选择丢掉或留着 cancel。
         """

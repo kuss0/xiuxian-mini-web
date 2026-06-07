@@ -85,33 +85,33 @@ def _clamp_horizon_days(value) -> int:
     return n
 
 
-# 排定时给 TG 时,每条 SendMessageRequest 之间睡一下。
-# 用真实人类操作节奏:点输入框 → 打字 → 长按发送 → 选时间 → 确认,
-# 一个熟练用户 20-40s 一条,偶尔卡顿 / 想一下要更久。
+# 排定时给 TG 时,每条 SendMessageRequest 之间留一个短暂停顿。
+# 这里是在创建 Telegram scheduled message,不是往群里即时刷屏;
+# 需要避免 API 侧连续请求过密,但不应该按真人手动排每条的分钟级节奏。
 #
 # 参数:
 # - 短停顿 gauss(SHORT_PAUSE_MEAN, SHORT_PAUSE_STDEV) clamp [SHORT_MIN, SHORT_MAX]
-#   多数条之间 20-35s
-# - 每 5-10 条插一次长停顿 uniform(LONG_PAUSE_MIN, LONG_PAUSE_MAX) 60-180s
-#   模拟人「停下来想想 / 看一眼别的」
+#   多数条之间 1-4s
+# - 每 18-28 条插一次长停顿 uniform(LONG_PAUSE_MIN, LONG_PAUSE_MAX) 6-15s
+#   给 TG 端一点缓冲,同时让大批量仍在几分钟内完成
 #
 # 估算耗时:
-# - 3 天 deep_retreat ~6 条 → ~3 分钟
-# - 7 天 ~14 条 → ~7-9 分钟
-# - 上限 100 条 → ~45-55 分钟
+# - 3 天 deep_retreat ~6 条 → ~20 秒
+# - 7 天 ~14 条 → ~1 分钟
+# - 上限 100 条 → ~7 分钟
 # 因为时间长,server 把这个跑成后台任务,前端轮询批次进度,而不是阻塞 HTTP 响应。
-SHORT_PAUSE_MEAN_SEC = 28.0
-SHORT_PAUSE_STDEV_SEC = 8.0
-SHORT_PAUSE_MIN_SEC = 15.0
-SHORT_PAUSE_MAX_SEC = 50.0
-LONG_PAUSE_MIN_SEC = 60.0
-LONG_PAUSE_MAX_SEC = 180.0
-LONG_PAUSE_EVERY_MIN = 5
-LONG_PAUSE_EVERY_MAX = 10
+SHORT_PAUSE_MEAN_SEC = 2.5
+SHORT_PAUSE_STDEV_SEC = 0.8
+SHORT_PAUSE_MIN_SEC = 1.0
+SHORT_PAUSE_MAX_SEC = 5.0
+LONG_PAUSE_MIN_SEC = 6.0
+LONG_PAUSE_MAX_SEC = 15.0
+LONG_PAUSE_EVERY_MIN = 18
+LONG_PAUSE_EVERY_MAX = 28
 
 
 def humanized_send_pause(*, rng=None) -> float:
-    """单条发送后的"拟人"停顿(秒)。给 server 端发 TG 时调用。"""
+    """单条排定时后的短暂停顿(秒)。给 server 端发 TG 时调用。"""
     import random as _random
     r = rng or _random
     val = r.gauss(SHORT_PAUSE_MEAN_SEC, SHORT_PAUSE_STDEV_SEC)
@@ -123,7 +123,7 @@ def humanized_send_pause(*, rng=None) -> float:
 
 
 def humanized_long_pause(*, rng=None) -> float:
-    """偶发的"长停顿",一组里几条插一次。"""
+    """偶发缓冲停顿,大批量里插一次。"""
     import random as _random
     r = rng or _random
     return r.uniform(LONG_PAUSE_MIN_SEC, LONG_PAUSE_MAX_SEC)

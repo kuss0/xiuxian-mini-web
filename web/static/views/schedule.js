@@ -77,10 +77,14 @@
     }
     const railBatches = batches.filter(scheduleBatchHasCurrentWork);
     if (!railBatches.length) {
+      const previewCount = batches.filter(scheduleBatchIsDryRun).length;
+      const hiddenText = previewCount
+        ? `本地预演 ${previewCount} 批已收起。`
+        : "过期历史已收起。";
       scheduleRail.innerHTML = `
         <div class="schedule-rail-empty">
           <strong>没有进行中的排班</strong>
-          <span>过期历史已收起。</span>
+          <span>${escapeHtml(hiddenText)}</span>
         </div>
         <button type="button" class="schedule-rail-more" data-schedule-open>管理排班</button>
       `;
@@ -164,6 +168,7 @@
     if (statusKey === "needs_retry" || statusKey === "partial_failed" || Number(counts?.failed || 0) > 0) return "warn";
     if (statusKey === "sending") return "live";
     if (statusKey === "completed") return "done";
+    if (statusKey === "dry_run") return "muted";
     if (statusKey === "expired") return "muted";
     if (statusKey === "cancelled") return "muted";
     return "active";
@@ -368,23 +373,33 @@
       return '<p class="empty inline">还没有任何官方定时批次。上面新建一个。</p>';
     }
     const currentBatches = batches.filter(scheduleBatchHasCurrentWork);
-    const historicalBatches = batches.filter((batch) => !scheduleBatchHasCurrentWork(batch));
+    const previewBatches = batches.filter(scheduleBatchIsDryRun);
+    const historicalBatches = batches.filter((batch) => !scheduleBatchHasCurrentWork(batch) && !scheduleBatchIsDryRun(batch));
     const currentHtml = currentBatches.length
       ? renderScheduleBatchRows(deps, currentBatches)
       : '<p class="empty inline">没有进行中的官方定时批次。</p>';
+    const previewHtml = previewBatches.length
+      ? `
+        <details class="schedule-history-details">
+          <summary>已收起 ${escapeHtml(String(previewBatches.length))} 个本地预演批次</summary>
+          ${renderScheduleBatchRows(deps, previewBatches, { dryRunMode: true })}
+        </details>
+      `
+      : "";
     const historyHtml = historicalBatches.length
       ? `
         <details class="schedule-history-details">
-          <summary>已收起 ${escapeHtml(String(historicalBatches.length))} 个过期批次</summary>
+          <summary>已收起 ${escapeHtml(String(historicalBatches.length))} 个历史批次</summary>
           ${renderScheduleBatchRows(deps, historicalBatches, { includeExpiredItems: true })}
         </details>
       `
       : "";
-    return `${currentHtml}${historyHtml}`;
+    return `${currentHtml}${previewHtml}${historyHtml}`;
   }
 
   function renderScheduleBatchRows(deps = {}, batches, options = {}) {
     const includeExpiredItems = Boolean(options.includeExpiredItems);
+    const dryRunMode = Boolean(options.dryRunMode);
     return batches
       .map((b) => {
         const visibleItems = includeExpiredItems ? (b.items || []) : (b.items || []).filter(scheduleMessageHasCurrentWork);
@@ -406,7 +421,9 @@
         const total = (counts.planned || 0) + (counts.scheduled || 0) + (counts.failed || 0) + (counts.expired || 0);
         const done = (counts.scheduled || 0) + (counts.expired || 0);
         const pct = total ? Math.round((done / total) * 100) : 0;
-        const statusKey = scheduleDisplayStatusKey(b.status || "active", counts);
+        const statusKey = dryRunMode || scheduleBatchIsDryRun(b)
+          ? "dry_run"
+          : scheduleDisplayStatusKey(b.status || "active", counts);
         const statusText = scheduleStatusText(statusKey, counts);
         const statusPill = scheduleStatusPill(statusKey);
         const showProgress = statusKey === "sending" || statusKey === "needs_retry" || (counts.planned > 0 && counts.scheduled > 0);
@@ -492,6 +509,7 @@
     const c = counts || {};
     const total = (c.planned || 0) + (c.scheduled || 0) + (c.failed || 0) + (c.expired || 0);
     const done = (c.scheduled || 0) + (c.expired || 0);
+    if (statusKey === "dry_run") return `仅本地预演 ${c.planned || total || 0} 条`;
     if (statusKey === "sending") return `发送中 ${done}/${total}${c.failed ? `（${c.failed} 待重排）` : ""}`;
     if (statusKey === "completed") return `已完成 ${(c.scheduled || 0) + (c.expired || 0)}/${total}`;
     if (statusKey === "expired") return `已过期 ${c.expired || 0}/${total}`;
@@ -509,7 +527,8 @@
   }
 
   function scheduleStatusPill(statusKey) {
-    if (statusKey === "sending") return `<span class="status-pill warn">拟人发送中</span>`;
+    if (statusKey === "sending") return `<span class="status-pill warn">后台排定时</span>`;
+    if (statusKey === "dry_run") return `<span class="status-pill">本地预演</span>`;
     if (statusKey === "completed") return `<span class="status-pill ok">完成</span>`;
     if (statusKey === "expired") return `<span class="status-pill">已过期</span>`;
     if (statusKey === "needs_retry" || statusKey === "partial_failed") return `<span class="status-pill warn">待重排</span>`;
@@ -537,7 +556,12 @@
     };
   }
 
+  function scheduleBatchIsDryRun(batch) {
+    return Boolean(batch?.options?.dry_run || batch?.status === "dry_run");
+  }
+
   function scheduleBatchHasCurrentWork(batch) {
+    if (scheduleBatchIsDryRun(batch)) return false;
     if (batch?.status === "sending") return true;
     const c = scheduleCurrentCounts(batch?.counts || {});
     return (c.planned + c.scheduled + c.failed) > 0;
@@ -607,6 +631,13 @@
     if (!messages.length) return baseText || "";
     const detail = messages.map((text, index) => `${index + 1}. ${text}`).join("\n\n");
     return `${baseText || "官方定时需要手动处理"}\n需手动处理 ${messages.length} 条:\n${detail}`;
+  }
+
+  function scheduleEstimateText(seconds) {
+    const n = Number(seconds || 0);
+    if (!Number.isFinite(n) || n <= 0) return "约 0 秒";
+    if (n < 60) return `约 ${Math.ceil(n)} 秒`;
+    return `约 ${Math.ceil(n / 60)} 分钟`;
   }
 
   function findScheduleContract(scheduleModules, sendAsId, moduleKey) {
@@ -1007,7 +1038,7 @@
           return;
         }
         if (action === "create") {
-          if (!window.confirm("确认创建?dry_run 关掉的话会按拟人节奏后台发,可能要 30+ 分钟。")) return;
+          if (!window.confirm("确认创建?取消“仅预演”时会后台秒级错峰排到 Telegram;数量大时需要几分钟。")) return;
           btn.disabled = true;
           setStatus("info", "创建中…");
           try {
@@ -1024,8 +1055,8 @@
             if (result.batch_count) {
               const okN = result.succeeded || 0;
               const failN = result.failed || 0;
-              const totalMin = Math.round((result.total_estimate_seconds || 0) / 60);
-              stats = `批量创建 ${result.batch_count} 个身份｜成功 ${okN}${failN ? `｜失败 ${failN}` : ""}｜阶梯 ${result.offset_step_minutes}min｜总预估 ${totalMin}min`;
+              const totalEstimate = scheduleEstimateText(result.total_estimate_seconds || 0);
+              stats = `批量创建 ${result.batch_count} 个身份｜成功 ${okN}${failN ? `｜失败 ${failN}` : ""}｜阶梯 ${result.offset_step_minutes}min｜总预估 ${totalEstimate}`;
               for (const r of (result.results || [])) {
                 if (r.ok && r.status === "sending" && r.batch_id) {
                   scheduleProgressPolling(deps, dialog, r.batch_id);
@@ -1036,8 +1067,8 @@
               if (result.dry_run) {
                 stats += "｜dry_run";
               } else if (result.status === "sending") {
-                const mins = Math.round((result.estimate_seconds || 0) / 60);
-                stats += `｜后台拟人发送中,预估 ${mins} 分钟｜可在下方批次列表里取消`;
+                const estimate = scheduleEstimateText(result.estimate_seconds || 0);
+                stats += `｜后台排定时中,预估 ${estimate}｜可在下方批次列表里取消`;
                 scheduleProgressPolling(deps, dialog, result.batch_id);
               } else {
                 stats += `｜TG 排上 ${result.created_official}`;
@@ -1279,11 +1310,13 @@
     scheduleStatusPill,
     scheduleDisplayStatusKey,
     scheduleCurrentCounts,
+    scheduleBatchIsDryRun,
     scheduleBatchHasCurrentWork,
     scheduleMessageHasCurrentWork,
     scheduleMessageStatusView,
     scheduleManualMessages,
     scheduleStatusWithManualMessages,
+    scheduleEstimateText,
     findScheduleContract,
     scheduleContractHtml,
     applyScheduleSuggestionToForm,
