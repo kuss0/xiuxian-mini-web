@@ -4068,6 +4068,41 @@ def test_tianjige_routes_and_mock_payloads(tmp_path):
     assert {patch["key"] for patch in role["profile_patches"]} >= {"道号", "境界", "宗门", "灵根", "修为"}
 
 
+def test_tianjige_cultivator_refresh_persists_profile_patches_for_identity(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_identity({"send_as_id": 7239362314, "username": "mock_main", "label": "main"})
+    server = MiniWebServer(store=store)
+
+    role = server.tianjige_cultivator_payload({"send_as_id": 7239362314})
+
+    assert role["ok"] is True
+    assert role["profile_patches_saved"]
+    patches = store.list_state_patches("identity_profile", send_as_id=7239362314)
+    by_key = {patch["key"]: patch for patch in patches}
+    assert by_key["道号"]["value"] == "获赦之人"
+    assert by_key["境界"]["value"] == "化神初期"
+    assert by_key["宗门"]["source_message_id"].startswith("tianjige:")
+    assert all(patch["send_as_id"] == 7239362314 for patch in patches)
+
+    now = time.time()
+    store.save_module_state(
+        7239362314,
+        "wendao",
+        {"cooldown_until": now + 1800, "last_observed_at": now, "last_status": "cooldown"},
+        source_message_id="raw-wendao",
+    )
+    contract_payload = server.schedule_modules_payload("7239362314")
+    group = next(item for item in contract_payload["by_identity"] if item["send_as_id"] == 7239362314)
+    wendao = next(item for item in group["items"] if item["module_key"] == "wendao")
+
+    assert wendao["sources"] == ["bot_reply", "tianjige_profile"]
+    assert wendao["next_at_source"] == "bot_reply"
+    assert wendao["tianjige"]["profile_available"] is True
+    assert set(wendao["tianjige"]["profile_keys"]) >= {"道号", "境界", "宗门"}
+
+
 def test_tianjige_real_mode_without_credentials_degrades_without_network(tmp_path):
     gateway = TianjigeGateway(TianjigeConfig(mode="real", api_token="", cookie=""))
     server = MiniWebServer(store=SQLiteStore(tmp_path / "miniweb.db"), tianjige_gateway=gateway)
@@ -5427,7 +5462,8 @@ def test_schedule_presets_payload_lists_known_presets():
         "deep_retreat", "yuanying", "pet_touch", "pet_warm", "pet_trial", "custom",
         "wild_training", "checkin", "tower", "ranch", "concubine_dream",
         "concubine_tianji", "tianti_climb", "tianti_wenxin",
-        "tianti_gangfeng", "second_soul", "taiyi_cycle",
+        "tianti_gangfeng", "second_soul", "wendao", "yindao",
+        "search_node", "taiyi_cycle",
     }
     assert by_key["concubine_tianji"]["module_key"] == "concubine_tianji"
     assert by_key["custom"]["module_key"] == ""
@@ -5519,6 +5555,40 @@ def test_schedule_preview_state_machine_preset_uses_fixed_command(tmp_path):
     assert result["preset_label"] == "天机代卜"
     assert result["items"]
     assert {item["command"] for item in result["items"]} == {".天机代卜"}
+
+
+def test_schedule_preview_state_machine_defaults_can_override_fixed_command(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+    now = time.time()
+    store.save_module_state(
+        12345,
+        "yindao",
+        {
+            "cooldown_until": now + 1800,
+            "last_observed_at": now,
+            "last_status": "cooldown",
+            "choice": "火",
+        },
+        source_message_id="raw-yindao",
+    )
+    server = MiniWebServer(store=store)
+
+    result = server.schedule_preview_payload({
+        "send_as_id": 12345,
+        "preset_key": "custom",
+        "auto_anchor": True,
+        "auto_anchor_module": "yindao",
+        "schedule_use_module_defaults": True,
+        "horizon_days": 1,
+    })
+
+    assert result["ok"] is True
+    assert result["state_contract"]["suggestion"]["preset_key"] == "yindao"
+    assert result["items"]
+    assert {item["command"] for item in result["items"]} == {".引道 火"}
 
 
 def test_schedule_create_state_machine_preset_keeps_human_label(tmp_path):
@@ -6695,6 +6765,121 @@ def test_small_world_module_updates_harvest_refine_and_shortage():
     )
     assert blocked["last_status"] == "blocked"
     assert "香火库存不足" in blocked["last_error"]
+
+
+def test_small_world_module_records_extended_panel_fields_and_manifest_cd():
+    from backend.identity_state.small_world import SmallWorldModule
+
+    module = SmallWorldModule()
+    parent = _evt(id="p", msg_id=390, text=".小世界", sender_id=12345)
+    event = _evt(
+        id="e",
+        msg_id=391,
+        text=(
+            "【吕洛的小世界】\n"
+            "👥 人口: 12,345 人\n"
+            "🏙️ 承载上限: 20,000 人\n"
+            "🙏 信仰: 90 / 100\n"
+            "⚖️ 稳定: 80 / 100\n"
+            "☁️ 待收香火: 3,189.33\n"
+            "🏺 香火库存: 30\n"
+            "🔥 预计产出: 1,234.5 香火/小时\n"
+            "🛡️ 护界禁制: 三阶\n"
+            "🧠 神识强度: 2,500\n"
+            "🔥 凡人祈愿: 风调雨顺\n"
+            "⚡ 显灵消耗: 香火 100\n"
+            "(下一次祈愿感应需等待: 1小时2分钟3秒)"
+        ),
+        sender_id=-1003983937918,
+        reply_to_msg_id=390,
+    )
+    ctx = _fake_ctx(parent=parent, sender_kind="bot", now=5000.0)
+    state = module.observe(event, ctx, dict(module.default_state))
+
+    assert state["population"] == 12345
+    assert state["population_limit"] == 20000
+    assert state["stability"] == 80
+    assert state["output_per_hour"] == 1234.5
+    assert state["shield"] == "三阶"
+    assert state["spiritual_sense"] == 2500
+    assert state["prayer_cost"] == "香火 100"
+    assert state["prayer_wait_until"] == ctx.now + 3600 + 2 * 60 + 3
+
+    cd = module.observe(
+        _evt(
+            id="e2",
+            msg_id=392,
+            text="凡间方才承受神谕，需再等待 12分钟 后方可显灵。",
+            sender_id=-1003983937918,
+            reply_to_msg_id=390,
+        ),
+        ctx,
+        state,
+    )
+    assert cd["manifest_wait_until"] == ctx.now + 12 * 60
+    assert "人口 12345/20000" in module.status_summary(cd, now=ctx.now)["text"]
+
+
+def test_wendao_yindao_and_search_node_modules_parse_real_replies():
+    from backend.identity_state.wendao import WendaoModule
+    from backend.identity_state.yindao import YindaoModule
+    from backend.identity_state.search_node import SearchNodeModule
+
+    now = 10_000.0
+    wendao = WendaoModule()
+    w_parent = _evt(id="wp", msg_id=400, text=".问道", sender_id=12345)
+    w_ctx = _fake_ctx(parent=w_parent, sender_kind="bot", now=now)
+    w_state = wendao.observe(
+        _evt(
+            id="we",
+            msg_id=401,
+            text="【问道得宝】\n修为增加了 12,345 点\n- 【大衍诀残篇·控傀】 x 1",
+            sender_id=-1003983937918,
+            reply_to_msg_id=400,
+        ),
+        w_ctx,
+        dict(wendao.default_state),
+    )
+    assert w_state["last_status"] == "success"
+    assert w_state["reward_items"]["大衍诀残篇·控傀"] == 1
+    assert w_state["cooldown_until"] == now + 12 * 3600
+
+    yindao = YindaoModule()
+    y_parent = _evt(id="yp", msg_id=410, text=".引道 火", sender_id=12345)
+    y_ctx = _fake_ctx(parent=y_parent, sender_kind="bot", now=now)
+    y_state = yindao.observe(
+        _evt(
+            id="ye",
+            msg_id=411,
+            text="你引动【火之道】，获得了 3,000 点神识。\n临时增益【烈阳】\n修为增加 5%",
+            sender_id=-1003983937918,
+            reply_to_msg_id=410,
+        ),
+        y_ctx,
+        dict(yindao.default_state),
+    )
+    assert y_state["choice"] == "火"
+    assert y_state["last_status"] == "success"
+    assert "神识 +3000" in y_state["last_result"]
+
+    search = SearchNodeModule()
+    s_parent = _evt(id="sp", msg_id=420, text=".搜寻节点", sender_id=12345)
+    s_ctx = _fake_ctx(parent=s_parent, sender_kind="bot", now=now)
+    s_state = search.observe(
+        _evt(
+            id="se",
+            msg_id=421,
+            text="【天机垂青】\n你在虚空中获得： 【空间节点·天雷星】x1\n【虚空尘埃】x2",
+            sender_id=-1003983937918,
+            reply_to_msg_id=420,
+        ),
+        s_ctx,
+        dict(search.default_state),
+    )
+    assert s_state["last_status"] == "success"
+    assert s_state["last_node"] == "空间节点·天雷星"
+    assert s_state["stabilize_command"] == ".定星 空间节点·天雷星"
+    assert s_state["cooldown_until"] == now + 12 * 3600
 
 
 def test_module_registry_observe_only_writes_when_state_changes():
@@ -8725,7 +8910,9 @@ def test_skills_payload_exposes_default_layout():
     assert by_key["retreat_shallow"]["cd_module"] == "retreat_shallow"
     assert by_key["pet_trial"]["cd_module"] == "pet_trial"
     assert by_key["tianti_gangfeng"]["cd_module"] == "tianti_gangfeng"
-    assert by_key["node_search"]["cd_module"] == "taiyi_cycle"
+    assert by_key["wendao"]["cd_module"] == "wendao"
+    assert by_key["yindao"]["cd_module"] == "yindao"
+    assert by_key["node_search"]["cd_module"] == "search_node"
     # 回复类必须显式标记
     assert by_key["quiz_answer"]["reply_mode"] == "required"
     assert by_key["dungeon_join"]["reply_mode"] == "required"

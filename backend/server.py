@@ -67,6 +67,18 @@ class CardStore(Protocol):
     def list_state_patches(self, scope: str = "", send_as_id: int = 0) -> list[dict]:
         ...
 
+    def save_state_patches(
+        self,
+        patches: Iterable[dict],
+        *,
+        send_as_id: int = 0,
+        source: str = "",
+        source_text: str = "",
+        source_message_id: str = "",
+        updated_at: str = "",
+    ) -> list[dict]:
+        ...
+
     def resource_stats(
         self,
         *,
@@ -931,7 +943,28 @@ class MiniWebServer:
         api = result.to_api()
         data = result.data if isinstance(result.data, dict) else {}
         api["cultivator"] = data if result.ok else {}
-        api["profile_patches"] = tianjige_profile_patches(data) if result.ok else []
+        profile_patches = tianjige_profile_patches(data) if result.ok else []
+        if result.ok:
+            identity = self._resolve_tianjige_identity(
+                username=username,
+                data=data,
+                requested_send_as_id=send_as_id,
+                current=identity,
+            )
+            if identity and not username:
+                username = str(identity.get("username") or "").strip().lstrip("@")
+        saved_profile_patches: list[dict] = []
+        if result.ok and identity and profile_patches and hasattr(self._store, "save_state_patches"):
+            sid = _safe_int(identity.get("send_as_id"))
+            saved_profile_patches = self._store.save_state_patches(
+                profile_patches,
+                send_as_id=sid,
+                source="tianjige",
+                source_text=f"天机阁角色资料刷新 @{username or data.get('username') or sid}",
+                source_message_id=f"tianjige:profile:{sid}",
+            )
+        api["profile_patches"] = profile_patches
+        api["profile_patches_saved"] = saved_profile_patches
         api["inventory"] = {
             "source": "tianjige",
             "authoritative": False,
@@ -939,8 +972,61 @@ class MiniWebServer:
             "items": tianjige_inventory_items(data) if result.ok else [],
         }
         if identity:
-            api["identity"] = public_identity(identity, account=self._store.get_account(identity.get("account_local_id") or ""))
+            identity_payload = public_identity(identity) or {}
+            identity_payload["account"] = public_account(
+                self._store.get_account(identity.get("account_local_id") or "")
+            )
+            api["identity"] = identity_payload
         return api
+
+    def _resolve_tianjige_identity(
+        self,
+        *,
+        username: str = "",
+        data: dict | None = None,
+        requested_send_as_id: int = 0,
+        current: dict | None = None,
+    ) -> dict | None:
+        if current:
+            return current
+        data = data or {}
+        if requested_send_as_id:
+            found = self._store.get_identity(requested_send_as_id)
+            if found:
+                return found
+        telegram_id = _safe_int(data.get("telegram_id") or data.get("send_as_id") or data.get("id"))
+        if telegram_id:
+            found = self._store.get_identity(telegram_id)
+            if found:
+                return found
+        wanted = str(username or data.get("username") or data.get("name") or "").strip().lstrip("@").lower()
+        if not wanted:
+            return None
+        for identity in self._store.list_identities():
+            if str(identity.get("username") or "").strip().lstrip("@").lower() == wanted:
+                return identity
+        return None
+
+    def _tianjige_profile_state(self, send_as_id: int) -> dict:
+        if not send_as_id:
+            return {"available": False}
+        try:
+            patches = self._store.list_state_patches("identity_profile", send_as_id=send_as_id)
+        except Exception:
+            patches = []
+        api_patches = [
+            item for item in patches
+            if str(item.get("source_message_id") or "").startswith("tianjige:")
+        ]
+        if not api_patches:
+            return {"available": False}
+        latest = max(api_patches, key=lambda item: str(item.get("updated_at") or ""))
+        return {
+            "available": True,
+            "source_message_id": str(latest.get("source_message_id") or ""),
+            "updated_at": str(latest.get("updated_at") or ""),
+            "keys": sorted({str(item.get("key") or "") for item in api_patches if item.get("key")}),
+        }
 
     def resource_stats_payload(
         self,
@@ -1952,6 +2038,7 @@ class MiniWebServer:
             send_as_id=send_as_id,
             now=time.time(),
             tianjige_status=self._tianjige.status(),
+            tianjige_profile=self._tianjige_profile_state(send_as_id),
         )
 
     def _prepare_schedule_payload_with_state(self, payload: dict, *, send_as_id: int = 0) -> tuple[dict, dict | None]:
@@ -2041,6 +2128,7 @@ class MiniWebServer:
                         send_as_id=sid,
                         now=now,
                         tianjige_status=tianjige_status,
+                        tianjige_profile=self._tianjige_profile_state(sid),
                     )
                 )
             by_identity.append({

@@ -2633,6 +2633,104 @@ class SQLiteStore:
             )
         return out
 
+    def save_state_patches(
+        self,
+        patches: Iterable[dict | StatePatch],
+        *,
+        send_as_id: int = 0,
+        source: str = "external",
+        source_text: str = "",
+        source_message_id: str = "",
+        updated_at: str = "",
+    ) -> list[dict]:
+        """Persist externally sourced state patches.
+
+        Parser-created patches point at real Telegram raw_messages.  API
+        refreshes need the same traceability without pretending to be a bot
+        reply, so this method first creates a synthetic raw_messages row and
+        then upserts all patches against it.
+        """
+        rows = list(patches or [])
+        if not rows:
+            return []
+        sid = int(send_as_id or 0)
+        if sid == 0:
+            return []
+        source = str(source or "external").strip() or "external"
+        now_iso = str(updated_at or utc_now_iso())
+        raw_id = str(source_message_id or f"{source}:{uuid.uuid4().hex}")
+        text = str(source_text or f"{source} state refresh").strip()
+        saved: list[StatePatch] = []
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO raw_messages(
+                    id, chat_id, msg_id, text, source, date, sender_id,
+                    reply_to_msg_id, top_msg_id, mentions_json, sender_is_bot
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    text=excluded.text,
+                    source=excluded.source,
+                    date=excluded.date
+                """,
+                (
+                    raw_id,
+                    0,
+                    0,
+                    text,
+                    source,
+                    now_iso,
+                    0,
+                    None,
+                    None,
+                    json.dumps([], ensure_ascii=False),
+                    0,
+                ),
+            )
+            for item in rows:
+                if isinstance(item, StatePatch):
+                    patch = item
+                    scope = patch.scope
+                    key = patch.key
+                    value = patch.value
+                else:
+                    scope = str((item or {}).get("scope") or "")
+                    key = str((item or {}).get("key") or "")
+                    value = (item or {}).get("value")
+                if not scope or not key:
+                    continue
+                saved_patch = StatePatch(
+                    scope=scope,
+                    send_as_id=sid,
+                    key=key,
+                    value=value,
+                    source_message_id=raw_id,
+                    updated_at=now_iso,
+                )
+                conn.execute(
+                    """
+                    INSERT INTO state_patches(
+                        scope, send_as_id, key, value_json, source_message_id, updated_at
+                    )
+                    VALUES(?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(scope, send_as_id, key) DO UPDATE SET
+                        value_json=excluded.value_json,
+                        source_message_id=excluded.source_message_id,
+                        updated_at=excluded.updated_at
+                    """,
+                    (
+                        saved_patch.scope,
+                        saved_patch.send_as_id,
+                        saved_patch.key,
+                        json.dumps(saved_patch.value, ensure_ascii=False),
+                        saved_patch.source_message_id,
+                        saved_patch.updated_at,
+                    ),
+                )
+                saved.append(saved_patch)
+        return [patch.to_api() for patch in saved]
+
     def list_resource_deltas(self, raw_message_id: str = "") -> list[dict]:
         where = []
         params: list = []

@@ -161,7 +161,7 @@
         channel: "leader",
         channels: ["leader", "focus", "risk"],
         fallback: "会长、重点、风险和新玩法线索会汇入这里。",
-        modules: ["stargazer_guide", "stargazer_soothe", "stargazer_collect", "tianti_climb", "tianti_wenxin", "tianti_gangfeng", "taiyi_cycle"],
+        modules: ["stargazer_guide", "stargazer_soothe", "stargazer_collect", "tianti_climb", "tianti_wenxin", "tianti_gangfeng", "wendao", "yindao", "search_node", "taiyi_cycle"],
         actionSkills: ["tianti_status", "tianti_climb", "tianti_wenxin", "tianti_gangfeng", "stargazer_panel", "stargazer_guide", "stargazer_soothe", "taiyi", "yindao", "node_search"],
         actions: [
           { label: "情报", panel: "intel" },

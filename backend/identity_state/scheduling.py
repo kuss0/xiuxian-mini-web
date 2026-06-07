@@ -56,6 +56,28 @@ MODULE_HINTS: dict[str, dict[str, Any]] = {
         "automation_level": "one_click",
         "reason": "需要确认器灵名",
     },
+    "wendao": {
+        "preset_key": "wendao",
+        "command": ".问道",
+        "interval_sec": 12 * 3600,
+        "automation_level": "semiauto",
+        "reason": "12 小时 CD,以问道结果或 CD 回复为起点",
+    },
+    "yindao": {
+        "preset_key": "yindao",
+        "command": ".引道",
+        "interval_sec": 12 * 3600,
+        "arg_state_key": "choice",
+        "automation_level": "semiauto",
+        "reason": "12 小时 CD,属性来自最近一次真实回复的父命令",
+    },
+    "search_node": {
+        "preset_key": "search_node",
+        "command": ".搜寻节点",
+        "interval_sec": 12 * 3600,
+        "automation_level": "one_click",
+        "reason": "可能触发虚弱和定星后续,先保留人工确认",
+    },
 }
 
 # Built-in whitelist for the first semi-automatic tier.  It deliberately avoids
@@ -72,6 +94,8 @@ SEMIAUTO_MODULE_KEYS = {
     "tianti_gangfeng",
     "second_soul",
     "taiyi_cycle",
+    "wendao",
+    "yindao",
 }
 
 PRESET_MODULE_KEYS = {
@@ -164,6 +188,7 @@ def build_schedule_state_contract(
     send_as_id: int = 0,
     now: float,
     tianjige_status: dict | None = None,
+    tianjige_profile: dict | None = None,
 ) -> dict:
     state = dict((record or {}).get("state") or {})
     updated_at = _as_float((record or {}).get("updated_at"))
@@ -216,10 +241,15 @@ def build_schedule_state_contract(
         and not (hint["interval_sec"] and int(hint["interval_sec"]) < 3600)
     )
     tianjige = tianjige_status or {}
+    api_profile = tianjige_profile or {}
     sources = ["bot_reply"] if observed else []
+    if api_profile.get("available"):
+        sources.append("tianjige_profile")
     confidence = "unknown"
     if observed and next_at > 0:
         confidence = "stale" if stale_state else "high"
+    elif api_profile.get("available"):
+        confidence = "api_profile_only"
     return {
         "module_key": str(getattr(module, "key", "") or ""),
         "label": str(getattr(module, "label", "") or getattr(module, "key", "") or ""),
@@ -240,6 +270,10 @@ def build_schedule_state_contract(
             "mode": str(tianjige.get("mode") or ""),
             "authenticated": bool(tianjige.get("authenticated")),
             "message": str(tianjige.get("message") or ""),
+            "profile_available": bool(api_profile.get("available")),
+            "profile_source_message_id": str(api_profile.get("source_message_id") or ""),
+            "profile_updated_at": str(api_profile.get("updated_at") or ""),
+            "profile_keys": list(api_profile.get("keys") or []),
         },
     }
 

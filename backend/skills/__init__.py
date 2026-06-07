@@ -128,6 +128,8 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
     Skill("tianti_gangfeng", "玩法", "引九天罡风", ".引九天罡风", cd_module="tianti_gangfeng", icon="🌬️", sect="凌霄宫"),
     # 太一 = 太一门
     Skill("taiyi", "玩法", "太一", ".太一", icon="☯️", sect="太一门"),
+    Skill("wendao", "玩法", "问道", ".问道", cd_module="wendao", icon="🧭",
+          note="观察问道结果或 CD 回复后可作为定时起点"),
     # 放养 = 万灵宗
     Skill("ranch", "玩法", "一键放养", ".一键放养", cd_module="ranch", icon="🌾", sect="万灵宗"),
     # 小世界 = realm ≥ 化神初期
@@ -146,9 +148,9 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
           reply_mode="required",
           note="第二元神 prompt 出现时,回复 bot 提示"),
     # 引道 — 全角色都能用(节点/星移辅助)
-    Skill("yindao", "玩法", "引道", ".引道", cd_module="taiyi_cycle", icon="🌠"),
+    Skill("yindao", "玩法", "引道", ".引道", cd_module="yindao", icon="🌠"),
     Skill("node_search", "玩法", "搜寻节点", ".搜寻节点", icon="🔎",
-          cd_module="taiyi_cycle", note="搜寻可定星节点(老脚本 CMD_NODE_SEARCH)"),
+          cd_module="search_node", note="搜寻可定星节点(老脚本 CMD_NODE_SEARCH)"),
     Skill("node_define", "玩法", "定星", ".定星", icon="⭐",
           note="把节点钉成星(老脚本 CMD_NODE_DEFINE)"),
 

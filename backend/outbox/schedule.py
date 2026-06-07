@@ -30,6 +30,9 @@ CMD_VIEW_RETREAT = "查看闭关"
 CMD_PET_TOUCH = ".抚摸法宝"
 CMD_PET_WARM = ".温养器灵"
 CMD_PET_TRIAL = ".器灵试炼"
+CMD_WENDAO = ".问道"
+CMD_YINDAO = ".引道"
+CMD_SEARCH_NODE = ".搜寻节点"
 DEEP_RETREAT_CD = 8 * 3600  # 默认 8h
 
 PRESET_DEEP_RETREAT = "deep_retreat"
@@ -37,6 +40,9 @@ PRESET_PET_TOUCH = "pet_touch"
 PRESET_PET_WARM = "pet_warm"
 PRESET_PET_TRIAL = "pet_trial"
 PRESET_YUANYING = "yuanying"
+PRESET_WENDAO = "wendao"
+PRESET_YINDAO = "yindao"
+PRESET_SEARCH_NODE = "search_node"
 PRESET_CUSTOM = "custom"
 
 PRESET_LABELS = {
@@ -45,6 +51,9 @@ PRESET_LABELS = {
     PRESET_PET_WARM: "温养器灵",
     PRESET_PET_TRIAL: "器灵试炼",
     PRESET_YUANYING: "元婴出窍",
+    PRESET_WENDAO: "问道",
+    PRESET_YINDAO: "引道",
+    PRESET_SEARCH_NODE: "搜寻节点",
     PRESET_CUSTOM: "自定义",
 }
 
@@ -241,13 +250,13 @@ def _split_commands(command: str) -> list[str]:
 
 def _build_fixed_periodic(
     *, anchor: float, horizon_days: int, command_prefix: str, interval_sec: int,
-    end_at: float = 0.0, trigger_command: str = "", default_trigger_command: str = "",
+    command: str = "", end_at: float = 0.0, trigger_command: str = "", default_trigger_command: str = "",
     trigger_delay_sec: float = 0, command_delay_sec: float = 0, **_kw,
 ) -> list[dict]:
     return _build_pet_periodic(
         anchor=anchor,
         horizon_days=horizon_days,
-        command_prefix=command_prefix,
+        command_prefix=_norm(command) or command_prefix,
         pet_name="",
         interval_sec=interval_sec,
         end_at=end_at,
@@ -463,6 +472,27 @@ PRESETS: dict[str, PresetSpec] = {
         command=".元神修炼",
         interval_sec=24 * 3600,
         description="按第二元神状态机起点,一天一轮",
+    ),
+    PRESET_WENDAO: _fixed_preset(
+        key=PRESET_WENDAO,
+        label="问道",
+        command=CMD_WENDAO,
+        interval_sec=12 * 3600,
+        description="按问道状态机起点,12h 一轮",
+    ),
+    PRESET_YINDAO: _fixed_preset(
+        key=PRESET_YINDAO,
+        label="引道",
+        command=CMD_YINDAO,
+        interval_sec=12 * 3600,
+        description="按引道状态机起点,12h 一轮;如状态记录了属性则自动带上属性",
+    ),
+    PRESET_SEARCH_NODE: _fixed_preset(
+        key=PRESET_SEARCH_NODE,
+        label="搜寻节点",
+        command=CMD_SEARCH_NODE,
+        interval_sec=12 * 3600,
+        description="按搜寻节点状态机起点,12h 一轮;定星后续仍需人工确认",
     ),
     "taiyi_cycle": _fixed_preset(
         key="taiyi_cycle",
