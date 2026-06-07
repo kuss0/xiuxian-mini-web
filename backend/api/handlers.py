@@ -463,6 +463,10 @@ def _post_schedule_retry_failed(request: MiniWebRequest, payload: dict) -> dict:
     return _app(request).schedule_retry_failed_payload(payload)
 
 
+def _post_schedule_activate_dry_run(request: MiniWebRequest, payload: dict) -> dict:
+    return _app(request).schedule_activate_dry_run_payload(payload)
+
+
 def _post_schedule_sync_repair(request: MiniWebRequest, payload: dict) -> dict:
     return _app(request).schedule_sync_repair_payload(payload)
 

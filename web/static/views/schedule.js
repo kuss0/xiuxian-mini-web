@@ -430,6 +430,9 @@
         const cancelBtn = statusKey === "sending"
           ? `<button type="button" data-schedule-action="cancel" data-batch-id="${escapeAttr(String(b.id))}" aria-label="取消批次 #${escapeAttr(String(b.id))}">取消</button>`
           : "";
+        const activateBtn = scheduleBatchIsDryRun(b)
+          ? `<button type="button" data-schedule-action="activate-dry-run" data-batch-id="${escapeAttr(String(b.id))}" aria-label="把本地预演批次 #${escapeAttr(String(b.id))} 正式排到 TG">排到 TG</button>`
+          : "";
         const retryBtn = counts.failed > 0 && statusKey !== "sending" && statusKey !== "deleted"
           ? `<button type="button" data-schedule-action="retry-failed" data-batch-id="${escapeAttr(String(b.id))}" aria-label="重排批次 #${escapeAttr(String(b.id))} 的待重排项">重排待处理</button>`
           : "";
@@ -447,6 +450,7 @@
             </div>
             <div class="account-row-actions">
               ${cancelBtn}
+              ${activateBtn}
               ${retryBtn}
               <button type="button" data-schedule-action="delete" data-batch-id="${escapeAttr(String(b.id))}" aria-label="删除批次 #${escapeAttr(String(b.id))}">删除</button>
             </div>
@@ -1233,6 +1237,35 @@
         } catch (error) {
           setBatchStatus("error", error.message || "取消失败");
           window.alert(error.message || "取消失败");
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }
+      });
+    });
+    dialog.querySelectorAll('[data-schedule-action="activate-dry-run"]').forEach((btn) => {
+      if (btn.dataset.bound === "1") return;
+      btn.dataset.bound = "1";
+      btn.addEventListener("click", async () => {
+        const batchId = btn.dataset.batchId;
+        if (!batchId) return;
+        if (!window.confirm(`把本地预演批次 #${batchId} 正式排到 Telegram 官方定时?`)) return;
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "提交中";
+        setBatchStatus("info", `正在把批次 #${batchId} 排到 TG…`);
+        try {
+          const result = await postJson("/api/schedule/activate-dry-run", { batch_id: Number(batchId) });
+          if (!result.ok) throw new Error(result.error || "提交失败");
+          const estimate = scheduleEstimateText(result.estimate_seconds || 0);
+          setBatchStatus("ok", `批次 #${batchId} 已提交后台排定时｜${result.activated || 0} 条｜预估 ${estimate}`);
+          const refreshed = await fetchJson("/api/schedule");
+          const batchList = dialog.querySelector("#scheduleBatchList");
+          if (batchList) batchList.innerHTML = renderScheduleBatches(deps, syncScheduleBatches(deps, refreshed));
+          bindScheduleBatchActions(deps, dialog, setStatus);
+          if (result.batch_id) scheduleProgressPolling(deps, dialog, result.batch_id);
+        } catch (error) {
+          setBatchStatus("error", error.message || "提交失败");
+          window.alert(error.message || "提交失败");
           btn.disabled = false;
           btn.textContent = originalText;
         }

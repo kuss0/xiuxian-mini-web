@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 # 默认锚点:现在
@@ -24,6 +24,7 @@ DEFAULT_HORIZON_DAYS = 3
 MAX_HORIZON_DAYS = 7
 MAX_SCHEDULED_MESSAGES_PER_IDENTITY = 100
 SOURCE_TAG = "official_schedule"
+DISPLAY_TZ = timezone(timedelta(hours=8), "Asia/Shanghai")
 
 CMD_DEEP_RETREAT = ".深度闭关"
 CMD_VIEW_RETREAT = "查看闭关"
@@ -148,7 +149,7 @@ def _to_float_ts(value, default: float | None = None) -> float | None:
 def _fmt_ts(ts: float) -> str:
     if not ts or ts <= 0:
         return ""
-    return datetime.fromtimestamp(ts, timezone.utc).astimezone().strftime("%m-%d %H:%M")
+    return datetime.fromtimestamp(ts, timezone.utc).astimezone(DISPLAY_TZ).strftime("%m-%d %H:%M")
 
 
 # ---------- plan builders ----------

@@ -3702,6 +3702,25 @@ class SQLiteStore:
             )
             return cur.rowcount
 
+    def update_schedule_batch_options(self, batch_id: int, patch: dict) -> dict:
+        """Patch official_schedule_batches.options_json and return the updated options."""
+        import time
+        current = next(
+            (b for b in self.list_schedule_batches(include_inactive=True) if int(b.get("id") or 0) == int(batch_id)),
+            None,
+        )
+        if not current:
+            return {}
+        options = dict(current.get("options") or {})
+        options.update(patch or {})
+        now = time.time()
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE official_schedule_batches SET options_json=?, updated_at=? WHERE id=?",
+                (json.dumps(options, ensure_ascii=False, sort_keys=True), now, int(batch_id)),
+            )
+        return options
+
     def delete_schedule_batch(self, batch_id: int) -> dict:
         """标记 batch 和它下面所有 message 为 deleted(软删,保留历史)。"""
         import time

@@ -6248,6 +6248,7 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     schedule_js = (repo_root / "web/static/views/schedule.js").read_text(encoding="utf-8")
 
     assert "/api/schedule/retry-failed" in POST_ROUTES
+    assert "/api/schedule/activate-dry-run" in POST_ROUTES
     assert "/api/schedule/sync/repair" in POST_ROUTES
     assert 'fetchJson("/api/schedule/modules")' in schedule_js
     assert 'name="auto_anchor_module"' in schedule_js
@@ -6282,6 +6283,9 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert 'presetMap.get(key)?.module_key' in schedule_js
     assert 'payload.auto_anchor_module = stateModule || data.get("preset_key");' in schedule_js
     assert 'data-schedule-action="retry-failed"' in schedule_js
+    assert 'data-schedule-action="activate-dry-run"' in schedule_js
+    assert 'postJson("/api/schedule/activate-dry-run"' in schedule_js
+    assert "排到 TG" in schedule_js
     assert 'id="scheduleSyncRepairButton"' in schedule_js
     assert 'postJson("/api/schedule/sync/repair"' in schedule_js
     assert 'form.querySelectorAll("[data-schedule-action]")' in schedule_js
@@ -6345,6 +6349,60 @@ def test_schedule_retry_failed_clears_old_tg_id_and_retimes_expired_items(tmp_pa
     assert refreshed["scheduled_msg_id"] == 0
     assert refreshed["last_error"] == ""
     assert refreshed["schedule_at"] >= before + 100
+
+
+def test_schedule_activate_dry_run_submits_existing_planned_items(tmp_path):
+    import time
+
+    class FakeListener:
+        def __init__(self):
+            self.background_calls = 0
+
+        def submit_background(self, coro_factory):
+            self.background_calls += 1
+
+    class FakeListenerManager:
+        def __init__(self):
+            self.listener = FakeListener()
+
+        def get_listener(self, local_id):
+            return self.listener if local_id == "main" else None
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_settings_payload({"target_chat": "-1001680975844", "target_topic_id": 7310786})
+    listeners = FakeListenerManager()
+    server._listeners = listeners
+    batch_id = store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "account_local_id": "main",
+            "preset_key": "custom",
+            "label": "自定义",
+            "anchor_at": time.time() + 3600,
+            "horizon_days": 1,
+            "options": {"dry_run": True},
+        },
+        [
+            {
+                "command": ".签到",
+                "schedule_at": time.time() + 3600,
+                "scheduled_msg_id": 0,
+                "status": "planned",
+            }
+        ],
+    )
+
+    result = server.schedule_activate_dry_run_payload({"batch_id": batch_id})
+
+    assert result["ok"] is True, result
+    assert result["status"] == "sending"
+    assert result["activated"] == 1
+    assert listeners.listener.background_calls == 1
+    batch = store.list_schedule_batches(include_inactive=True)[0]
+    assert batch["status"] == "sending"
+    assert batch["options"]["dry_run"] is False
+    assert batch["options"]["activated_from_dry_run"] is True
 
 
 
@@ -7431,6 +7489,14 @@ def test_estimate_send_seconds_scales_with_count():
     assert 10 < six < 40
     sixty = _estimate_send_seconds(60)
     assert 3 * 60 < sixty < 8 * 60
+
+
+def test_schedule_fmt_ts_uses_shanghai_timezone():
+    from datetime import datetime, timezone
+    from backend.outbox.schedule import fmt_ts
+
+    ts = datetime(2026, 6, 7, 16, 10, tzinfo=timezone.utc).timestamp()
+    assert fmt_ts(ts) == "06-08 00:10"
 
 
 def test_schedule_create_returns_immediately_with_sending_status(tmp_path):

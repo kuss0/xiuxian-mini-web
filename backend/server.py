@@ -3066,6 +3066,107 @@ class MiniWebServer:
             return {"ok": False, "error": f"提交后台重排失败: {exc}", "batch_id": batch_id}
         return {"ok": True, "batch_id": batch_id, "retried": len(msgs), "retimed": retimed, "status": "sending"}
 
+    def schedule_activate_dry_run_payload(self, payload: dict) -> dict:
+        """把本地预演批次按已有 schedule_at 原样提交到 Telegram 官方定时。"""
+        try:
+            batch_id = int((payload or {}).get("batch_id") or 0)
+        except (TypeError, ValueError):
+            batch_id = 0
+        if not batch_id:
+            return {"ok": False, "error": "缺少 batch_id"}
+        batch = next(
+            (b for b in self._store.list_schedule_batches(include_inactive=True)
+             if int(b.get("id") or 0) == batch_id),
+            None,
+        )
+        if not batch:
+            return {"ok": False, "error": f"找不到批次 {batch_id}"}
+        status = str(batch.get("status") or "")
+        if status == "deleted":
+            return {"ok": False, "error": "批次已删除"}
+        if status == "sending":
+            return {"ok": True, "batch_id": batch_id, "status": "sending", "activated": 0, "message": "批次已在后台排定时"}
+        options = dict(batch.get("options") or {})
+        if not bool(options.get("dry_run")):
+            return {"ok": False, "error": "该批次不是本地预演,不能用此入口"}
+
+        send_as_id = int(batch.get("send_as_id") or 0)
+        account_local_id = str(batch.get("account_local_id") or "")
+        listener = self._listeners.get_listener(account_local_id) if account_local_id else None
+        if listener is None:
+            return {"ok": False, "error": "该身份的账号未在采集运行,无法正式排到 TG(需先登录并启动监听)"}
+
+        msgs = [
+            m for m in self._store.list_schedule_messages(batch_id=batch_id, include_inactive=False)
+            if str(m.get("status") or "") == "planned"
+        ]
+        if not msgs:
+            return {"ok": True, "batch_id": batch_id, "activated": 0, "message": "该预演批次没有待排项"}
+
+        current_usage = self._official_schedule_identity_usage(send_as_id)
+        if current_usage + len(msgs) > MAX_SCHEDULED_MESSAGES_PER_IDENTITY:
+            return self._schedule_quota_block_payload(
+                send_as_id=send_as_id, current=current_usage, incoming=len(msgs)
+            )
+
+        settings = self._store.get_settings()
+        target_chat = settings.get("target_chat") or ""
+        try:
+            target_topic_id = int(settings.get("target_topic_id") or 0)
+        except (TypeError, ValueError):
+            target_topic_id = 0
+        if not target_chat:
+            return {"ok": False, "error": "settings.target_chat 未配置,无法定位目标群"}
+
+        import time as _t
+        now = _t.time()
+        buffer_sec = 120.0
+        stagger_sec = 180.0
+        retimed = 0
+        for m in msgs:
+            schedule_at = float(m.get("schedule_at") or 0)
+            if schedule_at <= now + 60:
+                self._store.mark_schedule_message(
+                    int(m["id"]),
+                    scheduled_msg_id=0,
+                    status="planned",
+                    last_error="",
+                    schedule_at=now + buffer_sec + retimed * stagger_sec,
+                )
+                retimed += 1
+            else:
+                self._store.mark_schedule_message(
+                    int(m["id"]), scheduled_msg_id=0, status="planned", last_error=""
+                )
+        msgs = [
+            m for m in self._store.list_schedule_messages(batch_id=batch_id, include_inactive=False)
+            if str(m.get("status") or "") == "planned"
+        ]
+
+        update_options = getattr(self._store, "update_schedule_batch_options", None)
+        if callable(update_options):
+            update_options(batch_id, {"dry_run": False, "activated_from_dry_run": True, "activated_at": now})
+        self._store.set_schedule_batch_status(batch_id, "sending")
+        try:
+            listener.submit_background(
+                lambda client: self._run_official_send_background(
+                    client, batch_id, target_chat, target_topic_id, send_as_id, msgs
+                )
+            )
+        except Exception as exc:
+            if callable(update_options):
+                update_options(batch_id, {"dry_run": True})
+            self._store.set_schedule_batch_status(batch_id, "active")
+            return {"ok": False, "error": f"提交后台排定时失败: {exc}", "batch_id": batch_id}
+        return {
+            "ok": True,
+            "batch_id": batch_id,
+            "activated": len(msgs),
+            "retimed": retimed,
+            "status": "sending",
+            "estimate_seconds": _estimate_send_seconds(len(msgs)),
+        }
+
     def schedule_list_payload(self) -> dict:
         """返回所有 active batch 及其 items。前端按 identity 分组渲染。"""
         batches = self._store.list_schedule_batches(include_inactive=False)

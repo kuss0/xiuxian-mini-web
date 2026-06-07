@@ -99,6 +99,7 @@ def build_post_routes(handlers: Mapping[str, Callable]) -> dict[str, PostRoute]:
         "/api/schedule/templates/delete": PostRoute(handlers["_post_schedule_template_delete"], needs_payload=True),
         "/api/schedule/cancel": PostRoute(handlers["_post_schedule_cancel"], needs_payload=True),
         "/api/schedule/retry-failed": PostRoute(handlers["_post_schedule_retry_failed"], needs_payload=True),
+        "/api/schedule/activate-dry-run": PostRoute(handlers["_post_schedule_activate_dry_run"], needs_payload=True),
         "/api/schedule/sync/repair": PostRoute(handlers["_post_schedule_sync_repair"], needs_payload=True),
         "/api/skills/send": PostRoute(handlers["_post_skill_send"], needs_payload=True),
         "/api/notify/test": PostRoute(handlers["_post_notify_test"], needs_payload=True),
