@@ -4,7 +4,7 @@
 
   const { fetchJson, postJson } = window.MiniwebApi;
   const { openModal } = window.MiniwebModal;
-  const { escapeAttr, escapeHtml, formatNumber } = window.MiniwebFormat;
+  const { escapeAttr, escapeHtml, formatDisplayClockTime, formatDisplayDateTime, formatNumber } = window.MiniwebFormat;
   const INVENTORY_AUTO_REFRESH_MS = 60 * 1000;
 
   async function openInventoryModal({ copyCommandToClipboard }) {
@@ -347,10 +347,7 @@
   }
 
   function formatClockTime(value) {
-    const date = value instanceof Date ? value : new Date(value);
-    const hh = String(date.getHours()).padStart(2, "0");
-    const mm = String(date.getMinutes()).padStart(2, "0");
-    return `${hh}:${mm}`;
+    return formatDisplayClockTime(value) || "未知";
   }
 
   function setInventoryBatchBarVisible(dialog, visible) {
@@ -523,7 +520,7 @@
   function formatInventoryTime(value) {
     const raw = String(value || "");
     if (!raw) return "未知";
-    return raw.replace("T", " ").replace(/\..+$/, "").replace(/\+.+$/, "");
+    return formatDisplayDateTime(raw) || raw.replace("T", " ").replace(/\..+$/, "").replace(/\+.+$/, "");
   }
 
   window.MiniwebViews = window.MiniwebViews || {};

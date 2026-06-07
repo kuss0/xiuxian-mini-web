@@ -30,7 +30,7 @@
    * 格式化日志消息
    */
   function formatMessage(level, args) {
-    const timestamp = new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
+    const timestamp = window.MiniwebFormat?.formatDisplayClockTime?.(new Date()) || new Date().toISOString().slice(11, 16);
     const prefix = `[${timestamp}] [${level}]`;
     return [prefix, ...args];
   }

@@ -22,6 +22,7 @@ const {
   escapeAttr,
   escapeHtml,
   firstGrapheme,
+  formatDisplayMonthDayTime,
   formatNumber,
 } = window.MiniwebFormat;
 
@@ -1032,13 +1033,7 @@ function listenerStatusText(listener, runningCount) {
 function auditTimeLabel(value) {
   const text = String(value || "").trim();
   if (!text) return "";
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) return text.replace("T", " ").replace(/\+.+$/, "");
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const hh = String(date.getHours()).padStart(2, "0");
-  const mi = String(date.getMinutes()).padStart(2, "0");
-  return `${mm}-${dd} ${hh}:${mi}`;
+  return formatDisplayMonthDayTime(text) || text.replace("T", " ").replace(/\+.+$/, "");
 }
 
 async function openHealthModal() {

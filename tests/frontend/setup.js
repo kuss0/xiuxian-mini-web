@@ -48,6 +48,11 @@ global.window.MiniwebFormat = {
   clipGraphemes: (str, limit) => String(str || '').slice(0, limit),
   countGraphemes: (str) => String(str || '').length,
   firstGrapheme: (str) => String(str || '')[0] || '',
+  displayDayIndex: () => 0,
+  displayTimeParts: () => null,
+  formatDisplayClockTime: () => '',
+  formatDisplayDateTime: () => '',
+  formatDisplayMonthDayTime: () => '',
   formatNumber: (num) => Number(num || 0).toLocaleString(),
 };
 

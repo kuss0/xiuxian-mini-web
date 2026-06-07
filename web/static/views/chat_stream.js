@@ -8,6 +8,9 @@
     escapeAttr,
     escapeHtml,
     firstGrapheme,
+    displayDayIndex,
+    displayTimeParts,
+    formatDisplayClockTime,
     formatNumber,
   } = window.MiniwebFormat;
   const {
@@ -760,12 +763,12 @@
     if (!text) {
       return "时间未知";
     }
-    const date = new Date(text);
-    if (Number.isNaN(date.getTime())) {
+    const parts = displayTimeParts(text);
+    if (!parts) {
       return text;
     }
     const now = new Date();
-    const diffDays = daysBetween(date, now);
+    const diffDays = daysBetween(text, now);
     if (diffDays === 0) {
       return "今天";
     }
@@ -775,16 +778,18 @@
     if (diffDays === 2) {
       return "前天";
     }
-    if (date.getFullYear() === now.getFullYear()) {
-      return `${date.getMonth() + 1} 月 ${date.getDate()} 日`;
+    const nowParts = displayTimeParts(now);
+    if (parts.year === nowParts?.year) {
+      return `${Number(parts.month)} 月 ${Number(parts.day)} 日`;
     }
-    return `${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日`;
+    return `${parts.year} 年 ${Number(parts.month)} 月 ${Number(parts.day)} 日`;
   }
 
   function daysBetween(date, now) {
-    const a = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    const b = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    return Math.round((b.getTime() - a.getTime()) / 86400000);
+    const a = displayDayIndex(date);
+    const b = displayDayIndex(now);
+    if (a === null || b === null) return 0;
+    return b - a;
   }
 
   function formatChatTime(value) {
@@ -792,13 +797,7 @@
     if (!text) {
       return "";
     }
-    const date = new Date(text);
-    if (Number.isNaN(date.getTime())) {
-      return text;
-    }
-    const hh = String(date.getHours()).padStart(2, "0");
-    const mm = String(date.getMinutes()).padStart(2, "0");
-    return `${hh}:${mm}`;
+    return formatDisplayClockTime(text) || text;
   }
 
   function messageKind(deps = {}, message) {
