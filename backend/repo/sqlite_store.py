@@ -60,6 +60,7 @@ DEFAULT_LEADER_SENDER_IDS = [-1002049298748]
 DEFAULT_LEADER_SOURCE_NAMES = ["@iosdo7"]
 DEFAULT_TARGET_CHAT = "-1001680975844"
 DEFAULT_TARGET_TOPIC_ID = "7310786"
+ALL_CHANNEL_INDEX_KEY = "__all__"
 ACCOUNT_SECRET_KEYS = {"api_hash", "proxy_password"}
 RESOURCE_STATS_SCHEMA_VERSION = 8
 INVENTORY_SCHEMA_VERSION = 5
@@ -1004,6 +1005,7 @@ class SQLiteStore:
                 leader_ids,
             ).fetchall()
             updates = []
+            channel_updates = []
             for row in rows:
                 rowid = int(row[0])
                 card = ParsedCard.from_api(json.loads(row[1]))
@@ -1073,6 +1075,7 @@ class SQLiteStore:
                         json.dumps(updated_card.to_api(), ensure_ascii=False),
                         rowid,
                     ))
+                    channel_updates.append((updated_card, event))
             if updates:
                 conn.executemany(
                     """
@@ -1082,6 +1085,8 @@ class SQLiteStore:
                     """,
                     updates,
                 )
+                for updated_card, event in channel_updates:
+                    self._replace_card_channel_rows(conn, updated_card, event)
         return len(updates)
 
     def reclassify_message_filters(self) -> int:
@@ -1136,6 +1141,7 @@ class SQLiteStore:
                 if event.chat_id and event.msg_id:
                     events_by_key[(int(event.chat_id), int(event.msg_id))] = event
             updates = []
+            channel_updates = []
             for rowid, payload_json, event in prepared_rows:
                 card = ParsedCard.from_api(json.loads(payload_json))
                 clean_reply = _clean_reply_to(event, topic_id)
@@ -1191,6 +1197,7 @@ class SQLiteStore:
                         json.dumps(updated_card.to_api(), ensure_ascii=False),
                         rowid,
                     ))
+                    channel_updates.append((updated_card, event))
             if updates:
                 conn.executemany(
                     """
@@ -1200,6 +1207,8 @@ class SQLiteStore:
                     """,
                     updates,
                 )
+                for updated_card, event in channel_updates:
+                    self._replace_card_channel_rows(conn, updated_card, event)
         self.save_settings({"message_filter_version": CURRENT_MESSAGE_FILTER_VERSION})
         return len(updates)
 
@@ -1339,6 +1348,7 @@ class SQLiteStore:
                         json.dumps(card.to_api(), ensure_ascii=False),
                     ),
                 )
+                self._replace_card_channel_rows(conn, card, event)
             self._replace_resource_records(
                 conn,
                 event,
@@ -1422,6 +1432,40 @@ class SQLiteStore:
         # 重新分流,否则「bot 回复我」会停留在 archive,首页重点流看不到。
         self._reclassify_direct_reply_children(event)
         return cards
+
+    def _replace_card_channel_rows(self, conn, card: ParsedCard, event: RawMessageEvent) -> None:
+        row = conn.execute("SELECT rowid FROM parsed_cards WHERE id=?", (card.id,)).fetchone()
+        if row is None:
+            return
+        card_rowid = int(row[0] or 0)
+        channels: list[str] = []
+        seen: set[str] = set()
+        for channel in (ALL_CHANNEL_INDEX_KEY, *tuple(card.channels or ())):
+            channel = str(channel or "").strip()
+            if not channel or channel in seen:
+                continue
+            seen.add(channel)
+            channels.append(channel)
+        conn.execute("DELETE FROM parsed_card_channels WHERE card_id=?", (card.id,))
+        conn.executemany(
+            """
+            INSERT OR REPLACE INTO parsed_card_channels(
+                card_id, channel, card_rowid, raw_message_id, sort_date, msg_id
+            )
+            VALUES(?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    str(card.id),
+                    channel,
+                    card_rowid,
+                    str(event.id),
+                    str(event.date or ""),
+                    int(event.msg_id or 0),
+                )
+                for channel in channels
+            ],
+        )
 
     def _coalesce_event_identity(self, event: RawMessageEvent) -> RawMessageEvent:
         """按 Telegram 事实键合并同一条消息的不同本地 id。
@@ -1968,6 +2012,7 @@ class SQLiteStore:
                 (int(parent_event.chat_id), int(parent_event.msg_id)),
             ).fetchall()
             updates = []
+            channel_updates = []
             for row in rows:
                 rowid = int(row[0])
                 card = ParsedCard.from_api(json.loads(row[1]))
@@ -2037,6 +2082,7 @@ class SQLiteStore:
                         json.dumps(updated_card.to_api(), ensure_ascii=False),
                         rowid,
                     ))
+                    channel_updates.append((updated_card, event))
             if updates:
                 conn.executemany(
                     """
@@ -2046,6 +2092,8 @@ class SQLiteStore:
                     """,
                     updates,
                 )
+                for updated_card, event in channel_updates:
+                    self._replace_card_channel_rows(conn, updated_card, event)
         return len(updates)
 
     def list_cards(self, channel: str = "all") -> tuple[ParsedCard, ...]:
@@ -2075,44 +2123,131 @@ class SQLiteStore:
         rowid 是 SQLite 自动递增的插入序号,新进来的卡片 rowid 一定更大。
         Edit 走 UPSERT,rowid 不变 —— 当前不专门追踪「编辑过的旧卡片是否要重发」,
         前端按 id merge 即可处理。"""
-        sql_parts = ["SELECT parsed_cards.rowid, parsed_cards.payload_json FROM parsed_cards"]
-        joins = []
+        channel_filters = _normalize_channel_filters(channel, channels)
+        indexed_channels = channel_filters or [ALL_CHANNEL_INDEX_KEY]
+        if len(indexed_channels) == 1:
+            where = ["pcc.channel=?"]
+            params: list = [indexed_channels[0]]
+            if since_seq > 0:
+                where.append("pcc.card_rowid > ?")
+                params.append(int(since_seq))
+            if before_seq > 0:
+                where.append("pcc.card_rowid < ?")
+                params.append(int(before_seq))
+            order = (
+                "ORDER BY pcc.card_rowid ASC"
+                if since_seq > 0
+                else "ORDER BY pcc.sort_date DESC, pcc.msg_id DESC, pcc.card_rowid DESC"
+            )
+            limit_clause = ""
+            if limit and limit > 0:
+                limit_clause = "LIMIT ?"
+                params.append(int(limit))
+            sql = f"""
+                SELECT pcc.card_rowid, pc.payload_json
+                FROM parsed_card_channels pcc
+                JOIN parsed_cards pc ON pc.id = pcc.card_id
+                WHERE {' AND '.join(where)}
+                {order}
+                {limit_clause}
+            """
+            with self._connect() as conn:
+                rows = conn.execute(sql, params).fetchall()
+            result: list[tuple[int, ParsedCard]] = []
+            for rowid, payload in rows:
+                card = ParsedCard.from_api(json.loads(payload))
+                result.append((int(rowid), card))
+            return result
+
+        if limit and limit > 0:
+            combined: dict[str, tuple[int, str, int, str]] = {}
+            per_channel_limit = int(limit)
+            with self._connect() as conn:
+                for indexed_channel in indexed_channels:
+                    where = ["pcc.channel=?"]
+                    params: list = [indexed_channel]
+                    if since_seq > 0:
+                        where.append("pcc.card_rowid > ?")
+                        params.append(int(since_seq))
+                    if before_seq > 0:
+                        where.append("pcc.card_rowid < ?")
+                        params.append(int(before_seq))
+                    order = (
+                        "ORDER BY pcc.card_rowid ASC"
+                        if since_seq > 0
+                        else "ORDER BY pcc.sort_date DESC, pcc.msg_id DESC, pcc.card_rowid DESC"
+                    )
+                    params.append(per_channel_limit)
+                    rows = conn.execute(
+                        f"""
+                        SELECT pcc.card_id, pcc.card_rowid, pcc.sort_date, pcc.msg_id, pc.payload_json
+                        FROM parsed_card_channels pcc
+                        JOIN parsed_cards pc ON pc.id = pcc.card_id
+                        WHERE {' AND '.join(where)}
+                        {order}
+                        LIMIT ?
+                        """,
+                        params,
+                    ).fetchall()
+                    for card_id, rowid, sort_date, msg_id, payload in rows:
+                        combined[str(card_id)] = (int(rowid or 0), str(sort_date or ""), int(msg_id or 0), payload)
+            ordered = sorted(
+                combined.values(),
+                key=(
+                    (lambda item: item[0])
+                    if since_seq > 0
+                    else (lambda item: (item[1], item[2], item[0]))
+                ),
+                reverse=since_seq <= 0,
+            )[: int(limit)]
+            result: list[tuple[int, ParsedCard]] = []
+            for rowid, _sort_date, _msg_id, payload in ordered:
+                card = ParsedCard.from_api(json.loads(payload))
+                result.append((int(rowid), card))
+            return result
+
+        channel_placeholders = ",".join("?" for _ in indexed_channels)
         where = []
-        params: list = []
+        params: list = list(indexed_channels)
+        where.append(f"channel IN ({channel_placeholders})")
         if since_seq > 0:
-            where.append("parsed_cards.rowid > ?")
+            where.append("card_rowid > ?")
             params.append(int(since_seq))
         if before_seq > 0:
-            where.append("parsed_cards.rowid < ?")
+            where.append("card_rowid < ?")
             params.append(int(before_seq))
-        channel_filters = _normalize_channel_filters(channel, channels)
-        if channel_filters:
-            where.append("(" + " OR ".join("channels_json LIKE ?" for _ in channel_filters) + ")")
-            params.extend(f'%"{item}"%' for item in channel_filters)
-        if since_seq <= 0:
-            joins.append("JOIN raw_messages ON raw_messages.id = parsed_cards.raw_message_id")
-        if joins:
-            sql_parts.extend(joins)
-        if where:
-            sql_parts.append("WHERE " + " AND ".join(where))
-        # since_seq 模式按 rowid ASC 给前端推进增量游标;
-        # 普通初始化 / 翻页按消息真实时间倒序,避免重解析旧消息被 rowid 顶到最新。
-        if since_seq > 0:
-            sql_parts.append("ORDER BY parsed_cards.rowid ASC")
-        else:
-            sql_parts.append(
-                """
-                ORDER BY
-                    CASE WHEN raw_messages.date IS NULL OR raw_messages.date='' THEN 1 ELSE 0 END ASC,
-                    raw_messages.date DESC,
-                    raw_messages.msg_id DESC,
-                    parsed_cards.rowid DESC
-                """
-            )
+        order = (
+            "ORDER BY card_rowid ASC"
+            if since_seq > 0
+            else "ORDER BY sort_date DESC, msg_id DESC, card_rowid DESC"
+        )
         if limit and limit > 0:
-            sql_parts.append("LIMIT ?")
+            limit_clause = "LIMIT ?"
             params.append(int(limit))
-        sql = " ".join(sql_parts)
+        else:
+            limit_clause = ""
+        matched_sql = f"""
+            SELECT card_id,
+                   MIN(card_rowid) AS card_rowid,
+                   MAX(sort_date) AS sort_date,
+                   MAX(msg_id) AS msg_id
+            FROM parsed_card_channels
+            WHERE {' AND '.join(where)}
+            GROUP BY card_id
+            {order}
+            {limit_clause}
+        """
+        outer_order = (
+            "ORDER BY matched.card_rowid ASC"
+            if since_seq > 0
+            else "ORDER BY matched.sort_date DESC, matched.msg_id DESC, matched.card_rowid DESC"
+        )
+        sql = f"""
+            SELECT matched.card_rowid, pc.payload_json
+            FROM ({matched_sql}) matched
+            JOIN parsed_cards pc ON pc.id = matched.card_id
+            {outer_order}
+        """
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
 
@@ -2184,8 +2319,15 @@ class SQLiteStore:
             params.append(int(since_seq))
         channel_filters = _normalize_channel_filters(channel, channels)
         if channel_filters:
-            where_parts.append("(" + " OR ".join("parsed_cards.channels_json LIKE ?" for _ in channel_filters) + ")")
-            params.extend(f'%"{item}"%' for item in channel_filters)
+            channel_placeholders = ",".join("?" for _ in channel_filters)
+            where_parts.append(
+                "EXISTS ("
+                "SELECT 1 FROM parsed_card_channels pcc "
+                "WHERE pcc.card_id = parsed_cards.id "
+                f"AND pcc.channel IN ({channel_placeholders})"
+                ")"
+            )
+            params.extend(channel_filters)
 
         order = (
             "ORDER BY parsed_cards.rowid ASC"
@@ -3828,10 +3970,23 @@ class SQLiteStore:
                     FOREIGN KEY(raw_message_id) REFERENCES raw_messages(id)
                 );
 
+                CREATE TABLE IF NOT EXISTS parsed_card_channels (
+                    card_id TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    card_rowid INTEGER NOT NULL,
+                    raw_message_id TEXT NOT NULL,
+                    sort_date TEXT NOT NULL DEFAULT '',
+                    msg_id INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(channel, card_id),
+                    FOREIGN KEY(card_id) REFERENCES parsed_cards(id) ON DELETE CASCADE
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_raw_messages_msg_id
                     ON raw_messages(chat_id, msg_id);
                 CREATE INDEX IF NOT EXISTS idx_parsed_cards_primary_channel
                     ON parsed_cards(primary_channel);
+                CREATE INDEX IF NOT EXISTS idx_parsed_cards_raw_message
+                    ON parsed_cards(raw_message_id);
 
                 CREATE TABLE IF NOT EXISTS resource_deltas (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4104,12 +4259,146 @@ class SQLiteStore:
                 """
             )
             self._migrate_raw_messages_columns(conn)
+            self._migrate_parsed_card_channels_columns(conn)
+            self._backfill_parsed_card_channels_if_needed(conn)
+            self._ensure_parsed_card_channel_indexes(conn)
             self._migrate_state_patches_columns(conn)
             # idx_state_patches_sender 引用 send_as_id 列,迁移完成后再建,避免老库 cold start 失败
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_state_patches_sender "
                 "ON state_patches(scope, send_as_id)"
             )
+
+    def _ensure_parsed_card_channel_indexes(self, conn) -> None:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_parsed_card_channels_card "
+            "ON parsed_card_channels(card_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_parsed_card_channels_channel_rowid "
+            "ON parsed_card_channels(channel, card_rowid)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_parsed_card_channels_channel_sort "
+            "ON parsed_card_channels(channel, sort_date DESC, msg_id DESC, card_rowid DESC)"
+        )
+
+    def _migrate_parsed_card_channels_columns(self, conn) -> None:
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(parsed_card_channels)").fetchall()}
+        for column, ddl in (
+            ("card_rowid", "ALTER TABLE parsed_card_channels ADD COLUMN card_rowid INTEGER NOT NULL DEFAULT 0"),
+            ("raw_message_id", "ALTER TABLE parsed_card_channels ADD COLUMN raw_message_id TEXT NOT NULL DEFAULT ''"),
+            ("sort_date", "ALTER TABLE parsed_card_channels ADD COLUMN sort_date TEXT NOT NULL DEFAULT ''"),
+            ("msg_id", "ALTER TABLE parsed_card_channels ADD COLUMN msg_id INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if column not in existing:
+                conn.execute(ddl)
+
+    def _backfill_parsed_card_channels_if_needed(self, conn) -> int:
+        parsed_count = int(conn.execute("SELECT COUNT(*) FROM parsed_cards").fetchone()[0] or 0)
+        if parsed_count <= 0:
+            return 0
+        indexed_count = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM parsed_card_channels WHERE channel=?",
+                (ALL_CHANNEL_INDEX_KEY,),
+            ).fetchone()[0]
+            or 0
+        )
+        if indexed_count >= parsed_count:
+            return 0
+        missing_only = indexed_count > 0
+        if not missing_only:
+            conn.execute("DELETE FROM parsed_card_channels")
+        missing_join = ""
+        missing_where = ""
+        missing_params: tuple = ()
+        if missing_only:
+            max_indexed_rowid = int(
+                conn.execute(
+                    "SELECT MAX(card_rowid) FROM parsed_card_channels WHERE channel=?",
+                    (ALL_CHANNEL_INDEX_KEY,),
+                ).fetchone()[0]
+                or 0
+            )
+            max_parsed_rowid = int(conn.execute("SELECT MAX(rowid) FROM parsed_cards").fetchone()[0] or 0)
+            if 0 < max_indexed_rowid < max_parsed_rowid:
+                missing_where = "WHERE pc.rowid > ?"
+                missing_params = (max_indexed_rowid,)
+            else:
+                missing_join = """
+                LEFT JOIN parsed_card_channels existing
+                  ON existing.channel = ? AND existing.card_id = pc.id
+                """
+                missing_where = "WHERE existing.card_id IS NULL"
+                missing_params = (ALL_CHANNEL_INDEX_KEY,)
+        try:
+            conn.execute(
+                f"""
+                INSERT OR REPLACE INTO parsed_card_channels(
+                    card_id, channel, card_rowid, raw_message_id, sort_date, msg_id
+                )
+                SELECT pc.id, ?, pc.rowid, pc.raw_message_id, COALESCE(rm.date, ''), COALESCE(rm.msg_id, 0)
+                FROM parsed_cards pc
+                JOIN raw_messages rm ON rm.id = pc.raw_message_id
+                {missing_join}
+                {missing_where}
+                """,
+                (ALL_CHANNEL_INDEX_KEY, *missing_params),
+            )
+            conn.execute(
+                f"""
+                INSERT OR REPLACE INTO parsed_card_channels(
+                    card_id, channel, card_rowid, raw_message_id, sort_date, msg_id
+                )
+                SELECT pc.id, json_each.value, pc.rowid, pc.raw_message_id,
+                       COALESCE(rm.date, ''), COALESCE(rm.msg_id, 0)
+                FROM parsed_cards pc
+                JOIN raw_messages rm ON rm.id = pc.raw_message_id
+                {missing_join}
+                JOIN json_each(pc.channels_json)
+                WHERE json_each.value IS NOT NULL AND json_each.value != ''
+                {"AND " + missing_where.removeprefix("WHERE ") if missing_where else ""}
+                """,
+                missing_params,
+            )
+        except sqlite3.OperationalError:
+            if not missing_only:
+                conn.execute("DELETE FROM parsed_card_channels")
+            rows = conn.execute(
+                f"""
+                SELECT pc.id, pc.rowid, pc.raw_message_id, pc.channels_json,
+                       COALESCE(rm.date, ''), COALESCE(rm.msg_id, 0)
+                FROM parsed_cards pc
+                JOIN raw_messages rm ON rm.id = pc.raw_message_id
+                {missing_join}
+                {missing_where}
+                """,
+                missing_params,
+            ).fetchall()
+            inserts = []
+            for card_id, rowid, raw_message_id, channels_json, sort_date, msg_id in rows:
+                channels = [ALL_CHANNEL_INDEX_KEY]
+                try:
+                    channels.extend(str(item or "").strip() for item in json.loads(channels_json or "[]"))
+                except Exception:
+                    pass
+                seen: set[str] = set()
+                for channel in channels:
+                    if not channel or channel in seen:
+                        continue
+                    seen.add(channel)
+                    inserts.append((card_id, channel, int(rowid or 0), raw_message_id, sort_date or "", int(msg_id or 0)))
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO parsed_card_channels(
+                    card_id, channel, card_rowid, raw_message_id, sort_date, msg_id
+                )
+                VALUES(?, ?, ?, ?, ?, ?)
+                """,
+                inserts,
+            )
+        return parsed_count
 
     def _migrate_state_patches_columns(self, conn) -> None:
         """幂等 schema 升级:给老 state_patches 加 send_as_id 列。

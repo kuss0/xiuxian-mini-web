@@ -120,11 +120,11 @@ def test_listener_backfills_known_message_id_gaps():
         ],
     )
     listener = TelegramReadOnlyListener(sink)
+    listener._HISTORY_GAP_SCAN_LIMIT = 1
     client = FakeClient(
         responses=[
             [],
             [FakeMessage(150, "空窗消息", topic_id=7310786)],
-            [],
         ]
     )
 
@@ -135,13 +135,13 @@ def test_listener_backfills_known_message_id_gaps():
     assert client.calls == [
         {"min_id": 300, "reverse": True, "limit": listener._HISTORY_BACKFILL_LIMIT},
         {"min_id": 100, "max_id": 200, "reverse": True, "limit": 99},
-        {"min_id": 150, "max_id": 200, "reverse": True, "limit": 49},
     ]
 
 
 def test_listener_backfills_missing_reply_parent_before_child():
     sink = FakeSink(latest=80)
     listener = TelegramReadOnlyListener(sink)
+    listener._HISTORY_BACKFILL_REPLY_PARENTS = True
     parent = FakeMessage(90, ".宗门战况", topic_id=7310786)
     child = FakeMessage(91, "【宗门战况】\n当前无战事。", topic_id=7310786, reply_to_msg_id=90)
     client = FakeClient([child], parent_messages={90: parent})
@@ -152,6 +152,21 @@ def test_listener_backfills_missing_reply_parent_before_child():
     assert [event.msg_id for event in sink.events] == [90, 91]
     assert sink.events[1].reply_to_msg_id == 90
     assert {"get_messages": 90} in client.calls
+
+
+def test_listener_history_backfill_skips_reply_parent_by_default():
+    sink = FakeSink(latest=80)
+    listener = TelegramReadOnlyListener(sink)
+    parent = FakeMessage(90, ".宗门战况", topic_id=7310786)
+    child = FakeMessage(91, "【宗门战况】\n当前无战事。", topic_id=7310786, reply_to_msg_id=90)
+    client = FakeClient([child], parent_messages={90: parent})
+
+    message = asyncio.run(listener._backfill_history(client, -1001680975844, 7310786))
+
+    assert "历史补采 1 条" in message
+    assert [event.msg_id for event in sink.events] == [91]
+    assert sink.events[0].reply_to_msg_id == 90
+    assert {"get_messages": 90} not in client.calls
 
 
 def test_listener_ingest_retries_sqlite_busy():

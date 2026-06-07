@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sqlite3
 import threading
 from dataclasses import replace
@@ -9,6 +10,33 @@ from typing import Protocol
 
 from backend.domain.models import RawMessageEvent
 from backend.tg.client import create_telegram_client, import_telethon, parse_api_hash, parse_api_id
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        return int(str(raw).strip())
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        return float(str(raw).strip())
+    except ValueError:
+        return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 class EventSink(Protocol):
@@ -31,11 +59,16 @@ class TelegramReadOnlyListener:
     _BACKOFF_INITIAL = 1.0
     _BACKOFF_MAX = 60.0
     _STABLE_UPTIME_THRESHOLD = 60.0
-    _HISTORY_BACKFILL_LIMIT = 10000
-    _HISTORY_BOOTSTRAP_LIMIT = 300
-    _HISTORY_GAP_SCAN_LIMIT = 8
-    _HISTORY_GAP_RANGE_LIMIT = 1000
-    _HISTORY_GAP_MAX_PAGES = 10
+    _HISTORY_BACKFILL_LIMIT = _env_int("MINIWEB_HISTORY_BACKFILL_LIMIT", 240)
+    _HISTORY_BOOTSTRAP_LIMIT = _env_int("MINIWEB_HISTORY_BOOTSTRAP_LIMIT", 120)
+    _HISTORY_GAP_SCAN_LIMIT = _env_int("MINIWEB_HISTORY_GAP_SCAN_LIMIT", 0)
+    _HISTORY_GAP_RANGE_LIMIT = _env_int("MINIWEB_HISTORY_GAP_RANGE_LIMIT", 120)
+    _HISTORY_GAP_MAX_PAGES = _env_int("MINIWEB_HISTORY_GAP_MAX_PAGES", 1)
+    _HISTORY_YIELD_EVERY = _env_int("MINIWEB_HISTORY_YIELD_EVERY", 30)
+    _HISTORY_YIELD_SEC = _env_float("MINIWEB_HISTORY_YIELD_SEC", 0.03)
+    _HISTORY_STATUS_EVERY = _env_int("MINIWEB_HISTORY_STATUS_EVERY", 60)
+    _HISTORY_BACKFILL_REPLY_PARENTS = _env_bool("MINIWEB_HISTORY_BACKFILL_REPLY_PARENTS", False)
+    _HISTORY_BACKFILL_TIME_BUDGET_SEC = _env_float("MINIWEB_HISTORY_BACKFILL_TIME_BUDGET_SEC", 8.0)
     _INGEST_BUSY_ATTEMPTS = 6
     _INGEST_BUSY_BASE_SLEEP = 0.2
 
@@ -273,6 +306,8 @@ class TelegramReadOnlyListener:
         ingested = 0
         gap_ranges = 0
         gap_ingested = 0
+        budget_reached = False
+        started_at = asyncio.get_running_loop().time()
         try:
             if latest_msg_id > 0:
                 async for message in client.iter_messages(
@@ -297,16 +332,24 @@ class TelegramReadOnlyListener:
                         raw_event,
                         chat_id=chat_id,
                         topic_id=topic_id,
+                        backfill_reply_parent=self._HISTORY_BACKFILL_REPLY_PARENTS,
                     ):
                         ingested += 1
-                gap_ranges, gap_scanned, gap_ingested = await self._backfill_known_gaps(
-                    client,
-                    entity,
-                    chat_id,
-                    topic_id,
-                )
-                scanned += gap_scanned
-                ingested += gap_ingested
+                    await self._maybe_yield_history(scanned, ingested=ingested, limit=limit)
+                    if self._history_time_budget_reached(started_at):
+                        budget_reached = True
+                        break
+                if self._HISTORY_GAP_SCAN_LIMIT > 0 and not budget_reached:
+                    gap_ranges, gap_scanned, gap_ingested = await self._backfill_known_gaps(
+                        client,
+                        entity,
+                        chat_id,
+                        topic_id,
+                        started_at=started_at,
+                    )
+                    scanned += gap_scanned
+                    ingested += gap_ingested
+                    budget_reached = self._history_time_budget_reached(started_at)
             else:
                 recent = []
                 async for message in client.iter_messages(entity, limit=limit):
@@ -330,12 +373,20 @@ class TelegramReadOnlyListener:
                         raw_event,
                         chat_id=chat_id,
                         topic_id=topic_id,
+                        backfill_reply_parent=self._HISTORY_BACKFILL_REPLY_PARENTS,
                     ):
                         ingested += 1
+                    await self._maybe_yield_history(scanned, ingested=ingested, limit=limit)
+                    if self._history_time_budget_reached(started_at):
+                        budget_reached = True
+                        break
         except Exception as exc:
             print(f"[mini-web] history backfill failed: {exc}")
             return f"只读监听运行中｜历史补采失败:{exc}"
 
+        if budget_reached:
+            budget = max(0.0, float(self._HISTORY_BACKFILL_TIME_BUDGET_SEC or 0.0))
+            return f"只读监听运行中｜历史补采 {ingested} 条，已到轻量预算 {budget:g}s"
         if scanned >= limit and latest_msg_id > 0:
             return f"只读监听运行中｜历史补采 {ingested} 条，已达上限 {limit}"
         if gap_ranges:
@@ -346,7 +397,15 @@ class TelegramReadOnlyListener:
             return f"只读监听运行中｜历史补采扫描 {scanned} 条，无新增入库"
         return "只读监听运行中｜历史补采无新增"
 
-    async def _backfill_known_gaps(self, client, entity, chat_id: int, topic_id: int) -> tuple[int, int, int]:
+    async def _backfill_known_gaps(
+        self,
+        client,
+        entity,
+        chat_id: int,
+        topic_id: int,
+        *,
+        started_at: float | None = None,
+    ) -> tuple[int, int, int]:
         gaps = self._known_message_gaps(chat_id, topic_id)
         ranges = 0
         scanned = 0
@@ -390,12 +449,41 @@ class TelegramReadOnlyListener:
                         raw_event,
                         chat_id=chat_id,
                         topic_id=topic_id,
+                        backfill_reply_parent=self._HISTORY_BACKFILL_REPLY_PARENTS,
                     ):
                         ingested += 1
-                if self._stop_flag.is_set() or last_scanned_id <= after_id:
+                    await self._maybe_yield_history(scanned, ingested=ingested, limit=range_limit)
+                    if self._history_time_budget_reached(started_at):
+                        break
+                if self._stop_flag.is_set() or last_scanned_id <= after_id or self._history_time_budget_reached(started_at):
                     break
                 after_id = last_scanned_id
+            if self._history_time_budget_reached(started_at):
+                break
         return ranges, scanned, ingested
+
+    async def _maybe_yield_history(self, scanned: int, *, ingested: int | None = None, limit: int | None = None) -> None:
+        status_every = max(0, int(self._HISTORY_STATUS_EVERY or 0))
+        if status_every > 0 and scanned > 0 and scanned % status_every == 0:
+            suffix = f"历史补采中 {scanned}"
+            if limit:
+                suffix += f"/{limit}"
+            if ingested is not None:
+                suffix += f"，入库 {ingested}"
+            self._set_status("running", suffix)
+        every = max(0, int(self._HISTORY_YIELD_EVERY or 0))
+        if every <= 0 or scanned <= 0 or scanned % every:
+            return
+        await asyncio.sleep(max(0.0, float(self._HISTORY_YIELD_SEC or 0.0)))
+
+    def _history_time_budget_reached(self, started_at: float | None) -> bool:
+        budget = max(0.0, float(self._HISTORY_BACKFILL_TIME_BUDGET_SEC or 0.0))
+        if started_at is None or budget <= 0:
+            return False
+        try:
+            return asyncio.get_running_loop().time() - float(started_at) >= budget
+        except RuntimeError:
+            return False
 
     def _latest_ingested_message_id(self, chat_id: int, topic_id: int) -> int:
         getter = getattr(self._sink, "latest_message_id", None)
@@ -444,8 +532,10 @@ class TelegramReadOnlyListener:
         *,
         chat_id: int,
         topic_id: int,
+        backfill_reply_parent: bool = True,
     ) -> bool:
-        await self._maybe_backfill_reply_parent(client, entity, raw_event, chat_id, topic_id)
+        if backfill_reply_parent:
+            await self._maybe_backfill_reply_parent(client, entity, raw_event, chat_id, topic_id)
         return await self._ingest_event_with_retry(raw_event)
 
     async def _maybe_backfill_reply_parent(
