@@ -80,14 +80,15 @@
       acc.planned += Number(counts.planned || 0);
       acc.scheduled += Number(counts.scheduled || 0);
       acc.failed += Number(counts.failed || 0);
+      acc.expired += Number(counts.expired || 0);
       acc.sending += batch.status === "sending" ? 1 : 0;
       return acc;
-    }, { planned: 0, scheduled: 0, failed: 0, sending: 0 });
+    }, { planned: 0, scheduled: 0, failed: 0, expired: 0, sending: 0 });
     const visible = batches.slice(0, 4);
     scheduleRail.innerHTML = `
       <div class="schedule-rail-summary">
         <strong>${escapeHtml(String(batches.length))} 批排班</strong>
-        <span>${totals.sending ? `${escapeHtml(String(totals.sending))} 批发送中｜` : ""}${escapeHtml(String(totals.scheduled))} 已排 / ${escapeHtml(String(totals.planned))} 待排${totals.failed ? `｜${escapeHtml(String(totals.failed))} 失败` : ""}</span>
+        <span>${totals.sending ? `${escapeHtml(String(totals.sending))} 批发送中｜` : ""}${escapeHtml(String(totals.scheduled))} 已排 / ${escapeHtml(String(totals.planned))} 待排${totals.expired ? `｜${escapeHtml(String(totals.expired))} 过期` : ""}${totals.failed ? `｜${escapeHtml(String(totals.failed))} 失败` : ""}</span>
       </div>
       <div class="schedule-rail-list">
         ${visible.map((batch) => renderScheduleRailRow(deps, batch)).join("")}
@@ -111,8 +112,8 @@
 
   function renderScheduleRailRow(deps = {}, batch) {
     const counts = batch.counts || {};
-    const total = (counts.planned || 0) + (counts.scheduled || 0) + (counts.failed || 0);
-    const done = (counts.scheduled || 0) + (counts.failed || 0);
+    const total = (counts.planned || 0) + (counts.scheduled || 0) + (counts.failed || 0) + (counts.expired || 0);
+    const done = (counts.scheduled || 0) + (counts.failed || 0) + (counts.expired || 0);
     const pct = total ? Math.round((done / total) * 100) : 0;
     const statusKey = batch.status || "active";
     const statusPill = scheduleStatusPill(statusKey) || `<span class="status-pill">${statusKey === "active" ? "活动" : escapeHtml(statusKey)}</span>`;
@@ -301,7 +302,7 @@
 
         <section class="modal-section">
           <h4>对账 Telegram 端</h4>
-          <p class="muted">拉 TG 的 GetScheduledHistory,跟本地批次对账,标出「TG 有 mini-web 没记录」(orphans) 和「本地标了已排但 TG 没找到」(lost) 的项。</p>
+          <p class="muted">拉 TG 的 GetScheduledHistory,跟本地批次对账,标出「TG 有 mini-web 没记录」(orphans)、「未来丢失」(lost) 和「已过期释放」(expired) 的项。</p>
           <div class="form-grid">
             <label class="span-2">
               <span>对账身份</span>
@@ -356,7 +357,9 @@
               ? `<span class="status-pill ok">已排</span>`
               : m.status === "failed"
                 ? `<span class="status-pill risk">失败</span>`
-                : `<span class="status-pill">planned</span>`;
+                : m.status === "expired"
+                  ? `<span class="status-pill">过期</span>`
+                  : `<span class="status-pill">planned</span>`;
             return `
               <li>
                 <code>${escapeHtml(m.command)}</code>
@@ -369,8 +372,8 @@
           })
           .join("");
         const counts = b.counts || {};
-        const total = (counts.planned || 0) + (counts.scheduled || 0) + (counts.failed || 0);
-        const done = (counts.scheduled || 0) + (counts.failed || 0);
+        const total = (counts.planned || 0) + (counts.scheduled || 0) + (counts.failed || 0) + (counts.expired || 0);
+        const done = (counts.scheduled || 0) + (counts.failed || 0) + (counts.expired || 0);
         const pct = total ? Math.round((done / total) * 100) : 0;
         const statusKey = b.status || "active";
         const statusText = scheduleStatusText(statusKey, counts);
@@ -456,11 +459,11 @@
 
   function scheduleStatusText(statusKey, counts) {
     const c = counts || {};
-    const total = (c.planned || 0) + (c.scheduled || 0) + (c.failed || 0);
-    const done = (c.scheduled || 0) + (c.failed || 0);
+    const total = (c.planned || 0) + (c.scheduled || 0) + (c.failed || 0) + (c.expired || 0);
+    const done = (c.scheduled || 0) + (c.failed || 0) + (c.expired || 0);
     if (statusKey === "sending") return `发送中 ${done}/${total}${c.failed ? ` (${c.failed} 失败)` : ""}`;
-    if (statusKey === "completed") return `已完成 ${c.scheduled || 0}/${total}`;
-    if (statusKey === "partial_failed") return `部分失败 ${c.scheduled || 0}/${total}（${c.failed || 0} 失败）`;
+    if (statusKey === "completed") return `已完成 ${(c.scheduled || 0) + (c.expired || 0)}/${total}`;
+    if (statusKey === "partial_failed") return `部分失败 ${(c.scheduled || 0) + (c.expired || 0)}/${total}（${c.failed || 0} 失败）`;
     if (statusKey === "failed") return `全部失败`;
     if (statusKey === "cancelled") return `已取消 (排到 ${c.scheduled || 0}/${total})`;
     return `${c.scheduled || 0}/${total} 已排`;
@@ -951,6 +954,7 @@
         const tg = result.tg_messages || [];
         const orphans = result.orphans || [];
         const lost = result.lost || [];
+        const expired = result.expired || [];
         if (!syncResult) return;
         syncResult.hidden = false;
         syncResult.innerHTML = `
@@ -959,7 +963,8 @@
             ${tg.map((m) => `<li class="ok"><code>${escapeHtml(clipGraphemes(m.message || "", 40))}</code> <small>${escapeHtml(m.schedule_text || "")}｜TG #${escapeHtml(String(m.scheduled_msg_id || ""))}</small></li>`).join("") || "<li>(空)</li>"}
           </ul>
           ${orphans.length ? `<p><strong>⚠ TG 有但 mini-web 没记录的 ${escapeHtml(String(orphans.length))} 条</strong>(可能是从其它工具或手机端排的):</p><ul class="send-as-result-list">${orphans.map((m) => `<li class="warn"><code>${escapeHtml(clipGraphemes(m.message || "", 40))}</code> <small>TG #${escapeHtml(String(m.scheduled_msg_id || ""))}｜${escapeHtml(m.schedule_text || "")}</small></li>`).join("")}</ul>` : ""}
-          ${lost.length ? `<p><strong>⚠ 本地标已排但 TG 找不到的 ${escapeHtml(String(lost.length))} 条</strong>(可能被 TG 端取消了):</p><ul class="send-as-result-list">${lost.map((m) => `<li class="warn"><code>${escapeHtml(m.command)}</code> <small>本地 #${escapeHtml(String(m.id || ""))}｜TG 期望 #${escapeHtml(String(m.scheduled_msg_id || ""))}</small></li>`).join("")}</ul>` : ""}
+          ${lost.length ? `<p><strong>⚠ 未来应存在但 TG 找不到的 ${escapeHtml(String(lost.length))} 条</strong>(可能被 TG 端取消了):</p><ul class="send-as-result-list">${lost.map((m) => `<li class="warn"><code>${escapeHtml(m.command)}</code> <small>本地 #${escapeHtml(String(m.id || ""))}｜TG 期望 #${escapeHtml(String(m.scheduled_msg_id || ""))}</small></li>`).join("")}</ul>` : ""}
+          ${expired.length ? `<p><strong>已过期可释放的 ${escapeHtml(String(expired.length))} 条</strong>(计划时间已过且 TG 待发送列表不再返回):</p><ul class="send-as-result-list">${expired.map((m) => `<li class="ok"><code>${escapeHtml(m.command)}</code> <small>本地 #${escapeHtml(String(m.id || ""))}｜原 TG #${escapeHtml(String(m.scheduled_msg_id || ""))}｜${escapeHtml(m.schedule_text || "")}</small></li>`).join("")}</ul>` : ""}
         `;
       };
       syncButton.addEventListener("click", async () => {
@@ -979,7 +984,8 @@
           const matched = result.matched || [];
           const orphans = result.orphans || [];
           const lost = result.lost || [];
-          setSyncStatus(orphans.length || lost.length ? "warn" : "ok", `TG ${tg.length} 条｜对得上 ${matched.length}｜TG 有本地没的 ${orphans.length}｜本地标排 TG 没找到 ${lost.length}`);
+          const expired = result.expired || [];
+          setSyncStatus(orphans.length || lost.length || expired.length ? "warn" : "ok", `TG ${tg.length} 条｜对得上 ${matched.length}｜TG 有本地没的 ${orphans.length}｜未来丢失 ${lost.length}｜过期可释放 ${expired.length}`);
           renderSyncResult(result);
         } catch (error) {
           setSyncStatus("error", error.message);
@@ -1006,9 +1012,10 @@
             const sync = result.sync || result;
             const orphans = sync.orphans || [];
             const lost = sync.lost || [];
+            const expired = sync.expired || [];
             setSyncStatus(
-              orphans.length || lost.length ? "warn" : "ok",
-              `${result.message || "本地漂移修复完成"}｜当前 lost ${lost.length}｜orphans ${orphans.length}`
+              orphans.length || lost.length || expired.length ? "warn" : "ok",
+              `${result.message || "本地漂移修复完成"}｜当前 lost ${lost.length}｜expired ${expired.length}｜orphans ${orphans.length}`
             );
             renderSyncResult(sync);
             const refreshed = await fetchJson("/api/schedule");

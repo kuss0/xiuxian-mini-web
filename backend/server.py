@@ -2357,6 +2357,7 @@ class MiniWebServer:
         只是本地预演,不计入;cancelled 里未发送的 planned 不计入,但已经排到
         TG 的 scheduled 仍然计入,直到用户删除。
         """
+        now = time.time()
         batches = {
             int(batch.get("id") or 0): batch
             for batch in self._store.list_schedule_batches(include_inactive=True)
@@ -2370,7 +2371,7 @@ class MiniWebServer:
             batch = batches.get(int(msg.get("batch_id") or 0)) or {}
             batch_status = str(batch.get("status") or "")
             options = batch.get("options") or {}
-            if status == "scheduled":
+            if status == "scheduled" and float(msg.get("schedule_at") or 0) > now - 60:
                 count += 1
             elif (
                 status == "planned"
@@ -2923,6 +2924,7 @@ class MiniWebServer:
                 "planned": sum(1 for x in b["items"] if x["status"] == "planned"),
                 "scheduled": sum(1 for x in b["items"] if x["status"] == "scheduled"),
                 "failed": sum(1 for x in b["items"] if x["status"] == "failed"),
+                "expired": sum(1 for x in b["items"] if x["status"] == "expired"),
                 "deleted": sum(1 for x in b["items"] if x["status"] == "deleted"),
             }
         return {"ok": True, "batches": batches}
@@ -2992,7 +2994,8 @@ class MiniWebServer:
         """对照 TG 端真实状态。拉 GetScheduledHistory,跟本地 scheduled_messages 对账。
         - tg_messages:TG 端当前所有 scheduled message(每条 scheduled_msg_id+text+time)
         - orphans:TG 有但本地没记录的(可能是从其它地方排的)
-        - lost:本地标 scheduled 但 TG 没找到的(可能被 TG 端手动取消了)
+        - lost:本地标 scheduled 且未来仍应存在,但 TG 没找到的(可能被 TG 端手动取消了)
+        - expired:本地标 scheduled 但计划时间已过,且 TG 待发送列表已不再返回的
         - matched:对得上的
         """
         try:
@@ -3031,12 +3034,16 @@ class MiniWebServer:
             local_messages = self._store.list_schedule_messages(
                 send_as_id=send_as_id, include_inactive=False
             )
+            for m in local_messages:
+                m["schedule_text"] = schedule_fmt_ts(m.get("schedule_at") or 0)
             local_by_tg_id = {
                 m["scheduled_msg_id"]: m
                 for m in local_messages
                 if m["scheduled_msg_id"] and str(m.get("status") or "") == "scheduled"
             }
             tg_ids = {m["scheduled_msg_id"] for m in tg_messages}
+            now = time.time()
+            expired_grace_sec = 60.0
 
             matched = []
             orphans = []
@@ -3046,12 +3053,17 @@ class MiniWebServer:
                     matched.append({"local_id": local["id"], "tg": tg_msg, "local": local})
                 else:
                     orphans.append(tg_msg)
-            lost = [
-                m for m in local_messages
-                if str(m.get("status") or "") == "scheduled"
-                and m["scheduled_msg_id"]
-                and m["scheduled_msg_id"] not in tg_ids
-            ]
+            lost = []
+            expired = []
+            for m in local_messages:
+                if str(m.get("status") or "") != "scheduled":
+                    continue
+                if not m["scheduled_msg_id"] or m["scheduled_msg_id"] in tg_ids:
+                    continue
+                if float(m.get("schedule_at") or 0) <= now - expired_grace_sec:
+                    expired.append(m)
+                else:
+                    lost.append(m)
 
             return {
                 "ok": True,
@@ -3061,6 +3073,7 @@ class MiniWebServer:
                 "matched": matched,
                 "orphans": orphans,
                 "lost": lost,
+                "expired": expired,
             }
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -3069,9 +3082,10 @@ class MiniWebServer:
         """Repair local drift found by schedule sync.
 
         Only local-lost rows are changed: if mini-web marked a message as
-        scheduled but Telegram no longer returns that scheduled id, mark the
-        local row failed and clear scheduled_msg_id. TG-side orphans are left
-        untouched because they may have been created intentionally elsewhere.
+        scheduled but Telegram no longer returns that scheduled id, future
+        rows are marked failed while already-past rows are marked expired and
+        excluded from quota. TG-side orphans are left untouched because they
+        may have been created intentionally elsewhere.
         """
         try:
             send_as_id = int((payload or {}).get("send_as_id") or 0)
@@ -3083,8 +3097,11 @@ class MiniWebServer:
         if not sync.get("ok"):
             return sync
         lost = list(sync.get("lost") or [])
+        expired = list(sync.get("expired") or [])
         repaired = 0
+        expired_repaired = 0
         repair_error = "TG 对账未找到该官方定时,已标记失败;可确认后重排失败项。"
+        expired_note = "TG 待发送列表已无该项且计划时间已过,已标记过期并释放本地额度。"
         for item in lost:
             try:
                 message_id = int(item.get("id") or 0)
@@ -3099,15 +3116,30 @@ class MiniWebServer:
                 last_error=repair_error,
             )
             repaired += 1
+        for item in expired:
+            try:
+                message_id = int(item.get("id") or 0)
+            except (TypeError, ValueError):
+                message_id = 0
+            if not message_id:
+                continue
+            self._store.mark_schedule_message(
+                message_id,
+                scheduled_msg_id=0,
+                status="expired",
+                last_error=expired_note,
+            )
+            expired_repaired += 1
         refreshed = self.schedule_sync_payload(send_as_id)
         return {
             "ok": True,
             "send_as_id": send_as_id,
             "repaired_lost": repaired,
+            "expired_local": expired_repaired,
             "orphans_unchanged": len(sync.get("orphans") or []),
             "sync": refreshed if refreshed.get("ok") else sync,
             "message": (
-                f"已修复本地丢失记录 {repaired} 条;"
+                f"已修复本地丢失记录 {repaired} 条,过期释放 {expired_repaired} 条;"
                 f"TG 外部定时 {len(sync.get('orphans') or [])} 条未自动处理。"
             ),
         }

@@ -5885,6 +5885,78 @@ def test_schedule_sync_repair_marks_lost_rows_failed_and_clears_tg_id(tmp_path):
     assert result["sync"]["lost"] == []
 
 
+def test_schedule_sync_repair_marks_past_missing_rows_expired_and_releases_quota(tmp_path):
+    import time
+
+    class FakeListenerManager:
+        def get_listener(self, local_id):
+            if local_id != "main":
+                return None
+
+            class FakeListener:
+                def submit(self, coro_factory, *, timeout=30.0):
+                    return []
+
+            return FakeListener()
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_settings_payload({"target_chat": "-1001680975844"})
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "123", "api_hash": "hash", "account_id": "12345"}
+    )
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+    now = time.time()
+    batch_id = store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "account_local_id": "main",
+            "preset_key": "custom",
+            "label": "自定义",
+            "anchor_at": now - 3600,
+            "horizon_days": 1,
+            "options": {},
+        },
+        [
+            {
+                "command": ".已过",
+                "schedule_at": now - 3600,
+                "scheduled_msg_id": 555,
+                "status": "scheduled",
+            },
+            {
+                "command": ".未来",
+                "schedule_at": now + 3600,
+                "scheduled_msg_id": 556,
+                "status": "scheduled",
+            },
+        ],
+    )
+    server._listeners = FakeListenerManager()
+
+    sync = server.schedule_sync_payload(12345)
+
+    assert sync["ok"] is True
+    assert [item["scheduled_msg_id"] for item in sync["expired"]] == [555]
+    assert [item["scheduled_msg_id"] for item in sync["lost"]] == [556]
+    assert server._official_schedule_identity_usage(12345) == 1
+
+    result = server.schedule_sync_repair_payload({"send_as_id": 12345})
+
+    assert result["ok"] is True
+    assert result["expired_local"] == 1
+    assert result["repaired_lost"] == 1
+    repaired = store.list_schedule_messages(batch_id=batch_id, include_inactive=True)
+    by_command = {item["command"]: item for item in repaired}
+    assert by_command[".已过"]["status"] == "expired"
+    assert by_command[".已过"]["scheduled_msg_id"] == 0
+    assert "释放本地额度" in by_command[".已过"]["last_error"]
+    assert by_command[".未来"]["status"] == "failed"
+    assert result["sync"]["expired"] == []
+    assert result["sync"]["lost"] == []
+    assert server._official_schedule_identity_usage(12345) == 0
+
+
 def test_schedule_retry_failed_route_and_ui_are_wired():
     from backend.app import POST_ROUTES
 
@@ -5900,6 +5972,8 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert 'textarea name="command"' in schedule_js
     assert 'name="command_gap_sec"' in schedule_js
     assert "function renderScheduleModuleOptions(modules)" in schedule_js
+    assert "m.status === \"expired\"" in schedule_js
+    assert "过期可释放" in schedule_js
     assert "tianjige: scheduleModules.tianjige" in schedule_js
     assert "syncStateModuleToPreset" in schedule_js
     assert 'presetMap.get(key)?.module_key' in schedule_js
