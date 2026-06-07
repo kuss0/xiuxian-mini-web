@@ -815,6 +815,10 @@ def test_chat_stream_view_module_keeps_wrappers_scroll_and_manual_action_contrac
         "return chatStreamView().restoreMessageScrollSnapshot(chatStreamDeps(), snapshot)",
         "const wasNearLatest = !incremental || isMessageListNearLatest()",
         "state.chatUnreadCount = wasNearLatest ? 0 : Math.min(999, Number(state.chatUnreadCount || 0) + unseenIncomingCount)",
+        "if (incremental && !wasNearLatest) {",
+        "deferMessageRenderUntilLatest();",
+        "function flushDeferredMessageRender({ toLatest = false, behavior = \"auto\" } = {})",
+        "state.messageRenderDeferred = false;",
         "function quickActionLabel(action)",
         "return chatStreamView().quickActionLabel(action)",
         "async function handleChatQuickAction(message, index, button)",
@@ -889,6 +893,7 @@ def test_chat_stream_view_module_keeps_wrappers_scroll_and_manual_action_contrac
     for fragment in required_app_fragments:
         assert fragment in app_js
     assert "chatUnreadCount: 0," in state_js
+    assert "messageRenderDeferred: false," in state_js
     for fragment in required_module_fragments:
         assert fragment in chat_stream_js
     for fragment in forbidden_module_fragments:
@@ -1925,19 +1930,24 @@ def test_chat_viewport_layout_contract_keeps_composer_visible():
         ".chat-client-shell .workspace-tools-panel .tool-panel {\n  order: -1;",
         ".chat-client-shell .workspace-tools-panel .tool-panel .sidebar-toolbox {\n  grid-template-columns: repeat(3, minmax(0, 1fr));",
         ".chat-client-shell .workspace-tools-toggle {\n  justify-content: center;\n  min-width: 96px;",
-        ".chat-client-shell {\n    width: 100%;\n    max-width: 100%;\n    grid-template-rows: 124px minmax(0, 1fr);",
-        ".chat-client-shell .conversation-rail {\n    grid-column: 1;\n    grid-row: 1;\n    display: grid;\n    grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);",
+        ".chat-client-shell:has(.global-banner:not([hidden])) .stream-channel-tools {\n  position: static;",
+        ".chat-client-shell {\n    width: 100%;\n    max-width: 100%;\n    grid-template-rows: clamp(180px, 24dvh, 230px) minmax(0, 1fr);",
+        ".chat-client-shell .conversation-rail {\n    grid-column: 1;\n    grid-row: 1;\n    display: grid;\n    grid-template-columns: minmax(0, 1.15fr) minmax(184px, 0.85fr);",
+        ".chat-client-shell .schedule-rail {\n    min-height: 0;\n    max-height: none;\n    overflow: auto;",
+        ".chat-client-shell .schedule-rail-list {\n    display: grid;\n    gap: 5px;",
         ".chat-client-shell .stream-channel-tools {\n    position: static;\n    justify-self: end;",
-        ".chat-client-shell .workspace-tools-panel {\n    top: 174px;\n    max-height: calc(100dvh - 188px);",
+        ".chat-client-shell .workspace-tools-panel {\n    top: calc(clamp(180px, 24dvh, 230px) + 50px);\n    max-height: calc(100dvh - clamp(180px, 24dvh, 230px) - 64px);",
         "@media (max-width: 460px)",
-        ".chat-client-shell {\n    grid-template-rows: 168px minmax(0, 1fr);",
-        ".chat-client-shell .conversation-rail {\n    grid-template-columns: minmax(0, 1fr);\n    grid-template-rows: 54px minmax(0, 1fr);",
+        ".chat-client-shell {\n    grid-template-rows: 236px minmax(0, 1fr);",
+        ".chat-client-shell .conversation-rail {\n    grid-template-columns: minmax(0, 1fr);\n    grid-template-rows: minmax(0, 1fr) auto;",
+        ".chat-client-shell .primary-toolbox {\n    grid-template-columns: repeat(4, minmax(0, 1fr));",
     ]
     for fragment in required_fragments:
         assert fragment in final_contract
 
     assert "messageLoading: false" in state_js
     assert "messageError: \"\"" in state_js
+    assert 'const scheduleReady = startupTask("initial schedule rail", () => loadScheduleRail({ silent: true }));' in app_js
     assert "state.messageLoading = true;" in app_js
     assert "return \"正在读取消息...\";" in app_js
 

@@ -41,6 +41,7 @@
     channelSummaryMessages: [],
     channelSummarySeq: 0,
     chatUnreadCount: 0,
+    messageRenderDeferred: false,
     viewMode: "focus",
     sendAs: {
       peers: [],

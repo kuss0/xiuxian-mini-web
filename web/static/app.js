@@ -364,7 +364,12 @@ async function loadMessages({ incremental = false } = {}) {
   renderChannelFilters();
   renderQuickFilters();
   renderGameCockpit();
-  renderMessages();
+  if (incremental && !wasNearLatest) {
+    deferMessageRenderUntilLatest();
+  } else {
+    state.messageRenderDeferred = false;
+    renderMessages();
+  }
   renderDirectSendComposer();
   // 轮询走的增量更新不要碰右侧详情面板 — 用户可能正在看某条消息的详情,
   // 重渲会让按钮和滚动闪一下。初始化 / 手动刷新才重渲详情。
@@ -1746,6 +1751,21 @@ function renderActiveChannelText() {
 
 function renderMessages() {
   return chatStreamView().renderMessages(chatStreamDeps());
+}
+
+function deferMessageRenderUntilLatest() {
+  state.messageRenderDeferred = true;
+  updateJumpToLatestVisibility();
+}
+
+function flushDeferredMessageRender({ toLatest = false, behavior = "auto" } = {}) {
+  if (!state.messageRenderDeferred) return false;
+  state.messageRenderDeferred = false;
+  renderMessages();
+  if (toLatest) {
+    scrollMessageListToLatest({ behavior });
+  }
+  return true;
 }
 
 function isMessageListNearLatest(threshold = 120) {
@@ -3335,8 +3355,16 @@ function setViewMode(mode) {
 }
 
 if (jumpToLatestButton && messageList) {
-  messageList.addEventListener("scroll", updateJumpToLatestVisibility, { passive: true });
+  messageList.addEventListener("scroll", () => {
+    updateJumpToLatestVisibility();
+    if (state.messageRenderDeferred && isMessageListNearLatest()) {
+      flushDeferredMessageRender({ toLatest: true });
+    }
+  }, { passive: true });
   jumpToLatestButton.addEventListener("click", () => {
+    if (flushDeferredMessageRender({ toLatest: true, behavior: "auto" })) {
+      return;
+    }
     scrollMessageListToLatest({ behavior: "smooth" });
   });
 }
@@ -3608,6 +3636,7 @@ function startupTask(label, task) {
 }
 
 async function bootstrapApp() {
+  const scheduleReady = startupTask("initial schedule rail", () => loadScheduleRail({ silent: true }));
   try {
     await loadChannels();
     await refreshChatViewport({ incremental: false });
@@ -3624,7 +3653,7 @@ async function bootstrapApp() {
   const accountsReady = startupTask("initial accounts", loadAccounts);
   const identitiesReady = accountsReady.then(() => startupTask("initial identities", loadIdentities));
 
-  startupTask("initial schedule rail", () => loadScheduleRail({ silent: true }));
+  void scheduleReady;
   startupTask("initial world snapshot", () => loadWorldSnapshot({ silent: true }));
   settingsReady.then(() => startupTask("initial bot discovery", loadDiscoveredBots));
   settingsReady.then(() => startupTask("initial message audit", () => loadMessageAudit({ silent: true })));

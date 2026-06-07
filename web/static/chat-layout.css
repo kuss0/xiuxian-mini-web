@@ -508,6 +508,18 @@ body {
   overflow: visible;
 }
 
+.chat-client-shell:has(.global-banner:not([hidden])) .chat-pane .section-head {
+  padding-right: 14px;
+}
+
+.chat-client-shell:has(.global-banner:not([hidden])) .stream-channel-tools {
+  position: static;
+  justify-self: end;
+  width: auto;
+  max-width: 100%;
+  flex-wrap: nowrap;
+}
+
 .chat-client-shell .message-search,
 .chat-client-shell .message-count-pill {
   display: none;
@@ -565,14 +577,14 @@ body {
   .chat-client-shell {
     width: 100%;
     max-width: 100%;
-    grid-template-rows: 124px minmax(0, 1fr);
+    grid-template-rows: clamp(180px, 24dvh, 230px) minmax(0, 1fr);
   }
 
   .chat-client-shell .conversation-rail {
     grid-column: 1;
     grid-row: 1;
     display: grid;
-    grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+    grid-template-columns: minmax(0, 1.15fr) minmax(184px, 0.85fr);
     grid-template-rows: minmax(0, 1fr);
     align-items: stretch;
     gap: 8px;
@@ -583,7 +595,7 @@ body {
     z-index: 2;
     width: 100%;
     max-width: 100%;
-    height: 124px;
+    height: clamp(180px, 24dvh, 230px);
     min-height: 0;
     overflow: hidden;
     border-right: 0;
@@ -634,17 +646,22 @@ body {
   .chat-client-shell .schedule-rail {
     min-height: 0;
     max-height: none;
-    overflow: hidden;
+    overflow: auto;
     padding: 0;
+    scrollbar-width: thin;
   }
 
   .chat-client-shell .schedule-rail > .empty.inline,
   .chat-client-shell .schedule-rail-summary,
   .chat-client-shell .schedule-rail-empty {
     margin: 0;
-    border: 0;
-    background: transparent;
-    padding: 0;
+    padding: 6px 7px;
+  }
+
+  .chat-client-shell .schedule-rail-summary,
+  .chat-client-shell .schedule-rail-empty {
+    border: 1px solid rgba(148, 163, 184, 0.10);
+    background: rgba(2, 6, 23, 0.26);
   }
 
   .chat-client-shell .schedule-rail > .empty.inline,
@@ -660,10 +677,68 @@ body {
   }
 
   .chat-client-shell .schedule-rail-summary strong,
-  .chat-client-shell .schedule-rail-empty strong,
-  .chat-client-shell .schedule-rail-list,
-  .chat-client-shell .schedule-rail-more {
+  .chat-client-shell .schedule-rail-empty strong {
+    display: block;
+    overflow: hidden;
+    color: #f8fafc;
+    font-size: 12px;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chat-client-shell .schedule-rail-list {
+    display: grid;
+    gap: 5px;
+  }
+
+  .chat-client-shell .schedule-rail-row-main {
+    gap: 3px;
+    padding: 6px 7px;
+  }
+
+  .chat-client-shell .schedule-rail-row-title {
+    gap: 6px;
+  }
+
+  .chat-client-shell .schedule-rail-row-title strong {
+    font-size: 12px;
+  }
+
+  .chat-client-shell .schedule-rail-row-title .status-pill {
+    padding: 1px 5px;
+    font-size: 10px;
+  }
+
+  .chat-client-shell .schedule-rail-row-meta {
+    font-size: 10.5px;
+    line-height: 1.2;
+  }
+
+  .chat-client-shell .schedule-progress.compact {
+    height: 3px;
+  }
+
+  .chat-client-shell .schedule-rail-snippets {
+    gap: 2px;
+  }
+
+  .chat-client-shell .schedule-rail-snippets span:nth-child(n+2) {
     display: none;
+  }
+
+  .chat-client-shell .schedule-rail-snippets code {
+    font-size: 10.5px;
+  }
+
+  .chat-client-shell .schedule-rail-snippets small {
+    font-size: 10px;
+  }
+
+  .chat-client-shell .schedule-rail-more {
+    display: block;
+    min-height: 26px;
+    font-size: 12px;
   }
 
   .chat-client-shell .primary-toolbox {
@@ -707,14 +782,14 @@ body {
   }
 
   .chat-client-shell .workspace-tools-panel {
-    top: 174px;
-    max-height: calc(100dvh - 188px);
+    top: calc(clamp(180px, 24dvh, 230px) + 50px);
+    max-height: calc(100dvh - clamp(180px, 24dvh, 230px) - 64px);
   }
 }
 
 @media (max-width: 720px) {
   .chat-client-shell {
-    grid-template-rows: 124px minmax(0, 1fr);
+    grid-template-rows: clamp(180px, 24dvh, 230px) minmax(0, 1fr);
   }
 
   .chat-client-shell .conversation-rail {
@@ -731,18 +806,18 @@ body {
 
 @media (max-width: 460px) {
   .chat-client-shell {
-    grid-template-rows: 168px minmax(0, 1fr);
+    grid-template-rows: 236px minmax(0, 1fr);
   }
 
   .chat-client-shell .conversation-rail {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 54px minmax(0, 1fr);
-    height: 168px;
+    grid-template-rows: minmax(0, 1fr) auto;
+    height: 236px;
     gap: 6px;
   }
 
   .chat-client-shell .schedule-rail-panel {
-    grid-template-rows: 24px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
     padding: 7px 8px;
   }
 
@@ -770,21 +845,35 @@ body {
   }
 
   .chat-client-shell .common-action-panel {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 6px;
     padding: 7px 8px;
   }
 
+  .chat-client-shell .common-action-panel .panel-head {
+    min-height: 0;
+    margin-bottom: 0;
+  }
+
+  .chat-client-shell .common-action-panel .panel-head h2 {
+    display: none;
+  }
+
   .chat-client-shell .primary-toolbox {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 5px 6px;
   }
 
   .chat-client-shell .primary-toolbox button {
     min-height: 28px;
-    padding: 4px 7px;
+    padding: 4px 5px;
+    text-align: center;
   }
 
   .chat-client-shell .workspace-tools-panel {
-    top: 218px;
-    max-height: calc(100dvh - 232px);
+    top: 286px;
+    max-height: calc(100dvh - 300px);
   }
 }
