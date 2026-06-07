@@ -64,8 +64,9 @@ def _next_local_midnight(now: float) -> float:
 def _next_daily_window(now: float, start_hour_utc: int) -> float:
     """粗略对齐老脚本的每日窗口:点卯 UTC 02,闯塔 UTC 01。"""
     utc_now = datetime.fromtimestamp(float(now or 0), timezone.utc)
-    next_day = utc_now + timedelta(days=1)
-    due = next_day.replace(hour=start_hour_utc, minute=0, second=0, microsecond=0)
+    due = utc_now.replace(hour=start_hour_utc, minute=0, second=0, microsecond=0)
+    if due.timestamp() <= float(now or 0):
+        due = due + timedelta(days=1)
     return due.timestamp()
 
 

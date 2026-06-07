@@ -189,7 +189,8 @@ def build_schedule_state_contract(
         warn("unobserved", "未观测到机器人回复,无法证明定时起点", "risk")
     if observed and next_at <= 0:
         warn("missing_anchor", "状态机没有给出 next_at,只能人工确认", "risk")
-    if updated_at > 0 and now - updated_at > STALE_STATE_SECONDS:
+    stale_state = updated_at > 0 and now - updated_at > STALE_STATE_SECONDS
+    if stale_state:
         warn("stale", "状态超过 7 天未刷新,建议先重新观察", "warn")
     if hint["requires_argument"]:
         warn("missing_argument", "建议命令缺少必要参数", "risk")
@@ -209,12 +210,16 @@ def build_schedule_state_contract(
         and hint["semiauto_whitelisted"]
         and observed
         and next_at > 0
+        and not stale_state
         and not hint["requires_argument"]
         and not any(w["severity"] == "risk" for w in warnings)
         and not (hint["interval_sec"] and int(hint["interval_sec"]) < 3600)
     )
     tianjige = tianjige_status or {}
     sources = ["bot_reply"] if observed else []
+    confidence = "unknown"
+    if observed and next_at > 0:
+        confidence = "stale" if stale_state else "high"
     return {
         "module_key": str(getattr(module, "key", "") or ""),
         "label": str(getattr(module, "label", "") or getattr(module, "key", "") or ""),
@@ -222,14 +227,14 @@ def build_schedule_state_contract(
         "summary": summary,
         "next_at": next_at if next_at > 0 else None,
         "next_at_source": "bot_reply" if observed and next_at > 0 else "",
-        "confidence": "high" if observed and next_at > 0 else "unknown",
+        "confidence": confidence,
         "sources": sources,
         "source_message_id": source_message_id,
         "updated_at": updated_at,
         "suggestion": hint,
         "warnings": warnings,
         "semiauto_ready": semiauto_ready,
-        "one_click_ready": observed and next_at > 0 and bool(hint.get("command")),
+        "one_click_ready": observed and next_at > 0 and not stale_state and bool(hint.get("command")),
         "tianjige": {
             "enabled": bool(tianjige.get("enabled")),
             "mode": str(tianjige.get("mode") or ""),

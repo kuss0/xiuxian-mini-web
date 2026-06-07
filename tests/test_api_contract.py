@@ -5317,6 +5317,7 @@ def test_schedule_presets_payload_lists_known_presets():
     assert by_key["concubine_tianji"]["module_key"] == "concubine_tianji"
     assert by_key["custom"]["module_key"] == ""
     assert "command_gap_sec" in by_key["custom"]["fields"]
+    assert "horizon_days" in by_key["custom"]["fields"]
 
 
 def test_schedule_preview_deep_retreat_returns_plan_items(tmp_path):
@@ -5358,6 +5359,22 @@ def test_schedule_preview_custom_supports_multiple_commands(tmp_path):
         ".宗门点卯", ".闯塔", ".天机代卜",
     ]
     assert 120 <= result["items"][1]["schedule_at"] - result["items"][0]["schedule_at"] <= 240
+
+
+def test_schedule_preview_custom_preserves_repeated_commands(tmp_path):
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "miniweb.db"))
+    result = server.schedule_preview_payload(
+        {
+            "preset_key": "custom",
+            "command": ".签到\n.签到\n.闯塔",
+            "interval_sec": 86400,
+            "count": 1,
+            "command_gap_sec": 180,
+        }
+    )
+
+    assert result["ok"] is True
+    assert [it["command"] for it in result["items"]] == [".签到", ".签到", ".闯塔"]
 
 
 def test_schedule_preview_custom_respects_horizon_days_for_multiple_commands():
@@ -6192,6 +6209,50 @@ def test_generic_cooldown_module_uses_real_wait_text():
     assert state["last_status"] == "cooldown"
 
 
+def test_daily_window_uses_today_when_window_is_still_future():
+    from datetime import datetime, timezone
+    from backend.identity_state.cooldown import DEFAULT_COOLDOWN_SPECS, CooldownModule
+
+    spec = next(item for item in DEFAULT_COOLDOWN_SPECS if item.key == "checkin")
+    module = CooldownModule(spec)
+    now = datetime(2026, 6, 7, 1, 30, tzinfo=timezone.utc).timestamp()
+    parent = _evt(id="p", msg_id=335, text=".宗门点卯", sender_id=12345)
+    event = _evt(
+        id="e",
+        msg_id=336,
+        text="点卯成功，道友今日宗门贡献已记。",
+        sender_id=-1003983937918,
+        reply_to_msg_id=335,
+    )
+    ctx = _fake_ctx(parent=parent, sender_kind="bot", now=now)
+    state = module.observe(event, ctx, dict(module.default_state))
+
+    expected = datetime(2026, 6, 7, 2, 0, tzinfo=timezone.utc).timestamp()
+    assert state["cooldown_until"] == expected
+
+
+def test_daily_window_rolls_to_tomorrow_after_window_passed():
+    from datetime import datetime, timezone
+    from backend.identity_state.cooldown import DEFAULT_COOLDOWN_SPECS, CooldownModule
+
+    spec = next(item for item in DEFAULT_COOLDOWN_SPECS if item.key == "checkin")
+    module = CooldownModule(spec)
+    now = datetime(2026, 6, 7, 3, 30, tzinfo=timezone.utc).timestamp()
+    parent = _evt(id="p", msg_id=337, text=".宗门点卯", sender_id=12345)
+    event = _evt(
+        id="e",
+        msg_id=338,
+        text="点卯成功，道友今日宗门贡献已记。",
+        sender_id=-1003983937918,
+        reply_to_msg_id=337,
+    )
+    ctx = _fake_ctx(parent=parent, sender_kind="bot", now=now)
+    state = module.observe(event, ctx, dict(module.default_state))
+
+    expected = datetime(2026, 6, 8, 2, 0, tzinfo=timezone.utc).timestamp()
+    assert state["cooldown_until"] == expected
+
+
 def test_second_soul_cooldown_module_marks_ready_from_panel():
     from backend.identity_state.cooldown import DEFAULT_COOLDOWN_SPECS, CooldownModule
     spec = next(item for item in DEFAULT_COOLDOWN_SPECS if item.key == "second_soul")
@@ -6486,6 +6547,53 @@ def test_schedule_modules_payload_exposes_state_contract(tmp_path):
     assert tianji["suggestion"]["command"] == ".天机代卜"
     assert tianji["suggestion"]["preset_key"] == "concubine_tianji"
     assert tianji["semiauto_ready"] is True
+
+
+def test_schedule_state_contract_does_not_semiauto_from_stale_state(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+    now = time.time()
+    stale_at = now - 8 * 86400
+    store.save_module_state(
+        12345,
+        "checkin",
+        {
+            "cooldown_until": stale_at,
+            "last_observed_at": stale_at,
+            "last_status": "success",
+        },
+        source_message_id="raw-stale",
+    )
+    with store._connect() as conn:
+        conn.execute(
+            "UPDATE identity_module_state SET updated_at=? WHERE send_as_id=? AND module_key=?",
+            (stale_at, 12345, "checkin"),
+        )
+    server = MiniWebServer(store=store)
+
+    payload = server.schedule_modules_payload("")
+    group = next(item for item in payload["by_identity"] if item["send_as_id"] == 12345)
+    checkin = next(item for item in group["items"] if item["module_key"] == "checkin")
+
+    assert checkin["next_at"] is not None
+    assert checkin["confidence"] == "stale"
+    assert checkin["semiauto_ready"] is False
+    assert checkin["one_click_ready"] is False
+    assert any(w["code"] == "stale" for w in checkin["warnings"])
+
+    result = server.schedule_create_payload({
+        "send_as_ids": [12345],
+        "preset_key": "checkin",
+        "auto_anchor": True,
+        "auto_anchor_module": "checkin",
+        "schedule_semiauto": True,
+        "dry_run": True,
+    })
+    assert result["ok"] is False
+    assert result["status"] == "semiauto_blocked"
+    assert "超过 7 天" in result["error"]
 
 
 def test_schedule_preview_uses_state_contract_defaults_for_custom_command(tmp_path):

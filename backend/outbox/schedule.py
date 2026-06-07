@@ -144,23 +144,6 @@ def _fmt_ts(ts: float) -> str:
 
 # ---------- plan builders ----------
 
-# 各 preset 的"两次发送之间"间隔 — auto_anchor 时要把 builder 看到的 anchor
-# 往前推这么多,这样第一条落在「状态机算出的下次可用时间」上。
-PRESET_INTERVAL_SECONDS: dict[str, int] = {
-    PRESET_DEEP_RETREAT: DEEP_RETREAT_CD,
-    PRESET_PET_TOUCH: 2 * 3600,
-    PRESET_PET_WARM: 6 * 3600,
-    PRESET_PET_TRIAL: 8 * 3600,
-    PRESET_YUANYING: 8 * 3600,
-}
-
-
-def _interval_for(preset_key: str, builder_kwargs: dict) -> int:
-    if preset_key == PRESET_CUSTOM:
-        return _positive_int(builder_kwargs.get("interval_sec"), 3600)
-    return PRESET_INTERVAL_SECONDS.get(preset_key, 0)
-
-
 # 配对节奏(trigger → command)的默认偏移,单位秒。
 # - trigger 在 CD 走完后 +60s 才发(给系统点空隙)
 # - command 在 trigger 之后再 +240s = 4min(让 bot 处理完触发返回 / 总结落地)
@@ -248,13 +231,11 @@ def _build_pet_periodic(
 def _split_commands(command: str) -> list[str]:
     raw = str(command or "").replace("；", "\n").replace(";", "\n")
     out: list[str] = []
-    seen: set[str] = set()
     for line in raw.splitlines():
         item = _norm(line)
-        if not item or item in seen:
+        if not item:
             continue
         out.append(item)
-        seen.add(item)
     return out
 
 
@@ -357,7 +338,7 @@ PRESETS: dict[str, PresetSpec] = {
         key=PRESET_CUSTOM,
         label="自定义",
         description="一条或多条命令 + 间隔 + 轮数,批量排进官方定时",
-        fields=("command", "interval_sec", "count", "command_gap_sec"),
+        fields=("command", "interval_sec", "count", "command_gap_sec", "horizon_days"),
         builder=_build_custom,
     ),
     PRESET_DEEP_RETREAT: PresetSpec(
