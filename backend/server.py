@@ -417,7 +417,8 @@ class MiniWebServer:
         self,
         *,
         since_hours: int = 24,
-        min_gap_seconds: int = 300,
+        min_gap_seconds: int = 60,
+        min_missing_msg_ids: int = 20,
         limit: int = 12,
         deep: bool = False,
     ) -> dict:
@@ -458,6 +459,7 @@ class MiniWebServer:
                         topic_id,
                         since_hours=since_hours,
                         min_gap_seconds=min_gap_seconds,
+                        min_missing_msg_ids=min_missing_msg_ids,
                         limit=limit,
                     )
                 except Exception as exc:
@@ -493,6 +495,7 @@ class MiniWebServer:
             "latest_target_msg_id": latest_target_msg_id,
             "since_hours": since_hours,
             "min_gap_seconds": min_gap_seconds,
+            "min_missing_msg_ids": min_missing_msg_ids,
             "listener": listener,
             "messages": message_summary,
             "gaps": gaps,
@@ -505,6 +508,63 @@ class MiniWebServer:
         if deep:
             payload.update(self._message_audit_deep_sections(limit=limit))
         return payload
+
+    def message_audit_backfill_payload(self, payload: dict | None = None) -> dict:
+        payload = payload or {}
+        self._ensure_collector_running()
+        listeners = self._listeners.status()
+        collector_key = str(listeners.get("collector") or "")
+        if not collector_key:
+            return {"ok": False, "error": "没有运行中的采集账号"}
+        listener = self._listeners.get_listener(collector_key)
+        if listener is None:
+            return {"ok": False, "error": "listener 未运行,无法复用 Telegram client 补采"}
+
+        account = self._store.get_account(collector_key) or {}
+        settings = self._store.get_settings()
+        target_chat = str(account.get("target_chat") or settings.get("target_chat") or "").strip()
+        target_topic = str(account.get("target_topic_id") or settings.get("target_topic_id") or "").strip()
+        if not target_chat:
+            return {"ok": False, "error": "采集账号没有配置目标群"}
+
+        since_hours = max(1, min(168, _safe_int(payload.get("since_hours")) or 24))
+        min_gap_seconds = max(0, min(3600, _safe_int(payload.get("min_gap_seconds")) or 60))
+        min_missing_msg_ids = max(1, min(5000, _safe_int(payload.get("min_missing_msg_ids")) or 20))
+        limit = max(1, min(50, _safe_int(payload.get("limit")) or 8))
+        time_budget_sec = max(5, min(120, _safe_int(payload.get("time_budget_sec")) or 30))
+        try:
+            topic_id = int(target_topic or 0)
+        except (TypeError, ValueError):
+            topic_id = 0
+
+        result = listener.submit(
+            lambda client: listener.backfill_message_gaps(
+                client,
+                target_chat,
+                topic_id,
+                since_hours=since_hours,
+                min_gap_seconds=min_gap_seconds,
+                min_missing_msg_ids=min_missing_msg_ids,
+                limit=limit,
+                time_budget_sec=float(time_budget_sec),
+            ),
+            timeout=float(time_budget_sec + 15),
+        )
+        ok = bool(result.get("ok"))
+        audit = self.message_audit_payload(
+            since_hours=since_hours,
+            min_gap_seconds=min_gap_seconds,
+            min_missing_msg_ids=min_missing_msg_ids,
+            limit=limit,
+            deep=True,
+        )
+        return {
+            "ok": ok,
+            **result,
+            "target_chat": target_chat,
+            "target_topic_id": topic_id,
+            "audit": audit,
+        }
 
     def _message_audit_deep_sections(self, *, limit: int = 12) -> dict:
         deep_limit = max(1, int(limit or 12))

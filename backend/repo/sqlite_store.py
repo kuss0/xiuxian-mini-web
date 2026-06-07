@@ -805,9 +805,14 @@ class SQLiteStore:
         *,
         since_hours: int = 24,
         min_gap_seconds: int = 300,
+        min_missing_msg_ids: int = 20,
         limit: int = 8,
     ) -> list[dict]:
-        """返回最近一段时间内 msg_id/date 明显断档的区间,供 Telegram history 补采。"""
+        """返回最近一段时间内 msg_id/date 明显断档的区间,供 Telegram history 补采。
+
+        有些漏采窗口消息很多但耗时很短,只用时间阈值会漏掉;所以这里同时
+        支持「时间断档」和「msg_id 数量断档」两个触发条件。
+        """
         chat_id = int(chat_id or 0)
         topic_id = int(topic_id or 0)
         if not chat_id:
@@ -818,7 +823,11 @@ class SQLiteStore:
         if topic_id:
             topic_sql = "AND (top_msg_id=? OR reply_to_msg_id=?)"
             params.extend([topic_id, topic_id])
-        params.extend([max(1, int(min_gap_seconds or 300)), max(1, int(limit or 8))])
+        params.extend([
+            max(0, int(min_gap_seconds or 0)),
+            max(1, int(min_missing_msg_ids or 1)),
+            max(1, int(limit or 8)),
+        ])
         with self._connect() as conn:
             rows = conn.execute(
                 f"""
@@ -839,7 +848,10 @@ class SQLiteStore:
                 FROM ordered
                 WHERE prev_msg_id IS NOT NULL
                   AND msg_id - prev_msg_id > 1
-                  AND (julianday(date) - julianday(prev_date)) * 86400 >= ?
+                  AND (
+                    (julianday(date) - julianday(prev_date)) * 86400 >= ?
+                    OR msg_id - prev_msg_id - 1 >= ?
+                  )
                 ORDER BY
                     CASE WHEN msg_id - prev_msg_id - 1 <= 1000 THEN 0 ELSE 1 END ASC,
                     prev_msg_id DESC

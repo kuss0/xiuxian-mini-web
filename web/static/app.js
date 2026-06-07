@@ -144,7 +144,8 @@ async function loadMessageAudit({ silent = false, deep = false } = {}) {
   void silent;
   const params = new URLSearchParams({
     since_hours: "24",
-    min_gap_seconds: "300",
+    min_gap_seconds: "60",
+    min_missing_msg_ids: "20",
     limit: "12",
   });
   if (deep) params.set("deep", "1");
@@ -153,6 +154,23 @@ async function loadMessageAudit({ silent = false, deep = false } = {}) {
   renderGameCockpit();
   updateGlobalBanner();
   return payload;
+}
+
+async function backfillMessageGaps(payload = {}) {
+  const result = await postJson("/api/message-audit/backfill", {
+    since_hours: 24,
+    min_gap_seconds: 60,
+    min_missing_msg_ids: 20,
+    limit: 8,
+    time_budget_sec: 30,
+    ...(payload || {}),
+  });
+  if (result.audit) {
+    state.messageAudit = result.audit;
+    renderGameCockpit();
+    updateGlobalBanner();
+  }
+  return result;
 }
 
 async function loadWorldSnapshot({ silent = false } = {}) {
@@ -1031,6 +1049,7 @@ async function openHealthModal() {
     healthStatusLabel,
     listenerStatusText,
     loadMessageAudit,
+    backfillMessageGaps,
     renderResourceCoverage,
     updateGlobalBanner,
   });

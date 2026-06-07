@@ -61,7 +61,9 @@ class TelegramReadOnlyListener:
     _STABLE_UPTIME_THRESHOLD = 60.0
     _HISTORY_BACKFILL_LIMIT = _env_int("MINIWEB_HISTORY_BACKFILL_LIMIT", 240)
     _HISTORY_BOOTSTRAP_LIMIT = _env_int("MINIWEB_HISTORY_BOOTSTRAP_LIMIT", 120)
-    _HISTORY_GAP_SCAN_LIMIT = _env_int("MINIWEB_HISTORY_GAP_SCAN_LIMIT", 0)
+    _HISTORY_GAP_SCAN_LIMIT = _env_int("MINIWEB_HISTORY_GAP_SCAN_LIMIT", 8)
+    _HISTORY_GAP_MIN_SECONDS = _env_int("MINIWEB_HISTORY_GAP_MIN_SECONDS", 60)
+    _HISTORY_GAP_MIN_MISSING = _env_int("MINIWEB_HISTORY_GAP_MIN_MISSING", 20)
     _HISTORY_GAP_RANGE_LIMIT = _env_int("MINIWEB_HISTORY_GAP_RANGE_LIMIT", 120)
     _HISTORY_GAP_MAX_PAGES = _env_int("MINIWEB_HISTORY_GAP_MAX_PAGES", 1)
     _HISTORY_YIELD_EVERY = _env_int("MINIWEB_HISTORY_YIELD_EVERY", 30)
@@ -118,6 +120,76 @@ class TelegramReadOnlyListener:
         if loop is None or client is None or status not in {"starting", "running"}:
             raise RuntimeError("listener 未在运行,无法复用其 Telegram client")
         return asyncio.run_coroutine_threadsafe(coro_factory(client), loop)
+
+    async def backfill_message_gaps(
+        self,
+        client,
+        target_chat,
+        topic_id: int = 0,
+        *,
+        since_hours: int = 24,
+        min_gap_seconds: int | None = None,
+        min_missing_msg_ids: int | None = None,
+        limit: int | None = None,
+        time_budget_sec: float | None = None,
+    ) -> dict:
+        """Manually backfill recent msg_id gaps using this listener's client."""
+        parsed_target_chat = _parse_target_chat(target_chat)
+        chat_id = _target_chat_storage_id(target_chat)
+        if not chat_id:
+            return {"ok": False, "error": "监听目标群不是数字 chat_id,无法按 msg_id 补采"}
+        try:
+            entity = await client.get_entity(parsed_target_chat)
+        except Exception as exc:
+            return {"ok": False, "error": f"定位监听目标失败:{exc}"}
+
+        gap_limit = max(1, int(limit or self._HISTORY_GAP_SCAN_LIMIT or 8))
+        gap_seconds = self._HISTORY_GAP_MIN_SECONDS if min_gap_seconds is None else int(min_gap_seconds)
+        gap_missing = self._HISTORY_GAP_MIN_MISSING if min_missing_msg_ids is None else int(min_missing_msg_ids)
+        gaps = self._known_message_gaps(
+            chat_id,
+            int(topic_id or 0),
+            since_hours=since_hours,
+            min_gap_seconds=gap_seconds,
+            min_missing_msg_ids=gap_missing,
+            limit=gap_limit,
+        )
+        if not gaps:
+            return {
+                "ok": True,
+                "status": "no_gaps",
+                "ranges": 0,
+                "scanned": 0,
+                "ingested": 0,
+                "gaps": [],
+                "message": "没有命中需要补采的近期空窗",
+            }
+
+        started_at = asyncio.get_running_loop().time()
+        self._set_status("running", f"手动补采空窗中 {len(gaps)} 段")
+        ranges, scanned, ingested = await self._backfill_known_gaps(
+            client,
+            entity,
+            chat_id,
+            int(topic_id or 0),
+            gaps=gaps,
+            started_at=started_at,
+            time_budget_sec=time_budget_sec,
+        )
+        budget_reached = self._history_time_budget_reached(started_at, budget_sec=time_budget_sec)
+        message = f"手动补采空窗 {ranges} 段/{ingested} 条"
+        if budget_reached:
+            message += ",已到预算"
+        self._set_status("running", f"只读监听运行中｜{message}")
+        return {
+            "ok": True,
+            "status": "budget_reached" if budget_reached else "ok",
+            "ranges": ranges,
+            "scanned": scanned,
+            "ingested": ingested,
+            "gaps": gaps,
+            "message": message,
+        }
 
     def start(self, settings: dict) -> dict:
         with self._lock:
@@ -345,17 +417,18 @@ class TelegramReadOnlyListener:
                     if self._history_time_budget_reached(started_at):
                         budget_reached = True
                         break
-                if self._HISTORY_GAP_SCAN_LIMIT > 0 and not budget_reached:
+                if self._HISTORY_GAP_SCAN_LIMIT > 0:
+                    gap_started_at = asyncio.get_running_loop().time()
                     gap_ranges, gap_scanned, gap_ingested = await self._backfill_known_gaps(
                         client,
                         entity,
                         chat_id,
                         topic_id,
-                        started_at=started_at,
+                        started_at=gap_started_at,
                     )
                     scanned += gap_scanned
                     ingested += gap_ingested
-                    budget_reached = self._history_time_budget_reached(started_at)
+                    budget_reached = budget_reached or self._history_time_budget_reached(gap_started_at)
             else:
                 recent = []
                 async for message in client.iter_messages(entity, limit=limit):
@@ -392,13 +465,17 @@ class TelegramReadOnlyListener:
             print(f"[mini-web] history backfill failed: {exc}")
             return f"只读监听运行中｜历史补采失败:{exc}"
 
+        if gap_ranges:
+            suffix = f"只读监听运行中｜历史补采 {ingested} 条，修补空窗 {gap_ranges} 段/{gap_ingested} 条"
+            if budget_reached:
+                budget = max(0.0, float(self._HISTORY_BACKFILL_TIME_BUDGET_SEC or 0.0))
+                suffix += f"，已到轻量预算 {budget:g}s"
+            return suffix
         if budget_reached:
             budget = max(0.0, float(self._HISTORY_BACKFILL_TIME_BUDGET_SEC or 0.0))
             return f"只读监听运行中｜历史补采 {ingested} 条，已到轻量预算 {budget:g}s"
         if scanned >= limit and latest_msg_id > 0:
             return f"只读监听运行中｜历史补采 {ingested} 条，已达上限 {limit}"
-        if gap_ranges:
-            return f"只读监听运行中｜历史补采 {ingested} 条，修补空窗 {gap_ranges} 段/{gap_ingested} 条"
         if ingested:
             return f"只读监听运行中｜历史补采 {ingested} 条"
         if scanned:
@@ -412,9 +489,11 @@ class TelegramReadOnlyListener:
         chat_id: int,
         topic_id: int,
         *,
+        gaps: list[dict] | None = None,
         started_at: float | None = None,
+        time_budget_sec: float | None = None,
     ) -> tuple[int, int, int]:
-        gaps = self._known_message_gaps(chat_id, topic_id)
+        gaps = gaps if gaps is not None else self._known_message_gaps(chat_id, topic_id)
         ranges = 0
         scanned = 0
         ingested = 0
@@ -463,12 +542,12 @@ class TelegramReadOnlyListener:
                     ):
                         ingested += 1
                     await self._maybe_yield_history(scanned, ingested=ingested, limit=range_limit)
-                    if self._history_time_budget_reached(started_at):
+                    if self._history_time_budget_reached(started_at, budget_sec=time_budget_sec):
                         break
-                if self._stop_flag.is_set() or last_scanned_id <= after_id or self._history_time_budget_reached(started_at):
+                if self._stop_flag.is_set() or last_scanned_id <= after_id or self._history_time_budget_reached(started_at, budget_sec=time_budget_sec):
                     break
                 after_id = last_scanned_id
-            if self._history_time_budget_reached(started_at):
+            if self._history_time_budget_reached(started_at, budget_sec=time_budget_sec):
                 break
         return ranges, scanned, ingested
 
@@ -486,8 +565,8 @@ class TelegramReadOnlyListener:
             return
         await asyncio.sleep(max(0.0, float(self._HISTORY_YIELD_SEC or 0.0)))
 
-    def _history_time_budget_reached(self, started_at: float | None) -> bool:
-        budget = max(0.0, float(self._HISTORY_BACKFILL_TIME_BUDGET_SEC or 0.0))
+    def _history_time_budget_reached(self, started_at: float | None, *, budget_sec: float | None = None) -> bool:
+        budget = max(0.0, float(self._HISTORY_BACKFILL_TIME_BUDGET_SEC if budget_sec is None else budget_sec or 0.0))
         if started_at is None or budget <= 0:
             return False
         try:
@@ -505,7 +584,16 @@ class TelegramReadOnlyListener:
             print(f"[mini-web] latest_message_id failed: {exc}")
             return 0
 
-    def _known_message_gaps(self, chat_id: int, topic_id: int) -> list[dict]:
+    def _known_message_gaps(
+        self,
+        chat_id: int,
+        topic_id: int,
+        *,
+        since_hours: int = 24,
+        min_gap_seconds: int | None = None,
+        min_missing_msg_ids: int | None = None,
+        limit: int | None = None,
+    ) -> list[dict]:
         getter = getattr(self._sink, "message_id_gaps", None)
         if not callable(getter):
             return []
@@ -514,9 +602,10 @@ class TelegramReadOnlyListener:
                 getter(
                     int(chat_id),
                     int(topic_id or 0),
-                    since_hours=24,
-                    min_gap_seconds=300,
-                    limit=self._HISTORY_GAP_SCAN_LIMIT,
+                    since_hours=since_hours,
+                    min_gap_seconds=self._HISTORY_GAP_MIN_SECONDS if min_gap_seconds is None else int(min_gap_seconds),
+                    min_missing_msg_ids=self._HISTORY_GAP_MIN_MISSING if min_missing_msg_ids is None else int(min_missing_msg_ids),
+                    limit=self._HISTORY_GAP_SCAN_LIMIT if limit is None else int(limit),
                 )
                 or []
             )

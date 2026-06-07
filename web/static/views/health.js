@@ -7,6 +7,7 @@
 
   async function openHealthModal({
     auditTimeLabel,
+    backfillMessageGaps,
     formatChatTime,
     getInitialAudit,
     healthStatusLabel,
@@ -31,22 +32,34 @@
               renderResourceCoverage,
             })}
           </div>
+          <p class="modal-status-line info" id="healthBackfillStatus" hidden></p>
         </section>
       `,
       footer: `
         <button type="button" id="healthAuditRefresh">刷新审计</button>
+        <button type="button" id="healthAuditBackfill">补采空窗</button>
         <button type="button" data-modal-close>关闭</button>
       `,
     });
     if (!dialog) return;
     const refresh = dialog.querySelector("#healthAuditRefresh");
+    const backfill = dialog.querySelector("#healthAuditBackfill");
     const body = dialog.querySelector("#healthAuditBody");
+    const status = dialog.querySelector("#healthBackfillStatus");
+    const setStatus = (kind, text) => {
+      if (!status) return;
+      status.hidden = !text;
+      status.className = `modal-status-line ${kind}`;
+      status.textContent = text || "";
+    };
     const refreshAudit = async () => {
       if (!refresh || !body) return;
       refresh.disabled = true;
+      if (backfill) backfill.disabled = true;
       body.innerHTML = '<p class="empty inline">深度审计中…</p>';
       try {
         const payload = await loadMessageAudit({ silent: true, deep: true });
+        setStatus("", "");
         body.innerHTML = renderHealthAuditBody(payload, {
           auditTimeLabel,
           formatChatTime,
@@ -59,9 +72,44 @@
         body.innerHTML = `<p class="empty inline">审计失败：${escapeHtml(error.message || "未知错误")}</p>`;
       } finally {
         refresh.disabled = false;
+        if (backfill) backfill.disabled = false;
+      }
+    };
+    const backfillGaps = async () => {
+      if (!backfill || !body || !backfillMessageGaps) return;
+      backfill.disabled = true;
+      if (refresh) refresh.disabled = true;
+      setStatus("info", "正在补采近期空窗...");
+      try {
+        const result = await backfillMessageGaps({
+          since_hours: 24,
+          min_gap_seconds: 60,
+          min_missing_msg_ids: 20,
+          limit: 8,
+          time_budget_sec: 30,
+        });
+        if (!result?.ok) {
+          throw new Error(result?.error || "补采失败");
+        }
+        const audit = result.audit || await loadMessageAudit({ silent: true, deep: true });
+        body.innerHTML = renderHealthAuditBody(audit, {
+          auditTimeLabel,
+          formatChatTime,
+          healthStatusLabel,
+          listenerStatusText,
+          renderResourceCoverage,
+        });
+        setStatus("ok", `${result.message || "补采完成"}｜扫描 ${formatNumber(result.scanned || 0)} 条｜入库 ${formatNumber(result.ingested || 0)} 条`);
+        updateGlobalBanner();
+      } catch (error) {
+        setStatus("error", `补采失败：${error.message || "未知错误"}`);
+      } finally {
+        backfill.disabled = false;
+        if (refresh) refresh.disabled = false;
       }
     };
     refresh?.addEventListener("click", refreshAudit);
+    backfill?.addEventListener("click", backfillGaps);
     if (!initialAudit?.deep) {
       refreshAudit();
     }
@@ -113,7 +161,7 @@
         <div class="resource-stat-card ${Number(audit.gap_count || 0) ? "warn" : ""}">
           <span>近期断层</span>
           <strong>${escapeHtml(formatNumber(audit.gap_count || 0))}</strong>
-          <small>近 ${escapeHtml(String(audit.since_hours || 24))} 小时 / ${escapeHtml(String(audit.min_gap_seconds || 300))} 秒阈值</small>
+          <small>近 ${escapeHtml(String(audit.since_hours || 24))} 小时 / ${escapeHtml(String(audit.min_gap_seconds || 60))} 秒或缺 ${escapeHtml(String(audit.min_missing_msg_ids || 20))}</small>
         </div>
         <div class="resource-stat-card">
           <span>消息/卡片</span>
@@ -295,7 +343,7 @@
       advice.push("没有运行中的监听，先在接入配置里恢复只读采集。");
     }
     if (Number(audit.gap_count || 0) > 0) {
-      advice.push("近期存在 msg_id 断层，副本和资源统计需要先看覆盖诊断。");
+      advice.push("近期存在 msg_id 断层，可先补采空窗再判断副本和资源统计。");
     }
     if (Number(messages.invalid_date_total || 0) > 0) {
       advice.push("存在异常日期消息，可能影响按天/周/月统计。");

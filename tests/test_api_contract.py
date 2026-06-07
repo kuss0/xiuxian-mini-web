@@ -7959,9 +7959,58 @@ def test_message_audit_payload_includes_deep_sections(tmp_path):
     assert payload["filter_diagnostics"]["ok"] is True
 
 
+def test_message_id_gaps_detects_short_large_msg_id_gap(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    base = datetime.now(timezone.utc) - timedelta(minutes=5)
+    store.ingest_event(RawMessageEvent(
+        id="gap-before",
+        chat_id=-1001680975844,
+        msg_id=1000,
+        text="before",
+        source="玩家A",
+        date=base.isoformat(),
+        sender_id=1,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="gap-after",
+        chat_id=-1001680975844,
+        msg_id=1111,
+        text="after",
+        source="玩家B",
+        date=(base + timedelta(seconds=120)).isoformat(),
+        sender_id=2,
+    ))
+
+    gaps = store.message_id_gaps(
+        -1001680975844,
+        since_hours=24,
+        min_gap_seconds=300,
+        min_missing_msg_ids=20,
+        limit=5,
+    )
+
+    assert gaps
+    assert gaps[0]["after_msg_id"] == 1000
+    assert gaps[0]["before_msg_id"] == 1111
+    assert gaps[0]["missing_msg_ids"] == 110
+
+
 def test_message_audit_route_is_wired():
-    from backend.app import GET_ROUTES
+    from backend.app import GET_ROUTES, POST_ROUTES
     assert "/api/message-audit" in GET_ROUTES
+    assert "/api/message-audit/backfill" in POST_ROUTES
+
+
+def test_message_audit_backfill_requires_running_listener(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+
+    result = server.message_audit_backfill_payload({})
+
+    assert result["ok"] is False
+    assert "采集" in result["error"] or "listener" in result["error"]
 
 
 def test_list_schedule_batches_returns_sending_and_completed(tmp_path):

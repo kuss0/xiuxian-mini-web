@@ -26,9 +26,13 @@ def _get_message_audit(request: MiniWebRequest, query: dict) -> dict:
     except (TypeError, ValueError):
         since_hours = 24
     try:
-        min_gap_seconds = int((query.get("min_gap_seconds") or ["300"])[0])
+        min_gap_seconds = int((query.get("min_gap_seconds") or ["60"])[0])
     except (TypeError, ValueError):
-        min_gap_seconds = 300
+        min_gap_seconds = 60
+    try:
+        min_missing_msg_ids = int((query.get("min_missing_msg_ids") or ["20"])[0])
+    except (TypeError, ValueError):
+        min_missing_msg_ids = 20
     try:
         limit = int((query.get("limit") or ["12"])[0])
     except (TypeError, ValueError):
@@ -38,9 +42,17 @@ def _get_message_audit(request: MiniWebRequest, query: dict) -> dict:
     return _app(request).message_audit_payload(
         since_hours=since_hours,
         min_gap_seconds=min_gap_seconds,
+        min_missing_msg_ids=min_missing_msg_ids,
         limit=limit,
         deep=deep,
     )
+
+
+def _post_message_audit_backfill(request: MiniWebRequest, payload: dict) -> dict:
+    try:
+        return _app(request).message_audit_backfill_payload(payload)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 def _get_channels(request: MiniWebRequest, query: dict) -> dict:

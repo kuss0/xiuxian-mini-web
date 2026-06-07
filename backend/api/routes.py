@@ -67,6 +67,7 @@ def build_post_routes(handlers: Mapping[str, Callable]) -> dict[str, PostRoute]:
     return {
         "/api/settings": PostRoute(handlers["_post_settings"], needs_payload=True),
         "/api/focus-exclude/preview": PostRoute(handlers["_post_focus_exclude_preview"], needs_payload=True),
+        "/api/message-audit/backfill": PostRoute(handlers["_post_message_audit_backfill"], needs_payload=True),
         "/api/resource-coverage/reparse": PostRoute(handlers["_post_resource_reparse"], needs_payload=True),
         "/api/inventory/transfer-plan": PostRoute(handlers["_post_inventory_transfer_plan"], needs_payload=True),
         "/api/accounts": PostRoute(handlers["_post_account"], needs_payload=True),
