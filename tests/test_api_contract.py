@@ -9386,6 +9386,130 @@ def test_skill_send_blocks_immediate_duplicate_payload(tmp_path, monkeypatch):
     assert calls["n"] == 1
 
 
+def test_skill_send_blocks_duplicate_while_first_send_is_pending(tmp_path, monkeypatch):
+    import threading
+
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "1", "api_hash": "h",
+         "account_id": "8574677796", "target_chat": "-1001680975844"}
+    )
+    server.save_identity_payload(
+        {"send_as_id": "8574677796", "account_local_id": "main", "label": "self"}
+    )
+    now = {"value": 100.0}
+    monkeypatch.setattr(server_module.time, "monotonic", lambda: now["value"])
+    started = threading.Event()
+    release = threading.Event()
+    calls = {"n": 0}
+
+    class FakeClient:
+        async def send_message(self, chat_id, command, **kwargs):
+            calls["n"] += 1
+            class _Sent:
+                id = 88100
+            return _Sent()
+
+    class FakeListener:
+        def submit(self, coro_factory, *, timeout=30.0):
+            import asyncio
+            started.set()
+            assert release.wait(timeout=5), "first send did not release"
+            return asyncio.new_event_loop().run_until_complete(coro_factory(FakeClient()))
+
+    monkeypatch.setattr(server._listeners, "get_listener", lambda _id: FakeListener())
+    payload = {
+        "skill_key": "manual_send",
+        "identity_id": 8574677796,
+        "command_override": "今晚手动看一下",
+        "reply_to_msg_id": 7000,
+    }
+    first_result = {}
+
+    def _send_first():
+        first_result.update(server.skill_send_payload(dict(payload)))
+
+    thread = threading.Thread(target=_send_first)
+    thread.start()
+    assert started.wait(timeout=5)
+    now["value"] = 104.0
+    second = server.skill_send_payload(dict(payload))
+    now["value"] = 105.0
+    release.set()
+    thread.join(timeout=5)
+
+    assert first_result["ok"] is True
+    assert second["ok"] is False
+    assert second["duplicate"] is True
+    assert calls["n"] == 1
+
+
+def test_skill_send_success_window_blocks_slow_second_click(tmp_path, monkeypatch):
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "1", "api_hash": "h",
+         "account_id": "8574677796", "target_chat": "-1001680975844"}
+    )
+    server.save_identity_payload(
+        {"send_as_id": "8574677796", "account_local_id": "main", "label": "self"}
+    )
+    now = {"value": 100.0}
+    monkeypatch.setattr(server_module.time, "monotonic", lambda: now["value"])
+    calls = {"n": 0}
+
+    class FakeClient:
+        async def send_message(self, chat_id, command, **kwargs):
+            calls["n"] += 1
+            class _Sent:
+                id = 88200 + calls["n"]
+            return _Sent()
+
+    class FakeListener:
+        def submit(self, coro_factory, *, timeout=30.0):
+            import asyncio
+            return asyncio.new_event_loop().run_until_complete(coro_factory(FakeClient()))
+
+    monkeypatch.setattr(server._listeners, "get_listener", lambda _id: FakeListener())
+    payload = {
+        "skill_key": "manual_send",
+        "identity_id": 8574677796,
+        "command_override": "今晚手动看一下",
+        "reply_to_msg_id": 7000,
+    }
+
+    first = server.skill_send_payload(dict(payload))
+    now["value"] = 106.0
+    second = server.skill_send_payload(dict(payload))
+
+    assert first["ok"] is True
+    assert second["ok"] is False
+    assert second["duplicate"] is True
+    assert calls["n"] == 1
+
+
+def test_skill_send_empty_exception_reports_type(tmp_path, monkeypatch):
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "1", "api_hash": "h",
+         "account_id": "8574677796", "target_chat": "-1001680975844"}
+    )
+    server.save_identity_payload(
+        {"send_as_id": "8574677796", "account_local_id": "main", "label": "self"}
+    )
+
+    class FakeListener:
+        def submit(self, coro_factory, *, timeout=30.0):
+            raise RuntimeError()
+
+    monkeypatch.setattr(server._listeners, "get_listener", lambda _id: FakeListener())
+    result = server.skill_send_payload(
+        {"skill_key": "manual_send", "identity_id": 8574677796, "command_override": "今晚手动看一下"}
+    )
+
+    assert result["ok"] is False
+    assert result["error"] == "发送失败:RuntimeError"
+
+
 def test_skill_send_records_failed_send_log_for_reply_required_skill(tmp_path):
     server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
     server.save_account_payload(

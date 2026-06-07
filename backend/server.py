@@ -399,7 +399,7 @@ class MiniWebServer:
         # 用锁串行化整个 _create_one_schedule，确保 list/dedup/insert 原子化。
         self._schedule_create_lock = threading.Lock()
         self._skill_send_recent_lock = threading.Lock()
-        self._skill_send_recent: dict[str, float] = {}
+        self._skill_send_recent: dict[str, dict[str, float | str]] = {}
 
     def _current_tianjige_config(self, settings: dict | None = None) -> TianjigeConfig:
         if settings is None:
@@ -2213,29 +2213,34 @@ class MiniWebServer:
         duplicate_key = self._skill_send_duplicate_key(payload or {})
         if duplicate_key and self._claim_recent_skill_send(duplicate_key):
             return {"ok": False, "duplicate": True, "error": "重复发送已拦截: 同一条消息刚刚已经提交过。"}
-        api, context = self._send_skill_command(payload)
-        if context:
-            self._record_send_log(
-                {
-                    "kind": "manual_send",
-                    "status": "success" if api.get("ok") else "failed",
-                    "account_local_id": context["account_local_id"],
-                    "identity_id": context["identity_id"],
-                    "send_as_id": context["send_as_id"],
-                    "chat_id": context["chat_id"],
-                    "topic_id": context["topic_id"],
-                    "reply_to_msg_id": context["reply_to_msg_id"],
-                    "command": context["command"],
-                    "source_message_id": context["source_message_id"],
-                    "tg_msg_id": context["tg_msg_id"],
-                    "error": context["error"],
-                    "meta": {
-                        "skill_key": context["skill_key"],
-                        "reply_mode": context["reply_mode"],
-                    },
-                }
-            )
-        return api
+        api: dict = {}
+        try:
+            api, context = self._send_skill_command(payload)
+            if context:
+                self._record_send_log(
+                    {
+                        "kind": "manual_send",
+                        "status": "success" if api.get("ok") else "failed",
+                        "account_local_id": context["account_local_id"],
+                        "identity_id": context["identity_id"],
+                        "send_as_id": context["send_as_id"],
+                        "chat_id": context["chat_id"],
+                        "topic_id": context["topic_id"],
+                        "reply_to_msg_id": context["reply_to_msg_id"],
+                        "command": context["command"],
+                        "source_message_id": context["source_message_id"],
+                        "tg_msg_id": context["tg_msg_id"],
+                        "error": context["error"],
+                        "meta": {
+                            "skill_key": context["skill_key"],
+                            "reply_mode": context["reply_mode"],
+                        },
+                    }
+                )
+            return api
+        finally:
+            if duplicate_key:
+                self._finish_recent_skill_send(duplicate_key, ok=bool(api.get("ok")))
 
     def _skill_send_duplicate_key(self, payload: dict) -> str:
         skill_key = str(payload.get("skill_key") or "").strip()
@@ -2252,17 +2257,56 @@ class MiniWebServer:
             separators=(",", ":"),
         )
 
-    def _claim_recent_skill_send(self, key: str, *, window_sec: float = 2.5) -> bool:
+    def _claim_recent_skill_send(
+        self,
+        key: str,
+        *,
+        success_window_sec: float = 12.0,
+        failure_window_sec: float = 2.5,
+        pending_window_sec: float = 90.0,
+    ) -> bool:
         now = time.monotonic()
         with self._skill_send_recent_lock:
-            stale = [item_key for item_key, ts in self._skill_send_recent.items() if now - ts > window_sec * 4]
+            stale: list[str] = []
+            for item_key, item in self._skill_send_recent.items():
+                state = str(item.get("state") or "")
+                claimed_at = float(item.get("claimed_at") or 0)
+                finished_at = float(item.get("finished_at") or 0)
+                if state == "pending":
+                    if now - claimed_at > pending_window_sec:
+                        stale.append(item_key)
+                elif now - finished_at > max(success_window_sec, failure_window_sec) * 4:
+                    stale.append(item_key)
             for item_key in stale:
                 self._skill_send_recent.pop(item_key, None)
-            last = self._skill_send_recent.get(key)
-            if last is not None and now - last < window_sec:
-                return True
-            self._skill_send_recent[key] = now
+            existing = self._skill_send_recent.get(key)
+            if existing is not None:
+                state = str(existing.get("state") or "")
+                claimed_at = float(existing.get("claimed_at") or 0)
+                finished_at = float(existing.get("finished_at") or 0)
+                if state == "pending" and now - claimed_at <= pending_window_sec:
+                    return True
+                if state == "success" and now - finished_at < success_window_sec:
+                    return True
+                if state == "failed" and now - finished_at < failure_window_sec:
+                    return True
+            self._skill_send_recent[key] = {"state": "pending", "claimed_at": now, "finished_at": 0.0}
             return False
+
+    def _finish_recent_skill_send(self, key: str, *, ok: bool) -> None:
+        now = time.monotonic()
+        with self._skill_send_recent_lock:
+            existing = self._skill_send_recent.get(key)
+            if existing is None:
+                return
+            if str(existing.get("state") or "") != "pending":
+                return
+            claimed_at = float(existing.get("claimed_at") or now)
+            self._skill_send_recent[key] = {
+                "state": "success" if ok else "failed",
+                "claimed_at": claimed_at,
+                "finished_at": now,
+            }
 
     def _send_skill_command(self, payload: dict) -> tuple[dict, dict]:
         payload = payload or {}

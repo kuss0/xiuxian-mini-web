@@ -149,7 +149,8 @@ class SkillSendService:
                 else:
                     error = f"⏳ Telegram 限流:{exc}"
             else:
-                error = f"发送失败:{exc}"
+                detail = str(exc).strip() or exc_name
+                error = f"发送失败:{detail}"
             return SkillSendResult(
                 ok=False,
                 error=error,
