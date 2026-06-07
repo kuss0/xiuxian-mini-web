@@ -6257,7 +6257,13 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert 'name="command_gap_sec"' in schedule_js
     assert "function renderScheduleModuleOptions(modules)" in schedule_js
     assert "function scheduleDisplayStatusKey(statusKey, counts)" in schedule_js
+    assert "function scheduleCurrentCounts(counts)" in schedule_js
+    assert "function scheduleBatchHasCurrentWork(batch)" in schedule_js
+    assert "function scheduleMessageHasCurrentWork(message)" in schedule_js
     assert "function scheduleMessageStatusView(message)" in schedule_js
+    assert "const railBatches = batches.filter(scheduleBatchHasCurrentWork);" in schedule_js
+    assert "const currentItems = (batch.items || []).filter(scheduleMessageHasCurrentWork);" in schedule_js
+    assert "已收起" in schedule_js
     assert 'return "needs_retry";' in schedule_js
     assert "待重排" in schedule_js
     assert "已从 TG 待发送列表释放" in schedule_js

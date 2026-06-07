@@ -496,6 +496,32 @@
   color: var(--risk);
 }
 
+.schedule-item-list li small.warn {
+  color: var(--warn);
+}
+
+.schedule-item-list li small.muted {
+  color: var(--muted);
+}
+
+.schedule-history-details {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 8px 10px;
+}
+
+.schedule-history-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.schedule-history-details[open] summary {
+  margin-bottom: 8px;
+}
+
 .resource-stats-controls {
   max-width: 560px;
 }
@@ -1497,4 +1523,3 @@ button.health-chip:hover {
 .dungeon-status-card.closed {
   border-left-color: #dc2626;
 }
-

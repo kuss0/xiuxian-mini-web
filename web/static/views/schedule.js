@@ -75,27 +75,42 @@
       `;
       return;
     }
-    const totals = batches.reduce((acc, batch) => {
-      const counts = batch.counts || {};
+    const railBatches = batches.filter(scheduleBatchHasCurrentWork);
+    if (!railBatches.length) {
+      scheduleRail.innerHTML = `
+        <div class="schedule-rail-empty">
+          <strong>没有进行中的排班</strong>
+          <span>过期历史已收起。</span>
+        </div>
+        <button type="button" class="schedule-rail-more" data-schedule-open>管理排班</button>
+      `;
+      bindScheduleOpenButtons(deps, scheduleRail);
+      return;
+    }
+    const totals = railBatches.reduce((acc, batch) => {
+      const counts = scheduleCurrentCounts(batch.counts || {});
       acc.planned += Number(counts.planned || 0);
       acc.scheduled += Number(counts.scheduled || 0);
       acc.failed += Number(counts.failed || 0);
-      acc.expired += Number(counts.expired || 0);
       acc.sending += batch.status === "sending" ? 1 : 0;
       return acc;
-    }, { planned: 0, scheduled: 0, failed: 0, expired: 0, sending: 0 });
-    const visible = batches.slice(0, 4);
+    }, { planned: 0, scheduled: 0, failed: 0, sending: 0 });
+    const visible = railBatches.slice(0, 4);
     scheduleRail.innerHTML = `
       <div class="schedule-rail-summary">
-        <strong>${escapeHtml(String(batches.length))} 批排班</strong>
-        <span>${totals.sending ? `${escapeHtml(String(totals.sending))} 批发送中｜` : ""}${escapeHtml(String(totals.scheduled))} 已排 / ${escapeHtml(String(totals.planned))} 待排${totals.failed ? `｜${escapeHtml(String(totals.failed))} 待重排` : ""}${totals.expired ? `｜${escapeHtml(String(totals.expired))} 已过期` : ""}</span>
+        <strong>${escapeHtml(String(railBatches.length))} 批排班</strong>
+        <span>${totals.sending ? `${escapeHtml(String(totals.sending))} 批发送中｜` : ""}${escapeHtml(String(totals.scheduled))} 已排 / ${escapeHtml(String(totals.planned))} 待排${totals.failed ? `｜${escapeHtml(String(totals.failed))} 待重排` : ""}</span>
       </div>
       <div class="schedule-rail-list">
         ${visible.map((batch) => renderScheduleRailRow(deps, batch)).join("")}
       </div>
-      ${batches.length > visible.length ? `<button type="button" class="schedule-rail-more" data-schedule-open>查看全部 ${escapeHtml(String(batches.length))} 批</button>` : ""}
+      ${batches.length > visible.length ? `<button type="button" class="schedule-rail-more" data-schedule-open>管理排班</button>` : ""}
     `;
-    scheduleRail.querySelectorAll("[data-schedule-open]").forEach((button) => {
+    bindScheduleOpenButtons(deps, scheduleRail);
+  }
+
+  function bindScheduleOpenButtons(deps = {}, root) {
+    root.querySelectorAll("[data-schedule-open]").forEach((button) => {
       button.addEventListener("click", async () => {
         try {
           await Promise.all([
@@ -111,14 +126,15 @@
   }
 
   function renderScheduleRailRow(deps = {}, batch) {
-    const counts = batch.counts || {};
+    const counts = scheduleCurrentCounts(batch.counts || {});
     const total = (counts.planned || 0) + (counts.scheduled || 0) + (counts.failed || 0) + (counts.expired || 0);
     const done = (counts.scheduled || 0) + (counts.expired || 0);
     const pct = total ? Math.round((done / total) * 100) : 0;
     const statusKey = scheduleDisplayStatusKey(batch.status || "active", counts);
     const statusPill = scheduleStatusPill(statusKey) || `<span class="status-pill">${statusKey === "active" ? "活动" : escapeHtml(statusKey)}</span>`;
     const identity = scheduleIdentityLabel(deps, batch.send_as_id);
-    const snippets = (batch.items || []).slice(0, 2).map((item) => `
+    const currentItems = (batch.items || []).filter(scheduleMessageHasCurrentWork);
+    const snippets = currentItems.slice(0, 2).map((item) => `
       <span>
         <code>${escapeHtml(item.command || "")}</code>
         <small>${escapeHtml(item.schedule_text || "")}</small>
@@ -135,7 +151,7 @@
           ${total ? `<span class="schedule-progress compact"><span class="schedule-progress-bar" style="width:${pct}%"></span></span>` : ""}
           <span class="schedule-rail-snippets">
             ${snippets || "<small>没有待展示命令</small>"}
-            ${(batch.items || []).length > 2 ? `<small>+${escapeHtml(String((batch.items || []).length - 2))} 条</small>` : ""}
+            ${currentItems.length > 2 ? `<small>+${escapeHtml(String(currentItems.length - 2))} 条</small>` : ""}
           </span>
         </button>
       </article>
@@ -351,9 +367,28 @@
     if (!batches.length) {
       return '<p class="empty inline">还没有任何官方定时批次。上面新建一个。</p>';
     }
+    const currentBatches = batches.filter(scheduleBatchHasCurrentWork);
+    const historicalBatches = batches.filter((batch) => !scheduleBatchHasCurrentWork(batch));
+    const currentHtml = currentBatches.length
+      ? renderScheduleBatchRows(deps, currentBatches)
+      : '<p class="empty inline">没有进行中的官方定时批次。</p>';
+    const historyHtml = historicalBatches.length
+      ? `
+        <details class="schedule-history-details">
+          <summary>已收起 ${escapeHtml(String(historicalBatches.length))} 个过期批次</summary>
+          ${renderScheduleBatchRows(deps, historicalBatches, { includeExpiredItems: true })}
+        </details>
+      `
+      : "";
+    return `${currentHtml}${historyHtml}`;
+  }
+
+  function renderScheduleBatchRows(deps = {}, batches, options = {}) {
+    const includeExpiredItems = Boolean(options.includeExpiredItems);
     return batches
       .map((b) => {
-        const items = (b.items || [])
+        const visibleItems = includeExpiredItems ? (b.items || []) : (b.items || []).filter(scheduleMessageHasCurrentWork);
+        const items = visibleItems
           .map((m) => {
             const view = scheduleMessageStatusView(m);
             return `
@@ -367,7 +402,7 @@
             `;
           })
           .join("");
-        const counts = b.counts || {};
+        const counts = includeExpiredItems ? (b.counts || {}) : scheduleCurrentCounts(b.counts || {});
         const total = (counts.planned || 0) + (counts.scheduled || 0) + (counts.failed || 0) + (counts.expired || 0);
         const done = (counts.scheduled || 0) + (counts.expired || 0);
         const pct = total ? Math.round((done / total) * 100) : 0;
@@ -391,7 +426,7 @@
                 <span class="account-row-meta">send_as ${escapeHtml(String(b.send_as_id || ""))}｜${escapeHtml(b.anchor_text || "")}｜${escapeHtml(String(b.horizon_days || ""))} 天｜${escapeHtml(statusText)}</span>
               </div>
               ${showProgress ? `<div class="schedule-progress"><div class="schedule-progress-bar" style="width:${pct}%"></div></div>` : ""}
-              <ul class="schedule-item-list">${items}</ul>
+              <ul class="schedule-item-list">${items || '<li><small>没有待展示命令</small></li>'}</ul>
             </div>
             <div class="account-row-actions">
               ${cancelBtn}
@@ -489,6 +524,28 @@
     if (total > 0 && (c.expired || 0) === total) return "expired";
     if ((c.failed || 0) > 0 && statusKey !== "sending") return "needs_retry";
     return statusKey || "active";
+  }
+
+  function scheduleCurrentCounts(counts) {
+    const c = counts || {};
+    return {
+      planned: Number(c.planned || 0),
+      scheduled: Number(c.scheduled || 0),
+      failed: Number(c.failed || 0),
+      expired: 0,
+      deleted: Number(c.deleted || 0),
+    };
+  }
+
+  function scheduleBatchHasCurrentWork(batch) {
+    if (batch?.status === "sending") return true;
+    const c = scheduleCurrentCounts(batch?.counts || {});
+    return (c.planned + c.scheduled + c.failed) > 0;
+  }
+
+  function scheduleMessageHasCurrentWork(message) {
+    const status = String(message?.status || "planned");
+    return status !== "expired" && status !== "deleted";
   }
 
   function scheduleMessageStatusView(message) {
@@ -1217,9 +1274,13 @@
     renderScheduleTemplateOptions,
     renderScheduleModuleOptions,
     renderScheduleBatches,
+    renderScheduleBatchRows,
     scheduleStatusText,
     scheduleStatusPill,
     scheduleDisplayStatusKey,
+    scheduleCurrentCounts,
+    scheduleBatchHasCurrentWork,
+    scheduleMessageHasCurrentWork,
     scheduleMessageStatusView,
     scheduleManualMessages,
     scheduleStatusWithManualMessages,
