@@ -2620,6 +2620,7 @@ function settingsDeps() {
     loadListenerStatus,
     loadNotifyCardTitles: () => fetchJson("/api/notify/card-titles"),
     loadSettings,
+    loadTianjigeStatus: () => fetchJson("/api/tianjige/status"),
     loadTelegramDialogs,
     loadTelegramTopics,
     rerenderSettings: renderSettings,

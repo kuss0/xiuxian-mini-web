@@ -7,13 +7,6 @@ describe('MiniwebModules', () => {
     modules = window.MiniwebModules;
   });
 
-  beforeEach(() => {
-    // Clear modules before each test
-    while (modules.list().length > 0) {
-      // Can't actually clear, so we'll work around it
-    }
-  });
-
   describe('register and require', () => {
     test('should register and retrieve module', () => {
       const testModule = { foo: 'bar' };

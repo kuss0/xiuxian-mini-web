@@ -27,6 +27,7 @@
     const savedSecrets = settings.saved_secrets || {};
     const dialogOptions = renderDialogOptions(deps, settings.target_chat);
     const topicOptions = renderTopicOptions(deps, settings.target_topic_id);
+    const tianjigeMode = settings.tianjige_mode || "mock";
     const accountCount = state.accounts?.length || 0;
     const accountLimit = state.accountLimit || 0;
     const identityCount = state.identities?.length || 0;
@@ -132,6 +133,54 @@
           <button type="button" data-login-action="start">发送验证码</button>
           <button type="button" data-login-action="cancel">取消登录</button>
           <button type="submit">保存配置</button>
+        </div>
+
+        <div class="detail-block tianjige-section">
+          <h4>天机阁 API</h4>
+          <p id="tianjigeStatusText" class="muted">${escapeHtml(tianjigeSettingsStatusText(settings, savedSecrets))}</p>
+          <div class="form-grid">
+            <label>
+              <span>模式</span>
+              <select name="tianjige_mode">
+                <option value="mock" ${tianjigeMode === "mock" ? "selected" : ""}>Mock</option>
+                <option value="real" ${tianjigeMode === "real" ? "selected" : ""}>真实 API</option>
+                <option value="off" ${tianjigeMode === "off" ? "selected" : ""}>关闭</option>
+              </select>
+            </label>
+            <label>
+              <span>Base URL</span>
+              <input name="tianjige_base_url" value="${escapeAttr(settings.tianjige_base_url || "https://asc.aiopenai.app")}" placeholder="https://asc.aiopenai.app" />
+            </label>
+            <label>
+              <span>X-API-Token</span>
+              <input
+                name="tianjige_api_token"
+                value=""
+                placeholder="${savedSecrets.tianjige_api_token ? "已保存，留空不变；重新填写则覆盖" : "天机阁 X-API-Token"}"
+                autocomplete="off"
+              />
+            </label>
+            <label>
+              <span>超时秒数</span>
+              <input name="tianjige_timeout_sec" type="number" min="1" step="0.5" value="${escapeAttr(settings.tianjige_timeout_sec ?? 8)}" />
+            </label>
+            <label>
+              <span>本地限速秒数</span>
+              <input name="tianjige_min_interval_sec" type="number" min="0" step="0.5" value="${escapeAttr(settings.tianjige_min_interval_sec ?? 10)}" />
+            </label>
+          </div>
+          <label class="stacked-field">
+            <span>Cookie</span>
+            <textarea
+              name="tianjige_cookie"
+              rows="3"
+              placeholder="${savedSecrets.tianjige_cookie ? "已保存，留空不变；重新填写则覆盖" : "session=..."}"
+              autocomplete="off"
+            ></textarea>
+          </label>
+          <div class="form-actions">
+            <button type="button" data-tianjige-action="status">保存并测试状态</button>
+          </div>
         </div>
 
         <div class="detail-block notify-section">
@@ -317,6 +366,37 @@
     return "会话";
   }
 
+  function tianjigeSettingsStatusText(settings = {}, savedSecrets = {}) {
+    const mode = settings.tianjige_mode || "mock";
+    if (mode === "off") {
+      return "模式：关闭";
+    }
+    if (mode === "mock") {
+      return "模式：Mock，本地模拟数据";
+    }
+    const tokenText = savedSecrets.tianjige_api_token ? "Token 已保存" : "Token 未保存";
+    const cookieText = savedSecrets.tianjige_cookie ? "Cookie 已保存" : "Cookie 未保存";
+    return `模式：真实 API，${tokenText}，${cookieText}`;
+  }
+
+  function tianjigeStatusText(status = {}) {
+    const mode = status.mode || "unknown";
+    const auth = status.authenticated ? "已认证" : status.needs_oauth ? "缺少凭据" : "未认证";
+    const rate = Number.isFinite(Number(status.min_interval_seconds))
+      ? `，限速 ${Number(status.min_interval_seconds)} 秒`
+      : "";
+    return `模式：${mode}，${auth}${rate}${status.message ? `｜${status.message}` : ""}`;
+  }
+
+  async function hydrateTianjigeStatus(deps = {}, root = document) {
+    const target = root.querySelector("#tianjigeStatusText");
+    if (!target || typeof deps.loadTianjigeStatus !== "function") return null;
+    const data = await deps.loadTianjigeStatus();
+    const status = data?.status || {};
+    target.textContent = tianjigeStatusText(status);
+    return status;
+  }
+
   function bindSettingsModal(deps = {}, dialog, settings = {}) {
     const state = settingsState(deps);
     const root = dialog.querySelector(".modal-body") || dialog;
@@ -330,6 +410,7 @@
       .catch(() => {});
 
     hydrateNotifySection(deps, settings, root);
+    hydrateTianjigeStatus(deps, root).catch(() => {});
 
     root.querySelector("#settingsForm")?.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -394,6 +475,28 @@
       });
     });
 
+    root.querySelectorAll("[data-tianjige-action]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const form = root.querySelector("#settingsForm");
+        const target = root.querySelector("#tianjigeStatusText");
+        button.disabled = true;
+        if (target) target.textContent = "正在保存并读取状态...";
+        try {
+          const saved = await deps.saveCurrentSettingsFromForm?.(form);
+          if (saved) {
+            state.settings = saved;
+          }
+          await hydrateTianjigeStatus(deps, root);
+          deps.showSkillToast?.("天机阁配置已保存", "ok");
+        } catch (error) {
+          if (target) target.textContent = error.message || String(error);
+          deps.showError?.(error);
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
+
     root.querySelectorAll("[data-login-action]").forEach((button) => {
       button.addEventListener("click", async () => {
         const form = root.querySelector("#settingsForm");
@@ -451,6 +554,12 @@
       notify_tg_bot_token: data.get("notify_tg_bot_token"),
       notify_tg_chat_id: data.get("notify_tg_chat_id"),
       notify_card_titles: notifyTitles,
+      tianjige_mode: data.get("tianjige_mode"),
+      tianjige_base_url: data.get("tianjige_base_url"),
+      tianjige_api_token: data.get("tianjige_api_token"),
+      tianjige_cookie: data.get("tianjige_cookie"),
+      tianjige_timeout_sec: data.get("tianjige_timeout_sec"),
+      tianjige_min_interval_sec: data.get("tianjige_min_interval_sec"),
     };
   }
 
@@ -540,6 +649,7 @@
     renderTopicOptions,
     bindSettingsModal,
     settingsPayloadFromForm,
+    hydrateTianjigeStatus,
     hydrateNotifySection,
   };
 })();

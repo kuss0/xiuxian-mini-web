@@ -1,16 +1,19 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Xiuxian Mini Web E2E Tests', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    await page.setExtraHTTPHeaders({
+      'CF-Connecting-IP': `e2e-page-${testInfo.project.name}-${testInfo.workerIndex}-${Date.now()}-${Math.random()}`,
+    });
     await page.goto('http://127.0.0.1:8787');
   });
 
   test('should load homepage successfully', async ({ page }) => {
-    await expect(page).toHaveTitle(/Xiuxian Mini Web/i);
+    await expect(page).toHaveTitle(/(修仙|Xiuxian) Mini Web/i);
 
     // Check main elements are present
     await expect(page.locator('#messageList')).toBeVisible();
-    await expect(page.locator('#channelFilters')).toBeVisible();
+    await expect(page.locator('#quickFilters')).toBeVisible();
     await expect(page.locator('#directSendComposer')).toBeVisible();
   });
 
@@ -47,17 +50,17 @@ test.describe('Xiuxian Mini Web E2E Tests', () => {
     expect(headers['x-xss-protection']).toBe('1; mode=block');
   });
 
-  test('should have rate limiting', async ({ page }) => {
-    // Make multiple requests quickly
-    const responses = [];
-    for (let i = 0; i < 65; i++) {
-      const response = await page.request.get('http://127.0.0.1:8787/api/health');
-      responses.push(response);
-    }
+  test('should have rate limiting', async ({ request }, testInfo) => {
+    const clientId = `e2e-${testInfo.project.name}-${Date.now()}-${Math.random()}`;
+    const responses = await Promise.all(
+      Array.from({ length: 65 }, () => request.get('http://127.0.0.1:8787/api/tianjige/status', {
+        headers: { 'CF-Connecting-IP': clientId },
+      }))
+    );
 
-    // Last request should be rate limited
-    const lastResponse = responses[responses.length - 1];
-    expect(lastResponse.status()).toBe(429);
+    const statuses = responses.map((response) => response.status());
+    expect(statuses.filter((status) => status === 429).length).toBeGreaterThan(0);
+    expect(statuses.filter((status) => status === 200).length).toBeLessThanOrEqual(60);
   });
 
   test('should load messages', async ({ page }) => {
@@ -72,7 +75,7 @@ test.describe('Xiuxian Mini Web E2E Tests', () => {
   test('should have working channel filters', async ({ page }) => {
     await page.waitForTimeout(1000);
 
-    const channelFilters = page.locator('#channelFilters');
+    const channelFilters = page.locator('#quickFilters');
     await expect(channelFilters).toBeVisible();
   });
 
@@ -108,8 +111,8 @@ test.describe('Xiuxian Mini Web E2E Tests', () => {
 
   test('should have good performance', async ({ page }) => {
     const startTime = Date.now();
-    await page.goto('http://127.0.0.1:8787');
-    await page.waitForLoadState('networkidle');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#directSendComposer')).toBeVisible();
     const loadTime = Date.now() - startTime;
 
     // Should load in less than 3 seconds

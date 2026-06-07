@@ -1031,6 +1031,7 @@ def test_settings_view_module_keeps_wrappers_and_api_boundary_contract():
         'cancelLogin: () => postJson("/api/login/cancel", {})',
         'loadNotifyCardTitles: () => fetchJson("/api/notify/card-titles")',
         "loadTelegramDialogs,",
+        'loadTianjigeStatus: () => fetchJson("/api/tianjige/status")',
         "loadTelegramTopics,",
         "saveCurrentSettingsFromForm,",
         'sendNotifyTest: () => postJson("/api/notify/test", {})',
@@ -1048,12 +1049,23 @@ def test_settings_view_module_keeps_wrappers_and_api_boundary_contract():
         "function renderDialogOptions(deps = {}, targetChat)",
         "function renderTopicOptions(deps = {}, targetTopicId)",
         "function telegramDialogKindLabel(kind)",
+        "function tianjigeSettingsStatusText(settings = {}, savedSecrets = {})",
+        "function tianjigeStatusText(status = {})",
+        "async function hydrateTianjigeStatus(deps = {}, root = document)",
+        'name="tianjige_mode"',
+        'name="tianjige_base_url"',
+        'name="tianjige_api_token"',
+        'name="tianjige_cookie"',
+        'name="tianjige_timeout_sec"',
+        'name="tianjige_min_interval_sec"',
+        'data-tianjige-action="status"',
         "function bindSettingsModal(deps = {}, dialog, settings = {})",
         "function settingsPayloadFromForm(form)",
         "function hydrateNotifySection(deps = {}, settings = {}, root = document)",
         "deps.saveCurrentSettingsFromForm?.(event.currentTarget)",
         "deps.loadTelegramDialogs?.()",
         "deps.loadTelegramTopics?.(targetChat)",
+        "deps.loadTianjigeStatus()",
         "deps.startLogin?.()",
         "deps.verifyLogin?.({",
         "deps.cancelLogin?.()",
@@ -1067,6 +1079,7 @@ def test_settings_view_module_keeps_wrappers_and_api_boundary_contract():
         "renderDialogOptions,",
         "renderTopicOptions,",
         "settingsPayloadFromForm,",
+        "hydrateTianjigeStatus,",
         "hydrateNotifySection,",
     ]
     forbidden_app_fragments = [
@@ -1086,6 +1099,7 @@ def test_settings_view_module_keeps_wrappers_and_api_boundary_contract():
         '"/api/settings"',
         '"/api/login/',
         '"/api/notify/',
+        '"/api/tianjige/',
         '"/api/skills/send"',
     ]
 
@@ -3363,6 +3377,8 @@ def test_sqlite_settings_roundtrip(tmp_path):
     assert -1002049298748 in store.get_settings()["leader_sender_ids"]
     assert "@iosdo7" in store.get_settings()["leader_source_names"]
     assert store.get_settings()["focus_include_player_plain"] is True
+    assert store.get_settings()["tianjige_mode"] == "mock"
+    assert store.get_settings()["tianjige_base_url"] == "https://asc.aiopenai.app"
 
     saved = store.save_settings(
         {
@@ -3371,12 +3387,20 @@ def test_sqlite_settings_roundtrip(tmp_path):
             "target_chat": "-1001",
             "game_bot_ids": ["7900199668", "bad", "8757550896"],
             "listen_enabled": True,
+            "tianjige_mode": "real",
+            "tianjige_base_url": "https://example.test",
+            "tianjige_timeout_sec": "3.5",
+            "tianjige_min_interval_sec": "0",
         }
     )
 
     assert saved["api_id"] == "123"
     assert saved["target_chat"] == "-1001"
     assert saved["game_bot_ids"] == [7900199668, 8757550896]
+    assert saved["tianjige_mode"] == "real"
+    assert saved["tianjige_base_url"] == "https://example.test"
+    assert saved["tianjige_timeout_sec"] == 3.5
+    assert saved["tianjige_min_interval_sec"] == 0.0
     assert -1002049298748 in saved["leader_sender_ids"]
     assert "@iosdo7" in saved["leader_source_names"]
     assert SQLiteStore(tmp_path / "miniweb.db").get_settings()["listen_enabled"] is True
@@ -3473,34 +3497,60 @@ def test_settings_auto_collects_own_usernames(tmp_path):
 
 def test_settings_payload_redacts_saved_secrets(tmp_path):
     store = SQLiteStore(tmp_path / "miniweb.db")
-    store.save_settings({"api_hash": "secret-hash", "proxy_password": "proxy-secret"})
+    store.save_settings({
+        "api_hash": "secret-hash",
+        "proxy_password": "proxy-secret",
+        "tianjige_api_token": "secret-token",
+        "tianjige_cookie": "session=secret-cookie",
+    })
     server = MiniWebServer(store=store)
 
     payload = server.settings_payload()
 
     assert payload["settings"]["api_hash"] == ""
     assert payload["settings"]["proxy_password"] == ""
+    assert payload["settings"]["tianjige_api_token"] == ""
+    assert payload["settings"]["tianjige_cookie"] == ""
     # 所有标记为 secret 的 key 都必须出现在 saved_secrets 里(True 表示已保存)
     assert payload["settings"]["saved_secrets"]["api_hash"] is True
     assert payload["settings"]["saved_secrets"]["proxy_password"] is True
     assert payload["settings"]["saved_secrets"]["notify_tg_bot_token"] is False
+    assert payload["settings"]["saved_secrets"]["tianjige_api_token"] is True
+    assert payload["settings"]["saved_secrets"]["tianjige_cookie"] is True
     assert "secret-hash" not in str(payload)
     assert "proxy-secret" not in str(payload)
+    assert "secret-token" not in str(payload)
+    assert "secret-cookie" not in str(payload)
 
 
 def test_blank_secret_save_preserves_existing_secret(tmp_path):
     store = SQLiteStore(tmp_path / "miniweb.db")
-    store.save_settings({"api_hash": "secret-hash", "proxy_password": "proxy-secret"})
+    store.save_settings({
+        "api_hash": "secret-hash",
+        "proxy_password": "proxy-secret",
+        "tianjige_api_token": "secret-token",
+        "tianjige_cookie": "session=secret-cookie",
+    })
     server = MiniWebServer(store=store)
 
-    payload = server.save_settings_payload({"api_hash": "", "proxy_password": "", "api_id": "456"})
+    payload = server.save_settings_payload({
+        "api_hash": "",
+        "proxy_password": "",
+        "tianjige_api_token": "",
+        "tianjige_cookie": "",
+        "api_id": "456",
+    })
 
     assert payload["settings"]["api_hash"] == ""
     assert payload["settings"]["proxy_password"] == ""
+    assert payload["settings"]["tianjige_api_token"] == ""
+    assert payload["settings"]["tianjige_cookie"] == ""
     saved = store.get_settings()
     assert saved["api_id"] == "456"
     assert saved["api_hash"] == "secret-hash"
     assert saved["proxy_password"] == "proxy-secret"
+    assert saved["tianjige_api_token"] == "secret-token"
+    assert saved["tianjige_cookie"] == "session=secret-cookie"
 
 
 def test_account_save_redacts_and_preserves_existing_secret(tmp_path):
@@ -3914,6 +3964,38 @@ def test_tianjige_real_mode_without_credentials_degrades_without_network(tmp_pat
     assert role["ok"] is False
     assert role["status"] == "unauthorized"
     assert role["inventory"]["items"] == []
+
+
+def test_tianjige_settings_save_reconfigures_gateway_without_network(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+
+    initial = server.tianjige_status_payload()["status"]
+    assert initial["mode"] == "mock"
+
+    saved = server.save_settings_payload({
+        "tianjige_mode": "real",
+        "tianjige_base_url": "https://example.test",
+        "tianjige_api_token": "token-secret",
+        "tianjige_cookie": "session=cookie-secret",
+        "tianjige_timeout_sec": "2",
+        "tianjige_min_interval_sec": "0",
+    })
+    status = server.tianjige_status_payload()["status"]
+
+    assert saved["settings"]["tianjige_api_token"] == ""
+    assert saved["settings"]["tianjige_cookie"] == ""
+    assert saved["settings"]["saved_secrets"]["tianjige_api_token"] is True
+    assert saved["settings"]["saved_secrets"]["tianjige_cookie"] is True
+    assert "token-secret" not in str(saved)
+    assert "cookie-secret" not in str(saved)
+    assert status["mode"] == "real"
+    assert status["base_url"] == "https://example.test"
+    assert status["authenticated"] is True
+    assert status["needs_oauth"] is False
+    assert status["has_api_token"] is True
+    assert status["has_cookie"] is True
+    assert status["min_interval_seconds"] == 0.0
 
 
 def test_identities_payload_classifies_self_and_channel_kinds(tmp_path):

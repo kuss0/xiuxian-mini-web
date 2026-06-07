@@ -1,5 +1,5 @@
 // Jest setup file
-import '@testing-library/jest-dom';
+require('@testing-library/jest-dom');
 
 // Mock window.MiniwebState
 global.window.MiniwebState = {
@@ -58,3 +58,5 @@ global.console = {
   warn: jest.fn(),
   error: jest.fn(),
 };
+
+require('../../web/static/utils/safe-dom.js');

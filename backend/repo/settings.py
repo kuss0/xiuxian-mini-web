@@ -7,6 +7,7 @@ from backend.processors.message_filter import (
     DEFAULT_FOCUS_KEYWORDS,
     LEGACY_FOCUS_EXCLUDE_PATTERNS,
 )
+from backend.external.tianjige import DEFAULT_TIANJIGE_BASE_URL
 from backend.repo.common import _merge_str_defaults
 from backend.repo.schedules import _normalize_schedule_saved_templates
 
@@ -78,6 +79,21 @@ def _normalize_settings(payload: dict) -> dict:
                 value = default
         return max(minimum, min(maximum, value))
 
+    def float_value(key: str, default: float, *, minimum: float) -> float:
+        raw = payload.get(key)
+        if raw is None or str(raw).strip() == "":
+            value = default
+        else:
+            try:
+                value = float(str(raw).strip())
+            except (TypeError, ValueError):
+                value = default
+        return max(minimum, value)
+
+    tianjige_mode = text("tianjige_mode").lower() or "mock"
+    if tianjige_mode not in {"off", "mock", "real"}:
+        tianjige_mode = "mock"
+
     return {
         "api_id": text("api_id"),
         "api_hash": text("api_hash"),
@@ -115,6 +131,12 @@ def _normalize_settings(payload: dict) -> dict:
         "notify_tg_bot_token": text("notify_tg_bot_token"),
         "notify_tg_chat_id": text("notify_tg_chat_id"),
         "notify_card_titles": notify_card_titles,
+        "tianjige_mode": tianjige_mode,
+        "tianjige_base_url": text("tianjige_base_url") or DEFAULT_TIANJIGE_BASE_URL,
+        "tianjige_api_token": text("tianjige_api_token"),
+        "tianjige_cookie": text("tianjige_cookie"),
+        "tianjige_timeout_sec": float_value("tianjige_timeout_sec", 8.0, minimum=1.0),
+        "tianjige_min_interval_sec": float_value("tianjige_min_interval_sec", 10.0, minimum=0.0),
         "schedule_saved_templates": schedule_saved_templates,
     }
 

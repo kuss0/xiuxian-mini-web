@@ -45,6 +45,33 @@ class TianjigeConfig:
             min_interval_sec=max(0.0, min_interval_sec),
         )
 
+    @classmethod
+    def from_settings(cls, settings: dict | None) -> "TianjigeConfig":
+        settings = settings or {}
+        fallback = cls.from_env()
+        mode = str(settings.get("tianjige_mode") or fallback.mode).strip().lower()
+        if mode not in {"off", "mock", "real"}:
+            mode = fallback.mode
+
+        def float_setting(key: str, default: float, *, minimum: float) -> float:
+            raw = settings.get(key)
+            if raw is None or str(raw).strip() == "":
+                return default
+            try:
+                value = float(str(raw).strip())
+            except (TypeError, ValueError):
+                value = default
+            return max(minimum, value)
+
+        return cls(
+            mode=mode,
+            base_url=str(settings.get("tianjige_base_url") or fallback.base_url).strip(),
+            api_token=str(settings.get("tianjige_api_token") or fallback.api_token).strip(),
+            cookie=str(settings.get("tianjige_cookie") or fallback.cookie).strip(),
+            timeout_sec=float_setting("tianjige_timeout_sec", fallback.timeout_sec, minimum=1.0),
+            min_interval_sec=float_setting("tianjige_min_interval_sec", fallback.min_interval_sec, minimum=0.0),
+        )
+
 
 @dataclass
 class TianjigeResult:
@@ -90,6 +117,12 @@ class TianjigeGateway:
         self._lock = threading.Lock()
         self._last_request_at = 0.0
         self._last_result: dict = {}
+
+    def configure(self, config: TianjigeConfig) -> None:
+        with self._lock:
+            self.config = config
+            self._last_request_at = 0.0
+            self._last_result = {}
 
     def status(self) -> dict:
         enabled = self.config.mode != "off"
@@ -417,4 +450,3 @@ __all__ = [
     "tianjige_inventory_items",
     "tianjige_profile_patches",
 ]
-

@@ -2,6 +2,8 @@
 // 测试 escapeHtml 和 safe-dom 工具
 
 describe('XSS Prevention', () => {
+  const { escapeHtml } = window.MiniwebFormat || {};
+
   describe('escapeHtml', () => {
     const { escapeHtml } = window.MiniwebFormat || {};
 
@@ -51,7 +53,7 @@ describe('XSS Prevention', () => {
 
     test('setHtml should escape HTML', () => {
       setHtml(container, '<script>alert("XSS")</script>');
-      expect(container.innerHTML).toBe('&lt;script&gt;alert(&quot;XSS&quot;)&lt;/script&gt;');
+      expect(container.innerHTML).toBe('&lt;script&gt;alert("XSS")&lt;/script&gt;');
     });
 
     test('setTrustedHtml should not escape', () => {

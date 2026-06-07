@@ -18,6 +18,7 @@ from backend.domain.models import (
     StatePatch,
     utc_now_iso,
 )
+from backend.external.tianjige import TianjigeConfig
 from backend.identity_state import build_default_registry
 from backend.parsers import build_parser_registry
 from backend.parsers.inventory import parse_inventory_delta_event, parse_inventory_snapshot
@@ -2478,6 +2479,7 @@ class SQLiteStore:
         }
 
     def get_settings(self) -> dict:
+        tianjige_env = TianjigeConfig.from_env()
         defaults = {
             "api_id": "",
             "api_hash": "",
@@ -2513,6 +2515,12 @@ class SQLiteStore:
             "notify_tg_bot_token": "",
             "notify_tg_chat_id": "",
             "notify_card_titles": [],
+            "tianjige_mode": tianjige_env.mode,
+            "tianjige_base_url": tianjige_env.base_url,
+            "tianjige_api_token": "",
+            "tianjige_cookie": "",
+            "tianjige_timeout_sec": tianjige_env.timeout_sec,
+            "tianjige_min_interval_sec": tianjige_env.min_interval_sec,
             "schedule_saved_templates": [],
         }
         with self._connect() as conn:

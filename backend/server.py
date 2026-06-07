@@ -17,7 +17,12 @@ from backend.features.dungeon_status import (
 )
 from backend.features.cangkun_guide import build_cangkun_guide_payload
 from backend.features.xutian_guide import build_xutian_oracle_guide_payload
-from backend.external.tianjige import TianjigeGateway, tianjige_inventory_items, tianjige_profile_patches
+from backend.external.tianjige import (
+    TianjigeConfig,
+    TianjigeGateway,
+    tianjige_inventory_items,
+    tianjige_profile_patches,
+)
 from backend.outbox import OutboxPlanner
 from backend.outbox.schedule import (
     MAX_SCHEDULED_MESSAGES_PER_IDENTITY,
@@ -121,7 +126,13 @@ class CardStore(Protocol):
         ...
 
 
-SECRET_SETTING_KEYS = {"api_hash", "proxy_password", "notify_tg_bot_token"}
+SECRET_SETTING_KEYS = {
+    "api_hash",
+    "proxy_password",
+    "notify_tg_bot_token",
+    "tianjige_api_token",
+    "tianjige_cookie",
+}
 INVENTORY_SNAPSHOT_STALE_SECONDS = 6 * 60 * 60
 
 
@@ -337,7 +348,8 @@ class MiniWebServer:
                 )
             store = sqlite_store
         self._store = store
-        self._tianjige = tianjige_gateway or TianjigeGateway()
+        self._tianjige_settings_managed = tianjige_gateway is None
+        self._tianjige = tianjige_gateway or TianjigeGateway(self._current_tianjige_config())
         self._outbox = OutboxPlanner(self._store)
         self._dialogs = TelegramDialogService()
         self._login = TelegramLoginService()
@@ -363,6 +375,21 @@ class MiniWebServer:
         self._schedule_create_lock = threading.Lock()
         self._skill_send_recent_lock = threading.Lock()
         self._skill_send_recent: dict[str, float] = {}
+
+    def _current_tianjige_config(self, settings: dict | None = None) -> TianjigeConfig:
+        if settings is None:
+            try:
+                settings = self._store.get_settings()
+            except Exception:
+                settings = {}
+        return TianjigeConfig.from_settings(settings)
+
+    def _refresh_tianjige_config(self, settings: dict | None = None) -> None:
+        if not self._tianjige_settings_managed:
+            return
+        configure = getattr(self._tianjige, "configure", None)
+        if callable(configure):
+            configure(self._current_tianjige_config(settings))
 
     def health_payload(self) -> dict:
         self._ensure_collector_running()
@@ -1208,7 +1235,7 @@ class MiniWebServer:
 
     def save_settings_payload(self, payload: dict) -> dict:
         before = self._store.get_settings()
-        patch = preserve_existing_secrets(payload, self._store.get_settings())
+        patch = preserve_existing_secrets(payload, before)
         saved = self._store.save_settings(patch)
         rebuilt = 0
         filter_keys = {
@@ -1228,6 +1255,16 @@ class MiniWebServer:
             reclassify = getattr(self._store, "reclassify_message_filters", None)
             if callable(reclassify):
                 rebuilt = int(reclassify() or 0)
+        tianjige_keys = {
+            "tianjige_mode",
+            "tianjige_base_url",
+            "tianjige_api_token",
+            "tianjige_cookie",
+            "tianjige_timeout_sec",
+            "tianjige_min_interval_sec",
+        }
+        if any(saved.get(key) != before.get(key) for key in tianjige_keys):
+            self._refresh_tianjige_config(saved)
         return {"ok": True, "settings": public_settings(saved), "rebuilt_messages": rebuilt}
 
     def schedule_templates_payload(self) -> dict:

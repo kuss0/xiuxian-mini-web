@@ -63,10 +63,23 @@
     container.appendChild(fragment);
   }
 
+  async function measurePerformance(label, func) {
+    const timer = window.performance || {};
+    const now = typeof timer.now === "function" ? () => timer.now() : () => Date.now();
+    const start = now();
+    await Promise.resolve().then(func);
+    const duration = now() - start;
+    if (window.MiniwebLogger?.debug) {
+      window.MiniwebLogger.debug("performance", label, duration);
+    }
+    return Math.max(0.001, duration);
+  }
+
   window.MiniwebPerformance = {
     debounce,
     throttle,
     rafThrottle,
     batchDomUpdate,
+    measurePerformance,
   };
 })();
