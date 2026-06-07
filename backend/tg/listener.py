@@ -4,6 +4,7 @@ import asyncio
 import os
 import sqlite3
 import threading
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import replace
 from datetime import timezone
 from typing import Protocol
@@ -104,7 +105,11 @@ class TelegramReadOnlyListener:
         if loop is None or client is None or status not in {"starting", "running"}:
             raise RuntimeError("listener 未在运行,无法复用其 Telegram client")
         future = asyncio.run_coroutine_threadsafe(coro_factory(client), loop)
-        return future.result(timeout=timeout)
+        try:
+            return future.result(timeout=timeout)
+        except FutureTimeoutError as exc:
+            future.cancel()
+            raise TimeoutError(f"Telegram client 查询超时({timeout:.0f}s)") from exc
 
     def submit_background(self, coro_factory):
         """提交一个不等结果的协程到 listener loop。

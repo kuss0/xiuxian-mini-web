@@ -1773,7 +1773,7 @@ class MiniWebServer:
             import asyncio
             return asyncio.run(self._send_as.resolve_entity(account, send_as_id))
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": str(exc) or exc.__class__.__name__}
 
     def login_start_payload(self) -> dict:
         try:
@@ -3076,7 +3076,7 @@ class MiniWebServer:
                 "expired": expired,
             }
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": str(exc) or exc.__class__.__name__}
 
     def schedule_sync_repair_payload(self, payload: dict) -> dict:
         """Repair local drift found by schedule sync.

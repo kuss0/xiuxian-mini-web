@@ -5780,6 +5780,33 @@ def test_schedule_sync_without_listener_returns_error(tmp_path):
     assert "采集" in result["error"]
 
 
+def test_schedule_sync_empty_exception_gets_actionable_error(tmp_path):
+    class FakeListenerManager:
+        def get_listener(self, local_id):
+            if local_id != "main":
+                return None
+
+            class FakeListener:
+                def submit(self, coro_factory, *, timeout=30.0):
+                    raise TimeoutError()
+
+            return FakeListener()
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_settings_payload({"target_chat": "-1001680975844"})
+    server.save_account_payload(
+        {"local_id": "main", "api_id": "123", "api_hash": "hash", "account_id": "12345"}
+    )
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+    server._listeners = FakeListenerManager()
+
+    result = server.schedule_sync_payload(12345)
+
+    assert result["ok"] is False
+    assert result["error"] == "TimeoutError"
+
+
 def test_schedule_sync_reconciles_with_local_records(tmp_path):
     """灌假 listener,模拟 TG 返回 3 条 scheduled,本地有 2 条(一条对得上、一条 TG 没了),
     sync 应正确分出 matched / orphans / lost。"""
