@@ -1431,6 +1431,33 @@ class MiniWebServer:
             return {"ok": False, "error": "store does not support schedule templates", "templates": []}
         return {"ok": True, "templates": self._store.list_schedule_templates()}
 
+    def schedule_bootstrap_payload(self, send_as_id_text: str = "") -> dict:
+        """Return the schedule modal's read-only startup data in one request."""
+        presets = self.schedule_presets_payload()
+        modules = self.schedule_modules_payload(send_as_id_text)
+        batches = self.schedule_list_payload()
+        templates = self.schedule_templates_payload()
+        errors = {
+            key: payload.get("error")
+            for key, payload in {
+                "presets": presets,
+                "modules": modules,
+                "batches": batches,
+                "templates": templates,
+            }.items()
+            if not payload.get("ok")
+        }
+        return {
+            "ok": not bool(errors),
+            "errors": errors,
+            "presets": presets.get("presets") or [],
+            "modules": modules.get("modules") or [],
+            "by_identity": modules.get("by_identity") or [],
+            "tianjige": modules.get("tianjige") or {},
+            "batches": batches.get("batches") or [],
+            "templates": templates.get("templates") or [],
+        }
+
     def schedule_template_save_payload(self, payload: dict) -> dict:
         if not hasattr(self._store, "save_schedule_templates"):
             return {"ok": False, "error": "store does not support schedule templates"}

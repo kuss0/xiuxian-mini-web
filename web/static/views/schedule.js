@@ -117,10 +117,10 @@
     root.querySelectorAll("[data-schedule-open]").forEach((button) => {
       button.addEventListener("click", async () => {
         try {
-          await Promise.all([
+          Promise.allSettled([
             deps.loadAccounts?.() || Promise.resolve(),
             deps.loadIdentities?.() || Promise.resolve(),
-          ]);
+          ]).catch(() => {});
           await openScheduleModal(deps);
         } catch (error) {
           deps.showError?.(error);
@@ -182,18 +182,52 @@
     return name ? `send_as ${name}` : "未绑定身份";
   }
 
+  function fallbackSchedulePresets() {
+    return [{
+      key: "custom",
+      label: "自定义",
+      description: "一条或多条命令 + 间隔 + 轮数,批量排进官方定时",
+      fields: ["command", "interval_sec", "count", "command_gap_sec"],
+      module_key: "",
+    }];
+  }
+
+  async function loadScheduleModalBootstrap(deps = {}) {
+    const state = scheduleState(deps);
+    try {
+      const payload = await fetchJson("/api/schedule/bootstrap");
+      return {
+        ok: payload.ok !== false,
+        warning: payload.ok === false ? "官方定时部分资料读取失败,已尽量展示可用数据。" : "",
+        presets: payload.presets || [],
+        modules: {
+          ok: true,
+          modules: payload.modules || [],
+          by_identity: payload.by_identity || [],
+          tianjige: payload.tianjige || {},
+        },
+        batches: payload.batches || [],
+        templates: payload.templates || [],
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        warning: `官方定时资料暂时读取失败: ${error.message || String(error)}。已显示本地缓存,稍后可再刷新。`,
+        presets: fallbackSchedulePresets(),
+        modules: { ok: false, modules: [], by_identity: [], tianjige: {} },
+        batches: state.scheduleBatches || [],
+        templates: [],
+      };
+    }
+  }
+
   async function openScheduleModal(deps = {}) {
     const state = scheduleState(deps);
-    const [presetsPayload, modulesPayload, batchesPayload, templatesPayload] = await Promise.all([
-      fetchJson("/api/schedule/presets"),
-      fetchJson("/api/schedule/modules"),
-      fetchJson("/api/schedule"),
-      fetchJson("/api/schedule/templates"),
-    ]);
-    const presets = presetsPayload.presets || [];
-    const scheduleModules = modulesPayload || { modules: [], by_identity: [] };
-    const batches = syncScheduleBatches(deps, batchesPayload);
-    const templates = templatesPayload.templates || [];
+    const bootstrap = await loadScheduleModalBootstrap(deps);
+    const presets = bootstrap.presets?.length ? bootstrap.presets : fallbackSchedulePresets();
+    const scheduleModules = bootstrap.modules || { modules: [], by_identity: [] };
+    const batches = syncScheduleBatches(deps, { batches: bootstrap.batches || [] });
+    const templates = bootstrap.templates || [];
     const identityOptions = (state.identities || [])
       .map((id) => {
         const label = `${id.label || id.username || id.send_as_id}｜send_as ${id.send_as_id}`;
@@ -207,149 +241,164 @@
     const dialog = openModal({
       title: "官方定时排班",
       body: `
-        <section class="modal-section">
-          <h4>模板复用</h4>
-          <p class="muted">把常用排班参数存成模板，后续一键套用后再微调即可。模板只存参数，不存具体锚点时间。</p>
-          <div class="form-grid">
-            <label class="span-2">
-              <span>模板名称</span>
-              <input id="scheduleTemplateName" placeholder="例如 深闭三天循环" />
-            </label>
-            <label class="span-2">
-              <span>已保存模板</span>
-              <select id="scheduleTemplateSelect">
-                <option value="">新建模板</option>
-                ${renderScheduleTemplateOptions(templates)}
-              </select>
-            </label>
-          </div>
-          <div class="form-actions">
-            <button type="button" id="scheduleTemplateLoadButton">套用模板</button>
-            <button type="button" id="scheduleTemplateSaveButton">保存当前为模板</button>
-            <button type="button" id="scheduleTemplateDeleteButton">删除模板</button>
-          </div>
-          <p class="modal-status-line info" id="scheduleTemplateStatus" hidden></p>
-        </section>
+        <div class="schedule-modal-grid">
+          <div class="schedule-modal-main">
+            <section class="modal-section">
+              <h4>模板复用</h4>
+              <p class="muted">把常用排班参数存成模板，后续一键套用后再微调即可。模板只存参数，不存具体锚点时间。</p>
+              <div class="form-grid">
+                <label class="span-2">
+                  <span>模板名称</span>
+                  <input id="scheduleTemplateName" placeholder="例如 深闭三天循环" />
+                </label>
+                <label class="span-2">
+                  <span>已保存模板</span>
+                  <select id="scheduleTemplateSelect">
+                    <option value="">新建模板</option>
+                    ${renderScheduleTemplateOptions(templates)}
+                  </select>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="button" id="scheduleTemplateLoadButton">套用模板</button>
+                <button type="button" id="scheduleTemplateSaveButton">保存当前为模板</button>
+                <button type="button" id="scheduleTemplateDeleteButton">删除模板</button>
+              </div>
+              <p class="modal-status-line info" id="scheduleTemplateStatus" hidden></p>
+            </section>
 
-        <section class="modal-section">
-          <h4>新建排班</h4>
-          <p class="muted">核心用法是填命令、间隔和次数,一次排进 Telegram 官方定时;预设只是快速填常用玩法。这里不会根据回复自动补发或追链。多选身份会一次为每个身份各起一批,按「错峰偏移 + 阶梯」自动错开。</p>
-          <form id="scheduleForm" class="settings-form">
-            <div class="form-grid">
-              <label class="span-2">
-                <span>身份(支持多选,Ctrl/⌘ 点击选多个)</span>
-                <select name="send_as_ids" multiple size="6" id="scheduleSendAsSelect">${identityOptions || '<option value="">没有可用身份</option>'}</select>
-                <small class="muted">已选 <span id="scheduleSendAsCount">0</span> 个</small>
-              </label>
-              <label>
-                <span>预设</span>
-                <select name="preset_key">${presetOptions}</select>
-              </label>
-              <label>
-                <span>状态机锚点来源</span>
-                <select name="auto_anchor_module" id="scheduleStateModuleSelect">
-                  <option value="">跟随预设 / 不使用</option>
-                  ${moduleOptions}
-                </select>
-                <small class="muted">状态机决定 next_at,定时只从这个起点排官方消息。</small>
-              </label>
-              <label>
-                <span>批量阶梯(每个身份递增分钟)</span>
-                <input name="offset_step_minutes" inputmode="numeric" value="5" placeholder="批量时每个身份 offset 递增,1 个就不生效" />
-              </label>
-              <label data-show-when="pet_name">
-                <span>法宝名</span>
-                <input name="pet_name" placeholder="留空表示不带名字" />
-              </label>
-              <label data-show-when="trigger_command">
-                <span>触发词(可选)</span>
-                <input name="trigger_command" placeholder="深闭默认「查看闭关」,留空走默认;其他 preset 留空 = 不发触发" />
-              </label>
-              <label data-show-when="horizon_days">
-                <span>排几天(1-7)</span>
-                <input name="horizon_days" inputmode="numeric" min="1" max="7" value="3" />
-              </label>
-              <label class="span-2" data-show-when="command">
-                <span>自定义命令</span>
-                <textarea name="command" rows="4" placeholder="每行一条命令；例如&#10;.宗门点卯&#10;.闯塔&#10;.天机代卜"></textarea>
-              </label>
-              <label data-show-when="interval_sec">
-                <span>间隔 / CD(秒)</span>
-                <input name="interval_sec" inputmode="numeric" value="3600" />
-              </label>
-              <label data-show-when="count">
-                <span>次数 / 轮数</span>
-                <input name="count" inputmode="numeric" value="3" />
-              </label>
-              <label data-show-when="command_gap_sec">
-                <span>同轮命令间隔(秒)</span>
-                <input name="command_gap_sec" inputmode="numeric" value="180" placeholder="多条自定义命令之间错开" />
-              </label>
-              <label>
-                <span>错峰偏移(分钟)</span>
-                <input name="offset_minutes" inputmode="numeric" value="0" placeholder="0 = 不偏" title="多账号同时建议各错开 3-15 分钟,避免天尊同一刻被多账号挤" />
-              </label>
-              <label class="span-2">
-                <span>锚点时间(留空 = 现在)</span>
-                <input name="anchor_at_text" type="datetime-local" />
-              </label>
-            </div>
-            <label class="toggle-row">
-              <input type="checkbox" name="auto_anchor" />
-              <span>自动锚点(取状态机 next_at 和手填锚点中较晚者)</span>
-            </label>
-            <label class="toggle-row">
-              <input type="checkbox" name="schedule_use_module_defaults" checked />
-              <span>套用状态机建议命令/间隔/参数</span>
-            </label>
-            <label class="toggle-row">
-              <input type="checkbox" name="schedule_semiauto" />
-              <span>白名单半自动(后端会拒绝未知、缺参数、阶段型和非白名单模块)</span>
-            </label>
-            <label class="toggle-row">
-              <input type="checkbox" name="dry_run" checked />
-              <span>仅预演(只在本地记录,不真正排到 Telegram)— 没登录或想试就开着</span>
-            </label>
-            <div class="form-actions">
-              <button type="button" id="scheduleApplyStateSuggestion">套用状态机建议</button>
-            </div>
-            <div id="scheduleStateHint" class="send-as-result" hidden></div>
-            <div class="form-actions">
-              <button type="button" data-schedule-action="preview">预览计划</button>
-              <button type="button" class="primary" data-schedule-action="create">创建</button>
-            </div>
-          </form>
-          <p class="modal-status-line info" id="scheduleStatus" hidden></p>
-          <div id="schedulePreview" class="send-as-result" hidden></div>
-        </section>
+            <section class="modal-section">
+              <h4>新建排班</h4>
+              <p class="muted">核心用法是填命令、间隔和次数,一次排进 Telegram 官方定时;预设只是快速填常用玩法。这里不会根据回复自动补发或追链。多选身份会一次为每个身份各起一批,按「错峰偏移 + 阶梯」自动错开。</p>
+              <form id="scheduleForm" class="settings-form">
+                <div class="form-grid">
+                  <label class="span-2">
+                    <span>身份(支持多选,Ctrl/⌘ 点击选多个)</span>
+                    <select name="send_as_ids" multiple size="6" id="scheduleSendAsSelect">${identityOptions || '<option value="">没有可用身份</option>'}</select>
+                    <small class="muted">已选 <span id="scheduleSendAsCount">0</span> 个</small>
+                  </label>
+                  <label>
+                    <span>预设</span>
+                    <select name="preset_key">${presetOptions}</select>
+                  </label>
+                  <label>
+                    <span>状态机锚点来源</span>
+                    <select name="auto_anchor_module" id="scheduleStateModuleSelect">
+                      <option value="">跟随预设 / 不使用</option>
+                      ${moduleOptions}
+                    </select>
+                    <small class="muted">状态机决定 next_at,定时只从这个起点排官方消息。</small>
+                  </label>
+                  <label>
+                    <span>批量阶梯(每个身份递增分钟)</span>
+                    <input name="offset_step_minutes" inputmode="numeric" value="5" placeholder="批量时每个身份 offset 递增,1 个就不生效" />
+                  </label>
+                  <label data-show-when="pet_name">
+                    <span>法宝名</span>
+                    <input name="pet_name" placeholder="留空表示不带名字" />
+                  </label>
+                  <label data-show-when="trigger_command">
+                    <span>触发词(可选)</span>
+                    <input name="trigger_command" placeholder="深闭默认「查看闭关」,留空走默认;其他 preset 留空 = 不发触发" />
+                  </label>
+                  <label data-show-when="horizon_days">
+                    <span>排几天(1-7)</span>
+                    <input name="horizon_days" inputmode="numeric" min="1" max="7" value="3" />
+                  </label>
+                  <label class="span-2" data-show-when="command">
+                    <span>自定义命令</span>
+                    <textarea name="command" rows="4" placeholder="每行一条命令；例如&#10;.宗门点卯&#10;.闯塔&#10;.天机代卜"></textarea>
+                  </label>
+                  <label data-show-when="interval_sec">
+                    <span>间隔 / CD(秒)</span>
+                    <input name="interval_sec" inputmode="numeric" value="3600" />
+                  </label>
+                  <label data-show-when="count">
+                    <span>次数 / 轮数</span>
+                    <input name="count" inputmode="numeric" value="3" />
+                  </label>
+                  <label data-show-when="command_gap_sec">
+                    <span>同轮命令间隔(秒)</span>
+                    <input name="command_gap_sec" inputmode="numeric" value="180" placeholder="多条自定义命令之间错开" />
+                  </label>
+                  <label>
+                    <span>错峰偏移(分钟)</span>
+                    <input name="offset_minutes" inputmode="numeric" value="0" placeholder="0 = 不偏" title="多账号同时建议各错开 3-15 分钟,避免天尊同一刻被多账号挤" />
+                  </label>
+                  <label class="span-2">
+                    <span>锚点时间(留空 = 现在)</span>
+                    <input name="anchor_at_text" type="datetime-local" />
+                  </label>
+                </div>
+                <label class="toggle-row">
+                  <input type="checkbox" name="auto_anchor" />
+                  <span>自动锚点(取状态机 next_at 和手填锚点中较晚者)</span>
+                </label>
+                <label class="toggle-row">
+                  <input type="checkbox" name="schedule_use_module_defaults" checked />
+                  <span>套用状态机建议命令/间隔/参数</span>
+                </label>
+                <label class="toggle-row">
+                  <input type="checkbox" name="schedule_semiauto" />
+                  <span>白名单半自动(后端会拒绝未知、缺参数、阶段型和非白名单模块)</span>
+                </label>
+                <label class="toggle-row">
+                  <input type="checkbox" name="dry_run" checked />
+                  <span>仅预演(只在本地记录,不真正排到 Telegram)— 没登录或想试就开着</span>
+                </label>
+                <div class="form-actions">
+                  <button type="button" id="scheduleApplyStateSuggestion">套用状态机建议</button>
+                </div>
+                <div id="scheduleStateHint" class="send-as-result" hidden></div>
+                <div class="form-actions">
+                  <button type="button" data-schedule-action="preview">预览计划</button>
+                  <button type="button" class="primary" data-schedule-action="create">创建</button>
+                </div>
+              </form>
+              <p class="modal-status-line info" id="scheduleStatus" hidden></p>
+              <div id="schedulePreview" class="send-as-result" hidden></div>
+            </section>
 
-        <section class="modal-section">
-          <h4>对账 Telegram 端</h4>
-          <p class="muted">拉 TG 的 GetScheduledHistory,跟本地批次对账,标出「TG 有 mini-web 没记录」(orphans)、「未来丢失」(lost) 和「已过期释放」(expired) 的项。</p>
-          <div class="form-grid">
-            <label class="span-2">
-              <span>对账身份</span>
-              <select id="scheduleSyncSelect">${identityOptions || '<option value="">没有可用身份</option>'}</select>
-            </label>
+            <section class="modal-section">
+              <h4>对账 Telegram 端</h4>
+              <p class="muted">拉 TG 的 GetScheduledHistory,跟本地批次对账,标出「TG 有 mini-web 没记录」(orphans)、「未来丢失」(lost) 和「已过期释放」(expired) 的项。</p>
+              <div class="form-grid">
+                <label class="span-2">
+                  <span>对账身份</span>
+                  <select id="scheduleSyncSelect">${identityOptions || '<option value="">没有可用身份</option>'}</select>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="button" id="scheduleSyncButton">拉 TG 状态对账</button>
+                <button type="button" id="scheduleSyncRepairButton">修复本地漂移</button>
+              </div>
+              <p class="modal-status-line info" id="scheduleSyncStatus" hidden></p>
+              <div id="scheduleSyncResult" class="send-as-result" hidden></div>
+            </section>
           </div>
-          <div class="form-actions">
-            <button type="button" id="scheduleSyncButton">拉 TG 状态对账</button>
-            <button type="button" id="scheduleSyncRepairButton">修复本地漂移</button>
-          </div>
-          <p class="modal-status-line info" id="scheduleSyncStatus" hidden></p>
-          <div id="scheduleSyncResult" class="send-as-result" hidden></div>
-        </section>
 
-        <section class="modal-section">
-          <h4>本地排班记录</h4>
-          <p class="muted">这些是 mini-web 自己存的批次。dry_run=False 那次会同时排到 Telegram;有 scheduled_msg_id 的就是真排上的。</p>
-          <div id="scheduleBatchList">${renderScheduleBatches(deps, batches)}</div>
-        </section>
+          <aside class="schedule-modal-records" aria-label="本地排班记录">
+            <section class="modal-section">
+              <h4>本地排班记录</h4>
+              <p class="muted">这些是 mini-web 自己存的批次。dry_run=False 那次会同时排到 Telegram;有 scheduled_msg_id 的就是真排上的。</p>
+              <div id="scheduleBatchList">${renderScheduleBatches(deps, batches)}</div>
+            </section>
+          </aside>
+        </div>
       `,
       footer: `<button type="button" data-modal-close>关闭</button>`,
     });
     if (!dialog) return;
+    dialog.classList.add("schedule-modal-dialog");
     bindScheduleModal(deps, dialog, presets, batches, templates, scheduleModules);
+    if (bootstrap.warning) {
+      const status = dialog.querySelector("#scheduleStatus");
+      if (status) {
+        status.hidden = false;
+        status.className = "modal-status-line warn";
+        status.textContent = bootstrap.warning;
+      }
+    }
   }
 
   function renderScheduleTemplateOptions(templates) {

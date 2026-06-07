@@ -651,7 +651,7 @@
   background: rgba(15, 22, 32, 0.55);
   display: grid;
   place-items: center;
-  z-index: 100;
+  z-index: 260;
   padding: 20px;
 }
 
@@ -744,6 +744,143 @@
 .modal-actions button:disabled {
   cursor: default;
   opacity: 0.55;
+}
+
+.modal-dialog.schedule-modal-dialog {
+  width: min(1180px, calc(100vw - 40px));
+  height: min(860px, calc(100dvh - 40px));
+  max-height: calc(100dvh - 40px);
+}
+
+.schedule-modal-dialog .modal-body {
+  display: block;
+  overflow: hidden;
+  padding: 0;
+}
+
+.schedule-modal-grid {
+  display: grid;
+  grid-template-columns: minmax(460px, 1fr) minmax(360px, 0.86fr);
+  min-height: 0;
+  height: 100%;
+}
+
+.schedule-modal-main,
+.schedule-modal-records {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 18px;
+}
+
+.schedule-modal-records {
+  border-left: 1px solid var(--line);
+  background: rgba(2, 6, 23, 0.20);
+}
+
+.schedule-modal-records .modal-section {
+  margin: 0;
+}
+
+.schedule-modal-records #scheduleBatchList {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.schedule-modal-records .account-row {
+  grid-template-columns: 10px minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  padding: 10px;
+}
+
+.schedule-modal-records .account-row-actions {
+  grid-column: 2;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.schedule-modal-records .schedule-item-list {
+  max-height: 230px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.schedule-modal-records .schedule-history-details .schedule-item-list {
+  max-height: 180px;
+}
+
+.schedule-modal-records .schedule-item-list li {
+  align-items: flex-start;
+}
+
+.schedule-modal-dialog .modal-actions {
+  padding: 10px 18px;
+}
+
+@media (max-width: 980px) {
+  .modal-dialog.schedule-modal-dialog {
+    width: min(760px, calc(100vw - 24px));
+  }
+
+  .schedule-modal-dialog .modal-body {
+    overflow: auto;
+  }
+
+  .schedule-modal-grid {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+    min-height: 100%;
+  }
+
+  .schedule-modal-main,
+  .schedule-modal-records {
+    overflow: visible;
+  }
+
+  .schedule-modal-records {
+    order: -1;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 520px) {
+  .modal-backdrop {
+    padding: 8px;
+  }
+
+  .modal-dialog.schedule-modal-dialog {
+    width: calc(100vw - 16px);
+    height: calc(100dvh - 16px);
+    max-height: calc(100dvh - 16px);
+  }
+
+  .schedule-modal-main,
+  .schedule-modal-records {
+    padding: 12px;
+  }
+
+  .schedule-modal-dialog .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .schedule-modal-dialog .span-2 {
+    grid-column: auto;
+  }
+
+  .schedule-modal-dialog .form-actions {
+    justify-content: stretch;
+    flex-wrap: wrap;
+  }
+
+  .schedule-modal-dialog .form-actions button {
+    flex: 1 1 auto;
+  }
 }
 
 .modal-section {
@@ -1997,4 +2134,3 @@
   padding: 6px 10px;
   font-size: 12px;
 }
-

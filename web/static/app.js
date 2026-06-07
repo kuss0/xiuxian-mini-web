@@ -3466,7 +3466,7 @@ outboxButton.addEventListener("click", async () => {
 scheduleButton.addEventListener("click", async () => {
   try {
     scheduleButton.closest("details")?.removeAttribute("open");
-    await Promise.all([loadAccounts(), loadIdentities()]);
+    Promise.allSettled([loadAccounts(), loadIdentities()]).catch(() => {});
     await openScheduleModal();
   } catch (error) {
     showError(error);

@@ -52,6 +52,7 @@ def build_get_routes(handlers: Mapping[str, Callable]) -> dict[str, Callable]:
         "/api/accounts/send-as-peers": handlers["_get_account_send_as_peers"],
         "/api/accounts/dialogs": handlers["_get_account_dialogs"],
         "/api/accounts/topics": handlers["_get_account_topics"],
+        "/api/schedule/bootstrap": handlers["_get_schedule_bootstrap"],
         "/api/schedule/presets": handlers["_get_schedule_presets"],
         "/api/schedule/modules": handlers["_get_schedule_modules"],
         "/api/schedule/templates": handlers["_get_schedule_templates"],

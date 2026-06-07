@@ -5489,6 +5489,19 @@ def test_schedule_presets_payload_lists_known_presets():
     assert "horizon_days" in by_key["custom"]["fields"]
 
 
+def test_schedule_bootstrap_payload_combines_modal_startup_data(tmp_path):
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "miniweb.db"))
+
+    payload = server.schedule_bootstrap_payload()
+
+    assert payload["ok"] is True
+    assert any(item["key"] == "custom" for item in payload["presets"])
+    assert isinstance(payload["modules"], list)
+    assert isinstance(payload["by_identity"], list)
+    assert isinstance(payload["batches"], list)
+    assert isinstance(payload["templates"], list)
+
+
 def test_schedule_preview_deep_retreat_returns_plan_items(tmp_path):
     server = MiniWebServer(store=SQLiteStore(tmp_path / "miniweb.db"))
     result = server.schedule_preview_payload({"preset_key": "deep_retreat", "horizon_days": 2})
@@ -5943,6 +5956,7 @@ def test_schedule_templates_roundtrip(tmp_path):
 
 def test_schedule_routes_are_wired():
     from backend.app import GET_ROUTES, POST_ROUTES
+    assert "/api/schedule/bootstrap" in GET_ROUTES
     assert "/api/schedule/presets" in GET_ROUTES
     assert "/api/schedule/modules" in GET_ROUTES
     assert "/api/schedule/templates" in GET_ROUTES
@@ -6256,11 +6270,21 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
 
     repo_root = Path(__file__).resolve().parents[1]
     schedule_js = (repo_root / "web/static/views/schedule.js").read_text(encoding="utf-8")
+    detail_css = (repo_root / "web/static/styles/pages/detail.css").read_text(encoding="utf-8")
 
     assert "/api/schedule/retry-failed" in POST_ROUTES
     assert "/api/schedule/activate-dry-run" in POST_ROUTES
     assert "/api/schedule/sync/repair" in POST_ROUTES
-    assert 'fetchJson("/api/schedule/modules")' in schedule_js
+    assert 'fetchJson("/api/schedule/bootstrap")' in schedule_js
+    assert "function fallbackSchedulePresets()" in schedule_js
+    assert "function loadScheduleModalBootstrap(deps = {})" in schedule_js
+    assert 'dialog.classList.add("schedule-modal-dialog");' in schedule_js
+    assert "schedule-modal-grid" in schedule_js
+    assert "schedule-modal-records" in schedule_js
+    assert ".modal-dialog.schedule-modal-dialog" in detail_css
+    assert "z-index: 260;" in detail_css
+    assert "grid-template-columns: minmax(460px, 1fr) minmax(360px, 0.86fr);" in detail_css
+    assert ".schedule-modal-records {\n    order: -1;" in detail_css
     assert 'name="auto_anchor_module"' in schedule_js
     assert 'name="schedule_semiauto"' in schedule_js
     assert 'name="schedule_use_module_defaults"' in schedule_js
