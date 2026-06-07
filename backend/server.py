@@ -1717,14 +1717,15 @@ class MiniWebServer:
             if listener is not None:
                 return listener.submit(lambda client: self._dialogs.list_dialogs_on_client(client))
             import asyncio
-            return asyncio.run(self._dialogs.list_dialogs(account))
+            return asyncio.run(self._dialogs.list_dialogs(self._account_runtime_config(account)))
         except Exception as exc:
             return {"ok": False, "error": str(exc), "dialogs": []}
 
     def account_topics_payload(self, local_id: str, chat: str | None = None) -> dict:
         try:
             account = self._require_account(local_id)
-            target = str(chat or account.get("target_chat") or "").strip()
+            account_config = self._account_runtime_config(account)
+            target = str(chat or account_config.get("target_chat") or "").strip()
             if not target:
                 return {"ok": False, "error": "请先选择目标群 / 频道", "topics": []}
             listener = self._listeners.get_listener(local_id)
@@ -1733,7 +1734,7 @@ class MiniWebServer:
                     lambda client: self._dialogs.list_topics_on_client(client, target)
                 )
             import asyncio
-            return asyncio.run(self._dialogs.list_topics(account, chat=target))
+            return asyncio.run(self._dialogs.list_topics(account_config, chat=target))
         except Exception as exc:
             return {"ok": False, "error": str(exc), "topics": []}
 
@@ -1744,7 +1745,8 @@ class MiniWebServer:
         send_as 列表。listener 在跑就复用 listener client,避免 session 锁。"""
         try:
             account = self._require_account(local_id)
-            chat = str(target_chat or account.get("target_chat") or "").strip()
+            account_config = self._account_runtime_config(account)
+            chat = str(target_chat or account_config.get("target_chat") or "").strip()
             if not chat:
                 return {"ok": False, "error": "请先在该账号上配置目标群,或在请求里指定 target_chat", "peers": []}
             listener = self._listeners.get_listener(local_id)
@@ -1753,7 +1755,7 @@ class MiniWebServer:
                     lambda client: self._send_as.list_send_as_peers_on_client(client, chat)
                 )
             import asyncio
-            return asyncio.run(self._send_as.list_send_as_peers(account, chat))
+            return asyncio.run(self._send_as.list_send_as_peers(account_config, chat))
         except Exception as exc:
             return {"ok": False, "error": str(exc), "peers": []}
 
@@ -1771,7 +1773,7 @@ class MiniWebServer:
                     lambda client: self._send_as.resolve_entity_on_client(client, send_as_id)
                 )
             import asyncio
-            return asyncio.run(self._send_as.resolve_entity(account, send_as_id))
+            return asyncio.run(self._send_as.resolve_entity(self._account_runtime_config(account), send_as_id))
         except Exception as exc:
             return {"ok": False, "error": str(exc) or exc.__class__.__name__}
 
@@ -1793,7 +1795,7 @@ class MiniWebServer:
     def account_login_start_payload(self, payload: dict) -> dict:
         try:
             account = self._require_account(payload.get("local_id"))
-            result = self._login.send_code(account, key=account["local_id"])
+            result = self._login.send_code(self._account_runtime_config(account), key=account["local_id"])
             account = self._store.save_account(
                 {
                     **account,
@@ -3198,7 +3200,8 @@ class MiniWebServer:
 
     def account_listener_start_payload(self, payload: dict) -> dict:
         account = self._require_account(payload.get("local_id"))
-        result = self._listeners.start(account["local_id"], account)
+        account_config = self._account_runtime_config(account)
+        result = self._listeners.start(account["local_id"], account_config)
         ok = result["status"] not in {"error"}
         if ok:
             self._mark_only_collector_account(account["local_id"])
@@ -3233,6 +3236,72 @@ class MiniWebServer:
         if account is None:
             raise ValueError("账号不存在，请先保存账号配置")
         return account
+
+    def _account_runtime_config(self, account: dict) -> dict:
+        """Return account config with global Telegram defaults applied.
+
+        Per-account API/proxy/target fields remain optional. Runtime clients
+        use the merged view, while the account record only stores explicit
+        overrides so shared API secrets are not copied into every account row.
+        """
+        try:
+            settings = self._store.get_settings()
+        except Exception:
+            settings = {}
+        merged = dict(account or {})
+        local_id = str(merged.get("local_id") or "")
+
+        api_sources = [settings]
+        try:
+            accounts = self._store.list_accounts()
+        except Exception:
+            accounts = []
+        logged_in_accounts = [
+            item for item in accounts
+            if str(item.get("local_id") or "") != local_id
+            and str(item.get("login_status") or "") == "done"
+        ]
+        other_accounts = [
+            item for item in accounts
+            if str(item.get("local_id") or "") != local_id
+            and str(item.get("login_status") or "") != "done"
+        ]
+        api_sources.extend(logged_in_accounts)
+        api_sources.extend(other_accounts)
+
+        if not (str(merged.get("api_id") or "").strip() and str(merged.get("api_hash") or "").strip()):
+            for source in api_sources:
+                if not (
+                    str((source or {}).get("api_id") or "").strip()
+                    and str((source or {}).get("api_hash") or "").strip()
+                ):
+                    continue
+                if not str(merged.get("api_id") or "").strip():
+                    merged["api_id"] = source.get("api_id")
+                if not str(merged.get("api_hash") or "").strip():
+                    merged["api_hash"] = source.get("api_hash")
+                break
+
+        for key in ("proxy_type", "proxy_host", "proxy_username", "proxy_password"):
+            if str(merged.get(key) or "").strip():
+                continue
+            for source in api_sources:
+                value = (source or {}).get(key)
+                if str(value or "").strip():
+                    merged[key] = value
+                    break
+
+        for key in ("target_chat", "target_topic_id"):
+            if str(merged.get(key) or "").strip():
+                continue
+            for source in [settings, *logged_in_accounts, *other_accounts]:
+                value = (source or {}).get(key)
+                if str(value or "").strip():
+                    merged[key] = value
+                    break
+        if not str(merged.get("session_name") or "").strip():
+            merged["session_name"] = merged.get("local_id") or "account"
+        return merged
 
     def _ensure_self_identity(self, account: dict) -> dict | None:
         """登录成功后,如果 account_id 已知,就 upsert 一条 send_as_id == account_id 的
@@ -3299,7 +3368,7 @@ class MiniWebServer:
             if current_status not in active_statuses:
                 continue
             account = self._store.get_account(local_id)
-            if account is None or not _account_can_collect(account):
+            if account is None or not _account_can_collect(self._account_runtime_config(account)):
                 self._listeners.stop(local_id)
 
         status = self._listeners.status()
@@ -3315,7 +3384,7 @@ class MiniWebServer:
         }
         self._sync_collector_statuses(running)
         for account in self._collector_candidates(skip_local_ids=failed_collectors):
-            result = self._listeners.start(account["local_id"], account)
+            result = self._listeners.start(account["local_id"], self._account_runtime_config(account))
             ok = result["status"] not in {"error"}
             account = self._store.save_account(
                 {
@@ -3359,7 +3428,7 @@ class MiniWebServer:
                 continue
             if not account.get("collector_enabled", True):
                 continue
-            if not _account_can_collect(account):
+            if not _account_can_collect(self._account_runtime_config(account)):
                 continue
             candidates.append(account)
         return sorted(

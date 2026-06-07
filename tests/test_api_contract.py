@@ -1258,6 +1258,10 @@ def test_account_management_view_module_keeps_api_orchestration_in_app():
         'data-listen-select="target_topic_id"',
         'id="logoutAccountSelect"',
         'id="logoutBoundIdentities"',
+        "默认复用已有 API",
+        "默认复用全局 API",
+        "默认复用已配置账号的 Telegram API",
+        "默认复用全局 API Hash",
     ]
     forbidden_app_fragments = [
         "const savedSecrets = acc.saved_secrets || {}",
@@ -3582,6 +3586,117 @@ def test_account_save_redacts_and_preserves_existing_secret(tmp_path):
     assert saved["label"] == "主号"
     assert saved["api_hash"] == "secret-hash"
     assert saved["proxy_password"] == "proxy-secret"
+
+
+def test_account_login_start_uses_global_api_defaults_without_persisting_them(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_settings(
+        {
+            "api_id": "98765",
+            "api_hash": "global-api-hash",
+            "proxy_type": "http",
+            "proxy_host": "127.0.0.1:7890",
+        }
+    )
+    server = MiniWebServer(store=store)
+    server.save_account_payload({"local_id": "main", "phone": "+8613800138000"})
+    captured = {}
+
+    class FakeLogin:
+        def send_code(self, settings, key="default"):
+            captured.update(settings)
+            captured["key"] = key
+            return {"status": "waiting_code", "message": "sent"}
+
+    server._login = FakeLogin()
+
+    result = server.account_login_start_payload({"local_id": "main"})
+
+    assert result["ok"] is True
+    assert captured["key"] == "main"
+    assert captured["api_id"] == "98765"
+    assert captured["api_hash"] == "global-api-hash"
+    assert captured["proxy_type"] == "http"
+    assert captured["proxy_host"] == "127.0.0.1:7890"
+    saved = store.get_account("main")
+    assert saved["api_id"] == ""
+    assert saved["api_hash"] == ""
+
+
+def test_account_login_start_can_reuse_logged_in_account_api_defaults(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_account_payload(
+        {
+            "local_id": "main",
+            "phone": "+8613800138000",
+            "api_id": "24680",
+            "api_hash": "main-api-hash",
+            "account_id": "12345",
+            "login_status": "done",
+        }
+    )
+    server.save_account_payload({"local_id": "alt", "phone": "+8613800138001"})
+    captured = {}
+
+    class FakeLogin:
+        def send_code(self, settings, key="default"):
+            captured.update(settings)
+            captured["key"] = key
+            return {"status": "waiting_code", "message": "sent"}
+
+    server._login = FakeLogin()
+
+    result = server.account_login_start_payload({"local_id": "alt"})
+
+    assert result["ok"] is True
+    assert captured["key"] == "alt"
+    assert captured["api_id"] == "24680"
+    assert captured["api_hash"] == "main-api-hash"
+    saved = store.get_account("alt")
+    assert saved["api_id"] == ""
+    assert saved["api_hash"] == ""
+
+
+def test_account_listener_start_uses_global_api_and_target_defaults(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_settings(
+        {
+            "api_id": "98765",
+            "api_hash": "global-api-hash",
+            "target_chat": "-1001680975844",
+        }
+    )
+    server = MiniWebServer(store=store)
+    server.save_account_payload(
+        {
+            "local_id": "main",
+            "phone": "+8613800138000",
+            "account_id": "12345",
+            "login_status": "done",
+        }
+    )
+    captured = {}
+
+    class FakeListeners:
+        def start(self, local_id, settings):
+            captured.update(settings)
+            captured["local_id_arg"] = local_id
+            return {"status": "running", "message": "ok"}
+
+    server._listeners = FakeListeners()
+
+    result = server.account_listener_start_payload({"local_id": "main"})
+
+    assert result["ok"] is True
+    assert captured["local_id_arg"] == "main"
+    assert captured["api_id"] == "98765"
+    assert captured["api_hash"] == "global-api-hash"
+    assert captured["target_chat"] == "-1001680975844"
+    saved = store.get_account("main")
+    assert saved["api_id"] == ""
+    assert saved["api_hash"] == ""
+    assert saved["target_chat"] == ""
 
 
 def test_account_limit_uses_normalized_identity(tmp_path, monkeypatch):

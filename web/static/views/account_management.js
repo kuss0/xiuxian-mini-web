@@ -13,6 +13,10 @@
     const cfg = settings || {};
     const state = modalState || {};
     const savedSecrets = acc.saved_secrets || {};
+    const globalSecrets = cfg.saved_secrets || {};
+    const globalApiHint = cfg.api_id && globalSecrets.api_hash
+      ? `默认复用全局 Telegram API (${cfg.api_id})`
+      : "默认复用已配置账号的 Telegram API；没有可复用配置时才需要在这里填写";
     const accountSummaryLine = acc.account_id
       ? `<p class="muted">account_id ${escapeHtml(acc.account_id)}｜session ${escapeHtml(acc.session_name || acc.local_id || "未生成")}</p>`
       : "";
@@ -40,8 +44,9 @@
 
         <section class="modal-section">
           <details ${acc.api_id || acc.proxy_type || acc.session_name ? "open" : ""}>
-            <summary>高级 / 单账号覆盖（可选,通常不用填）</summary>
+            <summary>高级 / 单账号覆盖（可选,默认复用已有 API）</summary>
             <div>
+              <p class="muted">${escapeHtml(globalApiHint)}</p>
               <div class="form-grid">
                 <label>
                   <span>session 名称</span>
@@ -53,11 +58,11 @@
                 </label>
                 <label>
                   <span>API ID</span>
-                  ${renderInput("api_id", acc.api_id || "", "Telegram API ID", "text", 'inputmode="numeric"')}
+                  ${renderInput("api_id", acc.api_id || "", cfg.api_id ? `默认 ${cfg.api_id}` : "Telegram API ID", "text", 'inputmode="numeric"')}
                 </label>
                 <label>
                   <span>API Hash</span>
-                  ${renderInput("api_hash", "", savedSecrets.api_hash ? "已保存,留空不变" : "Telegram API Hash", "text", 'autocomplete="off"')}
+                  ${renderInput("api_hash", "", savedSecrets.api_hash ? "已保存,留空不变" : (globalSecrets.api_hash ? "默认复用全局 API Hash" : "Telegram API Hash"), "text", 'autocomplete="off"')}
                 </label>
                 <label>
                   <span>代理类型</span>
