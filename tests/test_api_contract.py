@@ -388,6 +388,11 @@ def test_identity_status_view_module_keeps_shared_helpers_and_composer_fill_cont
         "function identityModuleView(deps = {}, spec, item)",
         "function identityStatusFlatSpecs()",
         "function tickIdentityStatusCards(deps = {})",
+        '{ key: "wendao", skill: "wendao" }',
+        '{ key: "yindao", skill: "yindao" }',
+        '{ key: "search_node", skill: "node_search" }',
+        'sourceKind: String(item.source_message_id || "").startsWith("tianjige:") ? "tianjige" : "message"',
+        'row.sourceKind === "tianjige" ? \'<em>API</em>\'',
         "window.MiniwebViews.identityStatus = {",
         "IDENTITY_STATUS_GROUPS,",
         "openIdentityStatusModal,",
@@ -1823,6 +1828,9 @@ def test_schedule_manual_required_details_persist_in_status_line():
     assert "(result?.results || []).forEach(push);" in schedule_js
     assert "function scheduleStatusWithManualMessages(baseText, manualMessages)" in schedule_js
     assert 'return `${baseText || "官方定时需要手动处理"}\\n需手动处理 ${messages.length} 条:\\n${detail}`;' in schedule_js
+    assert "tianjige.profile_available" in schedule_js
+    assert "资料已刷新" in schedule_js
+    assert "profile_keys.slice(0, 6)" in schedule_js
 
     create_start = schedule_js.index('if (action === "create")')
     sync_start = schedule_js.index("if (syncButton && syncSelect)", create_start)
@@ -6816,6 +6824,16 @@ def test_small_world_module_records_extended_panel_fields_and_manifest_cd():
         ctx,
         state,
     )
+    assert module.resolve_target(
+        _evt(
+            id="e3",
+            msg_id=393,
+            text="凡间方才承受神谕，需再等待 12分钟 后方可显灵。",
+            sender_id=-1003983937918,
+            reply_to_msg_id=390,
+        ),
+        ctx,
+    ) == 12345
     assert cd["manifest_wait_until"] == ctx.now + 12 * 60
     assert "人口 12345/20000" in module.status_summary(cd, now=ctx.now)["text"]
 

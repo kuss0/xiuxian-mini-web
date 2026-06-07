@@ -2115,6 +2115,7 @@ class MiniWebServer:
         by_identity: list[dict] = []
         for sid in sorted(set(target_ids)):
             records = self._store.list_module_states(send_as_id=sid)
+            profile_state = self._tianjige_profile_state(sid)
             items = []
             for record in records:
                 key = str(record.get("module_key") or "")
@@ -2128,7 +2129,7 @@ class MiniWebServer:
                         send_as_id=sid,
                         now=now,
                         tianjige_status=tianjige_status,
-                        tianjige_profile=self._tianjige_profile_state(sid),
+                        tianjige_profile=profile_state,
                     )
                 )
             by_identity.append({

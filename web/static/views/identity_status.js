@@ -66,11 +66,14 @@
     },
     {
       key: "taiyi",
-      title: "太一",
-      hint: "太一周期用于引道 / 搜寻节点的手动判断。",
+      title: "太一 / 问道",
+      hint: "问道、引道、搜寻节点按真实回复分别观测；太一周期仅保留旧状态兼容。",
       query: "taiyi",
       modules: [
-        { key: "taiyi_cycle", skill: "yindao", extraSkills: ["node_search"] },
+        { key: "wendao", skill: "wendao" },
+        { key: "yindao", skill: "yindao" },
+        { key: "search_node", skill: "node_search" },
+        { key: "taiyi_cycle", label: "太一周期(兼容)", icon: "•" },
       ],
     },
   ];
@@ -158,6 +161,7 @@
         key: item.key,
         value: item.value,
         sourceMessageId: item.source_message_id || "",
+        sourceKind: String(item.source_message_id || "").startsWith("tianjige:") ? "tianjige" : "message",
         updatedAt: item.updated_at || "",
       }));
   }
@@ -182,7 +186,7 @@
               <span>${escapeHtml(row.key)}</span>
               <strong>${escapeHtml(deps.formatFieldValue?.(row.value) || "")}</strong>
               <small>${escapeHtml(deps.auditTimeLabel?.(row.updatedAt) || "未知时间")}</small>
-              ${row.sourceMessageId ? `
+              ${row.sourceKind === "tianjige" ? '<em>API</em>' : row.sourceMessageId ? `
                 <button type="button" data-identity-source-jump="${escapeAttr(row.sourceMessageId)}">
                   来源
                 </button>

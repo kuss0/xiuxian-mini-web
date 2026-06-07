@@ -527,7 +527,10 @@
     const warnings = source.warnings || [];
     const tianjige = source.tianjige || null;
     const tianjigeText = tianjige
-      ? `天机阁 API ${tianjige.enabled ? (tianjige.mode || "on") : "off"}｜${tianjige.authenticated ? "已认证" : "未认证"}${tianjige.message ? `｜${tianjige.message}` : ""}`
+      ? `天机阁 API ${tianjige.enabled ? (tianjige.mode || "on") : "off"}｜${tianjige.authenticated ? "已认证" : "未认证"}${tianjige.profile_available ? `｜资料已刷新 ${tianjige.profile_updated_at || ""}` : "｜资料未刷新"}${tianjige.message ? `｜${tianjige.message}` : ""}`
+      : "";
+    const tianjigeKeys = tianjige?.profile_keys?.length
+      ? `<small>${escapeHtml(tianjige.profile_keys.slice(0, 6).join("、"))}</small>`
       : "";
     const warnHtml = warnings.length
       ? `<ul class="send-as-result-list">${warnings.map((w) => `<li class="${w.severity === "risk" ? "warn" : "ok"}"><small>${escapeHtml(w.message || w.code || "")}</small></li>`).join("")}</ul>`
@@ -540,7 +543,7 @@
         <small>${escapeHtml(source.summary?.text || "")}</small>
       </p>
       <p class="muted">起点 ${escapeHtml(source.next_at ? "状态机 next_at" : "未确定")}｜置信 ${escapeHtml(source.confidence || "unknown")}｜建议 <code>${escapeHtml(command)}</code>${suggestion.interval_sec ? `｜间隔 ${escapeHtml(String(suggestion.interval_sec))}s` : ""}</p>
-      ${tianjigeText ? `<p class="muted">${escapeHtml(tianjigeText)}</p>` : ""}
+      ${tianjigeText ? `<p class="muted">${escapeHtml(tianjigeText)} ${tianjigeKeys}</p>` : ""}
       ${warnHtml}
     `;
   }
