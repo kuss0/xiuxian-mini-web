@@ -66,6 +66,8 @@ ACCOUNT_SECRET_KEYS = {"api_hash", "proxy_password"}
 RESOURCE_STATS_SCHEMA_VERSION = 8
 INVENTORY_SCHEMA_VERSION = 5
 INVENTORY_LEDGER_SCHEMA_VERSION = 2
+MODULE_STATE_BACKFILL_VERSION = 2
+MODULE_STATE_BACKFILL_KEYS = ("small_world", "wendao", "yindao", "search_node")
 DUNGEON_CONTEXT_SCAN_LIMIT = 2500
 RESOURCE_BASIC_NAMES = ("修为", "贡献", "灵石")
 RESOURCE_RARE_NAMES = (
@@ -103,6 +105,10 @@ RESOURCE_RARE_NAMES = (
     "碧鸠毒囊",
     "紫铖兜图谱",
 )
+
+
+def _module_state_backfill_marker_key(send_as_id: int) -> str:
+    return f"module_state_backfill_v{MODULE_STATE_BACKFILL_VERSION}_identity_{int(send_as_id)}"
 
 
 class SQLiteStore:
@@ -314,6 +320,7 @@ class SQLiteStore:
         if count:
             self.backfill_state_patches_if_empty()
             self.backfill_module_states_if_empty()
+            self.backfill_missing_module_states_if_needed()
             return
 
     def cleanup_seed_samples(self) -> int:
@@ -494,6 +501,178 @@ class SQLiteStore:
             self.ingest_event(event)
             count += 1
         return count
+
+    def backfill_missing_module_states_if_needed(
+        self,
+        send_as_id: int | str | None = None,
+        *,
+        force: bool = False,
+    ) -> dict[str, object]:
+        """Targeted historical observe for modules added after the first backfill.
+
+        The original full backfill only runs when identity_module_state is empty.
+        When new observe-only modules are introduced later, old bot replies are
+        already in raw_messages but the table is not empty anymore.  This pass
+        replays only replies whose parent command can affect the new modules,
+        and only through MessagePipeline.observe_event() so cards/resources are
+        not rewritten.
+        """
+        target_keys = tuple(MODULE_STATE_BACKFILL_KEYS)
+        if send_as_id is None:
+            target_sids = [int(sid) for sid in self._collect_my_identities() if int(sid or 0)]
+        else:
+            sid = _coerce_non_zero_int(send_as_id)
+            target_sids = [sid] if sid else []
+        target_sids = sorted(set(target_sids))
+        if not target_sids:
+            return {"events": 0, "states": 0, "modules": [], "identities": [], "skipped": 0}
+
+        processed_sids: list[int] = []
+        missing_union: set[str] = set()
+        skipped = 0
+        with self._connect() as conn:
+            for sid in target_sids:
+                marker_row = conn.execute(
+                    "SELECT value_json FROM settings WHERE key=?",
+                    (_module_state_backfill_marker_key(sid),),
+                ).fetchone()
+                try:
+                    marker_version = int(json.loads(marker_row[0])) if marker_row else 0
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    marker_version = 0
+                if marker_version >= MODULE_STATE_BACKFILL_VERSION and not force:
+                    skipped += 1
+                    continue
+                existing_keys = {
+                    str(row[0] or "")
+                    for row in conn.execute(
+                        "SELECT DISTINCT module_key FROM identity_module_state WHERE send_as_id=?",
+                        (sid,),
+                    ).fetchall()
+                }
+                missing = [key for key in target_keys if key not in existing_keys]
+                if missing:
+                    missing_union.update(missing)
+                    processed_sids.append(sid)
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO settings(key, value_json)
+                        VALUES(?, ?)
+                        ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json
+                        """,
+                        (
+                            _module_state_backfill_marker_key(sid),
+                            json.dumps(MODULE_STATE_BACKFILL_VERSION),
+                        ),
+                    )
+            if not processed_sids:
+                return {
+                    "events": 0,
+                    "states": 0,
+                    "modules": [],
+                    "identities": [],
+                    "skipped": skipped,
+                }
+            sid_placeholders = ",".join("?" for _ in processed_sids)
+            key_placeholders = ",".join("?" for _ in target_keys)
+            before_count = conn.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM identity_module_state
+                WHERE send_as_id IN ({sid_placeholders})
+                  AND module_key IN ({key_placeholders})
+                """,
+                (*processed_sids, *target_keys),
+            ).fetchone()[0]
+            rows = []
+            for sid in processed_sids:
+                rows.extend(
+                    conn.execute(
+                        """
+                        SELECT rm.id, rm.chat_id, rm.msg_id, rm.text, rm.source, rm.date,
+                               rm.sender_id, rm.reply_to_msg_id, rm.top_msg_id,
+                               rm.mentions_json, rm.sender_is_bot,
+                               rm.edited_at, rm.deleted_at, rm.media_kind, rm.media_meta_json
+                        FROM raw_messages rm
+                        JOIN raw_messages parent
+                          ON parent.chat_id=rm.chat_id
+                         AND parent.msg_id=rm.reply_to_msg_id
+                        WHERE rm.reply_to_msg_id IS NOT NULL
+                          AND parent.sender_id=?
+                          AND (
+                            parent.text = '.问道'
+                            OR parent.text = '.搜寻节点'
+                            OR parent.text LIKE '.引道%'
+                            OR parent.text LIKE '.定星%'
+                            OR parent.text LIKE '.小世界%'
+                            OR parent.text LIKE '.收割香火%'
+                            OR parent.text LIKE '.神识淬炼%'
+                            OR parent.text LIKE '.神迹%'
+                            OR parent.text LIKE '.显灵%'
+                          )
+                        ORDER BY rm.rowid ASC
+                        """,
+                        (sid,),
+                    ).fetchall()
+                )
+        events = 0
+        for row in rows:
+            event = RawMessageEvent(
+                id=row[0],
+                chat_id=int(row[1]),
+                msg_id=int(row[2]),
+                text=row[3],
+                source=row[4],
+                date=row[5],
+                sender_id=row[6],
+                reply_to_msg_id=row[7],
+                top_msg_id=row[8],
+                mentions=tuple(json.loads(row[9] or "[]")),
+                sender_is_bot=bool(row[10]),
+                edited_at=row[11],
+                deleted_at=row[12],
+                media_kind=row[13],
+                media_meta=(json.loads(row[14]) if row[14] else None),
+            )
+            observed_dt = _parse_message_dt(event.date)
+            self._pipeline.observe_event(
+                event,
+                observed_at=observed_dt.timestamp() if observed_dt else None,
+                force=True,
+            )
+            events += 1
+        with self._connect() as conn:
+            sid_placeholders = ",".join("?" for _ in processed_sids)
+            key_placeholders = ",".join("?" for _ in target_keys)
+            after_count = conn.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM identity_module_state
+                WHERE send_as_id IN ({sid_placeholders})
+                  AND module_key IN ({key_placeholders})
+                """,
+                (*processed_sids, *target_keys),
+            ).fetchone()[0]
+            for sid in processed_sids:
+                conn.execute(
+                    """
+                    INSERT INTO settings(key, value_json)
+                    VALUES(?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json
+                    """,
+                    (
+                        _module_state_backfill_marker_key(sid),
+                        json.dumps(MODULE_STATE_BACKFILL_VERSION),
+                    ),
+                )
+        return {
+            "events": events,
+            "states": max(0, int(after_count or 0) - int(before_count or 0)),
+            "modules": sorted(missing_union),
+            "identities": processed_sids,
+            "skipped": skipped,
+        }
 
     def backfill_resource_records_if_needed(self) -> dict[str, int]:
         """资源统计表首次启用/升级时,从历史消息箱补一次。

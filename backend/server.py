@@ -344,6 +344,14 @@ class MiniWebServer:
             backfilled = sqlite_store.backfill_module_states_if_empty()
             if backfilled:
                 print(f"[mini-web] 状态机历史 backfill: 重放 {backfilled} 条 raw_messages")
+            missing_module_backfill = sqlite_store.backfill_missing_module_states_if_needed()
+            if missing_module_backfill.get("events") or missing_module_backfill.get("states"):
+                print(
+                    "[mini-web] 新增状态机历史 backfill: "
+                    f"候选 {missing_module_backfill.get('events', 0)} 条, "
+                    f"新增/更新 {missing_module_backfill.get('states', 0)} 个状态, "
+                    f"模块 {','.join(missing_module_backfill.get('modules') or [])}"
+                )
             resource_backfilled = sqlite_store.backfill_resource_records_if_needed()
             if resource_backfilled.get("events") or resource_backfilled.get("deltas"):
                 print(
@@ -1734,6 +1742,11 @@ class MiniWebServer:
         if account_local_id and self._store.get_account(account_local_id) is None:
             raise ValueError("绑定账号不存在，请先保存 Telegram 账号")
         identity = self._store.save_identity({**payload, "send_as_id": send_as_id})
+        if hasattr(self._store, "backfill_missing_module_states_if_needed"):
+            try:
+                self._store.backfill_missing_module_states_if_needed(send_as_id)
+            except Exception as exc:
+                print(f"[mini-web] identity {send_as_id} 状态机补采集失败: {exc}")
         if _username_changed(current, identity):
             self._reclassify_message_filters()
         return {"ok": True, "identity": public_identity(identity)}

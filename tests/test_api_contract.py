@@ -7235,6 +7235,140 @@ def test_backfill_module_states_noop_when_table_nonempty(tmp_path):
     assert store.backfill_module_states_if_empty() == 0
 
 
+def test_backfill_missing_module_states_replays_new_module_candidates(tmp_path):
+    import json as _json
+    from datetime import datetime, timezone
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_settings({"game_bot_ids": [-1003983937918]})
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+    store.save_module_state(12345, "deep_retreat", {"phase": "running"}, source_message_id="sentinel")
+    with store._connect() as conn:
+        for mid, sid, reply_to, text in [
+            (100, 12345, None, ".问道"),
+            (101, -1003983937918, 100, "【问道得宝】\n修为增加了 100 点\n- 【大衍诀残篇·控傀】 x 1"),
+        ]:
+            conn.execute(
+                """
+                INSERT INTO raw_messages(id, chat_id, msg_id, text, source, date,
+                    sender_id, reply_to_msg_id, top_msg_id, mentions_json, sender_is_bot)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"raw-new-{mid}",
+                    -1001680975844,
+                    mid,
+                    text,
+                    "",
+                    "2026-06-07T00:00:00Z",
+                    sid,
+                    reply_to,
+                    None,
+                    _json.dumps([]),
+                    int(sid < 0),
+                ),
+            )
+
+    assert store.backfill_module_states_if_empty() == 0
+    result = store.backfill_missing_module_states_if_needed()
+    record = store.get_module_state(12345, "wendao")
+
+    assert result["events"] == 1
+    assert result["states"] >= 1
+    assert "wendao" in result["modules"]
+    assert record is not None
+    assert record["state"]["last_status"] == "success"
+    assert record["state"]["reward_items"]["大衍诀残篇·控傀"] == 1
+    expected_at = datetime(2026, 6, 7, tzinfo=timezone.utc).timestamp()
+    assert record["state"]["last_success_at"] == expected_at
+    assert record["state"]["cooldown_until"] == expected_at + 12 * 3600
+    assert store.backfill_missing_module_states_if_needed()["events"] == 0
+
+
+def test_identity_save_backfill_ignores_legacy_global_module_marker(tmp_path):
+    import json as _json
+    from datetime import datetime, timezone
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_settings({"game_bot_ids": [-1003983937918]})
+    store.save_module_state(11111, "deep_retreat", {"phase": "running"}, source_message_id="sentinel")
+    with store._connect() as conn:
+        conn.execute(
+            "INSERT INTO settings(key, value_json) VALUES(?, ?)",
+            ("module_state_backfill_version", _json.dumps(2)),
+        )
+        for mid, sid, reply_to, text in [
+            (200, 24680, None, ".问道"),
+            (201, -1003983937918, 200, "【问道得宝】\n修为增加了 200 点\n- 【大衍诀残篇·控傀】 x 1"),
+        ]:
+            conn.execute(
+                """
+                INSERT INTO raw_messages(id, chat_id, msg_id, text, source, date,
+                    sender_id, reply_to_msg_id, top_msg_id, mentions_json, sender_is_bot)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"raw-late-{mid}",
+                    -1001680975844,
+                    mid,
+                    text,
+                    "",
+                    "2026-06-07T01:00:00Z",
+                    sid,
+                    reply_to,
+                    None,
+                    _json.dumps([]),
+                    int(sid < 0),
+                ),
+            )
+
+    server = MiniWebServer(store=store)
+    server.save_identity_payload({"send_as_id": "24680", "label": "late"})
+    record = store.get_module_state(24680, "wendao")
+
+    assert record is not None
+    assert record["state"]["last_status"] == "success"
+    expected_at = datetime(2026, 6, 7, 1, tzinfo=timezone.utc).timestamp()
+    assert record["state"]["last_success_at"] == expected_at
+
+
+def test_identity_save_backfill_force_observes_cached_raw_message(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_settings({"game_bot_ids": [-1003983937918]})
+    store.ingest_event(
+        RawMessageEvent(
+            id="raw-cache-parent",
+            chat_id=-1001680975844,
+            msg_id=300,
+            text=".问道",
+            source="",
+            date="2026-06-07T02:00:00Z",
+            sender_id=13579,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="raw-cache-reply",
+            chat_id=-1001680975844,
+            msg_id=301,
+            text="【问道得宝】\n修为增加了 300 点\n- 【大衍诀残篇·控傀】 x 1",
+            source="",
+            date="2026-06-07T02:00:00Z",
+            sender_id=-1003983937918,
+            reply_to_msg_id=300,
+        )
+    )
+    assert store.get_module_state(13579, "wendao") is None
+
+    server = MiniWebServer(store=store)
+    server.save_identity_payload({"send_as_id": "13579", "label": "cached"})
+    record = store.get_module_state(13579, "wendao")
+
+    assert record is not None
+    assert record["state"]["last_status"] == "success"
+    assert record["state"]["reward_items"]["大衍诀残篇·控傀"] == 1
+
+
 def test_schedule_build_plan_auto_anchor_first_due_lands_on_cooldown_until():
     """auto_anchor 推算的下次可用时间是 cooldown_until。
     第一条 plan(trigger 词)应该落在 cooldown_until + 触发偏移(60-120s + jitter),

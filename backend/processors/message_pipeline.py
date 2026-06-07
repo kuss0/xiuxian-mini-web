@@ -98,6 +98,16 @@ class MessagePipeline:
         self._maybe_observe(event)
         return enriched
 
+    def observe_event(
+        self,
+        event: RawMessageEvent,
+        *,
+        observed_at: float | None = None,
+        force: bool = False,
+    ) -> None:
+        """Run only state-machine observation for historical targeted backfills."""
+        self._maybe_observe(event, observed_at=observed_at, force=force)
+
     def _gc_observe_cache(self, now: float) -> None:
         if len(self._observe_cache) < _OBSERVE_CACHE_MAX:
             # 按 max 容量做被动 GC,够用且代价低
@@ -111,7 +121,13 @@ class MessagePipeline:
             for k, _ in items[: _OBSERVE_CACHE_MAX // 2]:
                 self._observe_cache.pop(k, None)
 
-    def _maybe_observe(self, event: RawMessageEvent) -> None:
+    def _maybe_observe(
+        self,
+        event: RawMessageEvent,
+        *,
+        observed_at: float | None = None,
+        force: bool = False,
+    ) -> None:
         """跑玩法 module 的 observe;失败静默,不影响 parser 落库。"""
         if (
             self._module_registry is None
@@ -123,13 +139,13 @@ class MessagePipeline:
         # 会反复送同一条进来)。text_hash 是 hash(text or "") — 编辑了文字才重跑。
         key = (int(event.chat_id or 0), int(event.msg_id or 0))
         text_hash = hash(event.text or "")
+        wall_now = time.time()
         if key[0] and key[1]:
-            now = time.time()
-            self._gc_observe_cache(now)
+            self._gc_observe_cache(wall_now)
             prev = self._observe_cache.get(key)
-            if prev and prev[0] == text_hash and prev[1] > now:
+            if not force and prev and prev[0] == text_hash and prev[1] > wall_now:
                 return
-            self._observe_cache[key] = (text_hash, now + _OBSERVE_CACHE_TTL_SEC)
+            self._observe_cache[key] = (text_hash, wall_now + _OBSERVE_CACHE_TTL_SEC)
         try:
             from backend.identity_state import ObserveContext, classify_sender
         except Exception:
@@ -156,7 +172,7 @@ class MessagePipeline:
             my_identities=my_ids,
             game_bot_ids=bot_ids,
             settings=settings,
-            now=time.time(),
+            now=float(observed_at or wall_now),
         )
         try:
             self._module_registry.observe_all(
