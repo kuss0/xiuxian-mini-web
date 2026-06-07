@@ -23,6 +23,11 @@ from backend.external.tianjige import (
     tianjige_inventory_items,
     tianjige_profile_patches,
 )
+from backend.identity_state.scheduling import (
+    apply_schedule_contract_defaults,
+    build_schedule_state_contract,
+    schedule_hint,
+)
 from backend.outbox import OutboxPlanner
 from backend.outbox.schedule import (
     MAX_SCHEDULED_MESSAGES_PER_IDENTITY,
@@ -1873,8 +1878,124 @@ class MiniWebServer:
         except Exception:
             return None
 
+    def _schedule_state_contract(self, send_as_id: int, module_key: str) -> dict | None:
+        registry = self._store.module_registry()
+        module = registry.get(module_key) if registry else None
+        if module is None:
+            return None
+        record = self._store.get_module_state(send_as_id, module_key)
+        return build_schedule_state_contract(
+            module,
+            record,
+            send_as_id=send_as_id,
+            now=time.time(),
+            tianjige_status=self._tianjige.status(),
+        )
+
+    def _prepare_schedule_payload_with_state(self, payload: dict, *, send_as_id: int = 0) -> tuple[dict, dict | None]:
+        """Apply state-machine schedule suggestions without inventing state.
+
+        The module contract supplies command/interval defaults and warning
+        metadata.  The actual anchor remains build_plan(auto_anchor) reading
+        module.compute_anchor via _resolve_module_anchor.
+        """
+        raw = dict(payload or {})
+        try:
+            sid = int(send_as_id or raw.get("send_as_id") or raw.get("auto_anchor_send_as_id") or 0)
+        except (TypeError, ValueError):
+            sid = 0
+        module_key = str(raw.get("auto_anchor_module") or raw.get("state_module_key") or "").strip()
+        if not module_key:
+            return raw, None
+        contract = self._schedule_state_contract(sid, module_key) if sid else None
+        raw["auto_anchor_module"] = module_key
+        if sid:
+            raw["auto_anchor_send_as_id"] = sid
+        if contract is not None:
+            raw = apply_schedule_contract_defaults(raw, contract)
+        return raw, contract
+
+    def _schedule_semiauto_block_payload(self, contract: dict | None) -> dict:
+        if contract is None:
+            msg = "半自动排程需要先选择有效状态机和身份。"
+            return {"ok": False, "manual_required": True, "status": "semiauto_blocked", "error": msg, "manual_message": msg}
+        if contract.get("semiauto_ready"):
+            return {"ok": True}
+        warnings = contract.get("warnings") or []
+        detail = "；".join(str(w.get("message") or w.get("code") or "") for w in warnings if w) or "状态机尚未满足白名单半自动条件。"
+        msg = f"{contract.get('label') or contract.get('module_key')} 不允许半自动创建: {detail}"
+        return {
+            "ok": False,
+            "manual_required": True,
+            "status": "semiauto_blocked",
+            "error": msg,
+            "manual_message": msg,
+            "state_contract": contract,
+        }
+
     def schedule_presets_payload(self) -> dict:
         return {"ok": True, "presets": list_schedule_presets()}
+
+    def schedule_modules_payload(self, send_as_id_text: str = "") -> dict:
+        """Expose state-machine schedule contracts for the scheduler UI."""
+        registry = self._store.module_registry()
+        modules = registry.all() if registry else []
+        try:
+            target_send_as = int(send_as_id_text or 0)
+        except (TypeError, ValueError):
+            target_send_as = 0
+        identities = self._store.list_identities()
+        target_ids = [
+            int(item.get("send_as_id") or 0)
+            for item in identities
+            if int(item.get("send_as_id") or 0) != 0
+        ]
+        if target_send_as:
+            target_ids = [target_send_as]
+        tianjige_status = self._tianjige.status()
+        now = time.time()
+        module_catalog = [
+            {
+                "key": m.key,
+                "label": m.label,
+                "suggestion": schedule_hint(m, dict(m.default_state)),
+            }
+            for m in modules
+        ]
+        module_by_key = {m.key: m for m in modules}
+        by_identity: list[dict] = []
+        for sid in sorted(set(target_ids)):
+            records = self._store.list_module_states(send_as_id=sid)
+            items = []
+            for record in records:
+                key = str(record.get("module_key") or "")
+                module = module_by_key.get(key)
+                if module is None:
+                    continue
+                items.append(
+                    build_schedule_state_contract(
+                        module,
+                        record,
+                        send_as_id=sid,
+                        now=now,
+                        tianjige_status=tianjige_status,
+                    )
+                )
+            by_identity.append({
+                "send_as_id": sid,
+                "items": items,
+            })
+        return {
+            "ok": True,
+            "modules": module_catalog,
+            "by_identity": by_identity,
+            "tianjige": {
+                "enabled": bool(tianjige_status.get("enabled")),
+                "mode": str(tianjige_status.get("mode") or ""),
+                "authenticated": bool(tianjige_status.get("authenticated")),
+                "message": str(tianjige_status.get("message") or ""),
+            },
+        }
 
     def skills_payload(self) -> dict:
         return self._skill_registry.to_api()
@@ -2098,8 +2219,9 @@ class MiniWebServer:
 
     def schedule_preview_payload(self, payload: dict) -> dict:
         try:
-            plan = build_schedule_plan(payload or {}, anchor_resolver=self._resolve_module_anchor)
-            return {"ok": True, **plan}
+            prepared, contract = self._prepare_schedule_payload_with_state(payload or {})
+            plan = build_schedule_plan(prepared, anchor_resolver=self._resolve_module_anchor)
+            return {"ok": True, **plan, "state_contract": contract}
         except Exception as exc:
             return {"ok": False, "error": str(exc), "items": []}
 
@@ -2244,6 +2366,12 @@ class MiniWebServer:
                     except (TypeError, ValueError):
                         continue
 
+            payload, state_contract = self._prepare_schedule_payload_with_state(payload or {}, send_as_id=send_as_id)
+            if payload.get("schedule_semiauto") or payload.get("semiauto"):
+                semiauto_check = self._schedule_semiauto_block_payload(state_contract)
+                if not semiauto_check.get("ok"):
+                    return semiauto_check
+
             plan = build_schedule_plan(payload or {}, anchor_resolver=self._resolve_module_anchor)
             preset_key = plan["preset_key"]
             label = PRESET_LABELS.get(preset_key, preset_key)
@@ -2303,7 +2431,18 @@ class MiniWebServer:
                         "command": payload.get("command") or "",
                         "interval_sec": payload.get("interval_sec") or 0,
                         "count": payload.get("count") or 0,
+                        "command_gap_sec": payload.get("command_gap_sec") or 0,
                         "dry_run": dry_run,
+                        "auto_anchor": bool(payload.get("auto_anchor")),
+                        "auto_anchor_module": payload.get("auto_anchor_module") or "",
+                        "schedule_semiauto": bool(payload.get("schedule_semiauto") or payload.get("semiauto")),
+                        "state_contract": {
+                            "module_key": (state_contract or {}).get("module_key") or "",
+                            "label": (state_contract or {}).get("label") or "",
+                            "next_at": (state_contract or {}).get("next_at"),
+                            "confidence": (state_contract or {}).get("confidence") or "",
+                            "semiauto_ready": bool((state_contract or {}).get("semiauto_ready")),
+                        } if state_contract else {},
                     },
                 },
                 items_for_db,
@@ -2344,6 +2483,7 @@ class MiniWebServer:
                 "errors": send_errors,
                 "status": "dry_run" if dry_run else sending_status,
                 "estimate_seconds": _estimate_send_seconds(len(items_for_db)) if (not dry_run and listener is not None) else 0,
+                "state_contract": state_contract,
             }
         except Exception as exc:
             return {"ok": False, "error": str(exc)}

@@ -5301,14 +5301,22 @@ def test_discovered_bots_keeps_manual_marked_even_without_messages(tmp_path):
 
 
 def test_schedule_presets_payload_lists_known_presets():
-    """5 个预设(深度闭关 / 抚摸 / 温养 / 试炼 + 自定义)。"""
+    """预设包含原有玩法和状态机冷却项,并暴露默认 module_key。"""
     import tempfile, pathlib
     with tempfile.TemporaryDirectory() as tmp:
         server = MiniWebServer(store=SQLiteStore(pathlib.Path(tmp) / "x.db"))
         payload = server.schedule_presets_payload()
     assert payload["ok"] is True
-    keys = {p["key"] for p in payload["presets"]}
-    assert keys >= {"deep_retreat", "pet_touch", "pet_warm", "pet_trial", "custom"}
+    by_key = {p["key"]: p for p in payload["presets"]}
+    assert set(by_key) >= {
+        "deep_retreat", "yuanying", "pet_touch", "pet_warm", "pet_trial", "custom",
+        "wild_training", "checkin", "tower", "ranch", "concubine_dream",
+        "concubine_tianji", "tianti_climb", "tianti_wenxin",
+        "tianti_gangfeng", "second_soul", "taiyi_cycle",
+    }
+    assert by_key["concubine_tianji"]["module_key"] == "concubine_tianji"
+    assert by_key["custom"]["module_key"] == ""
+    assert "command_gap_sec" in by_key["custom"]["fields"]
 
 
 def test_schedule_preview_deep_retreat_returns_plan_items(tmp_path):
@@ -5330,6 +5338,36 @@ def test_schedule_preview_custom_uses_user_command(tmp_path):
     assert result["ok"] is True
     assert len(result["items"]) == 3
     assert all(it["command"] == ".签到" for it in result["items"])
+
+
+def test_schedule_preview_custom_supports_multiple_commands(tmp_path):
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "miniweb.db"))
+    result = server.schedule_preview_payload(
+        {
+            "preset_key": "custom",
+            "command": ".宗门点卯\n.闯塔\n.天机代卜",
+            "interval_sec": 86400,
+            "count": 2,
+            "command_gap_sec": 180,
+        }
+    )
+
+    assert result["ok"] is True
+    assert [it["command"] for it in result["items"]] == [
+        ".宗门点卯", ".闯塔", ".天机代卜",
+        ".宗门点卯", ".闯塔", ".天机代卜",
+    ]
+    assert 120 <= result["items"][1]["schedule_at"] - result["items"][0]["schedule_at"] <= 240
+
+
+def test_schedule_preview_state_machine_preset_uses_fixed_command(tmp_path):
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "miniweb.db"))
+    result = server.schedule_preview_payload({"preset_key": "concubine_tianji", "horizon_days": 1})
+
+    assert result["ok"] is True
+    assert result["preset_label"] == "天机代卜"
+    assert result["items"]
+    assert {item["command"] for item in result["items"]} == {".天机代卜"}
 
 
 def test_schedule_create_dry_run_writes_batch_without_telegram(tmp_path):
@@ -5630,6 +5668,7 @@ def test_schedule_templates_roundtrip(tmp_path):
 def test_schedule_routes_are_wired():
     from backend.app import GET_ROUTES, POST_ROUTES
     assert "/api/schedule/presets" in GET_ROUTES
+    assert "/api/schedule/modules" in GET_ROUTES
     assert "/api/schedule/templates" in GET_ROUTES
     assert "/api/schedule" in GET_ROUTES
     assert "/api/schedule/sync" in GET_ROUTES
@@ -5800,6 +5839,16 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
 
     assert "/api/schedule/retry-failed" in POST_ROUTES
     assert "/api/schedule/sync/repair" in POST_ROUTES
+    assert 'fetchJson("/api/schedule/modules")' in schedule_js
+    assert 'name="auto_anchor_module"' in schedule_js
+    assert 'name="schedule_semiauto"' in schedule_js
+    assert 'name="schedule_use_module_defaults"' in schedule_js
+    assert 'textarea name="command"' in schedule_js
+    assert 'name="command_gap_sec"' in schedule_js
+    assert "function renderScheduleModuleOptions(modules)" in schedule_js
+    assert "syncStateModuleToPreset" in schedule_js
+    assert 'presetMap.get(key)?.module_key' in schedule_js
+    assert 'payload.auto_anchor_module = stateModule || data.get("preset_key");' in schedule_js
     assert 'data-schedule-action="retry-failed"' in schedule_js
     assert 'id="scheduleSyncRepairButton"' in schedule_js
     assert 'postJson("/api/schedule/sync/repair"' in schedule_js
@@ -6366,6 +6415,145 @@ def test_schedule_build_plan_uses_auto_anchor_resolver(tmp_path):
     plan2 = build_plan({"preset_key": "deep_retreat", "anchor_at": now, "horizon_days": 1}, anchor_resolver=resolver)
     assert plan2["auto_anchor_used"] is False
     assert resolver_calls == []
+
+
+def test_schedule_modules_payload_exposes_state_contract(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+    now = time.time()
+    store.save_module_state(
+        12345,
+        "concubine_tianji",
+        {
+            "cooldown_until": now + 1800,
+            "last_observed_at": now,
+            "last_status": "cooldown",
+            "last_text_excerpt": "天机链路尚未重铸，请在 30 分钟后再试",
+        },
+        source_message_id="raw-1",
+    )
+    server = MiniWebServer(store=store)
+
+    payload = server.schedule_modules_payload("")
+
+    assert payload["ok"] is True
+    assert payload["tianjige"]["enabled"] is True
+    group = next(item for item in payload["by_identity"] if item["send_as_id"] == 12345)
+    tianji = next(item for item in group["items"] if item["module_key"] == "concubine_tianji")
+    assert tianji["next_at"] >= now + 1700
+    assert tianji["next_at_source"] == "bot_reply"
+    assert tianji["sources"] == ["bot_reply"]
+    assert tianji["suggestion"]["command"] == ".天机代卜"
+    assert tianji["suggestion"]["preset_key"] == "concubine_tianji"
+    assert tianji["semiauto_ready"] is True
+
+
+def test_schedule_preview_uses_state_contract_defaults_for_custom_command(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+    now = time.time()
+    cooldown_until = now + 3600
+    store.save_module_state(
+        12345,
+        "concubine_tianji",
+        {"cooldown_until": cooldown_until, "last_observed_at": now, "last_status": "cooldown"},
+        source_message_id="raw-2",
+    )
+    server = MiniWebServer(store=store)
+
+    result = server.schedule_preview_payload({
+        "send_as_id": 12345,
+        "preset_key": "custom",
+        "command": ".旧命令",
+        "interval_sec": "3600",
+        "count": "1",
+        "anchor_at": now,
+        "auto_anchor": True,
+        "auto_anchor_module": "concubine_tianji",
+        "schedule_use_module_defaults": True,
+    })
+
+    assert result["ok"] is True
+    assert result["auto_anchor_used"] is True
+    assert result["state_contract"]["module_key"] == "concubine_tianji"
+    assert result["items"]
+    assert result["items"][0]["command"] == ".天机代卜"
+    assert len(result["items"]) > 1
+    assert result["items"][0]["schedule_at"] >= cooldown_until
+
+
+def test_schedule_create_semiauto_rejects_manual_phaseful_module(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+    now = time.time()
+    store.save_module_state(
+        12345,
+        "deep_retreat",
+        {
+            "phase": "running",
+            "cooldown_until": now + 3600,
+            "last_observed_at": now,
+            "last_status": "running",
+        },
+        source_message_id="raw-3",
+    )
+    server = MiniWebServer(store=store)
+
+    result = server.schedule_create_payload({
+        "send_as_ids": [12345],
+        "preset_key": "deep_retreat",
+        "auto_anchor": True,
+        "auto_anchor_module": "deep_retreat",
+        "schedule_semiauto": True,
+        "dry_run": True,
+    })
+
+    assert result["ok"] is False
+    assert result["status"] == "semiauto_blocked"
+    assert result["manual_required"] is True
+    assert "不允许半自动" in result["error"]
+
+
+def test_schedule_create_semiauto_accepts_observed_low_risk_module(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+    now = time.time()
+    store.save_module_state(
+        12345,
+        "concubine_tianji",
+        {"cooldown_until": now + 1800, "last_observed_at": now, "last_status": "cooldown"},
+        source_message_id="raw-4",
+    )
+    server = MiniWebServer(store=store)
+
+    result = server.schedule_create_payload({
+        "send_as_ids": [12345],
+        "preset_key": "custom",
+        "command": "",
+        "interval_sec": "",
+        "count": "",
+        "auto_anchor": True,
+        "auto_anchor_module": "concubine_tianji",
+        "schedule_semiauto": True,
+        "schedule_use_module_defaults": True,
+        "dry_run": True,
+    })
+
+    assert result["ok"] is True
+    assert result["dry_run"] is True
+    assert result["state_contract"]["semiauto_ready"] is True
+    batch = store.list_schedule_batches(include_inactive=True)[0]
+    messages = store.list_schedule_messages(batch_id=batch["id"], include_inactive=True)
+    assert messages
+    assert messages[0]["command"] == ".天机代卜"
 
 
 def test_identity_state_route_is_wired():

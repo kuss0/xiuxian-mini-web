@@ -160,12 +160,14 @@
 
   async function openScheduleModal(deps = {}) {
     const state = scheduleState(deps);
-    const [presetsPayload, batchesPayload, templatesPayload] = await Promise.all([
+    const [presetsPayload, modulesPayload, batchesPayload, templatesPayload] = await Promise.all([
       fetchJson("/api/schedule/presets"),
+      fetchJson("/api/schedule/modules"),
       fetchJson("/api/schedule"),
       fetchJson("/api/schedule/templates"),
     ]);
     const presets = presetsPayload.presets || [];
+    const scheduleModules = modulesPayload || { modules: [], by_identity: [] };
     const batches = syncScheduleBatches(deps, batchesPayload);
     const templates = templatesPayload.templates || [];
     const identityOptions = (state.identities || [])
@@ -177,6 +179,7 @@
     const presetOptions = presets
       .map((p) => `<option value="${escapeAttr(p.key)}">${escapeHtml(p.label)} — ${escapeHtml(p.description)}</option>`)
       .join("");
+    const moduleOptions = renderScheduleModuleOptions(scheduleModules.modules || []);
     const dialog = openModal({
       title: "官方定时排班",
       body: `
@@ -219,6 +222,14 @@
                 <select name="preset_key">${presetOptions}</select>
               </label>
               <label>
+                <span>状态机锚点来源</span>
+                <select name="auto_anchor_module" id="scheduleStateModuleSelect">
+                  <option value="">跟随预设 / 不使用</option>
+                  ${moduleOptions}
+                </select>
+                <small class="muted">状态机决定 next_at,定时只从这个起点排官方消息。</small>
+              </label>
+              <label>
                 <span>批量阶梯(每个身份递增分钟)</span>
                 <input name="offset_step_minutes" inputmode="numeric" value="5" placeholder="批量时每个身份 offset 递增,1 个就不生效" />
               </label>
@@ -234,17 +245,21 @@
                 <span>排几天(1-7)</span>
                 <input name="horizon_days" inputmode="numeric" min="1" max="7" value="3" />
               </label>
-              <label data-show-when="command">
+              <label class="span-2" data-show-when="command">
                 <span>自定义命令</span>
-                <input name="command" placeholder="例如 .签到" />
+                <textarea name="command" rows="4" placeholder="每行一条命令；例如&#10;.宗门点卯&#10;.闯塔&#10;.天机代卜"></textarea>
               </label>
               <label data-show-when="interval_sec">
                 <span>间隔 / CD(秒)</span>
                 <input name="interval_sec" inputmode="numeric" value="3600" />
               </label>
               <label data-show-when="count">
-                <span>次数</span>
+                <span>次数 / 轮数</span>
                 <input name="count" inputmode="numeric" value="3" />
+              </label>
+              <label data-show-when="command_gap_sec">
+                <span>同轮命令间隔(秒)</span>
+                <input name="command_gap_sec" inputmode="numeric" value="180" placeholder="多条自定义命令之间错开" />
               </label>
               <label>
                 <span>错峰偏移(分钟)</span>
@@ -257,12 +272,24 @@
             </div>
             <label class="toggle-row">
               <input type="checkbox" name="auto_anchor" />
-              <span>自动锚点(按状态机算下一次可用,覆盖上面手填的锚点)</span>
+              <span>自动锚点(取状态机 next_at 和手填锚点中较晚者)</span>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" name="schedule_use_module_defaults" checked />
+              <span>套用状态机建议命令/间隔/参数</span>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" name="schedule_semiauto" />
+              <span>白名单半自动(后端会拒绝未知、缺参数、阶段型和非白名单模块)</span>
             </label>
             <label class="toggle-row">
               <input type="checkbox" name="dry_run" checked />
               <span>仅预演(只在本地记录,不真正排到 Telegram)— 没登录或想试就开着</span>
             </label>
+            <div class="form-actions">
+              <button type="button" id="scheduleApplyStateSuggestion">套用状态机建议</button>
+            </div>
+            <div id="scheduleStateHint" class="send-as-result" hidden></div>
             <div class="form-actions">
               <button type="button" data-schedule-action="preview">预览计划</button>
               <button type="button" class="primary" data-schedule-action="create">创建</button>
@@ -298,12 +325,22 @@
       footer: `<button type="button" data-modal-close>关闭</button>`,
     });
     if (!dialog) return;
-    bindScheduleModal(deps, dialog, presets, batches, templates);
+    bindScheduleModal(deps, dialog, presets, batches, templates, scheduleModules);
   }
 
   function renderScheduleTemplateOptions(templates) {
     return (templates || [])
       .map((template) => `<option value="${escapeAttr(template.id)}">${escapeHtml(template.name || template.id)}</option>`)
+      .join("");
+  }
+
+  function renderScheduleModuleOptions(modules) {
+    return (modules || [])
+      .map((module) => {
+        const suggestion = module.suggestion || {};
+        const badge = suggestion.semiauto_whitelisted ? "｜可半自动" : "";
+        return `<option value="${escapeAttr(module.key)}">${escapeHtml(module.label || module.key)}${escapeHtml(badge)}</option>`;
+      })
       .join("");
   }
 
@@ -457,7 +494,74 @@
     return `${baseText || "官方定时需要手动处理"}\n需手动处理 ${messages.length} 条:\n${detail}`;
   }
 
-  function bindScheduleModal(deps = {}, dialog, presets, _initialBatches, initialTemplates) {
+  function findScheduleContract(scheduleModules, sendAsId, moduleKey) {
+    const sid = Number(sendAsId || 0);
+    const key = String(moduleKey || "").trim();
+    if (!sid || !key) return null;
+    const group = (scheduleModules?.by_identity || []).find((item) => Number(item.send_as_id || 0) === sid);
+    return (group?.items || []).find((item) => item.module_key === key) || null;
+  }
+
+  function findModuleCatalog(scheduleModules, moduleKey) {
+    const key = String(moduleKey || "").trim();
+    return (scheduleModules?.modules || []).find((item) => item.key === key) || null;
+  }
+
+  function scheduleContractHtml(contract, catalog = null) {
+    if (!contract && !catalog) return "";
+    const source = contract || {
+      label: catalog?.label || catalog?.key || "",
+      module_key: catalog?.key || "",
+      summary: { text: "该身份暂无状态记录" },
+      suggestion: catalog?.suggestion || {},
+      warnings: [{ severity: "risk", message: "未观测到该身份的机器人回复" }],
+      semiauto_ready: false,
+      one_click_ready: false,
+      confidence: "unknown",
+    };
+    const suggestion = source.suggestion || {};
+    const warnings = source.warnings || [];
+    const warnHtml = warnings.length
+      ? `<ul class="send-as-result-list">${warnings.map((w) => `<li class="${w.severity === "risk" ? "warn" : "ok"}"><small>${escapeHtml(w.message || w.code || "")}</small></li>`).join("")}</ul>`
+      : '<p class="muted">当前没有阻断告警。</p>';
+    const command = suggestion.command || suggestion.base_command || "";
+    return `
+      <p>
+        <strong>${escapeHtml(source.label || source.module_key || "")}</strong>
+        <span class="status-pill ${source.semiauto_ready ? "ok" : "warn"}">${source.semiauto_ready ? "可半自动" : "需确认"}</span>
+        <small>${escapeHtml(source.summary?.text || "")}</small>
+      </p>
+      <p class="muted">起点 ${escapeHtml(source.next_at ? "状态机 next_at" : "未确定")}｜置信 ${escapeHtml(source.confidence || "unknown")}｜建议 <code>${escapeHtml(command)}</code>${suggestion.interval_sec ? `｜间隔 ${escapeHtml(String(suggestion.interval_sec))}s` : ""}</p>
+      ${warnHtml}
+    `;
+  }
+
+  function applyScheduleSuggestionToForm(form, contract, catalog = null) {
+    const suggestion = (contract?.suggestion || catalog?.suggestion || {});
+    if (!suggestion || !Object.keys(suggestion).length) return false;
+    const setValue = (name, value, { overwrite = true } = {}) => {
+      const field = form.querySelector(`[name="${CSS.escape(name)}"]`);
+      if (!field || value === undefined || value === null || value === "") return;
+      if (!overwrite && String(field.value || "").trim()) return;
+      field.value = String(value);
+    };
+    setValue("preset_key", suggestion.preset_key || "custom");
+    setValue("command", suggestion.command || suggestion.base_command || "", { overwrite: true });
+    setValue("interval_sec", suggestion.interval_sec || "", { overwrite: true });
+    setValue("count", suggestion.count || "", { overwrite: true });
+    setValue("horizon_days", suggestion.horizon_days || "", { overwrite: false });
+    setValue("trigger_command", suggestion.trigger_command || "", { overwrite: true });
+    if (suggestion.arg_payload_key && suggestion.arg_value) {
+      setValue(suggestion.arg_payload_key, suggestion.arg_value, { overwrite: true });
+    }
+    const autoAnchor = form.querySelector('[name="auto_anchor"]');
+    if (autoAnchor) autoAnchor.checked = true;
+    const useDefaults = form.querySelector('[name="schedule_use_module_defaults"]');
+    if (useDefaults) useDefaults.checked = true;
+    return true;
+  }
+
+  function bindScheduleModal(deps = {}, dialog, presets, _initialBatches, initialTemplates, scheduleModules = {}) {
     const form = dialog.querySelector("#scheduleForm");
     const status = dialog.querySelector("#scheduleStatus");
     const preview = dialog.querySelector("#schedulePreview");
@@ -473,6 +577,9 @@
     const templateLoadButton = dialog.querySelector("#scheduleTemplateLoadButton");
     const templateSaveButton = dialog.querySelector("#scheduleTemplateSaveButton");
     const templateDeleteButton = dialog.querySelector("#scheduleTemplateDeleteButton");
+    const stateModuleSelect = dialog.querySelector("#scheduleStateModuleSelect");
+    const stateHint = dialog.querySelector("#scheduleStateHint");
+    const applyStateSuggestionButton = dialog.querySelector("#scheduleApplyStateSuggestion");
     if (!form) return;
     const presetMap = new Map(presets.map((p) => [p.key, p]));
     let templates = Array.isArray(initialTemplates) ? [...initialTemplates] : [];
@@ -495,12 +602,54 @@
         label.style.display = required.has(fieldName) ? "" : "none";
       });
     };
+    const presetSelect = form.querySelector('[name="preset_key"]');
     updateFieldVisibility();
-    form.querySelector('[name="preset_key"]').addEventListener("change", updateFieldVisibility);
+
+    const selectedPrimarySendAs = () => {
+      const select = dialog.querySelector("#scheduleSendAsSelect");
+      return Number(select?.selectedOptions?.[0]?.value || 0);
+    };
+    const selectedStateModule = () => String(stateModuleSelect?.value || "").trim();
+    const matchedModuleForPreset = () => {
+      const key = String(presetSelect?.value || "").trim();
+      return String(presetMap.get(key)?.module_key || "").trim();
+    };
+    const syncStateModuleToPreset = ({ onlyIfEmpty = false } = {}) => {
+      const moduleKey = matchedModuleForPreset();
+      if (!moduleKey || !stateModuleSelect) return false;
+      if (onlyIfEmpty && stateModuleSelect.value) return false;
+      const option = Array.from(stateModuleSelect.options).find((item) => item.value === moduleKey);
+      if (!option) return false;
+      stateModuleSelect.value = moduleKey;
+      const autoAnchor = form.querySelector('[name="auto_anchor"]');
+      if (autoAnchor) autoAnchor.checked = true;
+      return true;
+    };
+    const renderStateHint = () => {
+      if (!stateHint) return;
+      const moduleKey = selectedStateModule();
+      if (!moduleKey) {
+        stateHint.hidden = true;
+        stateHint.innerHTML = "";
+        return;
+      }
+      const contract = findScheduleContract(scheduleModules, selectedPrimarySendAs(), moduleKey);
+      const catalog = findModuleCatalog(scheduleModules, moduleKey);
+      stateHint.hidden = false;
+      stateHint.innerHTML = scheduleContractHtml(contract, catalog);
+    };
+    if (presetSelect) {
+      presetSelect.addEventListener("change", () => {
+        updateFieldVisibility();
+        syncStateModuleToPreset();
+        renderStateHint();
+      });
+    }
 
     const collectPayload = () => {
       const data = new FormData(form);
       const sendAsIds = data.getAll("send_as_ids").map((v) => Number(v)).filter(Boolean);
+      const stateModule = String(data.get("auto_anchor_module") || "").trim();
       const payload = {
         send_as_ids: sendAsIds,
         send_as_id: sendAsIds[0] || 0,
@@ -510,14 +659,19 @@
         command: (data.get("command") || "").trim(),
         interval_sec: data.get("interval_sec") || 3600,
         count: data.get("count") || 1,
+        command_gap_sec: data.get("command_gap_sec") || 180,
         dry_run: data.get("dry_run") === "on",
         auto_anchor: data.get("auto_anchor") === "on",
+        schedule_use_module_defaults: data.get("schedule_use_module_defaults") === "on",
+        schedule_semiauto: data.get("schedule_semiauto") === "on",
         trigger_command: (data.get("trigger_command") || "").trim(),
         offset_minutes: data.get("offset_minutes") || 0,
         offset_step_minutes: data.get("offset_step_minutes") || 5,
       };
       if (payload.auto_anchor) {
-        payload.auto_anchor_module = data.get("preset_key");
+        payload.auto_anchor_module = stateModule || data.get("preset_key");
+      } else if (stateModule) {
+        payload.state_module_key = stateModule;
       }
       const anchorText = data.get("anchor_at_text");
       if (anchorText) {
@@ -577,6 +731,8 @@
       const anchor = form.querySelector('[name="anchor_at_text"]');
       if (anchor) anchor.value = "";
       updateFieldVisibility();
+      syncStateModuleToPreset({ onlyIfEmpty: true });
+      renderStateHint();
     };
 
     const saveTemplateFromForm = async () => {
@@ -606,10 +762,38 @@
     if (sendAsSelect && sendAsCount) {
       const refreshCount = () => {
         sendAsCount.textContent = String(Array.from(sendAsSelect.selectedOptions).length);
+        renderStateHint();
       };
       sendAsSelect.addEventListener("change", refreshCount);
       refreshCount();
     }
+    if (stateModuleSelect) {
+      stateModuleSelect.addEventListener("change", () => {
+        const autoAnchor = form.querySelector('[name="auto_anchor"]');
+        if (stateModuleSelect.value && autoAnchor) autoAnchor.checked = true;
+        renderStateHint();
+      });
+    }
+    if (applyStateSuggestionButton) {
+      applyStateSuggestionButton.addEventListener("click", () => {
+        const moduleKey = selectedStateModule();
+        if (!moduleKey) {
+          setStatus("warn", "先选择一个状态机锚点来源。");
+          return;
+        }
+        const contract = findScheduleContract(scheduleModules, selectedPrimarySendAs(), moduleKey);
+        const catalog = findModuleCatalog(scheduleModules, moduleKey);
+        if (!applyScheduleSuggestionToForm(form, contract, catalog)) {
+          setStatus("warn", "这个状态机没有可套用的排程建议。");
+          return;
+        }
+        updateFieldVisibility();
+        renderStateHint();
+        setStatus("ok", "已套用状态机建议。");
+      });
+    }
+    syncStateModuleToPreset({ onlyIfEmpty: true });
+    renderStateHint();
 
     refreshTemplateSelect();
     if (templateSelect) {
@@ -685,6 +869,7 @@
             } catch (e) { /* 用打开模态时的批次兜底 */ }
             showPreview(`
               <p>预设 <strong>${escapeHtml(result.preset_label)}</strong>｜锚点 ${escapeHtml(result.anchor_text)}${result.auto_anchor_used ? '<small class="status-pill ok" style="margin-left:6px">自动锚点</small>' : ""}｜首次发送 ${escapeHtml(result.first_due_text || result.anchor_text)}｜${result.horizon_days} 天</p>
+              ${result.state_contract ? `<div class="schedule-preview-extras">${scheduleContractHtml(result.state_contract)}</div>` : ""}
               <ul class="send-as-result-list">
                 ${(result.items || []).map((it) => `<li class="ok"><code>${escapeHtml(it.command)}</code> <small>${escapeHtml(it.schedule_text || "")}</small></li>`).join("") || "<li>(0 条)</li>"}
               </ul>
@@ -954,11 +1139,15 @@
     scheduleIdentityLabel,
     openScheduleModal,
     renderScheduleTemplateOptions,
+    renderScheduleModuleOptions,
     renderScheduleBatches,
     scheduleStatusText,
     scheduleStatusPill,
     scheduleManualMessages,
     scheduleStatusWithManualMessages,
+    findScheduleContract,
+    scheduleContractHtml,
+    applyScheduleSuggestionToForm,
     bindScheduleModal,
     bindScheduleBatchActions,
     scheduleProgressPolling,

@@ -405,6 +405,11 @@ def _get_schedule_presets(request: MiniWebRequest, query: dict) -> dict:
     return _app(request).schedule_presets_payload()
 
 
+def _get_schedule_modules(request: MiniWebRequest, query: dict) -> dict:
+    send_as_id = (query.get("send_as_id") or [""])[0]
+    return _app(request).schedule_modules_payload(send_as_id)
+
+
 def _get_schedule_templates(request: MiniWebRequest, query: dict) -> dict:
     return _app(request).schedule_templates_payload()
 

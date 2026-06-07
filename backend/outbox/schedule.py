@@ -36,6 +36,7 @@ PRESET_DEEP_RETREAT = "deep_retreat"
 PRESET_PET_TOUCH = "pet_touch"
 PRESET_PET_WARM = "pet_warm"
 PRESET_PET_TRIAL = "pet_trial"
+PRESET_YUANYING = "yuanying"
 PRESET_CUSTOM = "custom"
 
 PRESET_LABELS = {
@@ -43,6 +44,7 @@ PRESET_LABELS = {
     PRESET_PET_TOUCH: "抚摸法宝",
     PRESET_PET_WARM: "温养器灵",
     PRESET_PET_TRIAL: "器灵试炼",
+    PRESET_YUANYING: "元婴出窍",
     PRESET_CUSTOM: "自定义",
 }
 
@@ -149,6 +151,7 @@ PRESET_INTERVAL_SECONDS: dict[str, int] = {
     PRESET_PET_TOUCH: 2 * 3600,
     PRESET_PET_WARM: 6 * 3600,
     PRESET_PET_TRIAL: 8 * 3600,
+    PRESET_YUANYING: 8 * 3600,
 }
 
 
@@ -242,27 +245,66 @@ def _build_pet_periodic(
     return items
 
 
-def _build_custom(*, anchor: float, command: str, interval_sec: int, count: int, end_at: float = 0.0, **_kw) -> list[dict]:
-    command = _norm(command)
-    if not command:
+def _split_commands(command: str) -> list[str]:
+    raw = str(command or "").replace("；", "\n").replace(";", "\n")
+    out: list[str] = []
+    seen: set[str] = set()
+    for line in raw.splitlines():
+        item = _norm(line)
+        if not item or item in seen:
+            continue
+        out.append(item)
+        seen.add(item)
+    return out
+
+
+def _build_fixed_periodic(
+    *, anchor: float, horizon_days: int, command_prefix: str, interval_sec: int,
+    end_at: float = 0.0, trigger_command: str = "", default_trigger_command: str = "",
+    trigger_delay_sec: float = 0, command_delay_sec: float = 0, **_kw,
+) -> list[dict]:
+    return _build_pet_periodic(
+        anchor=anchor,
+        horizon_days=horizon_days,
+        command_prefix=command_prefix,
+        pet_name="",
+        interval_sec=interval_sec,
+        end_at=end_at,
+        trigger_command=trigger_command or default_trigger_command,
+        trigger_delay_sec=trigger_delay_sec,
+        command_delay_sec=command_delay_sec,
+    )
+
+
+def _build_custom(
+    *, anchor: float, command: str, interval_sec: int, count: int,
+    command_gap_sec: int = 180, end_at: float = 0.0, **_kw,
+) -> list[dict]:
+    commands = _split_commands(command)
+    if not commands:
         return []
     interval_sec = _positive_int(interval_sec, 3600)
     count = _positive_int(count, 1)
+    command_gap_sec = max(30, min(3600, _positive_int(command_gap_sec, 180)))
     # 红线护栏: 自定义与其它 preset 一样, 不得超过 7 天窗口、单批不超过 100 条。
     # 否则 count×interval 能把官方定时排到任意远的未来, 绕过"一次最多 7 天"上限。
     count = min(count, MAX_SCHEDULED_MESSAGES_PER_IDENTITY)
     horizon_end = float(end_at) if end_at and end_at > 0 else (anchor + MAX_HORIZON_DAYS * 86400)
     items = []
-    # 自定义把 anchor 当作第一条预计发送时间;后续按 interval 递推。
+    # 自定义支持多条命令:count 表示轮数;每轮内部按 command_gap_sec 错开。
     # 每条加少量 jitter,避免精确等距。
-    for i in range(count):
-        schedule_at = anchor + i * interval_sec + _jitter(0)
-        if schedule_at > horizon_end:
-            break
-        items.append({
-            "command": command,
-            "schedule_at": schedule_at,
-        })
+    for round_index in range(count):
+        base_at = anchor + round_index * interval_sec
+        for command_index, item_command in enumerate(commands):
+            schedule_at = base_at + command_index * command_gap_sec + _jitter(0)
+            if schedule_at > horizon_end:
+                return items
+            items.append({
+                "command": item_command,
+                "schedule_at": schedule_at,
+            })
+            if len(items) >= MAX_SCHEDULED_MESSAGES_PER_IDENTITY:
+                return items
     return items
 
 
@@ -276,14 +318,41 @@ class PresetSpec:
     # 必填字段(前端 UI 表单要根据这个动态显示)
     fields: tuple[str, ...]
     builder: Callable[..., list[dict]]
+    module_key: str = ""
+
+
+def _fixed_preset(
+    *,
+    key: str,
+    label: str,
+    command: str,
+    interval_sec: int,
+    description: str,
+    module_key: str | None = None,
+    fields: tuple[str, ...] = ("horizon_days",),
+    default_trigger_command: str = "",
+) -> PresetSpec:
+    return PresetSpec(
+        key=key,
+        label=label,
+        description=description,
+        fields=fields,
+        module_key=module_key or key,
+        builder=lambda **kw: _build_fixed_periodic(
+            command_prefix=command,
+            interval_sec=interval_sec,
+            default_trigger_command=default_trigger_command,
+            **{k: v for k, v in kw.items() if k not in {"interval_sec", "command_prefix", "default_trigger_command"}},
+        ),
+    )
 
 
 PRESETS: dict[str, PresetSpec] = {
     PRESET_CUSTOM: PresetSpec(
         key=PRESET_CUSTOM,
         label="自定义",
-        description="任意命令 + 间隔 + 次数,用于一天一次设好官方定时",
-        fields=("command", "interval_sec", "count"),
+        description="一条或多条命令 + 间隔 + 轮数,批量排进官方定时",
+        fields=("command", "interval_sec", "count", "command_gap_sec"),
         builder=_build_custom,
     ),
     PRESET_DEEP_RETREAT: PresetSpec(
@@ -291,13 +360,24 @@ PRESETS: dict[str, PresetSpec] = {
         label="深度闭关",
         description="trigger 触发总结/查询 → .深度闭关 配对,8h CD 后递推下一对",
         fields=("trigger_command", "horizon_days"),
+        module_key="deep_retreat",
         builder=_build_deep_retreat,
+    ),
+    PRESET_YUANYING: _fixed_preset(
+        key=PRESET_YUANYING,
+        label="元婴出窍",
+        command=".元婴出窍",
+        interval_sec=8 * 3600,
+        description=".元婴状态 → .元婴出窍 配对,8h 后递推下一轮",
+        fields=("trigger_command", "horizon_days"),
+        default_trigger_command=".元婴状态",
     ),
     PRESET_PET_TOUCH: PresetSpec(
         key=PRESET_PET_TOUCH,
         label="抚摸法宝",
         description="每 2h .抚摸法宝 <pet_name>;可选 trigger 先查 CD",
         fields=("pet_name", "trigger_command", "horizon_days"),
+        module_key="pet_touch",
         builder=lambda **kw: _build_pet_periodic(
             command_prefix=CMD_PET_TOUCH,
             interval_sec=2 * 3600,
@@ -309,6 +389,7 @@ PRESETS: dict[str, PresetSpec] = {
         label="温养器灵",
         description="每 6h .温养器灵 <pet_name>;可选 trigger 先查 CD",
         fields=("pet_name", "trigger_command", "horizon_days"),
+        module_key="pet_warm",
         builder=lambda **kw: _build_pet_periodic(
             command_prefix=CMD_PET_WARM,
             interval_sec=6 * 3600,
@@ -320,11 +401,89 @@ PRESETS: dict[str, PresetSpec] = {
         label="器灵试炼",
         description="每 8h .器灵试炼 <pet_name>;可选 trigger 先查 CD",
         fields=("pet_name", "trigger_command", "horizon_days"),
+        module_key="pet_trial",
         builder=lambda **kw: _build_pet_periodic(
             command_prefix=CMD_PET_TRIAL,
             interval_sec=8 * 3600,
             **{k: v for k, v in kw.items() if k not in {"interval_sec", "command_prefix"}},
         ),
+    ),
+    "wild_training": _fixed_preset(
+        key="wild_training",
+        label="野外历练",
+        command=".野外历练",
+        interval_sec=150 * 60,
+        description="按野外历练状态机起点,约 150 分钟一轮",
+    ),
+    "checkin": _fixed_preset(
+        key="checkin",
+        label="宗门点卯",
+        command=".宗门点卯",
+        interval_sec=24 * 3600,
+        description="按点卯状态机/每日窗口,一天一轮",
+    ),
+    "tower": _fixed_preset(
+        key="tower",
+        label="闯塔",
+        command=".闯塔",
+        interval_sec=24 * 3600,
+        description="按闯塔状态机/每日窗口,一天一轮",
+    ),
+    "ranch": _fixed_preset(
+        key="ranch",
+        label="一键放养",
+        command=".一键放养",
+        interval_sec=4 * 3600 + 20 * 60,
+        description="按一键放养状态机起点,约 4h20m 一轮",
+    ),
+    "concubine_dream": _fixed_preset(
+        key="concubine_dream",
+        label="入梦寻图",
+        command=".入梦寻图",
+        interval_sec=8 * 3600,
+        description="按入梦寻图状态机起点,8h 一轮",
+    ),
+    "concubine_tianji": _fixed_preset(
+        key="concubine_tianji",
+        label="天机代卜",
+        command=".天机代卜",
+        interval_sec=12 * 3600,
+        description="按天机代卜状态机起点,12h 一轮",
+    ),
+    "tianti_climb": _fixed_preset(
+        key="tianti_climb",
+        label="登天阶",
+        command=".登天阶",
+        interval_sec=4 * 3600,
+        description="按登天阶状态机起点,4h 一轮",
+    ),
+    "tianti_wenxin": _fixed_preset(
+        key="tianti_wenxin",
+        label="问心台",
+        command=".问心台",
+        interval_sec=24 * 3600,
+        description="按问心台状态机/每日重置,一天一轮",
+    ),
+    "tianti_gangfeng": _fixed_preset(
+        key="tianti_gangfeng",
+        label="九天罡风",
+        command=".引九天罡风",
+        interval_sec=12 * 3600,
+        description="按九天罡风状态机起点,12h 一轮",
+    ),
+    "second_soul": _fixed_preset(
+        key="second_soul",
+        label="第二元神",
+        command=".元神修炼",
+        interval_sec=24 * 3600,
+        description="按第二元神状态机起点,一天一轮",
+    ),
+    "taiyi_cycle": _fixed_preset(
+        key="taiyi_cycle",
+        label="太一周期",
+        command=".引道",
+        interval_sec=12 * 3600,
+        description="按太一周期状态机起点,12h 一轮",
     ),
 }
 
@@ -336,6 +495,7 @@ def list_presets() -> list[dict]:
             "label": p.label,
             "description": p.description,
             "fields": list(p.fields),
+            "module_key": p.module_key,
         }
         for p in PRESETS.values()
     ]
@@ -401,6 +561,7 @@ def build_plan(payload: dict, *, anchor_resolver: Callable[[int, str], float | N
         "command": payload.get("command") or "",
         "interval_sec": _positive_int(payload.get("interval_sec"), 3600),
         "count": _positive_int(payload.get("count"), 1),
+        "command_gap_sec": _positive_int(payload.get("command_gap_sec"), 180),
         "trigger_command": _norm(payload.get("trigger_command")),
         "trigger_delay_sec": _positive_int(payload.get("trigger_delay_sec"), 0),
         "command_delay_sec": _positive_int(payload.get("command_delay_sec"), 0),

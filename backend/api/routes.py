@@ -53,6 +53,7 @@ def build_get_routes(handlers: Mapping[str, Callable]) -> dict[str, Callable]:
         "/api/accounts/dialogs": handlers["_get_account_dialogs"],
         "/api/accounts/topics": handlers["_get_account_topics"],
         "/api/schedule/presets": handlers["_get_schedule_presets"],
+        "/api/schedule/modules": handlers["_get_schedule_modules"],
         "/api/schedule/templates": handlers["_get_schedule_templates"],
         "/api/schedule": handlers["_get_schedule"],
         "/api/schedule/sync": handlers["_get_schedule_sync"],
