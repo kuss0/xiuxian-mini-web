@@ -6256,7 +6256,13 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert 'textarea name="command"' in schedule_js
     assert 'name="command_gap_sec"' in schedule_js
     assert "function renderScheduleModuleOptions(modules)" in schedule_js
-    assert "m.status === \"expired\"" in schedule_js
+    assert "function scheduleDisplayStatusKey(statusKey, counts)" in schedule_js
+    assert "function scheduleMessageStatusView(message)" in schedule_js
+    assert 'return "needs_retry";' in schedule_js
+    assert "待重排" in schedule_js
+    assert "已从 TG 待发送列表释放" in schedule_js
+    assert "const done = (counts.scheduled || 0) + (counts.expired || 0);" in schedule_js
+    assert 'if (status === "expired")' in schedule_js
     assert "过期可释放" in schedule_js
     assert "other_identity" in schedule_js
     assert "其它身份" in schedule_js

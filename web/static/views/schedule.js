@@ -88,7 +88,7 @@
     scheduleRail.innerHTML = `
       <div class="schedule-rail-summary">
         <strong>${escapeHtml(String(batches.length))} 批排班</strong>
-        <span>${totals.sending ? `${escapeHtml(String(totals.sending))} 批发送中｜` : ""}${escapeHtml(String(totals.scheduled))} 已排 / ${escapeHtml(String(totals.planned))} 待排${totals.expired ? `｜${escapeHtml(String(totals.expired))} 过期` : ""}${totals.failed ? `｜${escapeHtml(String(totals.failed))} 失败` : ""}</span>
+        <span>${totals.sending ? `${escapeHtml(String(totals.sending))} 批发送中｜` : ""}${escapeHtml(String(totals.scheduled))} 已排 / ${escapeHtml(String(totals.planned))} 待排${totals.failed ? `｜${escapeHtml(String(totals.failed))} 待重排` : ""}${totals.expired ? `｜${escapeHtml(String(totals.expired))} 已过期` : ""}</span>
       </div>
       <div class="schedule-rail-list">
         ${visible.map((batch) => renderScheduleRailRow(deps, batch)).join("")}
@@ -113,9 +113,9 @@
   function renderScheduleRailRow(deps = {}, batch) {
     const counts = batch.counts || {};
     const total = (counts.planned || 0) + (counts.scheduled || 0) + (counts.failed || 0) + (counts.expired || 0);
-    const done = (counts.scheduled || 0) + (counts.failed || 0) + (counts.expired || 0);
+    const done = (counts.scheduled || 0) + (counts.expired || 0);
     const pct = total ? Math.round((done / total) * 100) : 0;
-    const statusKey = batch.status || "active";
+    const statusKey = scheduleDisplayStatusKey(batch.status || "active", counts);
     const statusPill = scheduleStatusPill(statusKey) || `<span class="status-pill">${statusKey === "active" ? "活动" : escapeHtml(statusKey)}</span>`;
     const identity = scheduleIdentityLabel(deps, batch.send_as_id);
     const snippets = (batch.items || []).slice(0, 2).map((item) => `
@@ -143,10 +143,12 @@
   }
 
   function scheduleRailStatusClass(statusKey, counts) {
+    statusKey = scheduleDisplayStatusKey(statusKey, counts);
     if (statusKey === "failed") return "risk";
-    if (statusKey === "partial_failed" || Number(counts?.failed || 0) > 0) return "warn";
+    if (statusKey === "needs_retry" || statusKey === "partial_failed" || Number(counts?.failed || 0) > 0) return "warn";
     if (statusKey === "sending") return "live";
     if (statusKey === "completed") return "done";
+    if (statusKey === "expired") return "muted";
     if (statusKey === "cancelled") return "muted";
     return "active";
   }
@@ -353,37 +355,31 @@
       .map((b) => {
         const items = (b.items || [])
           .map((m) => {
-            const stat = m.status === "scheduled"
-              ? `<span class="status-pill ok">已排</span>`
-              : m.status === "failed"
-                ? `<span class="status-pill risk">失败</span>`
-                : m.status === "expired"
-                  ? `<span class="status-pill">过期</span>`
-                  : `<span class="status-pill">planned</span>`;
+            const view = scheduleMessageStatusView(m);
             return `
               <li>
                 <code>${escapeHtml(m.command)}</code>
                 <small>${escapeHtml(m.schedule_text || "")}</small>
-                ${stat}
+                ${view.pill}
                 ${m.scheduled_msg_id ? `<small>TG #${escapeHtml(String(m.scheduled_msg_id))}</small>` : ""}
-                ${m.last_error ? `<small class="error">${escapeHtml(m.last_error)}</small>` : ""}
+                ${view.note ? `<small class="${escapeAttr(view.noteClass)}">${escapeHtml(view.note)}</small>` : ""}
               </li>
             `;
           })
           .join("");
         const counts = b.counts || {};
         const total = (counts.planned || 0) + (counts.scheduled || 0) + (counts.failed || 0) + (counts.expired || 0);
-        const done = (counts.scheduled || 0) + (counts.failed || 0) + (counts.expired || 0);
+        const done = (counts.scheduled || 0) + (counts.expired || 0);
         const pct = total ? Math.round((done / total) * 100) : 0;
-        const statusKey = b.status || "active";
+        const statusKey = scheduleDisplayStatusKey(b.status || "active", counts);
         const statusText = scheduleStatusText(statusKey, counts);
         const statusPill = scheduleStatusPill(statusKey);
-        const showProgress = statusKey === "sending" || (counts.planned > 0 && counts.scheduled > 0);
+        const showProgress = statusKey === "sending" || statusKey === "needs_retry" || (counts.planned > 0 && counts.scheduled > 0);
         const cancelBtn = statusKey === "sending"
           ? `<button type="button" data-schedule-action="cancel" data-batch-id="${escapeAttr(String(b.id))}" aria-label="取消批次 #${escapeAttr(String(b.id))}">取消</button>`
           : "";
         const retryBtn = counts.failed > 0 && statusKey !== "sending" && statusKey !== "deleted"
-          ? `<button type="button" data-schedule-action="retry-failed" data-batch-id="${escapeAttr(String(b.id))}" aria-label="重排批次 #${escapeAttr(String(b.id))} 的失败项">重排失败</button>`
+          ? `<button type="button" data-schedule-action="retry-failed" data-batch-id="${escapeAttr(String(b.id))}" aria-label="重排批次 #${escapeAttr(String(b.id))} 的待重排项">重排待处理</button>`
           : "";
         return `
           <article class="account-row" data-schedule-batch-id="${escapeAttr(String(b.id))}">
@@ -460,11 +456,19 @@
   function scheduleStatusText(statusKey, counts) {
     const c = counts || {};
     const total = (c.planned || 0) + (c.scheduled || 0) + (c.failed || 0) + (c.expired || 0);
-    const done = (c.scheduled || 0) + (c.failed || 0) + (c.expired || 0);
-    if (statusKey === "sending") return `发送中 ${done}/${total}${c.failed ? ` (${c.failed} 失败)` : ""}`;
+    const done = (c.scheduled || 0) + (c.expired || 0);
+    if (statusKey === "sending") return `发送中 ${done}/${total}${c.failed ? `（${c.failed} 待重排）` : ""}`;
     if (statusKey === "completed") return `已完成 ${(c.scheduled || 0) + (c.expired || 0)}/${total}`;
-    if (statusKey === "partial_failed") return `部分失败 ${(c.scheduled || 0) + (c.expired || 0)}/${total}（${c.failed || 0} 失败）`;
-    if (statusKey === "failed") return `全部失败`;
+    if (statusKey === "expired") return `已过期 ${c.expired || 0}/${total}`;
+    if (statusKey === "needs_retry" || statusKey === "partial_failed") {
+      const parts = [];
+      if (c.scheduled) parts.push(`${c.scheduled} 已排`);
+      if (c.planned) parts.push(`${c.planned} 待排`);
+      if (c.failed) parts.push(`${c.failed} 待重排`);
+      if (c.expired) parts.push(`${c.expired} 已过期`);
+      return parts.join("｜") || `待重排 ${c.failed || 0}/${total}`;
+    }
+    if (statusKey === "failed") return `待重排 ${c.failed || 0}/${total}`;
     if (statusKey === "cancelled") return `已取消 (排到 ${c.scheduled || 0}/${total})`;
     return `${c.scheduled || 0}/${total} 已排`;
   }
@@ -472,10 +476,61 @@
   function scheduleStatusPill(statusKey) {
     if (statusKey === "sending") return `<span class="status-pill warn">拟人发送中</span>`;
     if (statusKey === "completed") return `<span class="status-pill ok">完成</span>`;
-    if (statusKey === "partial_failed") return `<span class="status-pill warn">部分失败</span>`;
-    if (statusKey === "failed") return `<span class="status-pill risk">失败</span>`;
+    if (statusKey === "expired") return `<span class="status-pill">已过期</span>`;
+    if (statusKey === "needs_retry" || statusKey === "partial_failed") return `<span class="status-pill warn">待重排</span>`;
+    if (statusKey === "failed") return `<span class="status-pill warn">待重排</span>`;
     if (statusKey === "cancelled") return `<span class="status-pill">已取消</span>`;
     return "";
+  }
+
+  function scheduleDisplayStatusKey(statusKey, counts) {
+    const c = counts || {};
+    const total = (c.planned || 0) + (c.scheduled || 0) + (c.failed || 0) + (c.expired || 0);
+    if (total > 0 && (c.expired || 0) === total) return "expired";
+    if ((c.failed || 0) > 0 && statusKey !== "sending") return "needs_retry";
+    return statusKey || "active";
+  }
+
+  function scheduleMessageStatusView(message) {
+    const status = String(message?.status || "");
+    const rawError = String(message?.last_error || "").trim();
+    if (status === "scheduled") {
+      return { pill: `<span class="status-pill ok">已排</span>`, note: "", noteClass: "" };
+    }
+    if (status === "failed") {
+      return {
+        pill: `<span class="status-pill warn">待重排</span>`,
+        note: compactScheduleError(rawError),
+        noteClass: "warn",
+      };
+    }
+    if (status === "expired") {
+      return {
+        pill: `<span class="status-pill">已过期</span>`,
+        note: compactScheduleExpiredNote(rawError),
+        noteClass: "muted",
+      };
+    }
+    if (status === "deleted") {
+      return { pill: `<span class="status-pill">已删除</span>`, note: "", noteClass: "" };
+    }
+    return { pill: `<span class="status-pill">待排</span>`, note: "", noteClass: "" };
+  }
+
+  function compactScheduleExpiredNote(text) {
+    if (!text) return "";
+    if (text.includes("TG 待发送列表已无该项") && text.includes("计划时间已过")) {
+      return "已从 TG 待发送列表释放";
+    }
+    return text;
+  }
+
+  function compactScheduleError(text) {
+    if (!text) return "";
+    if (text.includes("cannot schedule more messages") || text.includes("官方定时触发单身份上限") || text.includes("单身份上限")) {
+      return "官方定时额度已满，需清理旧定时或点击重排";
+    }
+    return text;
   }
 
   function scheduleManualMessages(result) {
@@ -1101,11 +1156,11 @@
       btn.addEventListener("click", async () => {
         const batchId = btn.dataset.batchId;
         if (!batchId) return;
-        if (!window.confirm(`重排批次 #${batchId} 的失败项?已过期的会改到近期错峰时间,仍是官方定时、需已登录。`)) return;
+        if (!window.confirm(`重排批次 #${batchId} 的待重排项?已过期的会改到近期错峰时间,仍是官方定时、需已登录。`)) return;
         const originalText = btn.textContent;
         btn.disabled = true;
         btn.textContent = "重排中";
-        setBatchStatus("info", `正在重排批次 #${batchId} 的失败项…`);
+        setBatchStatus("info", `正在重排批次 #${batchId} 的待重排项…`);
         try {
           const result = await postJson("/api/schedule/retry-failed", { batch_id: Number(batchId) });
           if (!result.ok) throw new Error(result.error || "重排失败");
@@ -1164,6 +1219,8 @@
     renderScheduleBatches,
     scheduleStatusText,
     scheduleStatusPill,
+    scheduleDisplayStatusKey,
+    scheduleMessageStatusView,
     scheduleManualMessages,
     scheduleStatusWithManualMessages,
     findScheduleContract,
