@@ -265,10 +265,13 @@
     select.value = String(selectedId || "");
     if (followButton) followButton.disabled = !Number(state.activeIdentityId || 0);
     const identity = scheduleIdentityById(deps, selectedId);
+    const metaText = identity
+      ? `定时默认: ${identity.label || identity.username || identity.send_as_id}`
+      : "定时默认身份";
+    select.title = metaText;
+    if (followButton) followButton.title = "使用聊天当前身份作为定时默认";
     if (meta) {
-      meta.textContent = identity
-        ? `定时默认: ${identity.label || identity.username || identity.send_as_id}`
-        : "定时默认身份";
+      meta.textContent = metaText;
     }
     if (select.dataset.scheduleDockBound !== "1") {
       select.dataset.scheduleDockBound = "1";

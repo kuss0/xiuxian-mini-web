@@ -357,6 +357,7 @@ PROBE_SCRIPT = """
     shell: rect(".chat-client-shell"),
     rail: rect(".conversation-rail"),
     schedulePanel: rect(".schedule-rail-panel"),
+    scheduleIdentityDock: rect("#scheduleIdentityDock"),
     scheduleRefresh: rect("#scheduleRailRefreshButton"),
     scheduleNew: rect("#scheduleButton"),
     commonPanel: rect(".common-action-panel"),
@@ -387,6 +388,8 @@ PROBE_SCRIPT = """
   check("no body horizontal overflow", document.body.scrollWidth <= window.innerWidth + 1,
     document.body.scrollWidth + " <= " + window.innerWidth);
   check("schedule panel visible", visible(boxes.schedulePanel, 160, 42), JSON.stringify(boxes.schedulePanel));
+  check("schedule identity dock compact", visible(boxes.scheduleIdentityDock, 120, 24) && boxes.scheduleIdentityDock.height <= 42,
+    JSON.stringify(boxes.scheduleIdentityDock));
   check("schedule panel stays inside rail",
     boxes.schedulePanel.left >= boxes.rail.left - 1 && boxes.schedulePanel.right <= boxes.rail.right + 1,
     JSON.stringify({ schedulePanel: boxes.schedulePanel, rail: boxes.rail }));
