@@ -361,6 +361,10 @@ PROBE_SCRIPT = """
     scheduleNew: rect("#scheduleButton"),
     commonPanel: rect(".common-action-panel"),
     logsButton: rect("#logsButton"),
+    dungeonStatusButton: rect("#dungeonStatusButton"),
+    resourceStatsButton: rect("#resourceStatsButton"),
+    inventoryButton: rect("#inventoryButton"),
+    outboxButton: rect("#outboxButton"),
     workspace: rect(".chat-workspace"),
     header: rect(".chat-pane .section-head"),
     toolsToggle: rect(".workspace-tools-toggle"),
@@ -398,6 +402,11 @@ PROBE_SCRIPT = """
   check("common panel visible", visible(boxes.commonPanel, 160, 48), JSON.stringify(boxes.commonPanel));
   check("logs button clickable", visible(boxes.logsButton, 34, 24) && centerHit("#logsButton"),
     hitDetail("#logsButton"));
+  ["dungeonStatusButton", "resourceStatsButton", "inventoryButton", "outboxButton"].forEach(function(key) {
+    var selector = "#" + key;
+    check("common action " + key + " clickable", visible(boxes[key], 46, 24) && centerHit(selector),
+      hitDetail(selector));
+  });
   check("message list visible", visible(boxes.messageList, 180, 120), JSON.stringify(boxes.messageList));
   check("composer visible", visible(boxes.composer, 180, 80), JSON.stringify(boxes.composer));
   check("composer within viewport", boxes.composer.bottom <= window.innerHeight + 1 && boxes.composer.top >= -1,

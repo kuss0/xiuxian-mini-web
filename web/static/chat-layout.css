@@ -402,6 +402,7 @@ body {
 
   .chat-client-shell .conversation-rail {
     justify-self: stretch;
+    grid-template-rows: minmax(0, 1fr) auto;
     width: 100%;
   }
 
@@ -409,6 +410,11 @@ body {
   .chat-client-shell .common-action-panel {
     width: 100%;
     overflow: hidden;
+  }
+
+  .chat-client-shell .common-action-panel {
+    align-self: end;
+    height: auto;
   }
 
   .chat-client-shell .schedule-rail-panel .panel-head,
