@@ -60,6 +60,9 @@ const outboxButton = document.querySelector("#outboxButton");
 const scheduleButton = document.querySelector("#scheduleButton");
 const scheduleRail = document.querySelector("#scheduleRail");
 const scheduleRailRefreshButton = document.querySelector("#scheduleRailRefreshButton");
+const scheduleIdentityQuickSelect = document.querySelector("#scheduleIdentityQuickSelect");
+const scheduleIdentityFollowChatButton = document.querySelector("#scheduleIdentityFollowChatButton");
+const scheduleIdentityQuickMeta = document.querySelector("#scheduleIdentityQuickMeta");
 const logsButton = document.querySelector("#logsButton");
 const dungeonStatusButton = document.querySelector("#dungeonStatusButton");
 const resourceStatsButton = document.querySelector("#resourceStatsButton");
@@ -398,6 +401,7 @@ async function loadAccounts() {
   state.accountLimit = payload.max_accounts || 0;
   state.listenerSummary = payload.listener || null;
   renderSidebarIdentityList();
+  renderScheduleIdentityDock();
   renderDirectSendComposer();
   renderGameCockpit();
   updateCurrentAccountLine();
@@ -414,6 +418,7 @@ async function loadIdentities() {
   const activeChanged = previousActiveId !== (Number(state.activeIdentityId || 0) || null);
   renderSidebarIdentityList();
   renderSkillViews();
+  renderScheduleIdentityDock();
   renderDirectSendComposer();
   renderGameCockpit();
   if (activeChanged && previousActiveId !== null) {
@@ -2873,6 +2878,9 @@ function scheduleDeps() {
   return {
     state,
     scheduleRail,
+    scheduleIdentityQuickSelect,
+    scheduleIdentityFollowChatButton,
+    scheduleIdentityQuickMeta,
     identityOptionLabel,
     loadAccounts,
     loadIdentities,
@@ -2891,6 +2899,11 @@ function syncScheduleBatches(payload) {
 
 function renderScheduleRail() {
   return window.MiniwebViews.schedule.renderScheduleRail(scheduleDeps());
+}
+
+function renderScheduleIdentityDock() {
+  if (!window.MiniwebViews?.schedule?.renderScheduleIdentityDock) return;
+  return window.MiniwebViews.schedule.renderScheduleIdentityDock(scheduleDeps());
 }
 
 function renderScheduleRailRow(batch) {
@@ -3166,7 +3179,8 @@ function identityById(identityId) {
 
 function accountForIdentity(identity) {
   if (!identity) return null;
-  return (state.accounts || []).find((account) => account.local_id === identity.account_local_id) || null;
+  const localId = String(identity.account_local_id || "");
+  return (state.accounts || []).find((account) => String(account.local_id || "") === localId) || null;
 }
 
 function ensureActiveIdentity() {
@@ -3220,14 +3234,16 @@ function identityCanSend(identity) {
   const account = accountForIdentity(identity);
   const accountId = Number(account?.account_id || 0);
   const identityId = Number(identity?.send_as_id || 0);
-  return Boolean(account && accountId && identityId && accountId === identityId);
+  const loginDone = String(account?.login_status || "") === "done";
+  const targetChat = String(account?.target_chat || state.settings?.target_chat || "").trim();
+  return Boolean(account && loginDone && accountId && identityId && targetChat);
 }
 
 function identityOptionLabel(identity) {
   const account = accountForIdentity(identity);
   const name = identity?.label || identity?.username || identity?.send_as_id || "未命名身份";
   const accountLabel = account?.label || identity?.account_local_id || "未绑定账号";
-  const suffix = identityCanSend(identity) ? "" : "（暂不能发送）";
+  const suffix = identityCanSend(identity) ? "" : "（账号未就绪）";
   return `${name}｜账号 ${accountLabel}${suffix}`;
 }
 
@@ -3272,7 +3288,7 @@ async function sendDirectComposerMessage() {
       return;
     }
     if (!identityCanSend(identity)) {
-      setDirectSendStatus("当前只支持账号本体身份发送，请切换到可发送身份。", "warn");
+      setDirectSendStatus("该身份绑定账号未完成登录或缺少目标群配置。", "warn");
       return;
     }
     if (!command) {

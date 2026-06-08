@@ -9485,7 +9485,61 @@ def test_skill_send_happy_path_with_fake_listener(tmp_path, monkeypatch):
     assert result["command"] == ".野外历练"
     assert captured["chat_id"] == -1001680975844
     assert captured["command"] == ".野外历练"
-    assert "reply_to" not in captured["kwargs"]  # 直发不带 reply_to
+    assert captured["kwargs"].get("reply_to") == 7310786
+
+
+def test_skill_send_uses_transient_client_when_listener_is_not_running(tmp_path, monkeypatch):
+    """已登录账号即使没开采集,也应该能用自己的 session 临时 client 发送。"""
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "m.db"))
+    server.save_settings_payload({"target_chat": "-1001680975844", "target_topic_id": "7310786"})
+    server.save_account_payload(
+        {
+            "local_id": "wise",
+            "api_id": "1",
+            "api_hash": "h",
+            "account_id": "8574677796",
+            "login_status": "done",
+        }
+    )
+    server.save_identity_payload(
+        {"send_as_id": "8574677796", "account_local_id": "wise", "label": "Wise Mole🤓"}
+    )
+    monkeypatch.setattr(server._listeners, "get_listener", lambda _id: None)
+    captured: dict = {"connects": 0, "disconnects": 0}
+
+    class FakeClient:
+        async def connect(self):
+            captured["connects"] += 1
+
+        async def is_user_authorized(self):
+            return True
+
+        async def disconnect(self):
+            captured["disconnects"] += 1
+
+        async def send_message(self, chat_id, command, **kwargs):
+            captured["chat_id"] = chat_id
+            captured["command"] = command
+            captured["kwargs"] = kwargs
+
+            class _Sent:
+                id = 88088
+
+            return _Sent()
+
+    monkeypatch.setattr(server_module, "create_telegram_client", lambda _settings: FakeClient())
+
+    result = server.skill_send_payload(
+        {"skill_key": "manual_send", "identity_id": 8574677796, "command_override": "今晚手动看一下"}
+    )
+
+    assert result["ok"] is True
+    assert result["sent_msg_id"] == 88088
+    assert captured["connects"] == 1
+    assert captured["disconnects"] == 1
+    assert captured["chat_id"] == -1001680975844
+    assert captured["command"] == "今晚手动看一下"
+    assert captured["kwargs"].get("reply_to") == 7310786
 
 
 def test_skill_send_reply_mode_passes_reply_to_to_client(tmp_path, monkeypatch):

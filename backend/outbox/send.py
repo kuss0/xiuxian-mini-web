@@ -49,7 +49,7 @@ class SkillSendResult:
 
 class SkillSendService:
     """实际跑 send 的服务。需要 listener manager 注入,这样能复用已登录 client。
-    没 listener 的情况下,所有 Telethon 调用都失败 — 这是预期的(未登录就不能发)。
+    没 listener 时可由 server 注入 transient_submit,用已登录 session 短连接发送。
 
     event_sink:发送成功后,把 outgoing message 也 ingest 进消息箱(等价于 listener
     的 NewMessage 回调,但更可靠 — outgoing 事件 telethon 行为不一致)。
@@ -60,11 +60,13 @@ class SkillSendService:
         registry: SkillRegistry,
         *,
         listener_lookup: Callable[[str], Any] | None = None,
+        transient_submit: Callable[[str, Callable[[Any], Any]], Any] | None = None,
         event_sink: Callable[[RawMessageEvent], None] | None = None,
         time_fn: Callable[[], float] = time.time,
     ):
         self._registry = registry
         self._listener_lookup = listener_lookup or (lambda _id: None)
+        self._transient_submit = transient_submit
         self._event_sink = event_sink
         self._time_fn = time_fn
         self._last_display = ""
@@ -91,7 +93,7 @@ class SkillSendService:
         topic_id: int | None = None,
         command_override: str = "",
     ) -> SkillSendResult:
-        """同步入口,内部用 listener.submit 跑到 listener loop 里。"""
+        """同步入口,优先复用 listener client;未采集账号退到 transient client。"""
         skill = self._registry.get(skill_key)
         if skill is None:
             return SkillSendResult(ok=False, error=f"未知技能 key: {skill_key}", skill_key=skill_key)
@@ -118,26 +120,31 @@ class SkillSendService:
                 command=command,
             )
 
-        listener = self._listener_lookup(str(account_local_id or "").strip())
-        if listener is None:
-            return SkillSendResult(
-                ok=False,
-                error="account 没在采集运行中,无法用其 client 发送(需先登录并启动 listener)",
-                skill_key=skill_key,
+        local_id = str(account_local_id or "").strip()
+
+        def _send_coro(client):
+            return self._send_on_client(
+                client,
+                chat_id=chat_id_int,
                 command=command,
+                reply_to_msg_id=reply_id,
+                topic_id=topic,
+                send_as_id=int(send_as_id or 0),
             )
 
         try:
-            sent = listener.submit(
-                lambda client: self._send_on_client(
-                    client,
-                    chat_id=chat_id_int,
+            listener = self._listener_lookup(local_id)
+            if listener is not None:
+                sent = listener.submit(_send_coro)
+            elif self._transient_submit is not None:
+                sent = self._transient_submit(local_id, _send_coro)
+            else:
+                return SkillSendResult(
+                    ok=False,
+                    error="账号没有可用 Telegram client,请先完成登录",
+                    skill_key=skill_key,
                     command=command,
-                    reply_to_msg_id=reply_id,
-                    topic_id=topic,
-                    send_as_id=int(send_as_id or 0),
                 )
-            )
         except Exception as exc:
             # 老脚本 runtime.py:1536 在挂机模式下 catch FloodWaitError 暂停发送。
             # mini-web 一次一发不会循环,但还是要给用户一个可读的错误。
@@ -221,7 +228,7 @@ class SkillSendService:
             except Exception:
                 send_as_display = ""
 
-        if send_as_peer is not None or (topic_id > 0 and reply_to_msg_id > 0):
+        if send_as_peer is not None:
             from backend.tg.requests import input_reply_to_message, send_message_request
 
             peer = await client.get_input_entity(chat_id)

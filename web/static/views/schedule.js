@@ -14,6 +14,21 @@
     return deps.scheduleRail || document.querySelector("#scheduleRail");
   }
 
+  function scheduleSelectedSendAsIds(deps = {}) {
+    const state = scheduleState(deps);
+    const identities = state.identities || [];
+    const known = new Set(identities.map((item) => Number(item.send_as_id || 0)).filter(Boolean));
+    return (state.scheduleSelectedSendAsIds || [])
+      .map((id) => Number(id || 0))
+      .filter((id) => id && known.has(id));
+  }
+
+  function setScheduleSelectedSendAsIds(deps = {}, ids = []) {
+    const state = scheduleState(deps);
+    state.scheduleSelectedSendAsIds = (ids || []).map((id) => Number(id || 0)).filter(Boolean);
+    renderScheduleIdentityDock(deps);
+  }
+
   async function loadScheduleRail(deps = {}, { silent = false } = {}) {
     const state = scheduleState(deps);
     const scheduleRail = scheduleRailElement(deps);
@@ -44,6 +59,7 @@
     state.scheduleBatches = batches;
     state.scheduleError = "";
     state.scheduleLoading = false;
+    renderScheduleIdentityDock(deps);
     renderScheduleRail(deps);
     return batches;
   }
@@ -211,9 +227,7 @@
     const state = scheduleState(deps);
     const identities = state.identities || [];
     const known = new Set(identities.map((item) => Number(item.send_as_id || 0)).filter(Boolean));
-    const saved = (state.scheduleSelectedSendAsIds || [])
-      .map((id) => Number(id || 0))
-      .filter((id) => id && known.has(id));
+    const saved = scheduleSelectedSendAsIds(deps);
     if (saved.length) return saved;
     const active = Number(state.activeIdentityId || 0);
     if (active && known.has(active)) {
@@ -225,6 +239,50 @@
       identities[0];
     const id = Number(fallback?.send_as_id || 0);
     return id ? [id] : [];
+  }
+
+  function renderScheduleIdentityDock(deps = {}) {
+    const select = deps.scheduleIdentityQuickSelect || document.querySelector("#scheduleIdentityQuickSelect");
+    const followButton = deps.scheduleIdentityFollowChatButton || document.querySelector("#scheduleIdentityFollowChatButton");
+    const meta = deps.scheduleIdentityQuickMeta || document.querySelector("#scheduleIdentityQuickMeta");
+    if (!select) return;
+    const state = scheduleState(deps);
+    const identities = state.identities || [];
+    const selected = defaultScheduleSendAsIds(deps);
+    const selectedId = Number(selected[0] || 0);
+    if (!identities.length) {
+      select.innerHTML = '<option value="">无身份</option>';
+      select.disabled = true;
+      if (followButton) followButton.disabled = true;
+      if (meta) meta.textContent = "先登录账号";
+      return;
+    }
+    select.disabled = false;
+    select.innerHTML = identities.map((identity) => {
+      const id = Number(identity.send_as_id || 0);
+      return `<option value="${escapeAttr(String(id))}" ${id === selectedId ? "selected" : ""}>${escapeHtml(scheduleIdentityOptionLabel(deps, identity))}</option>`;
+    }).join("");
+    select.value = String(selectedId || "");
+    if (followButton) followButton.disabled = !Number(state.activeIdentityId || 0);
+    const identity = scheduleIdentityById(deps, selectedId);
+    if (meta) {
+      meta.textContent = identity
+        ? `定时默认: ${identity.label || identity.username || identity.send_as_id}`
+        : "定时默认身份";
+    }
+    if (select.dataset.scheduleDockBound !== "1") {
+      select.dataset.scheduleDockBound = "1";
+      select.addEventListener("change", () => {
+        const id = Number(select.value || 0);
+        setScheduleSelectedSendAsIds(deps, id ? [id] : []);
+      });
+    }
+    if (followButton && followButton.dataset.scheduleDockBound !== "1") {
+      followButton.dataset.scheduleDockBound = "1";
+      followButton.addEventListener("click", () => {
+        setScheduleSelectedSendAsIds(deps, activeScheduleSendAsIds(deps));
+      });
+    }
   }
 
   function activeScheduleSendAsIds(deps = {}) {
@@ -1117,6 +1175,7 @@
       const selected = selectedScheduleIds();
       const state = scheduleState(deps);
       state.scheduleSelectedSendAsIds = selected;
+      renderScheduleIdentityDock(deps);
       if (sendAsCount) sendAsCount.textContent = String(selected.length);
       if (identitySummary) {
         if (!selected.length) {
@@ -1621,6 +1680,7 @@
     loadScheduleRail,
     syncScheduleBatches,
     renderScheduleRail,
+    renderScheduleIdentityDock,
     renderScheduleRailRow,
     scheduleRailStatusClass,
     scheduleIdentityLabel,

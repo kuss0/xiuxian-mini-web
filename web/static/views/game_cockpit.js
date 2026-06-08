@@ -277,7 +277,7 @@
     const title = String(patchMap.get("称号") || "").replace(/^【|】$/g, "");
     const canSend = deps.identityCanSend?.(identity);
     const statusClass = !account ? "warn" : canSend ? "ok" : "warn";
-    const statusText = !account ? "未绑定账号" : canSend ? "可直接发送" : "只能观察";
+    const statusText = !account ? "未绑定账号" : canSend ? "可直接发送" : "账号未就绪";
     const metricRows = [
       ["战力", power || "未读"],
       ["修为", cultivation || "未读"],

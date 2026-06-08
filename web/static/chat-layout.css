@@ -389,7 +389,7 @@ body {
 
 @media (min-width: 901px) {
   .chat-client-shell {
-    grid-template-columns: clamp(300px, 24vw, 360px) minmax(0, 1fr);
+    grid-template-columns: clamp(360px, 30vw, 480px) minmax(0, 1fr);
   }
 
   .chat-client-shell .conversation-rail,
@@ -441,7 +441,7 @@ body {
   }
 
   .chat-client-shell .workspace-tools-panel {
-    left: max(calc(clamp(300px, 24vw, 360px) + 14px), calc(100vw - 934px));
+    left: max(calc(clamp(360px, 30vw, 480px) + 14px), calc(100vw - 934px));
     right: 14px;
     width: auto;
     max-width: none;
@@ -615,7 +615,7 @@ body {
   }
 
   .chat-client-shell .schedule-rail-panel {
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
   }
 
   .chat-client-shell .schedule-rail-panel .panel-head,
@@ -817,7 +817,7 @@ body {
   }
 
   .chat-client-shell .schedule-rail-panel {
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
     padding: 7px 8px;
   }
 

@@ -979,10 +979,6 @@
     overflow: visible;
   }
 
-  .schedule-modal-main {
-    order: -1;
-  }
-
   .schedule-modal-records {
     order: -1;
     border-top: 1px solid var(--line);

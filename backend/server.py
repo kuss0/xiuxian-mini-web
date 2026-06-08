@@ -389,6 +389,7 @@ class MiniWebServer:
         self._skill_send = SkillSendService(
             self._skill_registry,
             listener_lookup=lambda local_id: self._listeners.get_listener(local_id),
+            transient_submit=lambda local_id, coro_factory: self._submit_skill_send_transient(local_id, coro_factory),
             event_sink=lambda event: self._store.ingest_event(event),
         )
         # 通知调度器(MVP 只支持 TG bot,后续可加 Bark/钉钉/浏览器推送)
@@ -2155,24 +2156,28 @@ class MiniWebServer:
             target_topic_id = 0
         return target_chat, target_topic_id
 
-    def _official_schedule_account_config(self, account_local_id: str) -> dict:
+    def _telegram_account_config(self, account_local_id: str, *, action_label: str) -> dict:
         local_id = str(account_local_id or "").strip()
+        action = str(action_label or "操作 Telegram").strip() or "操作 Telegram"
         if not local_id:
-            raise RuntimeError("该身份没有绑定账号,无法正式排到 TG")
+            raise RuntimeError(f"该身份没有绑定账号,无法{action}")
         account = self._store.get_account(local_id)
         if account is None:
-            raise RuntimeError(f"找不到该身份绑定的账号 {local_id},无法正式排到 TG")
+            raise RuntimeError(f"找不到该身份绑定的账号 {local_id},无法{action}")
         account_config = self._account_runtime_config(account)
         if str(account_config.get("login_status") or "") != "done":
-            raise RuntimeError("该身份绑定账号未完成登录,无法正式排到 TG")
+            raise RuntimeError(f"该身份绑定账号未完成登录,无法{action}")
         missing = [
             key for key in ("api_id", "api_hash", "session_name")
             if not str(account_config.get(key) or "").strip()
         ]
         if missing:
             joined = " / ".join(missing)
-            raise RuntimeError(f"该身份绑定账号缺少 {joined},无法正式排到 TG")
+            raise RuntimeError(f"该身份绑定账号缺少 {joined},无法{action}")
         return account_config
+
+    def _official_schedule_account_config(self, account_local_id: str) -> dict:
+        return self._telegram_account_config(account_local_id, action_label="正式排到 TG")
 
     def _schedule_batch_status(self, batch_id: int) -> str:
         try:
@@ -2189,6 +2194,30 @@ class MiniWebServer:
                 lock = threading.Lock()
                 self._schedule_client_locks[key] = lock
             return lock
+
+    def _submit_skill_send_transient(self, account_local_id: str, coro_factory) -> dict:
+        local_id = str(account_local_id or "").strip()
+        account_config = self._telegram_account_config(local_id, action_label="发送消息")
+
+        async def _runner():
+            client = None
+            try:
+                client = create_telegram_client(account_config)
+                await client.connect()
+                if not await client.is_user_authorized():
+                    raise RuntimeError("Telegram session 未登录,请先在账号配置里完成验证码登录")
+                return await coro_factory(client)
+            finally:
+                if client is not None:
+                    try:
+                        await client.disconnect()
+                    except Exception:
+                        pass
+
+        import asyncio
+        lock = self._schedule_client_lock(local_id)
+        with lock:
+            return asyncio.run(_runner())
 
     async def _run_official_send_with_client_lock(
         self,
@@ -2605,14 +2634,23 @@ class MiniWebServer:
             return {"ok": False, "error": "account_id 为空,请先确认该 Telegram 账号已登录成功"}, {}
         send_as_id = 0 if identity_id == account_id else identity_id
 
-        chat_id_raw = payload.get("chat_id") or account.get("target_chat") or ""
+        try:
+            settings = self._store.get_settings()
+        except Exception:
+            settings = {}
+        chat_id_raw = payload.get("chat_id") or account.get("target_chat") or settings.get("target_chat") or ""
         try:
             chat_id = int(str(chat_id_raw).strip())
         except (TypeError, ValueError):
-            return {"ok": False, "error": "缺少 chat_id 或 account.target_chat"}, {}
+            return {"ok": False, "error": "缺少 chat_id 或目标群配置"}, {}
 
         try:
-            topic_id = int(str(payload.get("top_msg_id") or account.get("target_topic_id") or 0).strip())
+            topic_id = int(str(
+                payload.get("top_msg_id")
+                or account.get("target_topic_id")
+                or settings.get("target_topic_id")
+                or 0
+            ).strip())
         except (TypeError, ValueError):
             topic_id = 0
 
