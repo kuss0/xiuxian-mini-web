@@ -761,17 +761,21 @@
 .schedule-modal-grid {
   display: grid;
   grid-template-columns: minmax(460px, 1fr) minmax(360px, 0.86fr);
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
   height: 100%;
 }
 
 .schedule-modal-context {
-  grid-column: 1 / -1;
   min-width: 0;
-  border-bottom: 1px solid var(--line);
-  background: rgba(2, 6, 23, 0.24);
-  padding: 14px 18px;
+}
+
+.schedule-modal-loading {
+  display: grid;
+  place-items: center;
+  min-height: 260px;
+  height: 100%;
+  padding: 24px;
 }
 
 .schedule-modal-main,
@@ -851,7 +855,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 8px;
-  max-height: min(30dvh, 240px);
+  max-height: min(24dvh, 180px);
   overflow: auto;
   padding-right: 2px;
 }
@@ -964,14 +968,9 @@
 
   .schedule-modal-grid {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto auto;
+    grid-template-rows: auto auto;
     height: auto;
     min-height: 100%;
-  }
-
-  .schedule-modal-context {
-    order: -2;
-    padding: 12px;
   }
 
   .schedule-modal-main,
@@ -1017,8 +1016,7 @@
   }
 
   .schedule-modal-main,
-  .schedule-modal-records,
-  .schedule-modal-context {
+  .schedule-modal-records {
     padding: 12px;
   }
 
@@ -1028,10 +1026,6 @@
 
   .schedule-account-picker-list {
     max-height: min(20dvh, 132px);
-  }
-
-  .schedule-modal-main > .modal-section:first-child > h4 {
-    display: none;
   }
 
   .schedule-modal-dialog .span-2 {
