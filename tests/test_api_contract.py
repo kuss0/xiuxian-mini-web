@@ -6337,6 +6337,13 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert 'name="auto_anchor_module"' in schedule_js
     assert 'name="schedule_semiauto"' in schedule_js
     assert 'name="schedule_use_module_defaults"' in schedule_js
+    assert 'id="scheduleIdentityPicker"' in schedule_js
+    assert 'id="scheduleAccountPickerList"' in schedule_js
+    assert 'id="scheduleUseActiveIdentityButton"' in schedule_js
+    assert 'data-schedule-select-account' in schedule_js
+    assert 'data-schedule-select-identity' in schedule_js
+    assert 'name="dry_run" />' in schedule_js
+    assert 'name="dry_run" checked' not in schedule_js
     assert 'textarea name="command"' in schedule_js
     assert 'name="command_gap_sec"' in schedule_js
     assert "function renderScheduleModuleOptions(modules)" in schedule_js

@@ -785,6 +785,105 @@
   margin: 0;
 }
 
+.schedule-identity-picker {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.schedule-identity-picker-top,
+.schedule-account-picker-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.schedule-identity-picker-top span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.schedule-identity-picker-top strong {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.schedule-identity-picker-actions,
+.schedule-account-picker-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.schedule-identity-picker-actions button,
+.schedule-account-picker-actions button,
+.schedule-identity-chip {
+  min-height: 30px;
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.62);
+  color: var(--text);
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
+.schedule-account-picker-list {
+  display: grid;
+  gap: 8px;
+}
+
+.schedule-account-picker-row {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(2, 6, 23, 0.22);
+}
+
+.schedule-account-picker-row.selected {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(8, 47, 73, 0.28);
+}
+
+.schedule-account-picker-head {
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+}
+
+.schedule-account-picker-head strong,
+.schedule-account-picker-head small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.schedule-account-picker-head small {
+  color: var(--muted);
+}
+
+.schedule-identity-chip-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.schedule-identity-chip.selected {
+  border-color: rgba(34, 197, 94, 0.7);
+  background: rgba(20, 83, 45, 0.36);
+}
+
+.schedule-identity-picker-empty {
+  padding: 10px;
+  color: var(--muted);
+  border: 1px dashed var(--line);
+}
+
 .schedule-modal-records #scheduleBatchList {
   display: grid;
   gap: 10px;
@@ -846,6 +945,20 @@
     order: -1;
     border-top: 1px solid var(--line);
     border-left: 0;
+  }
+
+  .schedule-identity-picker-top,
+  .schedule-account-picker-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .schedule-account-picker-head {
+    grid-template-columns: 10px minmax(0, 1fr);
+  }
+
+  .schedule-account-picker-actions {
+    grid-column: 2;
+    justify-content: flex-start;
   }
 }
 

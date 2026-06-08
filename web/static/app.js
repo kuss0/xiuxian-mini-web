@@ -2873,8 +2873,10 @@ function scheduleDeps() {
   return {
     state,
     scheduleRail,
+    identityOptionLabel,
     loadAccounts,
     loadIdentities,
+    setActiveIdentity,
     showError,
   };
 }
