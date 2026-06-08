@@ -37,6 +37,7 @@
     scheduleBatches: [],
     scheduleLoading: false,
     scheduleError: "",
+    scheduleSelectedSendAsIds: [],
     lastMessageSeq: 0,
     channelSummaryMessages: [],
     channelSummarySeq: 0,

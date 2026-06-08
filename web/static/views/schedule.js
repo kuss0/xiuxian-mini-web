@@ -210,8 +210,13 @@
   function defaultScheduleSendAsIds(deps = {}) {
     const state = scheduleState(deps);
     const identities = state.identities || [];
+    const known = new Set(identities.map((item) => Number(item.send_as_id || 0)).filter(Boolean));
+    const saved = (state.scheduleSelectedSendAsIds || [])
+      .map((id) => Number(id || 0))
+      .filter((id) => id && known.has(id));
+    if (saved.length) return saved;
     const active = Number(state.activeIdentityId || 0);
-    if (active && identities.some((item) => Number(item.send_as_id || 0) === active)) {
+    if (active && known.has(active)) {
       return [active];
     }
     const fallback =
@@ -220,6 +225,16 @@
       identities[0];
     const id = Number(fallback?.send_as_id || 0);
     return id ? [id] : [];
+  }
+
+  function activeScheduleSendAsIds(deps = {}) {
+    const state = scheduleState(deps);
+    const active = Number(state.activeIdentityId || 0);
+    const identities = state.identities || [];
+    if (active && identities.some((item) => Number(item.send_as_id || 0) === active)) {
+      return [active];
+    }
+    return defaultScheduleSendAsIds(deps);
   }
 
   function renderScheduleIdentityOptions(deps = {}, selectedIds = []) {
@@ -258,7 +273,6 @@
       const group = identitiesByAccount.get(key) || [];
       const loggedIn = String(account?.login_status || "") === "done";
       const running = String(account?.listener_status || "") === "running" || Boolean(account?.listen_enabled);
-      const firstId = Number(group[0]?.send_as_id || 0);
       const selectedInGroup = group.filter((identity) => selected.has(Number(identity.send_as_id || 0))).length;
       return `
         <article class="schedule-account-picker-row ${selectedInGroup ? "selected" : ""}">
@@ -269,8 +283,8 @@
               <small>${escapeHtml(loggedIn ? "已登录" : "未登录")}｜${escapeHtml(running ? "采集中" : "未采集")}｜${escapeHtml(String(selectedInGroup))}/${escapeHtml(String(group.length))}</small>
             </div>
             <div class="schedule-account-picker-actions">
-              ${firstId ? `<button type="button" data-schedule-select-identity="${escapeAttr(String(firstId))}">设为当前</button>` : ""}
-              <button type="button" data-schedule-select-account="${escapeAttr(key)}">全选账号</button>
+              <button type="button" data-schedule-select-account="${escapeAttr(key)}">只选账号</button>
+              <button type="button" data-schedule-add-account="${escapeAttr(key)}">加入账号</button>
             </div>
           </div>
           <div class="schedule-identity-chip-list">
@@ -278,7 +292,7 @@
               const id = Number(identity.send_as_id || 0);
               const active = selected.has(id);
               const name = identity.label || identity.username || identity.send_as_id;
-              return `<button type="button" class="schedule-identity-chip ${active ? "selected" : ""}" data-schedule-select-identity="${escapeAttr(String(id))}" title="点击设为当前；Ctrl/⌘ 点击加入批量">${escapeHtml(String(name))}</button>`;
+              return `<button type="button" class="schedule-identity-chip ${active ? "selected" : ""}" data-schedule-select-identity="${escapeAttr(String(id))}" aria-pressed="${active ? "true" : "false"}">${escapeHtml(String(name))}</button>`;
             }).join("")}
           </div>
         </article>
@@ -342,56 +356,39 @@
       title: "官方定时排班",
       body: `
         <div class="schedule-modal-grid">
+          <section class="schedule-modal-context modal-section">
+            <div class="schedule-identity-picker" id="scheduleIdentityPicker">
+              <div class="schedule-identity-picker-top">
+                <div>
+                  <h4>排程身份</h4>
+                  <strong id="scheduleIdentitySummary">未选身份</strong>
+                  <small id="scheduleIdentityScope">0 个身份</small>
+                </div>
+                <div class="schedule-identity-picker-actions">
+                  <button type="button" id="scheduleUseActiveIdentityButton">跟随聊天当前</button>
+                  <button type="button" id="scheduleSelectAllIdentityButton">全选可用身份</button>
+                  <button type="button" id="scheduleSetChatIdentityButton">设为聊天当前</button>
+                  <button type="button" id="scheduleClearIdentityButton">清空</button>
+                </div>
+              </div>
+              <div class="schedule-account-picker-list" id="scheduleAccountPickerList">
+                ${renderScheduleIdentityPicker(deps, defaultSendAsIds)}
+              </div>
+            </div>
+          </section>
           <div class="schedule-modal-main">
             <section class="modal-section">
-              <h4>模板复用</h4>
-              <p class="muted">把常用排班参数存成模板，后续一键套用后再微调即可。模板只存参数，不存具体锚点时间。</p>
-              <div class="form-grid">
-                <label class="span-2">
-                  <span>模板名称</span>
-                  <input id="scheduleTemplateName" placeholder="例如 深闭三天循环" />
-                </label>
-                <label class="span-2">
-                  <span>已保存模板</span>
-                  <select id="scheduleTemplateSelect">
-                    <option value="">新建模板</option>
-                    ${renderScheduleTemplateOptions(templates)}
-                  </select>
-                </label>
-              </div>
-              <div class="form-actions">
-                <button type="button" id="scheduleTemplateLoadButton">套用模板</button>
-                <button type="button" id="scheduleTemplateSaveButton">保存当前为模板</button>
-                <button type="button" id="scheduleTemplateDeleteButton">删除模板</button>
-              </div>
-              <p class="modal-status-line info" id="scheduleTemplateStatus" hidden></p>
-            </section>
-
-            <section class="modal-section">
               <h4>新建排班</h4>
-              <p class="muted">核心用法是填命令、间隔和次数,一次排进 Telegram 官方定时;预设只是快速填常用玩法。这里不会根据回复自动补发或追链。多选身份会一次为每个身份各起一批,按「错峰偏移 + 阶梯」自动错开。</p>
               <form id="scheduleForm" class="settings-form">
-                <div class="schedule-identity-picker" id="scheduleIdentityPicker">
-                  <div class="schedule-identity-picker-top">
-                    <div>
-                      <span>定时身份</span>
-                      <strong id="scheduleIdentitySummary">未选身份</strong>
-                    </div>
-                    <div class="schedule-identity-picker-actions">
-                      <button type="button" id="scheduleUseActiveIdentityButton">跟随聊天当前</button>
-                      <button type="button" id="scheduleClearIdentityButton">清空</button>
-                    </div>
-                  </div>
-                  <div class="schedule-account-picker-list" id="scheduleAccountPickerList">
-                    ${renderScheduleIdentityPicker(deps, defaultSendAsIds)}
-                  </div>
+                <div class="schedule-native-send-as" aria-hidden="true">
+                  <select name="send_as_ids" multiple size="6" id="scheduleSendAsSelect" tabindex="-1">${identityOptions || '<option value="">没有可用身份</option>'}</select>
+                  <span id="scheduleSendAsCount">0</span>
+                </div>
+                <div class="form-actions schedule-form-actions-top">
+                  <button type="button" data-schedule-action="preview">预览计划</button>
+                  <button type="button" class="primary" data-schedule-action="create">创建</button>
                 </div>
                 <div class="form-grid">
-                  <label class="span-2">
-                    <span>已选身份明细</span>
-                    <select name="send_as_ids" multiple size="6" id="scheduleSendAsSelect">${identityOptions || '<option value="">没有可用身份</option>'}</select>
-                    <small class="muted">已选 <span id="scheduleSendAsCount">0</span> 个</small>
-                  </label>
                   <label>
                     <span>预设</span>
                     <select name="preset_key">${presetOptions}</select>
@@ -472,6 +469,30 @@
               </form>
               <p class="modal-status-line info" id="scheduleStatus" hidden></p>
               <div id="schedulePreview" class="send-as-result" hidden></div>
+            </section>
+
+            <section class="modal-section">
+              <h4>模板复用</h4>
+              <p class="muted">把常用排班参数存成模板，后续一键套用后再微调即可。模板只存参数，不存具体锚点时间。</p>
+              <div class="form-grid">
+                <label class="span-2">
+                  <span>模板名称</span>
+                  <input id="scheduleTemplateName" placeholder="例如 深闭三天循环" />
+                </label>
+                <label class="span-2">
+                  <span>已保存模板</span>
+                  <select id="scheduleTemplateSelect">
+                    <option value="">新建模板</option>
+                    ${renderScheduleTemplateOptions(templates)}
+                  </select>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="button" id="scheduleTemplateLoadButton">套用模板</button>
+                <button type="button" id="scheduleTemplateSaveButton">保存当前为模板</button>
+                <button type="button" id="scheduleTemplateDeleteButton">删除模板</button>
+              </div>
+              <p class="modal-status-line info" id="scheduleTemplateStatus" hidden></p>
             </section>
 
             <section class="modal-section">
@@ -905,7 +926,10 @@
     const applyStateSuggestionButton = dialog.querySelector("#scheduleApplyStateSuggestion");
     const accountPickerList = dialog.querySelector("#scheduleAccountPickerList");
     const identitySummary = dialog.querySelector("#scheduleIdentitySummary");
+    const identityScope = dialog.querySelector("#scheduleIdentityScope");
     const useActiveIdentityButton = dialog.querySelector("#scheduleUseActiveIdentityButton");
+    const selectAllIdentityButton = dialog.querySelector("#scheduleSelectAllIdentityButton");
+    const setChatIdentityButton = dialog.querySelector("#scheduleSetChatIdentityButton");
     const clearIdentityButton = dialog.querySelector("#scheduleClearIdentityButton");
     if (!form) return;
     const presetMap = new Map(presets.map((p) => [p.key, p]));
@@ -1034,19 +1058,10 @@
 
     const fillFormFromPayload = (payload) => {
       if (!payload) return;
-      const sendAsSelect = dialog.querySelector("#scheduleSendAsSelect");
-      if (sendAsSelect) {
-        const selectedIds = new Set(
-          (Array.isArray(payload.send_as_ids) ? payload.send_as_ids : [payload.send_as_id])
-            .map((value) => Number(value))
-            .filter(Boolean)
-        );
-        Array.from(sendAsSelect.options).forEach((option) => {
-          option.selected = selectedIds.has(Number(option.value));
-        });
-        const count = dialog.querySelector("#scheduleSendAsCount");
-        if (count) count.textContent = String(Array.from(sendAsSelect.selectedOptions).length);
-      }
+      const selectedIds = (Array.isArray(payload.send_as_ids) ? payload.send_as_ids : [payload.send_as_id])
+        .map((value) => Number(value))
+        .filter(Boolean);
+      setScheduleIdentitySelection(selectedIds);
       for (const [key, value] of Object.entries(payload)) {
         const field = form.querySelector(`[name="${CSS.escape(key)}"]`);
         if (!field || key === "send_as_ids" || key === "send_as_id") continue;
@@ -1091,8 +1106,17 @@
     const selectedScheduleIds = () => Array.from(sendAsSelect?.selectedOptions || [])
       .map((option) => Number(option.value || 0))
       .filter(Boolean);
+    const accountIdentityIds = (localId) => (scheduleState(deps).identities || [])
+      .filter((identity) => String(identity.account_local_id || "") === String(localId || ""))
+      .map((identity) => Number(identity.send_as_id || 0))
+      .filter(Boolean);
+    const allScheduleIdentityIds = () => (scheduleState(deps).identities || [])
+      .map((identity) => Number(identity.send_as_id || 0))
+      .filter(Boolean);
     function refreshScheduleIdentitySelection() {
       const selected = selectedScheduleIds();
+      const state = scheduleState(deps);
+      state.scheduleSelectedSendAsIds = selected;
       if (sendAsCount) sendAsCount.textContent = String(selected.length);
       if (identitySummary) {
         if (!selected.length) {
@@ -1103,6 +1127,17 @@
           identitySummary.textContent = `${scheduleIdentityOptionLabel(deps, first)}${suffix}`;
         }
       }
+      if (identityScope) {
+        const accountIds = new Set(
+          selected
+            .map((id) => scheduleIdentityById(deps, id)?.account_local_id)
+            .filter((value) => value !== undefined && value !== null && String(value) !== "")
+            .map((value) => String(value))
+        );
+        identityScope.textContent = selected.length
+          ? `${selected.length} 个身份｜${accountIds.size || 1} 个账号`
+          : "未选择排程身份";
+      }
       if (accountPickerList) {
         accountPickerList.innerHTML = renderScheduleIdentityPicker(deps, selected);
       }
@@ -1111,18 +1146,12 @@
       }
       renderStateHint();
     }
-    function setScheduleIdentitySelection(ids, options = {}) {
+    function setScheduleIdentitySelection(ids) {
       if (!sendAsSelect) return;
       const selected = new Set((ids || []).map((id) => Number(id)).filter(Boolean));
       Array.from(sendAsSelect.options).forEach((option) => {
         option.selected = selected.has(Number(option.value || 0));
       });
-      const first = Array.from(selected)[0] || 0;
-      if (first && options.setActive && typeof deps.setActiveIdentity === "function") {
-        Promise.resolve(deps.setActiveIdentity(first, { loadPatches: false })).catch((err) => {
-          console.warn("[mini-web] schedule set active identity failed:", err);
-        });
-      }
       refreshScheduleIdentitySelection();
     }
     if (sendAsSelect) {
@@ -1135,31 +1164,52 @@
         if (identityButton) {
           const id = Number(identityButton.dataset.scheduleSelectIdentity || 0);
           if (!id) return;
-          if (event.ctrlKey || event.metaKey || event.shiftKey) {
-            const current = new Set(selectedScheduleIds());
-            if (current.has(id)) current.delete(id);
-            else current.add(id);
-            setScheduleIdentitySelection(Array.from(current), { setActive: true });
-          } else {
-            setScheduleIdentitySelection([id], { setActive: true });
-          }
+          const current = new Set(selectedScheduleIds());
+          if (current.has(id)) current.delete(id);
+          else current.add(id);
+          setScheduleIdentitySelection(Array.from(current));
           return;
         }
-        const accountButton = event.target.closest("[data-schedule-select-account]");
-        if (accountButton) {
-          const localId = String(accountButton.dataset.scheduleSelectAccount || "");
-          const ids = (scheduleState(deps).identities || [])
-            .filter((identity) => String(identity.account_local_id || "") === localId)
-            .map((identity) => Number(identity.send_as_id || 0))
-            .filter(Boolean);
-          setScheduleIdentitySelection(ids, { setActive: true });
+        const setAccountButton = event.target.closest("[data-schedule-select-account]");
+        if (setAccountButton) {
+          setScheduleIdentitySelection(accountIdentityIds(setAccountButton.dataset.scheduleSelectAccount || ""));
+          return;
+        }
+        const addAccountButton = event.target.closest("[data-schedule-add-account]");
+        if (addAccountButton) {
+          const current = new Set(selectedScheduleIds());
+          for (const id of accountIdentityIds(addAccountButton.dataset.scheduleAddAccount || "")) current.add(id);
+          setScheduleIdentitySelection(Array.from(current));
         }
       });
     }
     if (useActiveIdentityButton) {
       useActiveIdentityButton.addEventListener("click", () => {
-        const ids = defaultScheduleSendAsIds(deps);
-        setScheduleIdentitySelection(ids, { setActive: false });
+        setScheduleIdentitySelection(activeScheduleSendAsIds(deps));
+      });
+    }
+    if (selectAllIdentityButton) {
+      selectAllIdentityButton.addEventListener("click", () => {
+        setScheduleIdentitySelection(allScheduleIdentityIds());
+      });
+    }
+    if (setChatIdentityButton) {
+      setChatIdentityButton.addEventListener("click", async () => {
+        const first = selectedScheduleIds()[0] || 0;
+        if (!first) {
+          setStatus("warn", "先选择一个排程身份。");
+          return;
+        }
+        if (typeof deps.setActiveIdentity !== "function") return;
+        setChatIdentityButton.disabled = true;
+        try {
+          await deps.setActiveIdentity(first, { loadPatches: true });
+          setStatus("ok", `聊天当前已切到 ${scheduleIdentityOptionLabel(deps, scheduleIdentityById(deps, first))}`);
+        } catch (error) {
+          setStatus("error", error.message || "切换聊天身份失败");
+        } finally {
+          setChatIdentityButton.disabled = false;
+        }
       });
     }
     if (clearIdentityButton) {
@@ -1256,6 +1306,7 @@
     form.querySelectorAll("[data-schedule-action]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const action = btn.dataset.scheduleAction;
+        const matchingActionButtons = () => Array.from(form.querySelectorAll(`[data-schedule-action="${CSS.escape(action || "")}"]`));
         if (action === "preview") {
           setStatus("info", "计算预览…");
           try {
@@ -1282,8 +1333,7 @@
           return;
         }
         if (action === "create") {
-          if (!window.confirm("确认创建官方定时?勾选“本地预演”时只保存计划;正式排 TG 数量大时需要几分钟。")) return;
-          btn.disabled = true;
+          matchingActionButtons().forEach((button) => { button.disabled = true; });
           setStatus("info", "创建中…");
           try {
             const result = await postJson("/api/schedule/create", collectPayload());
@@ -1326,7 +1376,7 @@
           } catch (error) {
             setStatus("error", error.message);
           } finally {
-            btn.disabled = false;
+            matchingActionButtons().forEach((button) => { button.disabled = false; });
           }
           return;
         }

@@ -747,8 +747,8 @@
 }
 
 .modal-dialog.schedule-modal-dialog {
-  width: min(1180px, calc(100vw - 40px));
-  height: min(860px, calc(100dvh - 40px));
+  width: min(1240px, calc(100vw - 40px));
+  height: min(900px, calc(100dvh - 40px));
   max-height: calc(100dvh - 40px);
 }
 
@@ -761,8 +761,17 @@
 .schedule-modal-grid {
   display: grid;
   grid-template-columns: minmax(460px, 1fr) minmax(360px, 0.86fr);
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
   height: 100%;
+}
+
+.schedule-modal-context {
+  grid-column: 1 / -1;
+  min-width: 0;
+  border-bottom: 1px solid var(--line);
+  background: rgba(2, 6, 23, 0.24);
+  padding: 14px 18px;
 }
 
 .schedule-modal-main,
@@ -788,8 +797,8 @@
 .schedule-identity-picker {
   display: grid;
   gap: 10px;
+  min-width: 0;
   padding: 12px;
-  margin-bottom: 12px;
   border: 1px solid var(--line);
   background: rgba(15, 23, 42, 0.42);
 }
@@ -802,7 +811,11 @@
   align-items: center;
 }
 
-.schedule-identity-picker-top span {
+.schedule-identity-picker-top h4 {
+  margin: 0 0 4px;
+}
+
+.schedule-identity-picker-top small {
   display: block;
   color: var(--muted);
   font-size: 12px;
@@ -836,7 +849,11 @@
 
 .schedule-account-picker-list {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 8px;
+  max-height: min(30dvh, 240px);
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .schedule-account-picker-row {
@@ -876,6 +893,21 @@
 .schedule-identity-chip.selected {
   border-color: rgba(34, 197, 94, 0.7);
   background: rgba(20, 83, 45, 0.36);
+}
+
+.schedule-native-send-as {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.schedule-form-actions-top {
+  margin: -2px 0 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 }
 
 .schedule-identity-picker-empty {
@@ -932,13 +964,23 @@
 
   .schedule-modal-grid {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
     height: auto;
     min-height: 100%;
+  }
+
+  .schedule-modal-context {
+    order: -2;
+    padding: 12px;
   }
 
   .schedule-modal-main,
   .schedule-modal-records {
     overflow: visible;
+  }
+
+  .schedule-modal-main {
+    order: -1;
   }
 
   .schedule-modal-records {
@@ -960,6 +1002,11 @@
     grid-column: 2;
     justify-content: flex-start;
   }
+
+  .schedule-account-picker-list {
+    grid-template-columns: minmax(0, 1fr);
+    max-height: min(24dvh, 160px);
+  }
 }
 
 @media (max-width: 520px) {
@@ -974,12 +1021,21 @@
   }
 
   .schedule-modal-main,
-  .schedule-modal-records {
+  .schedule-modal-records,
+  .schedule-modal-context {
     padding: 12px;
   }
 
   .schedule-modal-dialog .form-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .schedule-account-picker-list {
+    max-height: min(20dvh, 132px);
+  }
+
+  .schedule-modal-main > .modal-section:first-child > h4 {
+    display: none;
   }
 
   .schedule-modal-dialog .span-2 {
@@ -993,6 +1049,15 @@
 
   .schedule-modal-dialog .form-actions button {
     flex: 1 1 auto;
+  }
+
+  .schedule-modal-dialog .schedule-form-actions-top button {
+    min-height: 34px;
+    padding-block: 6px;
+  }
+
+  .schedule-modal-dialog > .modal-actions {
+    display: none;
   }
 }
 
