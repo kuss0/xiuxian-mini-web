@@ -47,7 +47,7 @@ from backend.repo import SQLiteStore
 from backend.repo.common import _safe_int
 from backend.skills import SkillRegistry
 from backend.outbox.send import SkillSendService
-from backend.tg.client import safe_session_name
+from backend.tg.client import create_telegram_client, safe_session_name
 from backend.tg.dialogs import TelegramDialogService
 from backend.tg.login import TelegramLoginService
 from backend.tg.listener_manager import TelegramListenerManager
@@ -398,6 +398,8 @@ class MiniWebServer:
         # ThreadingHTTPServer 下并发 schedule_create 会撞 dedup 秒级唯一约束。
         # 用锁串行化整个 _create_one_schedule，确保 list/dedup/insert 原子化。
         self._schedule_create_lock = threading.Lock()
+        self._schedule_client_locks_lock = threading.Lock()
+        self._schedule_client_locks: dict[str, threading.Lock] = {}
         self._skill_send_recent_lock = threading.Lock()
         self._skill_send_recent: dict[str, dict[str, float | str]] = {}
 
@@ -2122,6 +2124,240 @@ class MiniWebServer:
             "state_contract": contract,
         }
 
+    def _official_schedule_target(self, account_local_id: str = "") -> tuple[str, int]:
+        """Return the target chat/topic for official scheduled messages.
+
+        Prefer the selected account's runtime config, because account rows can
+        carry target_chat while shared settings only provide defaults.
+        """
+        try:
+            settings = self._store.get_settings()
+        except Exception:
+            settings = {}
+        account_config: dict = {}
+        local_id = str(account_local_id or "").strip()
+        if local_id:
+            try:
+                account = self._store.get_account(local_id)
+            except Exception:
+                account = None
+            if account is not None:
+                account_config = self._account_runtime_config(account)
+        target_chat = str(
+            account_config.get("target_chat")
+            or settings.get("target_chat")
+            or ""
+        ).strip()
+        topic_raw = account_config.get("target_topic_id") or settings.get("target_topic_id") or 0
+        try:
+            target_topic_id = int(topic_raw or 0)
+        except (TypeError, ValueError):
+            target_topic_id = 0
+        return target_chat, target_topic_id
+
+    def _official_schedule_account_config(self, account_local_id: str) -> dict:
+        local_id = str(account_local_id or "").strip()
+        if not local_id:
+            raise RuntimeError("该身份没有绑定账号,无法正式排到 TG")
+        account = self._store.get_account(local_id)
+        if account is None:
+            raise RuntimeError(f"找不到该身份绑定的账号 {local_id},无法正式排到 TG")
+        account_config = self._account_runtime_config(account)
+        if str(account_config.get("login_status") or "") != "done":
+            raise RuntimeError("该身份绑定账号未完成登录,无法正式排到 TG")
+        missing = [
+            key for key in ("api_id", "api_hash", "session_name")
+            if not str(account_config.get(key) or "").strip()
+        ]
+        if missing:
+            joined = " / ".join(missing)
+            raise RuntimeError(f"该身份绑定账号缺少 {joined},无法正式排到 TG")
+        return account_config
+
+    def _schedule_batch_status(self, batch_id: int) -> str:
+        try:
+            batches = self._store.list_schedule_batches(include_inactive=True)
+            return str(next((b.get("status") for b in batches if int(b.get("id") or 0) == int(batch_id)), "") or "")
+        except Exception:
+            return ""
+
+    def _schedule_client_lock(self, account_local_id: str) -> threading.Lock:
+        key = str(account_local_id or "").strip() or "default"
+        with self._schedule_client_locks_lock:
+            lock = self._schedule_client_locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                self._schedule_client_locks[key] = lock
+            return lock
+
+    async def _run_official_send_with_client_lock(
+        self,
+        client,
+        account_local_id: str,
+        batch_id: int,
+        target_chat,
+        target_topic_id: int,
+        send_as_id: int,
+        messages: list[dict],
+    ) -> None:
+        import asyncio
+        lock = self._schedule_client_lock(account_local_id)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, lock.acquire)
+        try:
+            await self._run_official_send_background(
+                client,
+                batch_id,
+                target_chat,
+                target_topic_id,
+                send_as_id,
+                messages,
+            )
+        finally:
+            lock.release()
+
+    def _mark_official_schedule_batch_failed(
+        self,
+        batch_id: int,
+        messages: list[dict],
+        error: str,
+        *,
+        account_local_id: str,
+        send_as_id: int,
+        target_chat: object,
+        target_topic_id: int,
+    ) -> None:
+        if self._schedule_batch_status(batch_id) in {"cancelled", "deleted"}:
+            return
+        err = str(error or "").strip() or "官方定时提交失败"
+        try:
+            log_chat_id = int(target_chat) if str(target_chat).lstrip("-").isdigit() else 0
+        except (TypeError, ValueError):
+            log_chat_id = 0
+        for msg in messages or []:
+            try:
+                db_id = int(msg.get("id") or 0)
+            except (TypeError, ValueError):
+                db_id = 0
+            if db_id:
+                self._store.mark_schedule_message(db_id, status="failed", last_error=err)
+            self._record_send_log(
+                {
+                    "kind": "official_schedule",
+                    "status": "failed",
+                    "account_local_id": account_local_id,
+                    "identity_id": send_as_id,
+                    "send_as_id": send_as_id,
+                    "chat_id": log_chat_id,
+                    "topic_id": target_topic_id,
+                    "command": msg.get("command") or "",
+                    "batch_id": batch_id,
+                    "schedule_message_id": db_id,
+                    "error": err,
+                    "meta": {"schedule_at": msg.get("schedule_at") or 0},
+                }
+            )
+        self._store.set_schedule_batch_status(batch_id, "failed")
+
+    async def _run_official_send_transient_client(
+        self,
+        account_config: dict,
+        batch_id: int,
+        target_chat,
+        target_topic_id: int,
+        send_as_id: int,
+        messages: list[dict],
+    ) -> None:
+        client = None
+        account_local_id = str(account_config.get("local_id") or "")
+        try:
+            client = create_telegram_client(account_config)
+            await client.connect()
+            if not await client.is_user_authorized():
+                raise RuntimeError("Telegram session 未登录,请先在账号配置里完成验证码登录")
+            await self._run_official_send_with_client_lock(
+                client,
+                account_local_id,
+                batch_id,
+                target_chat,
+                target_topic_id,
+                send_as_id,
+                messages,
+            )
+        except Exception as exc:
+            err = str(exc) or exc.__class__.__name__
+            print(f"[mini-web] transient schedule client failed for batch {batch_id}: {exc!r}")
+            self._mark_official_schedule_batch_failed(
+                batch_id,
+                messages,
+                f"临时 Telegram client 排定时失败:{err}",
+                account_local_id=account_local_id,
+                send_as_id=send_as_id,
+                target_chat=target_chat,
+                target_topic_id=target_topic_id,
+            )
+        finally:
+            if client is not None:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+    def _submit_official_schedule_background(
+        self,
+        *,
+        account_local_id: str,
+        batch_id: int,
+        target_chat,
+        target_topic_id: int,
+        send_as_id: int,
+        messages: list[dict],
+    ) -> str:
+        """Submit official scheduled-message creation.
+
+        If the account is the active collector, reuse its listener client.
+        Otherwise use the already logged-in session in a short-lived background
+        client so official scheduling does not require switching collectors.
+        """
+        local_id = str(account_local_id or "").strip()
+        listener = self._listeners.get_listener(local_id) if local_id else None
+        if listener is not None:
+            listener.submit_background(
+                lambda client: self._run_official_send_with_client_lock(
+                    client,
+                    local_id,
+                    batch_id,
+                    target_chat,
+                    target_topic_id,
+                    send_as_id,
+                    messages,
+                )
+            )
+            return "listener"
+
+        account_config = self._official_schedule_account_config(local_id)
+
+        def _runner() -> None:
+            import asyncio
+            asyncio.run(
+                self._run_official_send_transient_client(
+                    account_config,
+                    batch_id,
+                    target_chat,
+                    target_topic_id,
+                    send_as_id,
+                    messages,
+                )
+            )
+
+        thread = threading.Thread(
+            target=_runner,
+            name=f"miniweb-schedule-{batch_id}",
+            daemon=True,
+        )
+        thread.start()
+        return "transient"
+
     def schedule_presets_payload(self) -> dict:
         return {"ok": True, "presets": list_schedule_presets()}
 
@@ -2579,8 +2815,9 @@ class MiniWebServer:
     def _create_one_schedule(self, payload: dict) -> dict:
         """payload: {send_as_id, preset_key, anchor_at?, horizon_days?, pet_name?,
                      command?, interval_sec?, count?, dry_run?, offset_minutes?, trigger_command?, ...}
-        - dry_run=True 或没有 listener 对应 client → 只在本地落 batch + planned items,不发 TG
-        - dry_run=False 且 listener 在跑 → 后台错峰排 Telegram scheduled message
+        - dry_run=True → 只在本地落 batch + planned items,不发 TG
+        - dry_run=False → 后台错峰排 Telegram scheduled message;优先复用 listener,
+          没开采集则用该登录账号的短生命周期 client。
         """
         try:
             send_as_id = int(payload.get("send_as_id") or 0)
@@ -2622,10 +2859,6 @@ class MiniWebServer:
                 }
 
             dry_run = bool(payload.get("dry_run"))
-            listener = self._listeners.get_listener(account_local_id) if account_local_id else None
-            if listener is None:
-                # 没 listener → 强制 dry_run(没 client 没法发 TG 端)
-                dry_run = True
 
             items_for_db = [
                 {
@@ -2646,19 +2879,17 @@ class MiniWebServer:
                     )
             target_chat = ""
             target_topic_id = 0
-            if not dry_run and listener is not None:
-                target_chat = self._store.get_settings().get("target_chat") or ""
-                target_topic_id = self._store.get_settings().get("target_topic_id") or 0
-                try:
-                    target_topic_id = int(target_topic_id)
-                except (TypeError, ValueError):
-                    target_topic_id = 0
+            if not dry_run:
+                target_chat, target_topic_id = self._official_schedule_target(account_local_id)
                 if not target_chat:
                     return {
                         "ok": False,
-                        "error": "settings.target_chat 未配置,无法定位发送目标群",
+                        "error": "target_chat 未配置,无法定位发送目标群",
                         "items": items_for_db,
                     }
+                listener = self._listeners.get_listener(account_local_id) if account_local_id else None
+                if listener is None:
+                    self._official_schedule_account_config(account_local_id)
             # 去重秒:让所有 active scheduled_messages 的 schedule_at(秒级)全局唯一,
             # 避免 N 个账号同一秒撞天尊。jitter 已经把分布拉开,这里只兜底极少数撞秒情况。
             self._dedupe_schedule_seconds(items_for_db)
@@ -2696,17 +2927,21 @@ class MiniWebServer:
             created_ids: list[int] = []
             send_errors: list[str] = []
             sending_status = "queued"
-            if not dry_run and listener is not None:
+            submit_mode = ""
+            if not dry_run:
                 msgs = self._store.list_schedule_messages(batch_id=batch_id, include_inactive=False)
                 # 批量排官方定时不能阻塞 HTTP 响应。
-                # 走后台:listener loop 上 fire-and-forget,DB 实时更新每条状态,
+                # 走后台:listener loop 或临时 client fire-and-forget,DB 实时更新每条状态,
                 # 前端轮询 /api/schedule 看 planned/scheduled/failed 计数。
                 self._store.set_schedule_batch_status(batch_id, "sending")
                 try:
-                    listener.submit_background(
-                        lambda client: self._run_official_send_background(
-                            client, batch_id, target_chat, target_topic_id, send_as_id, msgs
-                        )
+                    submit_mode = self._submit_official_schedule_background(
+                        account_local_id=account_local_id,
+                        batch_id=batch_id,
+                        target_chat=target_chat,
+                        target_topic_id=target_topic_id,
+                        send_as_id=send_as_id,
+                        messages=msgs,
                     )
                     sending_status = "sending"
                 except Exception as exc:
@@ -2727,7 +2962,8 @@ class MiniWebServer:
                 "created_official": len(created_ids),
                 "errors": send_errors,
                 "status": "dry_run" if dry_run else sending_status,
-                "estimate_seconds": _estimate_send_seconds(len(items_for_db)) if (not dry_run and listener is not None) else 0,
+                "submit_mode": submit_mode,
+                "estimate_seconds": _estimate_send_seconds(len(items_for_db)) if not dry_run else 0,
                 "state_contract": state_contract,
             }
         except Exception as exc:
@@ -3041,22 +3277,19 @@ class MiniWebServer:
         ]
         if not failed:
             return {"ok": True, "batch_id": batch_id, "retried": 0, "message": "该批次没有失败项"}
-        listener = self._listeners.get_listener(account_local_id) if account_local_id else None
-        if listener is None:
-            return {"ok": False, "error": "该身份的账号未在采集运行, 无法重排(需先登录并启动监听)"}
         current_usage = self._official_schedule_identity_usage(send_as_id)
         if current_usage + len(failed) > MAX_SCHEDULED_MESSAGES_PER_IDENTITY:
             return self._schedule_quota_block_payload(
                 send_as_id=send_as_id, current=current_usage, incoming=len(failed)
             )
-        settings = self._store.get_settings()
-        target_chat = settings.get("target_chat") or ""
-        try:
-            target_topic_id = int(settings.get("target_topic_id") or 0)
-        except (TypeError, ValueError):
-            target_topic_id = 0
+        target_chat, target_topic_id = self._official_schedule_target(account_local_id)
         if not target_chat:
             return {"ok": False, "error": "settings.target_chat 未配置, 无法定位目标群"}
+        if self._listeners.get_listener(account_local_id) is None:
+            try:
+                self._official_schedule_account_config(account_local_id)
+            except Exception as exc:
+                return {"ok": False, "error": str(exc), "batch_id": batch_id}
         import time as _t
         now = _t.time()
         buffer_sec = 120.0
@@ -3083,15 +3316,18 @@ class MiniWebServer:
         ]
         self._store.set_schedule_batch_status(batch_id, "sending")
         try:
-            listener.submit_background(
-                lambda client: self._run_official_send_background(
-                    client, batch_id, target_chat, target_topic_id, send_as_id, msgs
-                )
+            submit_mode = self._submit_official_schedule_background(
+                account_local_id=account_local_id,
+                batch_id=batch_id,
+                target_chat=target_chat,
+                target_topic_id=target_topic_id,
+                send_as_id=send_as_id,
+                messages=msgs,
             )
         except Exception as exc:
             self._store.set_schedule_batch_status(batch_id, "failed")
             return {"ok": False, "error": f"提交后台重排失败: {exc}", "batch_id": batch_id}
-        return {"ok": True, "batch_id": batch_id, "retried": len(msgs), "retimed": retimed, "status": "sending"}
+        return {"ok": True, "batch_id": batch_id, "retried": len(msgs), "retimed": retimed, "status": "sending", "submit_mode": submit_mode}
 
     def schedule_activate_dry_run_payload(self, payload: dict) -> dict:
         """把本地预演批次按已有 schedule_at 原样提交到 Telegram 官方定时。"""
@@ -3119,9 +3355,6 @@ class MiniWebServer:
 
         send_as_id = int(batch.get("send_as_id") or 0)
         account_local_id = str(batch.get("account_local_id") or "")
-        listener = self._listeners.get_listener(account_local_id) if account_local_id else None
-        if listener is None:
-            return {"ok": False, "error": "该身份的账号未在采集运行,无法正式排到 TG(需先登录并启动监听)"}
 
         msgs = [
             m for m in self._store.list_schedule_messages(batch_id=batch_id, include_inactive=False)
@@ -3136,14 +3369,14 @@ class MiniWebServer:
                 send_as_id=send_as_id, current=current_usage, incoming=len(msgs)
             )
 
-        settings = self._store.get_settings()
-        target_chat = settings.get("target_chat") or ""
-        try:
-            target_topic_id = int(settings.get("target_topic_id") or 0)
-        except (TypeError, ValueError):
-            target_topic_id = 0
+        target_chat, target_topic_id = self._official_schedule_target(account_local_id)
         if not target_chat:
             return {"ok": False, "error": "settings.target_chat 未配置,无法定位目标群"}
+        if self._listeners.get_listener(account_local_id) is None:
+            try:
+                self._official_schedule_account_config(account_local_id)
+            except Exception as exc:
+                return {"ok": False, "error": str(exc), "batch_id": batch_id}
 
         import time as _t
         now = _t.time()
@@ -3175,10 +3408,13 @@ class MiniWebServer:
             update_options(batch_id, {"dry_run": False, "activated_from_dry_run": True, "activated_at": now})
         self._store.set_schedule_batch_status(batch_id, "sending")
         try:
-            listener.submit_background(
-                lambda client: self._run_official_send_background(
-                    client, batch_id, target_chat, target_topic_id, send_as_id, msgs
-                )
+            submit_mode = self._submit_official_schedule_background(
+                account_local_id=account_local_id,
+                batch_id=batch_id,
+                target_chat=target_chat,
+                target_topic_id=target_topic_id,
+                send_as_id=send_as_id,
+                messages=msgs,
             )
         except Exception as exc:
             if callable(update_options):
@@ -3191,11 +3427,13 @@ class MiniWebServer:
             "activated": len(msgs),
             "retimed": retimed,
             "status": "sending",
+            "submit_mode": submit_mode,
             "estimate_seconds": _estimate_send_seconds(len(msgs)),
         }
 
     def schedule_list_payload(self) -> dict:
         """返回所有 active batch 及其 items。前端按 identity 分组渲染。"""
+        self._repair_stale_sending_schedule_batches()
         batches = self._store.list_schedule_batches(include_inactive=False)
         all_messages = self._store.list_schedule_messages(include_inactive=False)
         msgs_by_batch: dict[int, list[dict]] = {}
@@ -3213,6 +3451,54 @@ class MiniWebServer:
                 "deleted": sum(1 for x in b["items"] if x["status"] == "deleted"),
             }
         return {"ok": True, "batches": batches}
+
+    def _repair_stale_sending_schedule_batches(self) -> int:
+        """Convert abandoned sending batches into retryable failures.
+
+        Background schedule tasks live in process memory. After a restart or a
+        lost Telethon task, DB rows can remain `sending` forever while planned
+        items no longer have a worker.  The list endpoint is a cheap place to
+        repair only clearly stale batches.
+        """
+        now = time.time()
+        repaired = 0
+        try:
+            batches = self._store.list_schedule_batches(include_inactive=False)
+            all_messages = self._store.list_schedule_messages(include_inactive=False)
+        except Exception:
+            return 0
+        msgs_by_batch: dict[int, list[dict]] = {}
+        for msg in all_messages:
+            msgs_by_batch.setdefault(int(msg.get("batch_id") or 0), []).append(msg)
+        for batch in batches:
+            if str(batch.get("status") or "") != "sending":
+                continue
+            batch_id = int(batch.get("id") or 0)
+            items = msgs_by_batch.get(batch_id, [])
+            planned = [m for m in items if str(m.get("status") or "") == "planned"]
+            if not planned:
+                continue
+            latest_update = max(
+                [float(batch.get("updated_at") or 0)]
+                + [float(m.get("updated_at") or 0) for m in items]
+            )
+            threshold = max(600.0, float(_estimate_send_seconds(len(items))) * 3.0 + 120.0)
+            if latest_update and now - latest_update < threshold:
+                continue
+            err = "后台排官方定时长时间无进展,已转为待重排;可确认后点击重排待处理。"
+            for msg in planned:
+                self._store.mark_schedule_message(
+                    int(msg.get("id") or 0),
+                    scheduled_msg_id=0,
+                    status="failed",
+                    last_error=err,
+                )
+            had_scheduled = any(str(m.get("status") or "") == "scheduled" for m in items)
+            had_failed = any(str(m.get("status") or "") == "failed" for m in items)
+            final = "partial_failed" if (had_scheduled or had_failed) else "failed"
+            self._store.set_schedule_batch_status(batch_id, final)
+            repaired += 1
+        return repaired
 
     def schedule_cancel_payload(self, payload: dict) -> dict:
         """中途取消正在后台排 TG 定时的 batch。

@@ -5661,6 +5661,55 @@ def test_schedule_create_dry_run_writes_batch_without_telegram(tmp_path):
     assert listing["batches"][0]["counts"]["planned"] > 0
 
 
+def test_schedule_create_real_send_does_not_fall_back_to_dry_run_without_listener(tmp_path, monkeypatch):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_settings_payload({"target_chat": "-1001680975844", "target_topic_id": 7310786})
+    server.save_account_payload(
+        {
+            "local_id": "main",
+            "api_id": "123",
+            "api_hash": "hash",
+            "account_id": "12345",
+            "login_status": "done",
+        }
+    )
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+
+    class FakeListeners:
+        def get_listener(self, account_local_id):
+            return None
+
+    submitted = {}
+
+    def fake_submit(**kwargs):
+        submitted.update(kwargs)
+        return "transient"
+
+    server._listeners = FakeListeners()
+    monkeypatch.setattr(server, "_submit_official_schedule_background", fake_submit)
+
+    result = server.schedule_create_payload(
+        {
+            "send_as_id": 12345,
+            "preset_key": "custom",
+            "command": ".签到",
+            "interval_sec": 60,
+            "count": 1,
+            "dry_run": False,
+        }
+    )
+
+    assert result["ok"] is True, result
+    assert result["dry_run"] is False
+    assert result["status"] == "sending"
+    assert result["submit_mode"] == "transient"
+    assert submitted["account_local_id"] == "main"
+    batch = store.list_schedule_batches(include_inactive=True)[0]
+    assert batch["status"] == "sending"
+    assert batch["options"]["dry_run"] is False
+
+
 def test_schedule_create_rejects_empty_plan_without_writing_batch(tmp_path):
     store = SQLiteStore(tmp_path / "miniweb.db")
     server = MiniWebServer(store=store)
@@ -6437,6 +6486,64 @@ def test_schedule_activate_dry_run_submits_existing_planned_items(tmp_path):
     assert batch["status"] == "sending"
     assert batch["options"]["dry_run"] is False
     assert batch["options"]["activated_from_dry_run"] is True
+
+
+def test_schedule_activate_dry_run_uses_transient_client_when_listener_is_not_running(tmp_path, monkeypatch):
+    import time
+
+    class FakeListenerManager:
+        def get_listener(self, local_id):
+            return None
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_settings_payload({"target_chat": "-1001680975844", "target_topic_id": 7310786})
+    server.save_account_payload(
+        {
+            "local_id": "main",
+            "api_id": "123",
+            "api_hash": "hash",
+            "account_id": "12345",
+            "login_status": "done",
+        }
+    )
+    submitted = {}
+
+    def fake_submit(**kwargs):
+        submitted.update(kwargs)
+        return "transient"
+
+    server._listeners = FakeListenerManager()
+    monkeypatch.setattr(server, "_submit_official_schedule_background", fake_submit)
+    batch_id = store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "account_local_id": "main",
+            "preset_key": "custom",
+            "label": "自定义",
+            "anchor_at": time.time() + 3600,
+            "horizon_days": 1,
+            "options": {"dry_run": True},
+        },
+        [
+            {
+                "command": ".签到",
+                "schedule_at": time.time() + 3600,
+                "scheduled_msg_id": 0,
+                "status": "planned",
+            }
+        ],
+    )
+
+    result = server.schedule_activate_dry_run_payload({"batch_id": batch_id})
+
+    assert result["ok"] is True, result
+    assert result["status"] == "sending"
+    assert result["submit_mode"] == "transient"
+    assert submitted["account_local_id"] == "main"
+    batch = store.list_schedule_batches(include_inactive=True)[0]
+    assert batch["status"] == "sending"
+    assert batch["options"]["dry_run"] is False
 
 
 
@@ -8779,6 +8886,44 @@ def test_list_schedule_batches_returns_sending_and_completed(tmp_path):
     assert not any(b["id"] == bid for b in visible), "deleted 默认要隐藏"
     visible_all = store.list_schedule_batches(include_inactive=True)
     assert any(b["id"] == bid for b in visible_all)
+
+
+def test_schedule_list_repairs_stale_sending_batch_to_retryable_failed(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    old = time.time() - 3600
+    batch_id = store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "account_local_id": "main",
+            "preset_key": "custom",
+            "label": "自定义",
+            "anchor_at": old,
+            "horizon_days": 1,
+            "options": {},
+        },
+        [
+            {"command": ".已排", "schedule_at": time.time() + 3600, "scheduled_msg_id": 100, "status": "scheduled"},
+            {"command": ".待排", "schedule_at": time.time() + 7200, "scheduled_msg_id": 0, "status": "planned"},
+        ],
+    )
+    store.set_schedule_batch_status(batch_id, "sending")
+    with store._connect() as conn:
+        conn.execute("UPDATE official_schedule_batches SET updated_at=? WHERE id=?", (old, batch_id))
+        conn.execute("UPDATE official_scheduled_messages SET updated_at=? WHERE batch_id=?", (old, batch_id))
+
+    payload = server.schedule_list_payload()
+
+    batch = next(b for b in payload["batches"] if b["id"] == batch_id)
+    assert batch["status"] == "partial_failed"
+    assert batch["counts"]["scheduled"] == 1
+    assert batch["counts"]["failed"] == 1
+    messages = {m["command"]: m for m in store.list_schedule_messages(batch_id=batch_id, include_inactive=True)}
+    assert messages[".已排"]["status"] == "scheduled"
+    assert messages[".待排"]["status"] == "failed"
+    assert "重排" in messages[".待排"]["last_error"]
 
 
 def test_background_send_loop_preserves_cancelled_status(tmp_path):
