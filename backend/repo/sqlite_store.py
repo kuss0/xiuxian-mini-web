@@ -4262,6 +4262,7 @@ class SQLiteStore:
 
     def _init_schema(self) -> None:
         with self._connect() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS raw_messages (
@@ -4774,7 +4775,7 @@ class SQLiteStore:
     def _connect(self):
         # 多线程并发写(listener 线程在 ingest 消息 + HTTP 请求在保存账号/身份)
         # 默认 SQLite 不容忍并发,会立刻报 "database is locked"。
-        # 加 WAL 模式让读不阻塞写,加更长 busy_timeout 让写等而不立刻 fail。
+        # schema 初始化时启用 WAL;这里加 busy_timeout 让写等而不立刻 fail。
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         try:
             conn.execute("PRAGMA foreign_keys=ON")
