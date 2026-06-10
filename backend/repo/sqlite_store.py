@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import replace
@@ -119,6 +120,7 @@ class SQLiteStore:
         self._init_schema()
         # 通知调度器 — 服务层注入(set_notify_dispatcher),没注入就完全不推
         self._notify_dispatcher = None
+        self._runtime_cache: dict[str, tuple[float, object]] = {}
         # 玩法状态机注册表 — 默认 3 个模块(深度闭关 / 抚摸法宝 / 温养器灵)。
         # 后续可通过 set_module_registry() 替换(单测里换 fixture 用)。
         self._module_registry = build_default_registry()
@@ -228,6 +230,9 @@ class SQLiteStore:
 
     def _collect_my_identities(self) -> list[int]:
         """所有已登记身份的 send_as_id。"""
+        cached = self._runtime_cache_get("my_identities")
+        if cached is not None:
+            return list(cached)
         ids: set[int] = set()
         try:
             ids.update(int(item.get("send_as_id") or 0) for item in self.list_identities())
@@ -237,7 +242,9 @@ class SQLiteStore:
             ids.update(int(account.get("account_id") or 0) for account in self.list_accounts())
         except Exception:
             pass
-        return [item for item in sorted(ids) if item]
+        result = [item for item in sorted(ids) if item]
+        self._runtime_cache_set("my_identities", result)
+        return result
 
     def _collect_my_aliases(self) -> list[str]:
         """从账号/身份里自动收集自己的 @username,用于过滤 @我的消息。"""
@@ -284,9 +291,14 @@ class SQLiteStore:
         return owners
 
     def _collect_game_bot_ids(self) -> list[int]:
+        cached = self._runtime_cache_get("game_bot_ids")
+        if cached is not None:
+            return list(cached)
         try:
             ids = self.get_settings().get("game_bot_ids") or []
-            return [int(x) for x in ids]
+            result = [int(x) for x in ids]
+            self._runtime_cache_set("game_bot_ids", result)
+            return result
         except Exception:
             return []
 
@@ -299,16 +311,42 @@ class SQLiteStore:
         except (TypeError, ValueError):
             return False
         try:
-            ids = self.get_settings().get("game_bot_ids") or []
+            ids = self._collect_game_bot_ids()
             return sid in {int(x) for x in ids}
         except Exception:
             return False
 
     def _get_target_topic_id(self) -> int:
+        cached = self._runtime_cache_get("target_topic_id")
+        if cached is not None:
+            return int(cached or 0)
         try:
-            return int(self.get_settings().get("target_topic_id") or 0)
+            result = int(self.get_settings().get("target_topic_id") or 0)
+            self._runtime_cache_set("target_topic_id", result)
+            return result
         except (TypeError, ValueError):
             return 0
+
+    def _runtime_cache_get(self, key: str, *, ttl: float = 1.0):
+        now = time.time()
+        item = self._runtime_cache.get(key)
+        if not item:
+            return None
+        expires_at, value = item
+        if float(expires_at or 0) <= now:
+            self._runtime_cache.pop(key, None)
+            return None
+        return value
+
+    def _runtime_cache_set(self, key: str, value: object, *, ttl: float = 1.0) -> None:
+        self._runtime_cache[key] = (time.time() + max(0.0, float(ttl or 0.0)), value)
+
+    def _runtime_cache_clear(self, *keys: str) -> None:
+        if not keys:
+            self._runtime_cache.clear()
+            return
+        for key in keys:
+            self._runtime_cache.pop(key, None)
 
     @classmethod
     def default(cls) -> SQLiteStore:
@@ -3309,6 +3347,7 @@ class SQLiteStore:
                     """,
                     (key, json.dumps(value, ensure_ascii=False)),
                 )
+        self._runtime_cache_clear("game_bot_ids", "target_topic_id")
         return normalized
 
     def list_accounts(self) -> list[dict]:
@@ -3348,6 +3387,7 @@ class SQLiteStore:
                     json.dumps(normalized, ensure_ascii=False),
                 ),
             )
+        self._runtime_cache_clear("my_identities")
         return normalized
 
     def delete_account(self, local_id: str) -> bool:
@@ -3356,7 +3396,10 @@ class SQLiteStore:
             return False
         with self._connect() as conn:
             cursor = conn.execute("DELETE FROM accounts WHERE local_id=?", (local_id,))
-            return cursor.rowcount > 0
+            deleted = cursor.rowcount > 0
+        if deleted:
+            self._runtime_cache_clear("my_identities")
+        return deleted
 
     def list_identities(self) -> list[dict]:
         with self._connect() as conn:
@@ -3397,6 +3440,7 @@ class SQLiteStore:
                     json.dumps(normalized, ensure_ascii=False),
                 ),
             )
+        self._runtime_cache_clear("my_identities")
         return normalized
 
     def delete_identity(self, send_as_id: int | str) -> bool:
@@ -3405,7 +3449,10 @@ class SQLiteStore:
             return False
         with self._connect() as conn:
             cursor = conn.execute("DELETE FROM identities WHERE send_as_id=?", (send_as_id,))
-            return cursor.rowcount > 0
+            deleted = cursor.rowcount > 0
+        if deleted:
+            self._runtime_cache_clear("my_identities")
+        return deleted
 
     def list_outbox_drafts(self, status: str = "draft") -> list[dict]:
         status = str(status or "draft").strip()

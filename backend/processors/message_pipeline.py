@@ -178,17 +178,25 @@ class MessagePipeline:
             self._module_registry.observe_all(
                 event,
                 ctx,
-                get_state=lambda sid, key: (
-                    (self._get_module_state(sid, key) or {}).get("state")
-                    if self._get_module_state(sid, key) is not None
-                    else None
-                ),
+                get_state=self._module_state_getter(),
                 save_state=lambda sid, key, state, src: self._save_module_state(
                     sid, key, state, src
                 ),
             )
         except Exception:
             return
+
+    def _module_state_getter(self):
+        cache: dict[tuple[int, str], dict | None] = {}
+
+        def get_state(sid, key):
+            cache_key = (int(sid or 0), str(key or ""))
+            if cache_key not in cache:
+                cache[cache_key] = self._get_module_state(cache_key[0], cache_key[1])
+            row = cache.get(cache_key) or {}
+            return row.get("state")
+
+        return get_state
 
     def _enrich(self, output: ParserOutput, event: RawMessageEvent) -> ParserOutput:
         """把 event 上下文(chat_id/msg_id/sender_id/reply_to_msg_id)注入每张卡片,
