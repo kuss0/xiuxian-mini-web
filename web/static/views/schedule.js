@@ -39,7 +39,7 @@
       renderScheduleRail(deps);
     }
     try {
-      const payload = await fetchJson("/api/schedule");
+      const payload = await fetchJson("/api/schedule?summary=1&history=0");
       return syncScheduleBatches(deps, payload);
     } catch (error) {
       state.scheduleError = error.message || String(error);
@@ -154,6 +154,7 @@
     const statusPill = scheduleStatusPill(statusKey) || `<span class="status-pill">${statusKey === "active" ? "活动" : escapeHtml(statusKey)}</span>`;
     const identity = scheduleIdentityLabel(deps, batch.send_as_id);
     const currentItems = (batch.items || []).filter(scheduleMessageHasCurrentWork);
+    const hiddenItemCount = Number(batch.hidden_item_count || 0);
     const snippets = currentItems.slice(0, 2).map((item) => `
       <span>
         <code>${escapeHtml(item.command || "")}</code>
@@ -171,7 +172,7 @@
           ${total ? `<span class="schedule-progress compact"><span class="schedule-progress-bar" style="width:${pct}%"></span></span>` : ""}
           <span class="schedule-rail-snippets">
             ${snippets || "<small>没有待展示命令</small>"}
-            ${currentItems.length > 2 ? `<small>+${escapeHtml(String(currentItems.length - 2))} 条</small>` : ""}
+            ${hiddenItemCount || currentItems.length > 2 ? `<small>+${escapeHtml(String(hiddenItemCount || (currentItems.length - 2)))} 条</small>` : ""}
           </span>
         </button>
       </article>

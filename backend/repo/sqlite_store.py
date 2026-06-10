@@ -4,6 +4,7 @@ import json
 import re
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -4769,16 +4770,20 @@ class SQLiteStore:
             if column not in existing:
                 conn.execute(ddl)
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         # 多线程并发写(listener 线程在 ingest 消息 + HTTP 请求在保存账号/身份)
         # 默认 SQLite 不容忍并发,会立刻报 "database is locked"。
         # 加 WAL 模式让读不阻塞写,加更长 busy_timeout 让写等而不立刻 fail。
         conn = sqlite3.connect(self.db_path, timeout=30.0)
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=30000")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        return conn
+        try:
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA busy_timeout=30000")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
 
 def _clean_reply_to(event: RawMessageEvent, topic_id: int = 0) -> int | None:

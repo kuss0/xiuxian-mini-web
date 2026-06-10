@@ -3344,6 +3344,31 @@ def test_sqlite_store_persists_cards(tmp_path):
     assert second[0].severity == "risk"
 
 
+def test_sqlite_store_connect_context_closes_file_descriptors(tmp_path):
+    import os
+
+    db_path = tmp_path / "miniweb.db"
+    store = SQLiteStore(db_path)
+
+    def open_db_fds() -> int:
+        total = 0
+        fd_root = "/proc/self/fd"
+        for name in os.listdir(fd_root):
+            try:
+                target = os.readlink(os.path.join(fd_root, name))
+            except OSError:
+                continue
+            if str(db_path) in target:
+                total += 1
+        return total
+
+    baseline = open_db_fds()
+    for _ in range(25):
+        store.get_settings()
+
+    assert open_db_fds() <= baseline
+
+
 def test_sqlite_store_persists_state_patches(tmp_path):
     db_path = tmp_path / "miniweb.db"
     store = SQLiteStore(db_path)

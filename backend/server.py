@@ -1438,7 +1438,7 @@ class MiniWebServer:
         """Return the schedule modal's read-only startup data in one request."""
         presets = self.schedule_presets_payload()
         modules = self.schedule_modules_payload(send_as_id_text)
-        batches = self.schedule_list_payload()
+        batches = self.schedule_list_payload(include_history=False)
         templates = self.schedule_templates_payload()
         errors = {
             key: payload.get("error")
@@ -3469,8 +3469,12 @@ class MiniWebServer:
             "estimate_seconds": _estimate_send_seconds(len(msgs)),
         }
 
-    def schedule_list_payload(self) -> dict:
-        """返回所有 active batch 及其 items。前端按 identity 分组渲染。"""
+    def schedule_list_payload(self, *, summary: bool = False, include_history: bool = True) -> dict:
+        """返回官方定时批次。
+
+        summary=True 用于侧栏轮询:只带计数和少量当前命令,避免高频接口生成大 JSON。
+        include_history=False 用于弹窗首屏:隐藏纯历史批次,减少 DOM 渲染量。
+        """
         self._repair_stale_sending_schedule_batches()
         batches = self._store.list_schedule_batches(include_inactive=False)
         all_messages = self._store.list_schedule_messages(include_inactive=False)
@@ -3488,6 +3492,23 @@ class MiniWebServer:
                 "expired": sum(1 for x in b["items"] if x["status"] == "expired"),
                 "deleted": sum(1 for x in b["items"] if x["status"] == "deleted"),
             }
+            if summary:
+                current = [
+                    x for x in b["items"]
+                    if str(x.get("status") or "planned") not in {"expired", "deleted"}
+                ]
+                b["items"] = current[:2]
+                b["hidden_item_count"] = max(0, len(current) - len(b["items"]))
+            elif not include_history:
+                has_current = any(
+                    str(x.get("status") or "planned") not in {"expired", "deleted"}
+                    for x in b["items"]
+                )
+                is_dry_run = bool((b.get("options") or {}).get("dry_run") or b.get("status") == "dry_run")
+                if not has_current and not is_dry_run:
+                    b["_hide_from_initial_view"] = True
+        if not include_history:
+            batches = [b for b in batches if not b.pop("_hide_from_initial_view", False)]
         return {"ok": True, "batches": batches}
 
     def _repair_stale_sending_schedule_batches(self) -> int:

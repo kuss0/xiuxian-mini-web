@@ -432,7 +432,9 @@ def _get_schedule_templates(request: MiniWebRequest, query: dict) -> dict:
 
 
 def _get_schedule(request: MiniWebRequest, query: dict) -> dict:
-    return _app(request).schedule_list_payload()
+    summary = str((query.get("summary") or [""])[0]).strip().lower() in {"1", "true", "yes"}
+    include_history = str((query.get("history") or ["1"])[0]).strip().lower() not in {"0", "false", "no"}
+    return _app(request).schedule_list_payload(summary=summary, include_history=include_history)
 
 
 def _get_schedule_sync(request: MiniWebRequest, query: dict) -> dict:
