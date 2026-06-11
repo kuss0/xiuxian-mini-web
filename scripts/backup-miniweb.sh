@@ -5,7 +5,8 @@ ROOT_DIR="${MINIWEB_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 DATA_DIR="${MINIWEB_DATA_DIR:-$ROOT_DIR/data}"
 BACKUP_DIR="${MINIWEB_BACKUP_DIR:-$ROOT_DIR/backups}"
 KEEP_DAYS="${MINIWEB_BACKUP_KEEP_DAYS:-14}"
-KEEP_COUNT="${MINIWEB_BACKUP_KEEP_COUNT:-10}"
+KEEP_COUNT="${MINIWEB_BACKUP_KEEP_COUNT:-3}"
+REQUIRED_FREE_BYTES="${MINIWEB_BACKUP_REQUIRED_FREE_BYTES:-}"
 
 DB_PATH="$DATA_DIR/miniweb.db"
 STAMP="$(date +%Y%m%d_%H%M%S)"
@@ -17,6 +18,10 @@ need_cmd() {
     echo "missing required command: $1" >&2
     exit 1
   }
+}
+
+available_bytes() {
+  df -PB1 "$1" | awk 'NR == 2 {print $4}'
 }
 
 cleanup() {
@@ -53,6 +58,15 @@ fi
 
 umask 077
 mkdir -p "$BACKUP_DIR"
+DB_BYTES="$(stat -c '%s' "$DB_PATH")"
+if [[ -z "$REQUIRED_FREE_BYTES" ]]; then
+  REQUIRED_FREE_BYTES=$((DB_BYTES * 2 + 1073741824))
+fi
+FREE_BYTES="$(available_bytes "$BACKUP_DIR")"
+if [[ "$FREE_BYTES" -lt "$REQUIRED_FREE_BYTES" ]]; then
+  echo "not enough free space for backup: free=${FREE_BYTES} required=${REQUIRED_FREE_BYTES}" >&2
+  exit 1
+fi
 TMP_DIR="$(mktemp -d "$BACKUP_DIR/.tmp-miniweb-backup.XXXXXXXX")"
 trap cleanup EXIT
 
@@ -80,7 +94,7 @@ fi
   echo "created_at=$(date -Is)"
   echo "root=$ROOT_DIR"
   echo "source_db=$DB_PATH"
-  echo "source_db_bytes=$(stat -c '%s' "$DB_PATH")"
+  echo "source_db_bytes=$DB_BYTES"
   echo "git_commit=$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || true)"
   echo "hostname=$(hostname)"
 } > "$TMP_DIR/meta/manifest.txt"
