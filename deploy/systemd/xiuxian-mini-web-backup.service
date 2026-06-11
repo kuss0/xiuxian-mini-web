@@ -1,0 +1,12 @@
+[Unit]
+Description=Back up xiuxian mini web data
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/xiuxian-mini-web
+ExecStart=/root/xiuxian-mini-web/scripts/backup-miniweb.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

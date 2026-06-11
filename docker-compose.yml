@@ -35,27 +35,6 @@ services:
     networks:
       - xiuxian-network
 
-  # Backup service (runs daily at 2 AM)
-  backup:
-    image: alpine:latest
-    container_name: xiuxian-backup
-    restart: unless-stopped
-    volumes:
-      - ./data:/data:ro
-      - ./backups:/backups
-    command: >
-      sh -c "
-      apk add --no-cache tar gzip &&
-      while true; do
-        DATE=$$(date +%Y%m%d_%H%M%S) &&
-        tar czf /backups/data-$$DATE.tar.gz /data &&
-        find /backups -name 'data-*.tar.gz' -mtime +7 -delete &&
-        sleep 86400;
-      done
-      "
-    networks:
-      - xiuxian-network
-
 networks:
   xiuxian-network:
     driver: bridge
@@ -63,4 +42,3 @@ networks:
 volumes:
   data:
   logs:
-  backups:
