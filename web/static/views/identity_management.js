@@ -20,14 +20,16 @@
 
   function renderAddIdentityModalBody(deps = {}) {
     const state = identityManagementState(deps);
+    const preferredLocalId = preferredIdentityAccountLocalId(state);
     const accountOptions = (state.accounts || [])
       .map((account) => {
         const label = `${account.label || account.local_id}｜${account.local_id}`;
         const status = account.login_status === "done" ? " ✓" : " (未登录)";
-        return `<option value="${escapeAttr(account.local_id)}">${escapeHtml(label)}${status}</option>`;
+        const selected = String(account.local_id || "") === preferredLocalId ? " selected" : "";
+        return `<option value="${escapeAttr(account.local_id)}"${selected}>${escapeHtml(label)}${status}</option>`;
       })
       .join("");
-    const accountPickerOptions = `<option value="">选择账号</option>${accountOptions}`;
+    const accountPickerOptions = `<option value="">不绑定账号(仅登记)</option>${accountOptions}`;
     return `
       <section class="modal-section">
         <h4>1. 选账号 + 拉可用身份</h4>
@@ -45,7 +47,7 @@
           <button type="button" class="primary" data-send-as-action="load">获取可用身份</button>
           <button type="button" data-send-as-action="open-logout" hidden>退出此账号</button>
         </div>
-        <p class="modal-status-line info" data-send-as-status>选账号后点「获取可用身份」,会拉出该账号在目标群里所有 send_as peer。</p>
+        <p class="modal-status-line info" data-send-as-status>选账号后点「获取可用身份」,会拉出该账号在目标群里所有 send_as peer。下方手动添加可不绑定账号。</p>
       </section>
 
       <section class="modal-section">
@@ -82,6 +84,21 @@
         </div>
       </details>
     `;
+  }
+
+  function preferredIdentityAccountLocalId(state = {}) {
+    const activeId = Number(state.activeIdentityId || 0);
+    const activeIdentity = activeId
+      ? (state.identities || []).find((identity) => Number(identity.send_as_id || 0) === activeId)
+      : null;
+    if (activeIdentity?.account_local_id) {
+      return String(activeIdentity.account_local_id);
+    }
+    const accounts = state.accounts || [];
+    const preferred = accounts.find((account) => account.login_status === "done" && account.listen_enabled)
+      || accounts.find((account) => account.login_status === "done")
+      || accounts[0];
+    return preferred?.local_id ? String(preferred.local_id) : "";
   }
 
   function identityRowStatusText(identity, account) {
@@ -584,12 +601,6 @@
     const localId = accountSelect?.value || "";
     const sendAsId = (idInput?.value || "").trim();
     if (!status) return;
-    if (!localId) {
-      status.hidden = false;
-      status.className = "modal-status-line warn";
-      status.textContent = "请先选账号";
-      return;
-    }
     if (!sendAsId) {
       status.hidden = false;
       status.className = "modal-status-line warn";
@@ -599,11 +610,11 @@
     manualBtn.disabled = true;
     status.hidden = false;
     status.className = "modal-status-line info";
-    status.textContent = "正在解析并保存...";
+    status.textContent = localId ? "正在解析并保存..." : "正在保存...";
     try {
       let label = (labelInput?.value || "").trim();
       let username = "";
-      if (!label) {
+      if (localId && !label) {
         const resolved = await requireIdentityDep(deps, "resolveAccountEntity")(localId, Number(sendAsId)).catch(() => ({ ok: false }));
         if (resolved.ok) {
           label = resolved.label || "";

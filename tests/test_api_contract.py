@@ -1374,6 +1374,7 @@ def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_fo
         "deps.showSkillToast?.(`切换身份失败: ${err.message || err}`, \"err\")",
         "deps.renderCultivationModules?.()",
         "function renderAddIdentityModalBody(deps = {})",
+        "function preferredIdentityAccountLocalId(state = {})",
         "function isSendAsAlreadyRegistered(deps = {}, peer)",
         "function renderSendAsRow(deps = {}, peer)",
         "function rerenderSendAsList(deps = {}, rootEl)",
@@ -1416,6 +1417,10 @@ def test_add_identity_modal_uses_current_send_as_flow_without_legacy_identity_fo
         "setSendAsStatus,",
         'id="manualSendAsId"',
         'id="manualLabel"',
+        "不绑定账号(仅登记)",
+        "下方手动添加可不绑定账号",
+        'status.textContent = localId ? "正在解析并保存..." : "正在保存...";',
+        "if (localId && !label)",
         'title="填到手动添加">填入',
         'list.querySelectorAll("[data-send-as-fill]")',
         'rootEl.querySelector("#manualSendAsId")',
@@ -4045,6 +4050,16 @@ def test_identity_allows_channel_send_as_id(tmp_path):
     identity = server.save_identity_payload({"send_as_id": "-1001234567890", "account_local_id": "main"})["identity"]
 
     assert identity["send_as_id"] == -1001234567890
+
+
+def test_identity_allows_unbound_manual_registration(tmp_path):
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "miniweb.db"))
+
+    identity = server.save_identity_payload({"send_as_id": "12345", "label": "预登记"})["identity"]
+
+    assert identity["send_as_id"] == 12345
+    assert identity["account_local_id"] == ""
+    assert server.identities_payload()["identities"][0]["account"] is None
 
 
 def test_identity_binding_requires_existing_account(tmp_path):
