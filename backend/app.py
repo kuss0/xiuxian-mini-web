@@ -73,6 +73,7 @@ class MiniWebHandler(BaseHTTPRequestHandler):
         self._handle_post()
 
     def _handle_request(self, include_body: bool) -> None:
+        started = time.monotonic()
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
@@ -94,6 +95,7 @@ class MiniWebHandler(BaseHTTPRequestHandler):
                     self._send_raw(result, include_body=include_body)
                 else:
                     self._send_json(result, include_body=include_body)
+                self._log_slow_api("GET", parsed, started)
                 return
             self._serve_static(path, include_body=include_body)
         except (BrokenPipeError, ConnectionResetError):
@@ -102,6 +104,7 @@ class MiniWebHandler(BaseHTTPRequestHandler):
             self._safe_send_500(exc, include_body=include_body)
 
     def _handle_post(self) -> None:
+        started = time.monotonic()
         parsed = urlparse(self.path)
         if parsed.path.startswith("/api/"):
             if not self._check_rate_limit(True):
@@ -127,6 +130,7 @@ class MiniWebHandler(BaseHTTPRequestHandler):
                 payload = {}
             if payload is not None:
                 self._send_json(route(self, payload))
+                self._log_slow_api("POST", parsed, started)
         except (BrokenPipeError, ConnectionResetError):
             return
         except Exception as exc:
@@ -177,6 +181,19 @@ class MiniWebHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: object) -> None:
         if os.environ.get("MINIWEB_ACCESS_LOG", "").lower() in {"1", "true", "yes"}:
             print(f"[mini-web] {self.address_string()} - {fmt % args}")
+
+    def _log_slow_api(self, method: str, parsed, started: float) -> None:
+        try:
+            threshold = float(os.environ.get("MINIWEB_SLOW_API_LOG_SEC") or 0.5)
+        except (TypeError, ValueError):
+            threshold = 0.5
+        if threshold <= 0:
+            return
+        elapsed = time.monotonic() - started
+        if elapsed < threshold:
+            return
+        query = f"?{parsed.query}" if getattr(parsed, "query", "") else ""
+        print(f"[mini-web] slow api {method} {parsed.path}{query} {elapsed:.3f}s")
 
     def _is_authorized_api_request(self) -> bool:
         return is_authorized_api_headers(self.headers, self.access_token)

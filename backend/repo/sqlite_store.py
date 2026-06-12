@@ -2225,9 +2225,6 @@ class SQLiteStore:
         """
         if not parent_event.chat_id or not parent_event.msg_id:
             return 0
-        settings = self.get_settings()
-        my_identity_ids = self._collect_my_identities()
-        topic_id = self._get_target_topic_id()
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -2242,6 +2239,11 @@ class SQLiteStore:
                 """,
                 (int(parent_event.chat_id), int(parent_event.msg_id)),
             ).fetchall()
+            if not rows:
+                return 0
+            settings = self.get_settings()
+            my_identity_ids = self._collect_my_identities()
+            topic_id = self._get_target_topic_id()
             updates = []
             channel_updates = []
             for row in rows:
@@ -3270,7 +3272,7 @@ class SQLiteStore:
             ],
         }
 
-    def list_discovered_bots(self) -> list[dict]:
+    def list_discovered_bots(self, *, scan_limit: int = 10000) -> list[dict]:
         """从消息箱抓「真的发过游戏 bot 风格消息」的 sender,给 UI 让用户勾选哪些是游戏 bot
         (写到 settings.game_bot_ids)。识别条件:
         - candidate:sender_is_bot=1 或 sender_id<0(bot 用户 / 频道身份)
@@ -3285,6 +3287,10 @@ class SQLiteStore:
         """
         from backend.repo.bot_hints import matched_families
 
+        try:
+            scan_limit = max(500, min(50000, int(scan_limit or 10000)))
+        except (TypeError, ValueError):
+            scan_limit = 10000
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -3293,7 +3299,9 @@ class SQLiteStore:
                 WHERE sender_id IS NOT NULL
                   AND (sender_is_bot=1 OR sender_id < 0)
                 ORDER BY rowid DESC
-                """
+                LIMIT ?
+                """,
+                (scan_limit,),
             ).fetchall()
 
         senders: dict[int, dict] = {}
@@ -4348,6 +4356,9 @@ class SQLiteStore:
 
                 CREATE INDEX IF NOT EXISTS idx_raw_messages_msg_id
                     ON raw_messages(chat_id, msg_id);
+                CREATE INDEX IF NOT EXISTS idx_raw_messages_reply_to_msg_id
+                    ON raw_messages(chat_id, reply_to_msg_id)
+                    WHERE reply_to_msg_id IS NOT NULL;
                 CREATE INDEX IF NOT EXISTS idx_parsed_cards_primary_channel
                     ON parsed_cards(primary_channel);
                 CREATE INDEX IF NOT EXISTS idx_parsed_cards_raw_message

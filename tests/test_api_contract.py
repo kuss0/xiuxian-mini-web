@@ -1953,8 +1953,21 @@ def test_chat_viewport_layout_contract_keeps_composer_visible():
     assert "messageLoading: false" in state_js
     assert "messageError: \"\"" in state_js
     assert 'const scheduleReady = startupTask("initial schedule rail", () => loadScheduleRail({ silent: true }));' in app_js
+    assert "function delayedStartupTask(label, task, delayMs = 3000)" in app_js
+    assert 'delayedStartupTask("initial world snapshot", () => loadWorldSnapshot({ silent: true }), 5000)' in app_js
+    assert 'delayedStartupTask("initial message audit", () => loadMessageAudit({ silent: true }), 8000)' in app_js
+    assert 'delayedStartupTask("initial bot discovery", loadDiscoveredBots, 12000)' in app_js
     assert "state.messageLoading = true;" in app_js
     assert "return \"正在读取消息...\";" in app_js
+
+
+def test_heavy_frontend_pollers_are_not_high_frequency():
+    root = Path(__file__).resolve().parents[1]
+    constants_js = (root / "web" / "static" / "constants.js").read_text(encoding="utf-8")
+
+    assert "HEALTH_POLL_INTERVAL_MS: 600000" in constants_js
+    assert "WORLD_SNAPSHOT_POLL_INTERVAL_MS: 600000" in constants_js
+    assert "BOT_DISCOVERY_POLL_INTERVAL_MS: 600000" in constants_js
 
 
 def test_dungeon_playbook_panel_contract_is_read_only_until_composer_send():
@@ -5548,6 +5561,37 @@ def test_discovered_bots_keeps_manual_marked_even_without_messages(tmp_path):
     )
 
 
+def test_discovered_bots_payload_is_cached_and_invalidated_by_settings(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    calls = {"n": 0}
+
+    def list_discovered_bots():
+        calls["n"] += 1
+        return [{
+            "sender_id": 7900199668,
+            "last_source": "韩天尊",
+            "last_seen": "2026-05-16T01:00:00+00:00",
+            "message_count": calls["n"],
+            "kind": "bot",
+            "hit_count": 1,
+            "matched_families": ["battle_power"],
+        }]
+
+    store.list_discovered_bots = list_discovered_bots
+    server = MiniWebServer(store=store)
+
+    first = server.discovered_bots_payload()
+    second = server.discovered_bots_payload()
+    server.save_settings_payload({"game_bot_ids": [7900199668]})
+    third = server.discovered_bots_payload()
+
+    assert first["discovered"][0]["message_count"] == 1
+    assert second["discovered"][0]["message_count"] == 1
+    assert third["discovered"][0]["message_count"] == 2
+    assert third["discovered"][0]["is_game_bot"] is True
+    assert calls["n"] == 2
+
+
 def test_schedule_presets_payload_lists_known_presets():
     """预设包含原有玩法和状态机冷却项,并暴露默认 module_key。"""
     import tempfile, pathlib
@@ -7944,6 +7988,49 @@ def test_parent_arriving_after_bot_reply_reclassifies_mine_relation(tmp_path):
     assert "回复我" in after.tags
 
 
+def test_direct_reply_reclassify_query_uses_reply_index(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    with store._connect() as conn:
+        indexes = {
+            row[1]: [info[2] for info in conn.execute(f"PRAGMA index_info({row[1]})")]
+            for row in conn.execute("PRAGMA index_list(raw_messages)")
+        }
+        assert indexes["idx_raw_messages_reply_to_msg_id"] == ["chat_id", "reply_to_msg_id"]
+        plan = "\n".join(
+            str(row)
+            for row in conn.execute(
+                """
+                EXPLAIN QUERY PLAN
+                SELECT pc.rowid, pc.payload_json, rm.id
+                FROM parsed_cards pc
+                JOIN raw_messages rm ON rm.id = pc.raw_message_id
+                WHERE rm.chat_id=? AND rm.reply_to_msg_id=?
+                """,
+                (-1, 10),
+            )
+        )
+    assert "idx_raw_messages_reply_to_msg_id" in plan
+
+
+def test_direct_reply_reclassify_without_children_does_not_read_settings(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    parent = RawMessageEvent(
+        id="mine",
+        chat_id=-1,
+        msg_id=10,
+        text=".宗门战况",
+        source="me",
+        date="",
+        sender_id=12345,
+    )
+
+    def fail_settings():
+        raise AssertionError("settings should not be read when no child replies exist")
+
+    store.get_settings = fail_settings
+    assert store._reclassify_direct_reply_children(parent) == 0
+
+
 def test_messages_before_seq_returns_older(tmp_path):
     """before_seq 给「日志 modal 加载更早」用,返 rowid < before_seq 的卡片。"""
     from backend.domain.models import RawMessageEvent
@@ -8945,6 +9032,53 @@ def test_message_audit_payload_includes_deep_sections(tmp_path):
     assert "dungeon_audit" in payload
     assert payload["resource_coverage"]["ok"] is True
     assert payload["filter_diagnostics"]["ok"] is True
+
+
+def test_heavy_dashboard_payloads_are_cached_by_parameter(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_settings({
+        "target_chat": "-1001680975844",
+        "target_topic_id": 7310786,
+    })
+    calls = {"summary": 0, "resource": 0}
+
+    def message_summary():
+        calls["summary"] += 1
+        return {"raw_total": calls["summary"], "invalid_date_total": 0}
+
+    def message_gaps(*_args, **_kwargs):
+        return []
+
+    def latest_message_id(*_args, **_kwargs):
+        return 12345
+
+    def resource_stats(**kwargs):
+        calls["resource"] += 1
+        return {"ok": True, "rows": [{"n": calls["resource"]}], "kwargs": kwargs}
+
+    store.message_health_summary = message_summary
+    store.message_id_gaps = message_gaps
+    store.latest_message_id = latest_message_id
+    store.resource_stats = resource_stats
+    server = MiniWebServer(store=store)
+
+    first = server.message_audit_payload()
+    second = server.message_audit_payload()
+    other = server.message_audit_payload(limit=13)
+    stats_first = server.resource_stats_payload(period="day", limit=120)
+    stats_second = server.resource_stats_payload(period="day", limit=120)
+    health_first = server.health_payload()
+    health_second = server.health_payload()
+
+    assert first["messages"]["raw_total"] == 1
+    assert second["messages"]["raw_total"] == 1
+    assert other["messages"]["raw_total"] == 2
+    assert health_first["messages"]["raw_total"] == 3
+    assert health_second["messages"]["raw_total"] == 3
+    assert calls["summary"] == 3
+    assert stats_first["rows"][0]["n"] == 1
+    assert stats_second["rows"][0]["n"] == 1
+    assert calls["resource"] == 1
 
 
 def test_message_id_gaps_detects_short_large_msg_id_gap(tmp_path):

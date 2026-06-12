@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import re
 import threading
@@ -403,6 +404,8 @@ class MiniWebServer:
         self._schedule_client_locks: dict[str, threading.Lock] = {}
         self._skill_send_recent_lock = threading.Lock()
         self._skill_send_recent: dict[str, dict[str, float | str]] = {}
+        self._payload_cache_lock = threading.Lock()
+        self._payload_cache: dict[tuple, tuple[float, dict]] = {}
 
     def _current_tianjige_config(self, settings: dict | None = None) -> TianjigeConfig:
         if settings is None:
@@ -418,6 +421,26 @@ class MiniWebServer:
         configure = getattr(self._tianjige, "configure", None)
         if callable(configure):
             configure(self._current_tianjige_config(settings))
+
+    def _cached_payload(self, key: tuple, ttl_sec: float, factory) -> dict:
+        now = time.time()
+        with self._payload_cache_lock:
+            cached = self._payload_cache.get(key)
+            if cached and now - cached[0] <= ttl_sec:
+                return copy.deepcopy(cached[1])
+        payload = factory()
+        with self._payload_cache_lock:
+            self._payload_cache[key] = (now, copy.deepcopy(payload))
+        return payload
+
+    def _clear_payload_cache(self, prefix: str = "") -> None:
+        with self._payload_cache_lock:
+            if not prefix:
+                self._payload_cache.clear()
+                return
+            doomed = [key for key in self._payload_cache if key and key[0] == prefix]
+            for key in doomed:
+                self._payload_cache.pop(key, None)
 
     def _remember_tianjige_cookie_rotation(self, result) -> bool:
         new_cookie = str(getattr(result, "new_cookie", "") or "").strip()
@@ -445,7 +468,7 @@ class MiniWebServer:
         summary = getattr(self._store, "message_health_summary", None)
         if callable(summary):
             try:
-                messages = summary()
+                messages = self._cached_payload(("message_health_summary",), 60.0, summary)
             except Exception as exc:
                 messages = {"error": str(exc)}
         return {
@@ -457,6 +480,34 @@ class MiniWebServer:
         }
 
     def message_audit_payload(
+        self,
+        *,
+        since_hours: int = 24,
+        min_gap_seconds: int = 60,
+        min_missing_msg_ids: int = 20,
+        limit: int = 12,
+        deep: bool = False,
+    ) -> dict:
+        since_hours = int(since_hours or 24)
+        min_gap_seconds = int(min_gap_seconds or 60)
+        min_missing_msg_ids = int(min_missing_msg_ids or 20)
+        limit = int(limit or 12)
+        deep = bool(deep)
+        key = ("message_audit", since_hours, min_gap_seconds, min_missing_msg_ids, limit, deep)
+        ttl = 60.0 if deep else 300.0
+        return self._cached_payload(
+            key,
+            ttl,
+            lambda: self._message_audit_payload_uncached(
+                since_hours=since_hours,
+                min_gap_seconds=min_gap_seconds,
+                min_missing_msg_ids=min_missing_msg_ids,
+                limit=limit,
+                deep=deep,
+            ),
+        )
+
+    def _message_audit_payload_uncached(
         self,
         *,
         since_hours: int = 24,
@@ -594,6 +645,7 @@ class MiniWebServer:
             timeout=float(time_budget_sec + 15),
         )
         ok = bool(result.get("ok"))
+        self._clear_payload_cache("message_audit")
         audit = self.message_audit_payload(
             since_hours=since_hours,
             min_gap_seconds=min_gap_seconds,
@@ -1072,11 +1124,19 @@ class MiniWebServer:
     ) -> dict:
         if not hasattr(self._store, "resource_stats"):
             return {"ok": False, "error": "store does not support resource stats", "rows": []}
-        return self._store.resource_stats(
-            period=period,
-            source_type=source_type,
-            source_name=source_name,
-            limit=limit,
+        period = str(period or "day")
+        source_type = str(source_type or "")
+        source_name = str(source_name or "")
+        limit = int(limit or 120)
+        return self._cached_payload(
+            ("resource_stats", period, source_type, source_name, limit),
+            600.0,
+            lambda: self._store.resource_stats(
+                period=period,
+                source_type=source_type,
+                source_name=source_name,
+                limit=limit,
+            ),
         )
 
     def resource_coverage_payload(self, *, limit: int = 5000) -> dict:
@@ -1378,6 +1438,15 @@ class MiniWebServer:
             return {"ok": False, "error": str(exc)}
 
     def discovered_bots_payload(self) -> dict:
+        settings = self._store.get_settings()
+        marked_key = tuple(sorted(str(item) for item in (settings.get("game_bot_ids") or [])))
+        return self._cached_payload(
+            ("discovered_bots", marked_key),
+            600.0,
+            lambda: self._discovered_bots_payload_uncached(settings),
+        )
+
+    def _discovered_bots_payload_uncached(self, settings: dict | None = None) -> dict:
         """从消息箱「自动发现」可能是游戏 bot 的 sender(必须真的产出过游戏关键词消息,
         参考 backend/repo/bot_hints.py),每条带「是否已被标记为 game bot」标志。
         前端勾选 → POST /api/settings 写 game_bot_ids 列表。chat UI 用此区分
@@ -1388,7 +1457,7 @@ class MiniWebServer:
         discovered = self._store.list_discovered_bots()
         discovered_ids = {item["sender_id"] for item in discovered}
         marked: set[int] = set()
-        for raw in self._store.get_settings().get("game_bot_ids") or []:
+        for raw in (settings or {}).get("game_bot_ids") or []:
             try:
                 marked.add(int(raw))
             except (TypeError, ValueError):
@@ -1450,6 +1519,8 @@ class MiniWebServer:
         }
         if any(saved.get(key) != before.get(key) for key in tianjige_keys):
             self._refresh_tianjige_config(saved)
+        if saved.get("game_bot_ids") != before.get("game_bot_ids"):
+            self._clear_payload_cache("discovered_bots")
         return {"ok": True, "settings": public_settings(saved), "rebuilt_messages": rebuilt}
 
     def schedule_templates_payload(self) -> dict:

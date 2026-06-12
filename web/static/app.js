@@ -3653,6 +3653,18 @@ function startupTask(label, task) {
     });
 }
 
+function delayedStartupTask(label, task, delayMs = 3000) {
+  return new Promise((resolve) => {
+    window.setTimeout(() => {
+      if (document.hidden) {
+        resolve(null);
+        return;
+      }
+      startupTask(label, task).then(resolve);
+    }, delayMs);
+  });
+}
+
 async function bootstrapApp() {
   const scheduleReady = startupTask("initial schedule rail", () => loadScheduleRail({ silent: true }));
   try {
@@ -3672,9 +3684,9 @@ async function bootstrapApp() {
   const identitiesReady = accountsReady.then(() => startupTask("initial identities", loadIdentities));
 
   void scheduleReady;
-  startupTask("initial world snapshot", () => loadWorldSnapshot({ silent: true }));
-  settingsReady.then(() => startupTask("initial bot discovery", loadDiscoveredBots));
-  settingsReady.then(() => startupTask("initial message audit", () => loadMessageAudit({ silent: true })));
+  delayedStartupTask("initial world snapshot", () => loadWorldSnapshot({ silent: true }), 5000);
+  settingsReady.then(() => delayedStartupTask("initial bot discovery", loadDiscoveredBots, 12000));
+  settingsReady.then(() => delayedStartupTask("initial message audit", () => loadMessageAudit({ silent: true }), 8000));
   identitiesReady.then(() => startupTask("initial identity patches", () => loadIdentityPatches({ reset: true })));
   identitiesReady.then(() => startupTask("initial skills", loadSkills));
 }
