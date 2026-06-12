@@ -1580,12 +1580,15 @@ class SQLiteStore:
                     ),
                 )
                 self._replace_card_channel_rows(conn, card, event)
-            self._replace_resource_records(
-                conn,
-                event,
-                output.resource_deltas,
-                output.resource_events,
-            )
+            resource_deltas = tuple(output.resource_deltas)
+            resource_events = tuple(output.resource_events)
+            if resource_deltas or resource_events or self._has_resource_records(conn, event.id):
+                self._replace_resource_records(
+                    conn,
+                    event,
+                    resource_deltas,
+                    resource_events,
+                )
             self._replace_inventory_snapshot(conn, event)
             self._replace_inventory_delta_records(conn, event)
             for patch in output.state_patches:
@@ -1772,6 +1775,18 @@ class SQLiteStore:
                 ),
             )
 
+    def _has_resource_records(self, conn, raw_message_id: str) -> bool:
+        if not raw_message_id:
+            return False
+        for table in ("resource_events", "resource_deltas"):
+            row = conn.execute(
+                f"SELECT 1 FROM {table} WHERE raw_message_id=? LIMIT 1",
+                (raw_message_id,),
+            ).fetchone()
+            if row:
+                return True
+        return False
+
     def _enrich_resource_records_from_parent(
         self,
         conn,
@@ -1861,6 +1876,9 @@ class SQLiteStore:
             )
 
     def _replace_inventory_snapshot(self, conn, event: RawMessageEvent) -> None:
+        snapshot = parse_inventory_snapshot(event)
+        if snapshot is None and not self._has_inventory_snapshot(conn, event.id):
+            return
         existing = conn.execute(
             "SELECT id FROM inventory_snapshots WHERE raw_message_id=?",
             (event.id,),
@@ -1869,7 +1887,6 @@ class SQLiteStore:
             conn.execute("DELETE FROM inventory_items WHERE snapshot_id=?", (int(row[0]),))
         conn.execute("DELETE FROM inventory_snapshots WHERE raw_message_id=?", (event.id,))
 
-        snapshot = parse_inventory_snapshot(event)
         if snapshot is None:
             return
         items = list(snapshot.get("items") or [])
@@ -1969,9 +1986,11 @@ class SQLiteStore:
         self._replay_inventory_ledger_after_snapshot(conn, owner, event.id, event_time)
 
     def _replace_inventory_delta_records(self, conn, event: RawMessageEvent) -> None:
+        parsed = parse_inventory_delta_event(event)
+        if parsed is None and not self._has_inventory_ledger_records(conn, event.id):
+            return
         self._rollback_inventory_delta_records(conn, event.id)
         conn.execute("DELETE FROM inventory_ledger WHERE raw_message_id=?", (event.id,))
-        parsed = parse_inventory_delta_event(event)
         if parsed is None:
             return
         owner = self._inventory_owner_for_event(conn, event)
@@ -2061,6 +2080,26 @@ class SQLiteStore:
                     if owner:
                         return owner
         return ""
+
+    def _has_inventory_snapshot(self, conn, raw_message_id: str) -> bool:
+        if not raw_message_id:
+            return False
+        return bool(
+            conn.execute(
+                "SELECT 1 FROM inventory_snapshots WHERE raw_message_id=? LIMIT 1",
+                (raw_message_id,),
+            ).fetchone()
+        )
+
+    def _has_inventory_ledger_records(self, conn, raw_message_id: str) -> bool:
+        if not raw_message_id:
+            return False
+        return bool(
+            conn.execute(
+                "SELECT 1 FROM inventory_ledger WHERE raw_message_id=? LIMIT 1",
+                (raw_message_id,),
+            ).fetchone()
+        )
 
     def _replay_inventory_ledger_after_snapshot(
         self,
@@ -4394,6 +4433,8 @@ class SQLiteStore:
                     ON resource_deltas(source_type, source_name);
                 CREATE INDEX IF NOT EXISTS idx_resource_deltas_resource
                     ON resource_deltas(resource_name);
+                CREATE INDEX IF NOT EXISTS idx_resource_deltas_raw_message
+                    ON resource_deltas(raw_message_id);
 
                 CREATE TABLE IF NOT EXISTS resource_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4419,6 +4460,8 @@ class SQLiteStore:
                     ON resource_events(source_type, source_name);
                 CREATE INDEX IF NOT EXISTS idx_resource_events_result
                     ON resource_events(result);
+                CREATE INDEX IF NOT EXISTS idx_resource_events_raw_message
+                    ON resource_events(raw_message_id);
 
                 CREATE TABLE IF NOT EXISTS inventory_snapshots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from backend.app import GET_ROUTES, POST_ROUTES
 from backend.domain.models import RawMessageEvent
 from backend.repo.sqlite_store import RESOURCE_STATS_SCHEMA_VERSION, SQLiteStore
@@ -32,6 +34,66 @@ def test_resource_deltas_are_persisted_idempotently(tmp_path):
     }
     assert {item["day"] for item in deltas} == {"2026-05-15"}
     assert events[0]["result"] == "success"
+
+
+def test_resource_tables_have_raw_message_indexes(tmp_path):
+    store = SQLiteStore(tmp_path / "state.db")
+    with store._connect() as conn:
+        indexes = {
+            table: {
+                row[1]: [info[2] for info in conn.execute(f"PRAGMA index_info({row[1]})")]
+                for row in conn.execute(f"PRAGMA index_list({table})")
+            }
+            for table in ("resource_events", "resource_deltas")
+        }
+
+    assert indexes["resource_events"]["idx_resource_events_raw_message"] == ["raw_message_id"]
+    assert indexes["resource_deltas"]["idx_resource_deltas_raw_message"] == ["raw_message_id"]
+
+
+def test_plain_ingest_skips_resource_rewrite_but_clears_existing_records(tmp_path):
+    store = SQLiteStore(tmp_path / "state.db")
+    calls = {"n": 0}
+    original = store._replace_resource_records
+
+    def wrapped(*args, **kwargs):
+        calls["n"] += 1
+        return original(*args, **kwargs)
+
+    store._replace_resource_records = wrapped
+    plain = RawMessageEvent(
+        id="tg:-1:99",
+        chat_id=-1,
+        msg_id=99,
+        text="路过说句话。",
+        source="路人",
+        date="2026-05-15T11:59:00+00:00",
+        sender_id=123,
+    )
+    store.ingest_event(plain)
+    assert calls["n"] == 0
+
+    resource = RawMessageEvent(
+        id="tg:-1:100",
+        chat_id=-1,
+        msg_id=100,
+        text="""【野外历练 · 灵机暗藏】
+@salt9527 在山涧残阵旁避开妖兽踪迹，采得一份机缘。
+获得修为 +12000，获得 【灵石】x399。""",
+        source="韩天尊",
+        date="2026-05-15T12:00:00+00:00",
+        sender_id=7900199668,
+        sender_is_bot=True,
+    )
+    store.ingest_event(resource)
+    assert calls["n"] == 1
+    assert store.list_resource_events(resource.id)
+
+    store.ingest_event(replace(resource, text="这条编辑后不再是资源结算。"))
+
+    assert calls["n"] == 2
+    assert store.list_resource_events(resource.id) == []
+    assert store.list_resource_deltas(resource.id) == []
 
 
 def test_resource_coverage_reports_parsed_and_missing_candidates(tmp_path):
