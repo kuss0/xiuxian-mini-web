@@ -5999,9 +5999,10 @@ def test_schedule_create_dry_run_ignores_official_quota(tmp_path):
     assert len(store.list_schedule_batches(include_inactive=True)) == 2
 
 
-def test_schedule_delete_marks_batch_and_messages_deleted(tmp_path):
+def test_schedule_delete_marks_batch_and_messages_deleted(tmp_path, monkeypatch):
     store = SQLiteStore(tmp_path / "miniweb.db")
     server = MiniWebServer(store=store)
+    server.save_settings_payload({"target_chat": "-1001680975844"})
     server.save_account_payload(
         {"local_id": "main", "api_id": "123", "api_hash": "hash", "account_id": "12345"}
     )
@@ -6009,9 +6010,21 @@ def test_schedule_delete_marks_batch_and_messages_deleted(tmp_path):
     created = server.schedule_create_payload(
         {"send_as_id": 12345, "preset_key": "deep_retreat", "horizon_days": 1, "dry_run": True}
     )
+    msgs = store.list_schedule_messages(send_as_id=12345)
+    store.mark_schedule_message(msgs[0]["id"], scheduled_msg_id=100, status="scheduled")
+
+    def fake_submit(account_local_id, coro_factory, *, action_label, timeout=30.0):
+        assert account_local_id == "main"
+        assert action_label == "删除 TG 官方定时"
+        return 1, "transient"
+
+    monkeypatch.setattr(server, "_submit_telegram_account_client", fake_submit)
+
     deleted = server.schedule_delete_payload({"batch_id": created["batch_id"]})
     assert deleted["ok"] is True
     assert deleted["local"]["batch"] == 1
+    assert deleted["tg_deleted"] == 1
+    assert deleted["tg_client_mode"] == "transient"
     assert server.schedule_list_payload()["batches"] == []
 
 
@@ -6090,19 +6103,28 @@ def test_outbox_logs_route_and_store_roundtrip(tmp_path):
     assert "/api/outbox/logs" in GET_ROUTES
 
 
-def test_schedule_sync_without_listener_returns_error(tmp_path):
-    """没有 listener 在跑就没 client 可拉 TG,这时 sync 应明确报错而不是默默挂掉。"""
+def test_schedule_sync_without_listener_uses_transient_client(tmp_path, monkeypatch):
+    """没有 listener 在跑时, sync 走已登录账号 session 的临时 client。"""
     store = SQLiteStore(tmp_path / "miniweb.db")
     server = MiniWebServer(store=store)
+    server.save_settings_payload({"target_chat": "-1001680975844"})
     server.save_account_payload(
         {"local_id": "main", "api_id": "123", "api_hash": "hash", "account_id": "12345"}
     )
     server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
 
+    def fake_submit(account_local_id, coro_factory, *, action_label, timeout=30.0):
+        assert account_local_id == "main"
+        assert action_label == "拉 TG 定时列表"
+        return [], "transient"
+
+    monkeypatch.setattr(server, "_submit_telegram_account_client", fake_submit)
+
     result = server.schedule_sync_payload(12345)
 
-    assert result["ok"] is False
-    assert "采集" in result["error"]
+    assert result["ok"] is True
+    assert result["tg_client_mode"] == "transient"
+    assert result["tg_messages"] == []
 
 
 def test_schedule_sync_empty_exception_gets_actionable_error(tmp_path):

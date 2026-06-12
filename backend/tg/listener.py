@@ -60,9 +60,10 @@ class TelegramReadOnlyListener:
     _BACKOFF_INITIAL = 1.0
     _BACKOFF_MAX = 60.0
     _STABLE_UPTIME_THRESHOLD = 60.0
-    _HISTORY_BACKFILL_LIMIT = _env_int("MINIWEB_HISTORY_BACKFILL_LIMIT", 240)
+    _HISTORY_BACKFILL_LIMIT = _env_int("MINIWEB_HISTORY_BACKFILL_LIMIT", 120)
     _HISTORY_BOOTSTRAP_LIMIT = _env_int("MINIWEB_HISTORY_BOOTSTRAP_LIMIT", 120)
     _HISTORY_GAP_SCAN_LIMIT = _env_int("MINIWEB_HISTORY_GAP_SCAN_LIMIT", 8)
+    _HISTORY_AUTO_GAP_SCAN_LIMIT = _env_int("MINIWEB_HISTORY_AUTO_GAP_SCAN_LIMIT", 0)
     _HISTORY_GAP_MIN_SECONDS = _env_int("MINIWEB_HISTORY_GAP_MIN_SECONDS", 60)
     _HISTORY_GAP_MIN_MISSING = _env_int("MINIWEB_HISTORY_GAP_MIN_MISSING", 20)
     _HISTORY_GAP_RANGE_LIMIT = _env_int("MINIWEB_HISTORY_GAP_RANGE_LIMIT", 120)
@@ -71,7 +72,7 @@ class TelegramReadOnlyListener:
     _HISTORY_YIELD_SEC = _env_float("MINIWEB_HISTORY_YIELD_SEC", 0.03)
     _HISTORY_STATUS_EVERY = _env_int("MINIWEB_HISTORY_STATUS_EVERY", 60)
     _HISTORY_BACKFILL_REPLY_PARENTS = _env_bool("MINIWEB_HISTORY_BACKFILL_REPLY_PARENTS", False)
-    _HISTORY_BACKFILL_TIME_BUDGET_SEC = _env_float("MINIWEB_HISTORY_BACKFILL_TIME_BUDGET_SEC", 8.0)
+    _HISTORY_BACKFILL_TIME_BUDGET_SEC = _env_float("MINIWEB_HISTORY_BACKFILL_TIME_BUDGET_SEC", 3.0)
     _INGEST_BUSY_ATTEMPTS = 6
     _INGEST_BUSY_BASE_SLEEP = 0.2
 
@@ -422,13 +423,15 @@ class TelegramReadOnlyListener:
                     if self._history_time_budget_reached(started_at):
                         budget_reached = True
                         break
-                if self._HISTORY_GAP_SCAN_LIMIT > 0:
+                auto_gap_limit = max(0, int(self._HISTORY_AUTO_GAP_SCAN_LIMIT or 0))
+                if auto_gap_limit > 0:
                     gap_started_at = asyncio.get_running_loop().time()
                     gap_ranges, gap_scanned, gap_ingested = await self._backfill_known_gaps(
                         client,
                         entity,
                         chat_id,
                         topic_id,
+                        gaps=self._known_message_gaps(chat_id, topic_id, limit=auto_gap_limit),
                         started_at=gap_started_at,
                     )
                     scanned += gap_scanned

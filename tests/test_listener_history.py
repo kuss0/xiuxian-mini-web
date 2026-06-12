@@ -145,7 +145,7 @@ def test_listener_backfills_known_message_id_gaps():
         ],
     )
     listener = TelegramReadOnlyListener(sink)
-    listener._HISTORY_GAP_SCAN_LIMIT = 1
+    listener._HISTORY_AUTO_GAP_SCAN_LIMIT = 1
     client = FakeClient(
         responses=[
             [],
@@ -160,6 +160,30 @@ def test_listener_backfills_known_message_id_gaps():
     assert client.calls == [
         {"min_id": 300, "reverse": True, "limit": listener._HISTORY_BACKFILL_LIMIT},
         {"min_id": 100, "max_id": 200, "reverse": True, "limit": 99},
+    ]
+
+
+def test_listener_does_not_auto_scan_known_gaps_by_default():
+    sink = FakeSink(
+        latest=300,
+        gaps=[
+            {
+                "after_msg_id": 100,
+                "before_msg_id": 200,
+                "gap_seconds": 900,
+                "missing_msg_ids": 99,
+            }
+        ],
+    )
+    listener = TelegramReadOnlyListener(sink)
+    client = FakeClient(responses=[[]])
+
+    message = asyncio.run(listener._backfill_history(client, -1001680975844, 7310786))
+
+    assert "修补空窗" not in message
+    assert sink.events == []
+    assert client.calls == [
+        {"min_id": 300, "reverse": True, "limit": listener._HISTORY_BACKFILL_LIMIT},
     ]
 
 

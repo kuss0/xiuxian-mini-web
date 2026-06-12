@@ -2219,6 +2219,47 @@ class MiniWebServer:
         with lock:
             return asyncio.run(_runner())
 
+    def _submit_telegram_account_client(
+        self,
+        account_local_id: str,
+        coro_factory,
+        *,
+        action_label: str,
+        timeout: float = 30.0,
+    ) -> tuple[object, str]:
+        """Run a one-shot Telegram query for an account.
+
+        Prefer the active listener client when available; otherwise open the
+        already logged-in account session briefly.  Official schedule sync and
+        delete must not require switching the active collector.
+        """
+        local_id = str(account_local_id or "").strip()
+        listener = self._listeners.get_listener(local_id) if local_id else None
+        if listener is not None:
+            return listener.submit(coro_factory, timeout=timeout), "listener"
+
+        account_config = self._telegram_account_config(local_id, action_label=action_label)
+
+        async def _runner():
+            client = None
+            try:
+                client = create_telegram_client(account_config)
+                await client.connect()
+                if not await client.is_user_authorized():
+                    raise RuntimeError("Telegram session 未登录,请先在账号配置里完成验证码登录")
+                return await coro_factory(client)
+            finally:
+                if client is not None:
+                    try:
+                        await client.disconnect()
+                    except Exception:
+                        pass
+
+        import asyncio
+        lock = self._schedule_client_lock(local_id)
+        with lock:
+            return asyncio.run(_runner()), "transient"
+
     async def _run_official_send_with_client_lock(
         self,
         client,
@@ -3592,23 +3633,28 @@ class MiniWebServer:
                 return {"ok": False, "error": "batch 不存在"}
             batch = batches[0]
             account_local_id = batch.get("account_local_id") or ""
-            listener = self._listeners.get_listener(account_local_id) if account_local_id else None
             tg_deleted = 0
             tg_error = ""
-            if listener is not None and not payload.get("local_only"):
+            tg_client_mode = ""
+            if not payload.get("local_only"):
                 msgs = self._store.list_schedule_messages(batch_id=batch_id, include_inactive=False)
                 scheduled_ids = [m["scheduled_msg_id"] for m in msgs if m.get("scheduled_msg_id", 0) > 0]
                 if scheduled_ids:
-                    target_chat = self._store.get_settings().get("target_chat") or ""
+                    target_chat, _target_topic_id = self._official_schedule_target(account_local_id)
                     try:
-                        tg_deleted = listener.submit(
+                        if not target_chat:
+                            raise RuntimeError("settings.target_chat 未配置")
+                        result, tg_client_mode = self._submit_telegram_account_client(
+                            account_local_id,
                             lambda client: self._do_delete_official_messages(
                                 client, target_chat, scheduled_ids
                             ),
+                            action_label="删除 TG 官方定时",
                             timeout=30.0,
                         )
+                        tg_deleted = int(result or 0)
                     except Exception as exc:
-                        tg_error = str(exc)
+                        tg_error = str(exc) or exc.__class__.__name__
             local = self._store.delete_schedule_batch(batch_id)
             return {
                 "ok": True,
@@ -3616,6 +3662,7 @@ class MiniWebServer:
                 "local": local,
                 "tg_deleted": tg_deleted,
                 "tg_error": tg_error,
+                "tg_client_mode": tg_client_mode,
             }
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -3644,19 +3691,14 @@ class MiniWebServer:
                             break
                     except (TypeError, ValueError):
                         continue
-            listener = self._listeners.get_listener(account_local_id) if account_local_id else None
-            if listener is None:
-                return {
-                    "ok": False,
-                    "error": "该身份对应账号没在采集运行中,无法用其 client 拉 TG 定时列表",
-                }
-
-            target_chat = self._store.get_settings().get("target_chat") or ""
+            target_chat, _target_topic_id = self._official_schedule_target(account_local_id)
             if not target_chat:
                 return {"ok": False, "error": "settings.target_chat 未配置"}
 
-            tg_messages = listener.submit(
+            tg_messages, tg_client_mode = self._submit_telegram_account_client(
+                account_local_id,
                 lambda client: self._do_list_official_messages(client, target_chat),
+                action_label="拉 TG 定时列表",
                 timeout=30.0,
             )
 
@@ -3711,6 +3753,7 @@ class MiniWebServer:
                 "ok": True,
                 "send_as_id": send_as_id,
                 "account_local_id": account_local_id,
+                "tg_client_mode": tg_client_mode,
                 "tg_messages": tg_messages,
                 "matched": matched,
                 "orphans": orphans,
