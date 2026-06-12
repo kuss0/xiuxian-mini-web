@@ -6,6 +6,7 @@ DATA_DIR="${MINIWEB_DATA_DIR:-$ROOT_DIR/data}"
 BACKUP_DIR="${MINIWEB_BACKUP_DIR:-$ROOT_DIR/backups}"
 KEEP_DAYS="${MINIWEB_BACKUP_KEEP_DAYS:-14}"
 KEEP_COUNT="${MINIWEB_BACKUP_KEEP_COUNT:-3}"
+KEEP_BYTES="${MINIWEB_BACKUP_KEEP_BYTES:-0}"
 REQUIRED_FREE_BYTES="${MINIWEB_BACKUP_REQUIRED_FREE_BYTES:-}"
 
 DB_PATH="$DATA_DIR/miniweb.db"
@@ -38,6 +39,38 @@ sqlite_backup() {
   sqlite3 "$dst" "PRAGMA quick_check;" | grep -qx "ok"
 }
 
+backup_size() {
+  stat -c '%s' "$1" 2>/dev/null || echo 0
+}
+
+prune_backups_by_bytes() {
+  if [[ ! "$KEEP_BYTES" =~ ^[0-9]+$ || "$KEEP_BYTES" -le 0 ]]; then
+    return 0
+  fi
+  mapfile -t files < <(ls -1t "$BACKUP_DIR"/miniweb-*.tar.gz 2>/dev/null || true)
+  local total=0
+  local file=""
+  local size=0
+  for file in "${files[@]}"; do
+    size="$(backup_size "$file")"
+    total=$((total + size))
+  done
+  if [[ "$total" -le "$KEEP_BYTES" ]]; then
+    return 0
+  fi
+  local idx=$(( ${#files[@]} - 1 ))
+  while [[ "$total" -gt "$KEEP_BYTES" && "$idx" -ge 0 ]]; do
+    if [[ "$KEEP_COUNT" =~ ^[0-9]+$ && "$KEEP_COUNT" -gt 0 && "$idx" -lt "$KEEP_COUNT" ]]; then
+      break
+    fi
+    file="${files[$idx]}"
+    size="$(backup_size "$file")"
+    rm -f -- "$file"
+    total=$((total - size))
+    idx=$((idx - 1))
+  done
+}
+
 prune_backups() {
   if [[ "$KEEP_DAYS" =~ ^[0-9]+$ && "$KEEP_DAYS" -gt 0 ]]; then
     find "$BACKUP_DIR" -maxdepth 1 -type f -name 'miniweb-*.tar.gz' -mtime +"$KEEP_DAYS" -delete
@@ -45,6 +78,7 @@ prune_backups() {
   if [[ "$KEEP_COUNT" =~ ^[0-9]+$ && "$KEEP_COUNT" -gt 0 ]]; then
     ls -1t "$BACKUP_DIR"/miniweb-*.tar.gz 2>/dev/null | sed -e "1,${KEEP_COUNT}d" | xargs -r rm -f
   fi
+  prune_backups_by_bytes
 }
 
 need_cmd sqlite3

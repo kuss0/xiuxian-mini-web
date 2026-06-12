@@ -5,6 +5,7 @@
   const { fetchJson, postJson } = window.MiniwebApi;
   const { openModal } = window.MiniwebModal;
   const { clipGraphemes, escapeAttr, escapeHtml } = window.MiniwebFormat;
+  const SCHEDULE_BOOTSTRAP_URL = "/api/schedule/bootstrap?include=presets,modules,templates";
 
   function scheduleState(deps = {}) {
     return deps.state || window.MiniwebState?.state || {};
@@ -335,6 +336,8 @@
       const group = identitiesByAccount.get(key) || [];
       const loggedIn = String(account?.login_status || "") === "done";
       const running = String(account?.listener_status || "") === "running" || Boolean(account?.listen_enabled);
+      const scheduleStateText = loggedIn ? "可排 TG" : "需先登录";
+      const collectionText = running ? "采集中" : "采集未开";
       const selectedInGroup = group.filter((identity) => selected.has(Number(identity.send_as_id || 0))).length;
       return `
         <article class="schedule-account-picker-row ${selectedInGroup ? "selected" : ""}">
@@ -342,7 +345,7 @@
             <span class="account-row-dot ${running ? "live" : (loggedIn ? "ok" : "warn")}"></span>
             <div>
               <strong>${escapeHtml(scheduleAccountLabel(account, key || "未绑定账号"))}</strong>
-              <small>${escapeHtml(loggedIn ? "已登录" : "未登录")}｜${escapeHtml(running ? "采集中" : "未采集")}｜${escapeHtml(String(selectedInGroup))}/${escapeHtml(String(group.length))}</small>
+              <small>${escapeHtml(loggedIn ? "已登录" : "未登录")}｜${escapeHtml(scheduleStateText)}｜${escapeHtml(collectionText)}｜${escapeHtml(String(selectedInGroup))}/${escapeHtml(String(group.length))}</small>
             </div>
             <div class="schedule-account-picker-actions">
               <button type="button" data-schedule-select-account="${escapeAttr(key)}">只选账号</button>
@@ -375,7 +378,7 @@
   async function loadScheduleModalBootstrap(deps = {}) {
     const state = scheduleState(deps);
     try {
-      const payload = await fetchJson("/api/schedule/bootstrap");
+      const payload = await fetchJson(SCHEDULE_BOOTSTRAP_URL);
       return {
         ok: payload.ok !== false,
         warning: payload.ok === false ? "官方定时部分资料读取失败,已尽量展示可用数据。" : "",
@@ -386,7 +389,7 @@
           by_identity: payload.by_identity || [],
           tianjige: payload.tianjige || {},
         },
-        batches: payload.batches || [],
+        batches: state.scheduleBatches || [],
         templates: payload.templates || [],
       };
     } catch (error) {
@@ -604,7 +607,15 @@
     if (modalBody) {
       modalBody.innerHTML = renderScheduleModalBody(deps, { presets, scheduleModules, batches, templates, defaultSendAsIds });
     }
-    bindScheduleModal(deps, dialog, presets, batches, templates, scheduleModules);
+    const setScheduleStatus = bindScheduleModal(deps, dialog, presets, batches, templates, scheduleModules);
+    refreshScheduleModalBatches(deps, dialog, setScheduleStatus).catch((error) => {
+      const status = dialog.querySelector("#scheduleStatus");
+      if (status && !status.textContent) {
+        status.hidden = false;
+        status.className = "modal-status-line warn";
+        status.textContent = `本地排班记录刷新失败: ${error.message || String(error)}`;
+      }
+    });
     if (bootstrap.warning) {
       const status = dialog.querySelector("#scheduleStatus");
       if (status) {
@@ -613,6 +624,22 @@
         status.textContent = bootstrap.warning;
       }
     }
+  }
+
+  async function refreshScheduleModalBatches(deps = {}, dialog, setStatus = null) {
+    if (!dialog?.isConnected) return [];
+    const batchList = dialog.querySelector("#scheduleBatchList");
+    if (batchList && !(scheduleState(deps).scheduleBatches || []).length) {
+      batchList.innerHTML = '<p class="empty inline">正在读取本地排班记录...</p>';
+    }
+    const payload = await fetchJson("/api/schedule?history=0");
+    if (!dialog.isConnected) return [];
+    const batches = syncScheduleBatches(deps, payload);
+    if (batchList) {
+      batchList.innerHTML = renderScheduleBatches(deps, batches);
+      bindScheduleBatchActions(deps, dialog, setStatus);
+    }
+    return batches;
   }
 
   function renderScheduleTemplateOptions(templates) {
@@ -960,6 +987,7 @@
 
   function applyScheduleSuggestionToForm(form, contract, catalog = null) {
     const suggestion = (contract?.suggestion || catalog?.suggestion || {});
+    const payloadDefaults = suggestion.payload_defaults || contract?.payload_defaults || {};
     if (!suggestion || !Object.keys(suggestion).length) return false;
     const setValue = (name, value, { overwrite = true } = {}) => {
       const field = form.querySelector(`[name="${CSS.escape(name)}"]`);
@@ -967,12 +995,17 @@
       if (!overwrite && String(field.value || "").trim()) return;
       field.value = String(value);
     };
-    setValue("preset_key", suggestion.preset_key || "custom");
-    setValue("command", suggestion.command || suggestion.base_command || "", { overwrite: true });
-    setValue("interval_sec", suggestion.interval_sec || "", { overwrite: true });
-    setValue("count", suggestion.count || "", { overwrite: true });
-    setValue("horizon_days", suggestion.horizon_days || "", { overwrite: false });
-    setValue("trigger_command", suggestion.trigger_command || "", { overwrite: true });
+    setValue("preset_key", payloadDefaults.preset_key || suggestion.preset_key || "custom");
+    setValue("command", payloadDefaults.command || suggestion.command || suggestion.base_command || "", { overwrite: true });
+    setValue("interval_sec", payloadDefaults.interval_sec || suggestion.interval_sec || "", { overwrite: true });
+    setValue("count", payloadDefaults.count || suggestion.count || "", { overwrite: true });
+    setValue("horizon_days", payloadDefaults.horizon_days || suggestion.horizon_days || "", { overwrite: false });
+    setValue("trigger_command", payloadDefaults.trigger_command || suggestion.trigger_command || "", { overwrite: true });
+    Object.entries(payloadDefaults).forEach(([key, value]) => {
+      if (!["preset_key", "command", "interval_sec", "count", "horizon_days", "trigger_command"].includes(key)) {
+        setValue(key, value, { overwrite: true });
+      }
+    });
     if (suggestion.arg_payload_key && suggestion.arg_value) {
       setValue(suggestion.arg_payload_key, suggestion.arg_value, { overwrite: true });
     }
@@ -1009,7 +1042,7 @@
     const selectAllIdentityButton = dialog.querySelector("#scheduleSelectAllIdentityButton");
     const setChatIdentityButton = dialog.querySelector("#scheduleSetChatIdentityButton");
     const clearIdentityButton = dialog.querySelector("#scheduleClearIdentityButton");
-    if (!form) return;
+    if (!form) return null;
     const presetMap = new Map(presets.map((p) => [p.key, p]));
     let templates = Array.isArray(initialTemplates) ? [...initialTemplates] : [];
     const setStatus = (kind, text) => {
@@ -1018,6 +1051,7 @@
       status.className = `modal-status-line ${kind}`;
       status.textContent = text || "";
     };
+    dialog._scheduleSetStatus = setStatus;
     const showPreview = (html) => {
       if (!preview) return;
       preview.hidden = !html;
@@ -1553,10 +1587,13 @@
         });
       }
     }
+    return setStatus;
   }
 
   function bindScheduleBatchActions(deps = {}, dialog, setStatus = null) {
-    const setBatchStatus = typeof setStatus === "function" ? setStatus : () => {};
+    const setBatchStatus = typeof setStatus === "function"
+      ? setStatus
+      : (typeof dialog?._scheduleSetStatus === "function" ? dialog._scheduleSetStatus : () => {});
     dialog.querySelectorAll('[data-schedule-action="delete"]').forEach((btn) => {
       if (btn.dataset.bound === "1") return;
       btn.dataset.bound = "1";

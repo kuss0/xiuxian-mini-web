@@ -7,6 +7,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -83,6 +84,7 @@ class TianjigeResult:
     retry_after: int = 0
     raw: Any = None
     meta: dict = field(default_factory=dict)
+    new_cookie: str = ""
 
     def to_api(self) -> dict:
         return {
@@ -205,12 +207,30 @@ class TianjigeGateway:
                 status_code = int(getattr(response, "status", 200) or 200)
                 raw_body = response.read().decode("utf-8", errors="replace")
                 data = json.loads(raw_body) if raw_body.strip() else None
-                return TianjigeResult(True, "ok", data=data, status_code=status_code, raw=data, meta=meta)
+                new_cookie = _merge_cookie_header(
+                    self.config.cookie,
+                    _header_values(getattr(response, "headers", None), "Set-Cookie"),
+                )
+                public_meta = {**meta, "cookie_rotated": bool(new_cookie)}
+                return TianjigeResult(
+                    True,
+                    "ok",
+                    data=data,
+                    status_code=status_code,
+                    raw=data,
+                    meta=public_meta,
+                    new_cookie=new_cookie,
+                )
         except urllib.error.HTTPError as exc:
             raw_body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
             data = _decode_json(raw_body)
             retry_after = _safe_int(getattr(exc, "headers", {}).get("Retry-After"))
             status = _status_from_http(exc.code)
+            new_cookie = _merge_cookie_header(
+                self.config.cookie,
+                _header_values(getattr(exc, "headers", None), "Set-Cookie"),
+            )
+            public_meta = {**meta, "cookie_rotated": bool(new_cookie)}
             return TianjigeResult(
                 False,
                 status,
@@ -219,7 +239,8 @@ class TianjigeGateway:
                 status_code=int(exc.code or 0),
                 retry_after=retry_after,
                 raw=data if data is not None else raw_body,
-                meta=meta,
+                meta=public_meta,
+                new_cookie=new_cookie,
             )
         except (TimeoutError, urllib.error.URLError, OSError) as exc:
             return TianjigeResult(False, "network_error", error=str(exc), meta=meta)
@@ -246,9 +267,51 @@ class TianjigeGateway:
             "status_code": result.status_code,
             "error": result.error,
             "retry_after": result.retry_after,
+            "cookie_rotated": bool((result.meta or {}).get("cookie_rotated")),
             "at": int(time.time()),
         }
         return result
+
+
+def _header_values(headers: object, key: str) -> list[str]:
+    if headers is None:
+        return []
+    get_all = getattr(headers, "get_all", None)
+    if callable(get_all):
+        values = get_all(key) or []
+    else:
+        value = getattr(headers, "get", lambda _key, _default=None: _default)(key, None)
+        values = [value] if value else []
+    return [str(value).strip() for value in values if str(value or "").strip()]
+
+
+def _cookie_name_value(raw: str) -> tuple[str, str]:
+    first = str(raw or "").split(";", 1)[0].strip()
+    if not first or "=" not in first:
+        return "", ""
+    name, value = first.split("=", 1)
+    return name.strip(), value.strip()
+
+
+def _merge_cookie_header(current: str, set_cookie_headers: list[str]) -> str:
+    if not set_cookie_headers:
+        return ""
+    jar: OrderedDict[str, str] = OrderedDict()
+    for part in str(current or "").split(";"):
+        name, value = _cookie_name_value(part)
+        if name:
+            jar[name] = value
+    before = "; ".join(f"{name}={value}" for name, value in jar.items())
+    changed = False
+    for header in set_cookie_headers:
+        name, value = _cookie_name_value(header)
+        if not name:
+            continue
+        if jar.get(name) != value:
+            changed = True
+        jar[name] = value
+    merged = "; ".join(f"{name}={value}" for name, value in jar.items())
+    return merged if changed and merged != before else ""
 
 
 def tianjige_profile_patches(data: dict) -> list[dict]:

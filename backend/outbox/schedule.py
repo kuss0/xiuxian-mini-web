@@ -7,7 +7,8 @@ preset + plan + batch 三层:
 
 骨架只做:
 1. preset 注册表 + plan builder(纯计算,无 IO)
-2. 通过 listener 复用已登录 client,调 channels SendMessage(schedule_date=...) / GetScheduledHistory / DeleteScheduledMessages
+2. 优先复用 listener 的已登录 client,也允许 server 层用已登录账号开短生命周期 client,
+   调 channels SendMessage(schedule_date=...) / GetScheduledHistory / DeleteScheduledMessages
 3. 提供 dry_run 模式 — 只算 plan,不真发到 TG,方便 UI 开发和试错
 """
 
@@ -616,8 +617,10 @@ def build_plan(payload: dict, *, anchor_resolver: Callable[[int, str], float | N
 # ---------- Telethon-side service ----------
 
 class OfficialScheduleService:
-    """实际跟 Telegram 交互的部分。需要 listener manager 注入,这样能复用已登录 client。
-    没 listener 的情况下,所有 Telethon 调用都失败 — 这是预期的(未登录就不能排定时)。
+    """实际跟 Telegram 交互的低层方法。
+
+    这里只提供 listener client 复用和已连接 client 上的 Telegram 调用。
+    没有 listener 时,server 层可以用已登录账号打开短生命周期 client。
     """
 
     def __init__(self, listener_lookup: Callable[[str], object | None] | None = None):
@@ -628,7 +631,7 @@ class OfficialScheduleService:
     def _client_for(self, account_local_id: str):
         listener = self._listener_lookup(account_local_id)
         if listener is None:
-            raise RuntimeError("account 没在采集运行中,无法用其 client 排定时(需先登录并启动 listener)")
+            raise RuntimeError("该账号当前没有可复用 listener client")
         return listener
 
     async def create_one_on_client(

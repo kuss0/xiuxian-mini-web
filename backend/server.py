@@ -419,6 +419,26 @@ class MiniWebServer:
         if callable(configure):
             configure(self._current_tianjige_config(settings))
 
+    def _remember_tianjige_cookie_rotation(self, result) -> bool:
+        new_cookie = str(getattr(result, "new_cookie", "") or "").strip()
+        if not new_cookie or not self._tianjige_settings_managed:
+            return False
+        try:
+            before = self._store.get_settings()
+        except Exception:
+            before = {}
+        if str(before.get("tianjige_cookie") or "").strip() == new_cookie:
+            return False
+        last_result = getattr(self._tianjige, "_last_result", None)
+        saved = self._store.save_settings({"tianjige_cookie": new_cookie})
+        self._refresh_tianjige_config(saved)
+        if isinstance(last_result, dict) and last_result:
+            try:
+                setattr(self._tianjige, "_last_result", last_result)
+            except Exception:
+                pass
+        return True
+
     def health_payload(self) -> dict:
         self._ensure_collector_running()
         messages = {}
@@ -931,12 +951,14 @@ class MiniWebServer:
 
     def tianjige_bootstrap_payload(self) -> dict:
         result = self._tianjige.bootstrap()
+        self._remember_tianjige_cookie_rotation(result)
         payload = result.to_api()
         payload["bootstrap"] = result.data if result.ok else {}
         return payload
 
     def tianjige_me_payload(self, payload: dict | None = None) -> dict:
         result = self._tianjige.me()
+        self._remember_tianjige_cookie_rotation(result)
         api = result.to_api()
         data = result.data if isinstance(result.data, dict) else {}
         api["me"] = data if result.ok else {}
@@ -951,6 +973,7 @@ class MiniWebServer:
         if not username and identity:
             username = str(identity.get("username") or "").strip().lstrip("@")
         result = self._tianjige.cultivator(username)
+        self._remember_tianjige_cookie_rotation(result)
         api = result.to_api()
         data = result.data if isinstance(result.data, dict) else {}
         api["cultivator"] = data if result.ok else {}
@@ -1434,12 +1457,22 @@ class MiniWebServer:
             return {"ok": False, "error": "store does not support schedule templates", "templates": []}
         return {"ok": True, "templates": self._store.list_schedule_templates()}
 
-    def schedule_bootstrap_payload(self, send_as_id_text: str = "") -> dict:
-        """Return the schedule modal's read-only startup data in one request."""
-        presets = self.schedule_presets_payload()
-        modules = self.schedule_modules_payload(send_as_id_text)
-        batches = self.schedule_list_payload(include_history=False)
-        templates = self.schedule_templates_payload()
+    def schedule_bootstrap_payload(
+        self,
+        send_as_id_text: str = "",
+        *,
+        include: Iterable[str] | str | None = None,
+    ) -> dict:
+        """Return requested schedule modal startup data.
+
+        include=None preserves the old full response.  The UI can ask for a
+        smaller catalog-only bootstrap and lazy-load local batches separately.
+        """
+        include_keys = self._schedule_bootstrap_include(include)
+        presets = self.schedule_presets_payload() if "presets" in include_keys else {"ok": True, "presets": []}
+        modules = self.schedule_modules_payload(send_as_id_text) if "modules" in include_keys else {"ok": True, "modules": [], "by_identity": [], "tianjige": {}}
+        batches = self.schedule_list_payload(include_history=False) if "batches" in include_keys else {"ok": True, "batches": []}
+        templates = self.schedule_templates_payload() if "templates" in include_keys else {"ok": True, "templates": []}
         errors = {
             key: payload.get("error")
             for key, payload in {
@@ -1453,6 +1486,7 @@ class MiniWebServer:
         return {
             "ok": not bool(errors),
             "errors": errors,
+            "included": sorted(include_keys),
             "presets": presets.get("presets") or [],
             "modules": modules.get("modules") or [],
             "by_identity": modules.get("by_identity") or [],
@@ -1460,6 +1494,17 @@ class MiniWebServer:
             "batches": batches.get("batches") or [],
             "templates": templates.get("templates") or [],
         }
+
+    def _schedule_bootstrap_include(self, include: Iterable[str] | str | None) -> set[str]:
+        all_keys = {"presets", "modules", "batches", "templates"}
+        if include is None:
+            return set(all_keys)
+        if isinstance(include, str):
+            raw_items = re.split(r"[, ]+", include.strip())
+        else:
+            raw_items = [str(item or "").strip() for item in include]
+        selected = {item for item in raw_items if item in all_keys}
+        return selected or set(all_keys)
 
     def schedule_template_save_payload(self, payload: dict) -> dict:
         if not hasattr(self._store, "save_schedule_templates"):

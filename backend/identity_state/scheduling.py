@@ -163,20 +163,35 @@ def schedule_hint(module: object, state: dict | None = None) -> dict:
     if command and arg_value and arg_key:
         command = f"{command} {arg_value}"
     interval_sec = int(hint.get("interval_sec") or 0)
+    count = _default_count(interval_sec)
+    payload_defaults = {
+        "preset_key": str(hint.get("preset_key") or "custom"),
+        "command": command,
+        "interval_sec": interval_sec,
+        "count": count,
+        "horizon_days": DEFAULT_SCHEDULE_HORIZON_DAYS,
+    }
+    trigger_command = str(hint.get("trigger_command") or "").strip()
+    if trigger_command:
+        payload_defaults["trigger_command"] = trigger_command
+    arg_payload_key = str(hint.get("arg_payload_key") or "")
+    if arg_payload_key and arg_value:
+        payload_defaults[arg_payload_key] = arg_value
     return {
         "preset_key": str(hint.get("preset_key") or "custom"),
         "command": command,
         "base_command": str(hint.get("command") or ""),
-        "trigger_command": str(hint.get("trigger_command") or ""),
+        "trigger_command": trigger_command,
         "interval_sec": interval_sec,
-        "count": _default_count(interval_sec),
+        "count": count,
         "horizon_days": DEFAULT_SCHEDULE_HORIZON_DAYS,
         "arg_state_key": arg_key,
-        "arg_payload_key": str(hint.get("arg_payload_key") or ""),
+        "arg_payload_key": arg_payload_key,
         "arg_value": arg_value,
         "requires_argument": bool(arg_key and not arg_value),
         "automation_level": str(hint.get("automation_level") or "one_click"),
         "semiauto_whitelisted": key in SEMIAUTO_MODULE_KEYS,
+        "payload_defaults": payload_defaults,
         "reason": str(hint.get("reason") or ""),
     }
 
@@ -262,6 +277,7 @@ def build_schedule_state_contract(
         "source_message_id": source_message_id,
         "updated_at": updated_at,
         "suggestion": hint,
+        "payload_defaults": dict(hint.get("payload_defaults") or {}),
         "warnings": warnings,
         "semiauto_ready": semiauto_ready,
         "one_click_ready": observed and next_at > 0 and not stale_state and bool(hint.get("command")),
@@ -284,16 +300,21 @@ def apply_schedule_contract_defaults(payload: dict, contract: dict | None) -> di
     out = dict(payload or {})
     suggestion = contract.get("suggestion") or {}
     if out.get("schedule_use_module_defaults", True):
-        if suggestion.get("preset_key"):
-            out["preset_key"] = suggestion["preset_key"]
-        if suggestion.get("command"):
-            out["command"] = suggestion["command"]
-        if suggestion.get("interval_sec"):
-            out["interval_sec"] = suggestion["interval_sec"]
-        if suggestion.get("count"):
-            out["count"] = suggestion["count"]
-        if suggestion.get("trigger_command"):
-            out["trigger_command"] = suggestion["trigger_command"]
+        defaults = dict(suggestion.get("payload_defaults") or contract.get("payload_defaults") or {})
+        for key, value in defaults.items():
+            if value not in (None, ""):
+                out[key] = value
+        if not defaults:
+            if suggestion.get("preset_key"):
+                out["preset_key"] = suggestion["preset_key"]
+            if suggestion.get("command"):
+                out["command"] = suggestion["command"]
+            if suggestion.get("interval_sec"):
+                out["interval_sec"] = suggestion["interval_sec"]
+            if suggestion.get("count"):
+                out["count"] = suggestion["count"]
+            if suggestion.get("trigger_command"):
+                out["trigger_command"] = suggestion["trigger_command"]
         arg_payload_key = str(suggestion.get("arg_payload_key") or "")
         arg_value = str(suggestion.get("arg_value") or "")
         if arg_payload_key and arg_value:

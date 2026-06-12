@@ -419,7 +419,8 @@ def _get_schedule_presets(request: MiniWebRequest, query: dict) -> dict:
 
 def _get_schedule_bootstrap(request: MiniWebRequest, query: dict) -> dict:
     send_as_id = (query.get("send_as_id") or [""])[0]
-    return _app(request).schedule_bootstrap_payload(send_as_id)
+    include = (query.get("include") or [None])[0]
+    return _app(request).schedule_bootstrap_payload(send_as_id, include=include)
 
 
 def _get_schedule_modules(request: MiniWebRequest, query: dict) -> dict:

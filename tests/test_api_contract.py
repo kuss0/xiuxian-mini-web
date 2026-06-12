@@ -4206,6 +4206,46 @@ def test_tianjige_settings_save_reconfigures_gateway_without_network(tmp_path):
     assert status["min_interval_seconds"] == 0.0
 
 
+def test_tianjige_set_cookie_rotation_updates_managed_settings_without_leaking(tmp_path):
+    import io
+    import urllib.error
+    from email.message import Message
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_settings_payload({
+        "tianjige_mode": "real",
+        "tianjige_base_url": "https://example.test",
+        "tianjige_api_token": "token-secret",
+        "tianjige_cookie": "session=old-secret; keep=1",
+        "tianjige_min_interval_sec": "0",
+    })
+    headers = Message()
+    headers.add_header("Set-Cookie", "session=new-secret; Path=/; HttpOnly")
+    headers.add_header("Set-Cookie", "csrf=csrf-secret; Path=/")
+
+    def opener(request, timeout=0):
+        raise urllib.error.HTTPError(
+            request.full_url,
+            401,
+            "Unauthorized",
+            headers,
+            io.BytesIO(b'{"error":"bad auth"}'),
+        )
+
+    server._tianjige = TianjigeGateway(server._current_tianjige_config(), opener=opener)
+
+    payload = server.tianjige_bootstrap_payload()
+
+    assert payload["ok"] is False
+    assert payload["status"] == "unauthorized"
+    assert payload["meta"]["cookie_rotated"] is True
+    assert store.get_settings()["tianjige_cookie"] == "session=new-secret; keep=1; csrf=csrf-secret"
+    assert server.tianjige_status_payload()["status"]["last_result"]["cookie_rotated"] is True
+    assert "new-secret" not in str(payload)
+    assert "csrf-secret" not in str(payload)
+
+
 def test_identities_payload_classifies_self_and_channel_kinds(tmp_path):
     """UI 友好分类:
     send_as_id == 已登录账号 account_id => self;负数 => channel;
@@ -5540,6 +5580,16 @@ def test_schedule_bootstrap_payload_combines_modal_startup_data(tmp_path):
     assert isinstance(payload["by_identity"], list)
     assert isinstance(payload["batches"], list)
     assert isinstance(payload["templates"], list)
+    assert payload["included"] == ["batches", "modules", "presets", "templates"]
+
+    partial = server.schedule_bootstrap_payload(include="presets,templates")
+    assert partial["ok"] is True
+    assert partial["included"] == ["presets", "templates"]
+    assert any(item["key"] == "custom" for item in partial["presets"])
+    assert partial["modules"] == []
+    assert partial["by_identity"] == []
+    assert partial["batches"] == []
+    assert isinstance(partial["templates"], list)
 
 
 def test_schedule_preview_deep_retreat_returns_plan_items(tmp_path):
@@ -5658,6 +5708,8 @@ def test_schedule_preview_state_machine_defaults_can_override_fixed_command(tmp_
 
     assert result["ok"] is True
     assert result["state_contract"]["suggestion"]["preset_key"] == "yindao"
+    assert result["state_contract"]["payload_defaults"]["preset_key"] == "yindao"
+    assert result["state_contract"]["payload_defaults"]["command"] == ".引道 火"
     assert result["items"]
     assert {item["command"] for item in result["items"]} == {".引道 火"}
 
@@ -6386,7 +6438,9 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert "/api/schedule/retry-failed" in POST_ROUTES
     assert "/api/schedule/activate-dry-run" in POST_ROUTES
     assert "/api/schedule/sync/repair" in POST_ROUTES
-    assert 'fetchJson("/api/schedule/bootstrap")' in schedule_js
+    assert 'SCHEDULE_BOOTSTRAP_URL = "/api/schedule/bootstrap?include=presets,modules,templates"' in schedule_js
+    assert "function refreshScheduleModalBatches(deps = {}, dialog, setStatus = null)" in schedule_js
+    assert 'fetchJson("/api/schedule?history=0")' in schedule_js
     assert "function fallbackSchedulePresets()" in schedule_js
     assert "function loadScheduleModalBootstrap(deps = {})" in schedule_js
     assert 'dialog.classList.add("schedule-modal-dialog");' in schedule_js
@@ -6404,6 +6458,8 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert 'id="scheduleUseActiveIdentityButton"' in schedule_js
     assert 'data-schedule-select-account' in schedule_js
     assert 'data-schedule-select-identity' in schedule_js
+    assert "可排 TG" in schedule_js
+    assert "采集未开" in schedule_js
     assert 'name="dry_run" />' in schedule_js
     assert 'name="dry_run" checked' not in schedule_js
     assert 'textarea name="command"' in schedule_js
@@ -6431,6 +6487,7 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert "other_identity" in schedule_js
     assert "其它身份" in schedule_js
     assert "tianjige: scheduleModules.tianjige" in schedule_js
+    assert "payload_defaults" in schedule_js
     assert "syncStateModuleToPreset" in schedule_js
     assert 'presetMap.get(key)?.module_key' in schedule_js
     assert 'payload.auto_anchor_module = stateModule || data.get("preset_key");' in schedule_js
@@ -6444,6 +6501,25 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert "function bindScheduleBatchActions(deps = {}, dialog, setStatus = null)" in schedule_js
     assert 'btn.textContent = "重排中";' in schedule_js
     assert 'aria-label="重排批次 #' in schedule_js
+
+
+def test_backup_script_has_count_and_byte_retention_guard():
+    repo_root = Path(__file__).resolve().parents[1]
+    script = (repo_root / "scripts/backup-miniweb.sh").read_text(encoding="utf-8")
+
+    assert 'KEEP_COUNT="${MINIWEB_BACKUP_KEEP_COUNT:-3}"' in script
+    assert 'KEEP_BYTES="${MINIWEB_BACKUP_KEEP_BYTES:-0}"' in script
+    assert "prune_backups_by_bytes()" in script
+    assert '"$idx" -lt "$KEEP_COUNT"' in script
+
+
+def test_listener_pipeline_convergence_doc_keeps_listener_event_only():
+    repo_root = Path(__file__).resolve().parents[1]
+    doc = (repo_root / "docs/listener-pipeline-convergence.md").read_text(encoding="utf-8")
+
+    assert "event collector only" in doc
+    assert "bounded" in doc
+    assert "Schedule creation is login-bound, not collection-bound" in doc
 
 
 def test_schedule_retry_failed_clears_old_tg_id_and_retimes_expired_items(tmp_path):
