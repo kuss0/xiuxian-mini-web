@@ -6319,6 +6319,62 @@ def test_schedule_renew_save_rejects_non_whitelisted_preset(tmp_path):
     assert store.list_schedule_renew_profiles() == []
 
 
+def test_schedule_create_ignores_forged_renew_plan_items(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+
+    result = server.schedule_create_payload({
+        "send_as_id": 12345,
+        "preset_key": "custom",
+        "command": ".合法命令",
+        "interval_sec": 3600,
+        "count": 1,
+        "dry_run": True,
+        "renewed_by": "schedule_renew",
+        "renew_profile_id": 999,
+        "plan_items": [
+            {"command": ".伪造命令", "schedule_at": time.time() + 86400},
+        ],
+    })
+
+    assert result["ok"] is True
+    batch = store.list_schedule_batches(include_inactive=True)[0]
+    messages = store.list_schedule_messages(batch_id=batch["id"], include_inactive=True)
+    assert {item["command"] for item in messages} == {".合法命令"}
+    assert batch["options"]["renew_profile_id"] == 0
+    assert batch["options"]["renewed_by"] == ""
+
+
+def test_schedule_renew_profile_view_does_not_show_stale_covered_until_as_current(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    saved = store.save_schedule_renew_profile({
+        "send_as_id": 12345,
+        "preset_key": "concubine_tianji",
+        "module_key": "concubine_tianji",
+        "renew_days": 1,
+        "threshold_hours": 24,
+        "soft_limit": 95,
+        "payload": {"send_as_id": 12345, "preset_key": "concubine_tianji"},
+    })
+    stale_future = time.time() + 86400
+    store.update_schedule_renew_profile_runtime(saved["id"], covered_until=stale_future, last_batch_id=99)
+
+    payload = server.schedule_renew_profiles_payload()
+    profile = payload["profiles"][0]
+
+    assert profile["tail_at"] == 0
+    assert profile["covered_until"] == 0
+    assert profile["covered_until_text"] == ""
+    assert abs(profile["stored_covered_until"] - stale_future) < 0.001
+    assert profile["stored_covered_until_text"]
+
+
 def test_schedule_renew_preview_and_run_use_state_machine_tail_and_metadata(tmp_path, monkeypatch):
     import time
 
@@ -6393,6 +6449,11 @@ def test_schedule_renew_preview_and_run_use_state_machine_tail_and_metadata(tmp_
     assert after["ok"] is True
     assert after["status"] == "not_due"
     assert after["items"] == []
+
+    second = server.schedule_renew_run_payload({"profile_id": profile_id})
+    assert second["ok"] is True
+    assert second["status"] == "not_due"
+    assert len(store.list_schedule_batches(include_inactive=True)) == 1
 
 
 def test_schedule_renew_worker_runs_enabled_due_profiles_without_autostart(tmp_path, monkeypatch):

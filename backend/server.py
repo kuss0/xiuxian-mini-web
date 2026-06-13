@@ -423,6 +423,9 @@ class MiniWebServer:
         self._schedule_create_lock = threading.Lock()
         self._schedule_client_locks_lock = threading.Lock()
         self._schedule_client_locks: dict[str, threading.Lock] = {}
+        self._schedule_renew_internal_token = object()
+        self._schedule_renew_profile_locks_lock = threading.Lock()
+        self._schedule_renew_profile_locks: dict[int, threading.Lock] = {}
         self._schedule_renew_worker_lock = threading.Lock()
         self._schedule_renew_worker_stop = threading.Event()
         self._schedule_renew_worker_thread: threading.Thread | None = None
@@ -2955,18 +2958,31 @@ class MiniWebServer:
         except (TypeError, ValueError):
             return 0
 
-    def _schedule_renew_profile_view(self, profile: dict, *, include_contract: bool = True) -> dict:
+    def _schedule_renew_profile_view(
+        self,
+        profile: dict,
+        *,
+        include_contract: bool = True,
+        tail_at: float | None = None,
+        current_usage: int | None = None,
+    ) -> dict:
         out = dict(profile or {})
-        try:
-            tail_at = self._schedule_renew_profile_tail(out)
-        except Exception:
-            tail_at = 0.0
+        if tail_at is None:
+            try:
+                tail_at = self._schedule_renew_profile_tail(out)
+            except Exception:
+                tail_at = 0.0
+        stored_covered_until = float(out.get("covered_until") or 0)
         out["tail_at"] = tail_at
         out["tail_text"] = schedule_fmt_ts(tail_at)
-        out["covered_until"] = max(float(out.get("covered_until") or 0), tail_at)
-        out["covered_until_text"] = schedule_fmt_ts(float(out.get("covered_until") or 0))
+        out["stored_covered_until"] = stored_covered_until
+        out["stored_covered_until_text"] = schedule_fmt_ts(stored_covered_until)
+        out["covered_until"] = float(tail_at or 0)
+        out["covered_until_text"] = schedule_fmt_ts(float(tail_at or 0))
         out["last_run_text"] = schedule_fmt_ts(float(out.get("last_run_at") or 0))
-        out["current_usage"] = self._official_schedule_identity_usage(int(out.get("send_as_id") or 0))
+        if current_usage is None:
+            current_usage = self._official_schedule_identity_usage(int(out.get("send_as_id") or 0))
+        out["current_usage"] = int(current_usage or 0)
         out["soft_remaining"] = max(0, int(out.get("soft_limit") or SCHEDULE_RENEW_DEFAULT_SOFT_LIMIT) - out["current_usage"])
         out["allowed"] = (
             self._schedule_renew_allowed_module_for_preset(str(out.get("preset_key") or "")) == str(out.get("module_key") or "")
@@ -3048,10 +3064,43 @@ class MiniWebServer:
     def schedule_renew_profiles_payload(self) -> dict:
         if not hasattr(self._store, "list_schedule_renew_profiles"):
             return {"ok": False, "error": "store does not support schedule renew profiles", "profiles": []}
-        profiles = [
-            self._schedule_renew_profile_view(profile)
-            for profile in self._store.list_schedule_renew_profiles()
-        ]
+        raw_profiles = self._store.list_schedule_renew_profiles()
+        if not raw_profiles:
+            return {
+                "ok": True,
+                "profiles": [],
+                "allowed_presets": [
+                    {"preset_key": preset, "module_key": module, "interval_sec": interval}
+                    for preset, (module, interval) in SCHEDULE_RENEW_ALLOWED_PRESETS.items()
+                ],
+                "defaults": {
+                    "renew_days": 1,
+                    "threshold_hours": SCHEDULE_RENEW_DEFAULT_THRESHOLD_HOURS,
+                    "soft_limit": SCHEDULE_RENEW_DEFAULT_SOFT_LIMIT,
+                },
+                "worker": self.schedule_renew_worker_status_payload(),
+            }
+        send_as_ids = {int(profile.get("send_as_id") or 0) for profile in raw_profiles if int(profile.get("send_as_id") or 0)}
+        usages = self._official_schedule_identity_usages(send_as_ids)
+        try:
+            batches = self._store.list_schedule_batches(include_inactive=False)
+            messages = self._store.list_schedule_messages(include_inactive=False)
+        except Exception:
+            batches = None
+            messages = None
+        profiles = []
+        for profile in raw_profiles:
+            try:
+                tail_at = self._schedule_renew_profile_tail(profile, batches=batches, messages=messages)
+            except Exception:
+                tail_at = 0.0
+            profiles.append(
+                self._schedule_renew_profile_view(
+                    profile,
+                    tail_at=tail_at,
+                    current_usage=usages.get(int(profile.get("send_as_id") or 0), 0),
+                )
+            )
         return {
             "ok": True,
             "profiles": profiles,
@@ -3183,6 +3232,15 @@ class MiniWebServer:
     def stop_schedule_renew_worker(self) -> None:
         self._schedule_renew_worker_stop.set()
 
+    def _schedule_renew_profile_lock(self, profile_id: int) -> threading.Lock:
+        pid = int(profile_id or 0)
+        with self._schedule_renew_profile_locks_lock:
+            lock = self._schedule_renew_profile_locks.get(pid)
+            if lock is None:
+                lock = threading.Lock()
+                self._schedule_renew_profile_locks[pid] = lock
+            return lock
+
     def _schedule_renew_load_profile(self, payload: dict) -> tuple[dict | None, str]:
         profile_id = _safe_int((payload or {}).get("profile_id") or (payload or {}).get("id"))
         if profile_id:
@@ -3210,17 +3268,31 @@ class MiniWebServer:
         )
         return module_key == str(profile.get("module_key") or "")
 
-    def _schedule_renew_profile_tail(self, profile: dict) -> float:
-        now = time.time()
-        batches = [
-            batch for batch in self._store.list_schedule_batches(include_inactive=False)
+    def _schedule_renew_profile_tail(
+        self,
+        profile: dict,
+        *,
+        batches: list[dict] | None = None,
+        messages: list[dict] | None = None,
+        now: float | None = None,
+    ) -> float:
+        now = time.time() if now is None else float(now)
+        source_batches = batches if batches is not None else self._store.list_schedule_batches(include_inactive=False)
+        profile_batches = [
+            batch for batch in source_batches
             if self._schedule_renew_batch_matches_profile(batch, profile)
         ]
-        batch_by_id = {int(batch.get("id") or 0): batch for batch in batches}
+        batch_by_id = {int(batch.get("id") or 0): batch for batch in profile_batches}
         if not batch_by_id:
             return 0.0
         tail = 0.0
-        for msg in self._store.list_schedule_messages(send_as_id=int(profile.get("send_as_id") or 0), include_inactive=False):
+        source_messages = messages if messages is not None else self._store.list_schedule_messages(
+            send_as_id=int(profile.get("send_as_id") or 0),
+            include_inactive=False,
+        )
+        for msg in source_messages:
+            if int(msg.get("send_as_id") or 0) != int(profile.get("send_as_id") or 0):
+                continue
             batch = batch_by_id.get(int(msg.get("batch_id") or 0))
             if not batch:
                 continue
@@ -3375,49 +3447,54 @@ class MiniWebServer:
         profile_id = int((profile or {}).get("id") or 0)
         if not profile_id:
             return {"ok": False, "error": "请先保存续期策略再立即续期", "items": []}
-        if not bool((profile or {}).get("enabled", True)):
-            return {"ok": False, "status": "disabled", "error": "续期策略已停用", "items": []}
         force = self._schedule_renew_bool((payload or {}).get("force"), False)
-        plan = self._schedule_renew_plan(profile or {}, force=force)
-        if not plan.get("ok") or not plan.get("items"):
-            if not plan.get("ok"):
+        with self._schedule_renew_profile_lock(profile_id):
+            fresh = self._store.get_schedule_renew_profile(profile_id) if hasattr(self._store, "get_schedule_renew_profile") else None
+            if fresh:
+                profile = fresh
+            if not bool((profile or {}).get("enabled", True)):
+                return {"ok": False, "status": "disabled", "error": "续期策略已停用", "items": []}
+            plan = self._schedule_renew_plan(profile or {}, force=force)
+            if not plan.get("ok") or not plan.get("items"):
+                if not plan.get("ok"):
+                    self._store.update_schedule_renew_profile_runtime(
+                        profile_id,
+                        last_run_at=time.time(),
+                        last_error=str(plan.get("error") or plan.get("manual_message") or ""),
+                    )
+                return plan
+            create_payload = dict(plan.get("create_payload") or {})
+            create_payload.update(
+                {
+                    "plan_items": plan.get("items") or [],
+                    "renew_profile_id": profile_id,
+                    "renewed_by": "schedule_renew",
+                    "renew_run_at": time.time(),
+                    "dry_run": False,
+                    "_schedule_renew_internal_token": self._schedule_renew_internal_token,
+                }
+            )
+            with self._schedule_create_lock:
+                result = self._create_one_schedule(create_payload)
+            if not result.get("ok"):
                 self._store.update_schedule_renew_profile_runtime(
                     profile_id,
                     last_run_at=time.time(),
-                    last_error=str(plan.get("error") or plan.get("manual_message") or ""),
+                    last_error=str(result.get("error") or "续期创建失败"),
                 )
-            return plan
-        create_payload = dict(plan.get("create_payload") or {})
-        create_payload.update(
-            {
-                "plan_items": plan.get("items") or [],
-                "renew_profile_id": profile_id,
-                "renewed_by": "schedule_renew",
-                "renew_run_at": time.time(),
-                "dry_run": False,
-            }
-        )
-        with self._schedule_create_lock:
-            result = self._create_one_schedule(create_payload)
-        if not result.get("ok"):
-            self._store.update_schedule_renew_profile_runtime(
+                return {**result, "status": result.get("status") or "renew_failed", "renew_plan": plan}
+            batch_id = int(result.get("batch_id") or 0)
+            covered_until = 0.0
+            if batch_id:
+                messages = self._store.list_schedule_messages(batch_id=batch_id, include_inactive=True)
+                covered_until = max([float(m.get("schedule_at") or 0) for m in messages] or [0.0])
+            updated = self._store.update_schedule_renew_profile_runtime(
                 profile_id,
+                covered_until=covered_until,
+                last_batch_id=batch_id,
                 last_run_at=time.time(),
-                last_error=str(result.get("error") or "续期创建失败"),
+                last_error="",
             )
-            return {**result, "status": result.get("status") or "renew_failed", "renew_plan": plan}
-        batch_id = int(result.get("batch_id") or 0)
-        covered_until = 0.0
-        if batch_id:
-            messages = self._store.list_schedule_messages(batch_id=batch_id, include_inactive=True)
-            covered_until = max([float(m.get("schedule_at") or 0) for m in messages] or [0.0])
-        updated = self._store.update_schedule_renew_profile_runtime(
-            profile_id,
-            covered_until=covered_until,
-            last_batch_id=batch_id,
-            last_run_at=time.time(),
-            last_error="",
-        )
         return {
             **result,
             "renew_status": "submitted",
@@ -3501,36 +3578,46 @@ class MiniWebServer:
             "results": results,
         }
 
-    def _official_schedule_identity_usage(self, send_as_id: int) -> int:
-        """估算单个身份当前占用的官方定时额度。
+    def _official_schedule_identity_usages(self, send_as_ids: Iterable[int] | None = None) -> dict[int, int]:
+        """估算多个身份当前占用的官方定时额度。
 
         Telegram 的上限按实际已排/正在排的 scheduled message 算。dry_run
         只是本地预演,不计入;cancelled 里未发送的 planned 不计入,但已经排到
         TG 的 scheduled 仍然计入,直到用户删除。
         """
         now = time.time()
-        batches = {
-            int(batch.get("id") or 0): batch
-            for batch in self._store.list_schedule_batches(include_inactive=True)
-            if int(batch.get("send_as_id") or 0) == int(send_as_id or 0)
-        }
-        count = 0
-        for msg in self._store.list_schedule_messages(send_as_id=send_as_id, include_inactive=True):
+        wanted = {int(x or 0) for x in (send_as_ids or []) if int(x or 0)}
+        batches = {}
+        for batch in self._store.list_schedule_batches(include_inactive=True):
+            sid = int(batch.get("send_as_id") or 0)
+            if wanted and sid not in wanted:
+                continue
+            batches[int(batch.get("id") or 0)] = batch
+        counts: dict[int, int] = {sid: 0 for sid in wanted}
+        for msg in self._store.list_schedule_messages(include_inactive=True):
+            sid = int(msg.get("send_as_id") or 0)
+            if wanted and sid not in wanted:
+                continue
             status = str(msg.get("status") or "")
             if status == "deleted":
                 continue
             batch = batches.get(int(msg.get("batch_id") or 0)) or {}
+            if not batch:
+                continue
             batch_status = str(batch.get("status") or "")
             options = batch.get("options") or {}
             if status == "scheduled" and float(msg.get("schedule_at") or 0) > now - 60:
-                count += 1
+                counts[sid] = counts.get(sid, 0) + 1
             elif (
                 status == "planned"
                 and batch_status in {"active", "queued", "sending"}
                 and not bool(options.get("dry_run"))
             ):
-                count += 1
-        return count
+                counts[sid] = counts.get(sid, 0) + 1
+        return counts
+
+    def _official_schedule_identity_usage(self, send_as_id: int) -> int:
+        return self._official_schedule_identity_usages([int(send_as_id or 0)]).get(int(send_as_id or 0), 0)
 
     def _schedule_quota_block_payload(self, *, send_as_id: int, current: int, incoming: int) -> dict:
         remaining = max(0, MAX_SCHEDULED_MESSAGES_PER_IDENTITY - int(current or 0))
@@ -3580,6 +3667,11 @@ class MiniWebServer:
                         continue
 
             payload, state_contract = self._prepare_schedule_payload_with_state(payload or {}, send_as_id=send_as_id)
+            internal_schedule_renew = (
+                payload.get("_schedule_renew_internal_token") is self._schedule_renew_internal_token
+                and int(payload.get("renew_profile_id") or 0) > 0
+                and str(payload.get("renewed_by") or "") == "schedule_renew"
+            )
             if payload.get("schedule_semiauto") or payload.get("semiauto"):
                 semiauto_check = self._schedule_semiauto_block_payload(state_contract)
                 if not semiauto_check.get("ok"):
@@ -3587,7 +3679,7 @@ class MiniWebServer:
 
             plan_items_override = (
                 payload.get("plan_items")
-                if str(payload.get("renewed_by") or "") == "schedule_renew"
+                if internal_schedule_renew
                 else None
             )
             if isinstance(plan_items_override, list):
@@ -3688,9 +3780,9 @@ class MiniWebServer:
                         "auto_anchor": bool(payload.get("auto_anchor")),
                         "auto_anchor_module": payload.get("auto_anchor_module") or "",
                         "schedule_semiauto": bool(payload.get("schedule_semiauto") or payload.get("semiauto")),
-                        "renew_profile_id": int(payload.get("renew_profile_id") or 0),
-                        "renewed_by": str(payload.get("renewed_by") or ""),
-                        "renew_run_at": float(payload.get("renew_run_at") or 0),
+                        "renew_profile_id": int(payload.get("renew_profile_id") or 0) if internal_schedule_renew else 0,
+                        "renewed_by": str(payload.get("renewed_by") or "") if internal_schedule_renew else "",
+                        "renew_run_at": float(payload.get("renew_run_at") or 0) if internal_schedule_renew else 0,
                         "state_contract": {
                             "module_key": (state_contract or {}).get("module_key") or "",
                             "label": (state_contract or {}).get("label") or "",
