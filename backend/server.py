@@ -3254,7 +3254,15 @@ class MiniWebServer:
                 self._schedule_renew_profile_locks.pop(pid, None)
 
     def _schedule_renew_load_profile(self, payload: dict) -> tuple[dict | None, str]:
-        profile_id = _safe_int((payload or {}).get("profile_id") or (payload or {}).get("id"))
+        payload = payload or {}
+        profile_id = _safe_int(payload.get("profile_id"))
+        if not profile_id and _safe_int(payload.get("id")):
+            editable_keys = {
+                "send_as_id", "preset_key", "module_key", "auto_anchor_module",
+                "renew_days", "threshold_hours", "soft_limit", "payload",
+            }
+            if not any(key in payload for key in editable_keys):
+                profile_id = _safe_int(payload.get("id"))
         if profile_id:
             profile = self._store.get_schedule_renew_profile(profile_id) if hasattr(self._store, "get_schedule_renew_profile") else None
             if not profile:

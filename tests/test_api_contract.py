@@ -6399,6 +6399,54 @@ def test_schedule_create_ignores_forged_renew_plan_items(tmp_path):
     assert batch["options"]["renewed_by"] == ""
 
 
+def test_schedule_renew_preview_with_form_id_uses_current_form_fields(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+    now = time.time()
+    store.save_module_state(
+        12345,
+        "checkin",
+        {"cooldown_until": now + 3600, "last_observed_at": now, "last_status": "success"},
+        source_message_id="raw-checkin-renew",
+    )
+    saved = store.save_schedule_renew_profile({
+        "send_as_id": 12345,
+        "preset_key": "wild_training",
+        "module_key": "wild_training",
+        "renew_days": 1,
+        "threshold_hours": 24,
+        "soft_limit": 95,
+        "payload": {"send_as_id": 12345, "preset_key": "wild_training"},
+    })
+
+    preview = server.schedule_renew_preview_payload({
+        "id": saved["id"],
+        "send_as_id": 12345,
+        "preset_key": "checkin",
+        "module_key": "checkin",
+        "renew_days": 1,
+        "threshold_hours": 24,
+        "soft_limit": 95,
+        "payload": {
+            "send_as_id": 12345,
+            "preset_key": "checkin",
+            "auto_anchor": True,
+            "auto_anchor_module": "checkin",
+            "schedule_semiauto": True,
+            "dry_run": False,
+        },
+    })
+
+    assert preview["ok"] is True, preview
+    assert preview["preset_key"] == "checkin"
+    assert preview["profile"]["preset_key"] == "checkin"
+    assert preview["items"]
+    assert {item["command"] for item in preview["items"]} == {".宗门点卯"}
+
+
 def test_schedule_renew_profile_view_does_not_show_stale_covered_until_as_current(tmp_path):
     import time
 
@@ -7058,6 +7106,8 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert 'id="scheduleRenewWorkerStatus"' in schedule_js
     assert "function renderScheduleRenewWorkerStatus(worker = null)" in schedule_js
     assert "上次记录覆盖到" in schedule_js
+    assert "const markRenewFormAsDraft = () => {" in schedule_js
+    assert "if (!profileId) delete payload.id;" in schedule_js
     assert 'SCHEDULE_RENEW_ALLOWED_PRESETS' in schedule_js
     assert 'postJson("/api/schedule/renew/save"' in schedule_js
     assert 'postJson("/api/schedule/renew/preview"' in schedule_js

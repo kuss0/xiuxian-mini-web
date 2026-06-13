@@ -1347,6 +1347,13 @@
       if (option) renewModuleSelect.value = moduleKey;
     };
 
+    const markRenewFormAsDraft = () => {
+      if (!renewForm) return;
+      const idField = renewForm.querySelector('[name="id"]');
+      if (idField && idField.value) idField.value = "";
+      showRenewPreview("");
+    };
+
     const resetRenewForm = () => {
       if (!renewForm) return;
       renewForm.reset();
@@ -1457,6 +1464,7 @@
 
     const previewRenewProfile = async (profileId = 0) => {
       const payload = profileId ? { profile_id: Number(profileId) } : collectRenewPayload();
+      if (!profileId) delete payload.id;
       const result = await postJson("/api/schedule/renew/preview", payload);
       if (!result.ok) throw new Error(result.error || "预览续期失败");
       showRenewPreview(renderRenewPlan(result));
@@ -1649,7 +1657,11 @@
         syncSelect.value = String(selected[0]);
       }
       if (renewSendAsSelect && selected[0] && Array.from(renewSendAsSelect.options).some((option) => Number(option.value || 0) === Number(selected[0]))) {
-        renewSendAsSelect.value = String(selected[0]);
+        const nextRenewSendAs = String(selected[0]);
+        if (renewSendAsSelect.value !== nextRenewSendAs) {
+          renewSendAsSelect.value = nextRenewSendAs;
+          markRenewFormAsDraft();
+        }
       }
       renderStateHint();
     }
@@ -1752,8 +1764,17 @@
     syncStateModuleToPreset({ onlyIfEmpty: true });
     renderStateHint();
     if (renewPresetSelect) {
-      renewPresetSelect.addEventListener("change", syncRenewModuleToPreset);
+      renewPresetSelect.addEventListener("change", () => {
+        syncRenewModuleToPreset();
+        markRenewFormAsDraft();
+      });
       syncRenewModuleToPreset();
+    }
+    if (renewSendAsSelect) {
+      renewSendAsSelect.addEventListener("change", markRenewFormAsDraft);
+    }
+    if (renewModuleSelect) {
+      renewModuleSelect.addEventListener("change", markRenewFormAsDraft);
     }
     if (renewNewButton) {
       renewNewButton.addEventListener("click", resetRenewForm);
