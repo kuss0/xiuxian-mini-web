@@ -3816,6 +3816,200 @@ class SQLiteStore:
             )
         return options
 
+    def save_schedule_renew_profile(self, payload: dict) -> dict:
+        """Create/update an official-schedule renewal profile."""
+        now = time.time()
+        profile_id = _safe_int((payload or {}).get("id"))
+        send_as_id = _safe_int((payload or {}).get("send_as_id"))
+        renew_days = max(1, min(3, _safe_int((payload or {}).get("renew_days")) or 1))
+        threshold_hours = max(1, min(72, _safe_int((payload or {}).get("threshold_hours")) or 24))
+        soft_limit = max(1, min(100, _safe_int((payload or {}).get("soft_limit")) or 95))
+        record = {
+            "send_as_id": send_as_id,
+            "account_local_id": str((payload or {}).get("account_local_id") or ""),
+            "preset_key": str((payload or {}).get("preset_key") or ""),
+            "module_key": str((payload or {}).get("module_key") or ""),
+            "label": str((payload or {}).get("label") or ""),
+            "enabled": 1 if (payload or {}).get("enabled", True) else 0,
+            "renew_days": renew_days,
+            "threshold_hours": threshold_hours,
+            "soft_limit": soft_limit,
+            "payload_json": json.dumps((payload or {}).get("payload") or {}, ensure_ascii=False, sort_keys=True),
+            "covered_until": float((payload or {}).get("covered_until") or 0),
+            "last_batch_id": _safe_int((payload or {}).get("last_batch_id")),
+            "last_run_at": float((payload or {}).get("last_run_at") or 0),
+            "last_error": str((payload or {}).get("last_error") or ""),
+        }
+        with self._connect() as conn:
+            if profile_id:
+                current = conn.execute(
+                    "SELECT created_at, covered_until, last_batch_id, last_run_at, last_error FROM official_schedule_renew_profiles WHERE id=?",
+                    (profile_id,),
+                ).fetchone()
+                if current is None:
+                    raise ValueError("renew profile 不存在")
+                if "covered_until" not in (payload or {}):
+                    record["covered_until"] = float(current[1] or 0)
+                if "last_batch_id" not in (payload or {}):
+                    record["last_batch_id"] = int(current[2] or 0)
+                if "last_run_at" not in (payload or {}):
+                    record["last_run_at"] = float(current[3] or 0)
+                if "last_error" not in (payload or {}):
+                    record["last_error"] = str(current[4] or "")
+                conn.execute(
+                    """
+                    UPDATE official_schedule_renew_profiles
+                    SET send_as_id=?, account_local_id=?, preset_key=?, module_key=?, label=?,
+                        enabled=?, renew_days=?, threshold_hours=?, soft_limit=?, payload_json=?,
+                        covered_until=?, last_batch_id=?, last_run_at=?, last_error=?, updated_at=?
+                    WHERE id=?
+                    """,
+                    (
+                        record["send_as_id"],
+                        record["account_local_id"],
+                        record["preset_key"],
+                        record["module_key"],
+                        record["label"],
+                        record["enabled"],
+                        record["renew_days"],
+                        record["threshold_hours"],
+                        record["soft_limit"],
+                        record["payload_json"],
+                        record["covered_until"],
+                        record["last_batch_id"],
+                        record["last_run_at"],
+                        record["last_error"],
+                        now,
+                        profile_id,
+                    ),
+                )
+            else:
+                cur = conn.execute(
+                    """
+                    INSERT INTO official_schedule_renew_profiles
+                        (send_as_id, account_local_id, preset_key, module_key, label,
+                         enabled, renew_days, threshold_hours, soft_limit, payload_json,
+                         covered_until, last_batch_id, last_run_at, last_error, created_at, updated_at)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record["send_as_id"],
+                        record["account_local_id"],
+                        record["preset_key"],
+                        record["module_key"],
+                        record["label"],
+                        record["enabled"],
+                        record["renew_days"],
+                        record["threshold_hours"],
+                        record["soft_limit"],
+                        record["payload_json"],
+                        record["covered_until"],
+                        record["last_batch_id"],
+                        record["last_run_at"],
+                        record["last_error"],
+                        now,
+                        now,
+                    ),
+                )
+                profile_id = int(cur.lastrowid)
+        profile = self.get_schedule_renew_profile(profile_id)
+        if not profile:
+            raise ValueError("renew profile 保存失败")
+        return profile
+
+    def _schedule_renew_profile_row_to_api(self, row) -> dict:
+        payload = {}
+        try:
+            payload = json.loads(row[10] or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            payload = {}
+        return {
+            "id": int(row[0]),
+            "send_as_id": int(row[1] or 0),
+            "account_local_id": row[2] or "",
+            "preset_key": row[3] or "",
+            "module_key": row[4] or "",
+            "label": row[5] or "",
+            "enabled": bool(row[6]),
+            "renew_days": int(row[7] or 1),
+            "threshold_hours": int(row[8] or 24),
+            "soft_limit": int(row[9] or 95),
+            "payload": payload,
+            "covered_until": float(row[11] or 0),
+            "last_batch_id": int(row[12] or 0),
+            "last_run_at": float(row[13] or 0),
+            "last_error": row[14] or "",
+            "created_at": float(row[15] or 0),
+            "updated_at": float(row[16] or 0),
+        }
+
+    def get_schedule_renew_profile(self, profile_id: int) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, send_as_id, account_local_id, preset_key, module_key, label,
+                       enabled, renew_days, threshold_hours, soft_limit, payload_json,
+                       covered_until, last_batch_id, last_run_at, last_error, created_at, updated_at
+                FROM official_schedule_renew_profiles
+                WHERE id=?
+                """,
+                (int(profile_id or 0),),
+            ).fetchone()
+        return self._schedule_renew_profile_row_to_api(row) if row else None
+
+    def list_schedule_renew_profiles(self, *, enabled_only: bool = False) -> list[dict]:
+        sql = """
+            SELECT id, send_as_id, account_local_id, preset_key, module_key, label,
+                   enabled, renew_days, threshold_hours, soft_limit, payload_json,
+                   covered_until, last_batch_id, last_run_at, last_error, created_at, updated_at
+            FROM official_schedule_renew_profiles
+        """
+        if enabled_only:
+            sql += " WHERE enabled=1"
+        sql += " ORDER BY enabled DESC, updated_at DESC, id DESC"
+        with self._connect() as conn:
+            rows = conn.execute(sql).fetchall()
+        return [self._schedule_renew_profile_row_to_api(row) for row in rows]
+
+    def delete_schedule_renew_profile(self, profile_id: int) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM official_schedule_renew_profiles WHERE id=?",
+                (int(profile_id or 0),),
+            )
+        return cur.rowcount > 0
+
+    def update_schedule_renew_profile_runtime(
+        self,
+        profile_id: int,
+        *,
+        covered_until: float | None = None,
+        last_batch_id: int | None = None,
+        last_run_at: float | None = None,
+        last_error: str | None = None,
+    ) -> dict | None:
+        sets = ["updated_at=?"]
+        params: list = [time.time()]
+        if covered_until is not None:
+            sets.append("covered_until=?")
+            params.append(float(covered_until or 0))
+        if last_batch_id is not None:
+            sets.append("last_batch_id=?")
+            params.append(int(last_batch_id or 0))
+        if last_run_at is not None:
+            sets.append("last_run_at=?")
+            params.append(float(last_run_at or 0))
+        if last_error is not None:
+            sets.append("last_error=?")
+            params.append(str(last_error or ""))
+        params.append(int(profile_id or 0))
+        with self._connect() as conn:
+            conn.execute(
+                f"UPDATE official_schedule_renew_profiles SET {', '.join(sets)} WHERE id=?",
+                params,
+            )
+        return self.get_schedule_renew_profile(profile_id)
+
     def delete_schedule_batch(self, batch_id: int) -> dict:
         """标记 batch 和它下面所有 message 为 deleted(软删,保留历史)。"""
         import time
@@ -4642,6 +4836,29 @@ class SQLiteStore:
                     ON official_scheduled_messages(batch_id);
                 CREATE INDEX IF NOT EXISTS idx_official_scheduled_messages_identity
                     ON official_scheduled_messages(send_as_id, schedule_at);
+
+                CREATE TABLE IF NOT EXISTS official_schedule_renew_profiles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    send_as_id INTEGER NOT NULL,
+                    account_local_id TEXT NOT NULL DEFAULT '',
+                    preset_key TEXT NOT NULL DEFAULT '',
+                    module_key TEXT NOT NULL DEFAULT '',
+                    label TEXT NOT NULL DEFAULT '',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    renew_days INTEGER NOT NULL DEFAULT 1,
+                    threshold_hours INTEGER NOT NULL DEFAULT 24,
+                    soft_limit INTEGER NOT NULL DEFAULT 95,
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    covered_until REAL NOT NULL DEFAULT 0,
+                    last_batch_id INTEGER NOT NULL DEFAULT 0,
+                    last_run_at REAL NOT NULL DEFAULT 0,
+                    last_error TEXT NOT NULL DEFAULT '',
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_official_schedule_renew_profiles_identity
+                    ON official_schedule_renew_profiles(send_as_id, enabled);
 
                 CREATE TABLE IF NOT EXISTS dungeon_rooms (
                     key TEXT PRIMARY KEY,

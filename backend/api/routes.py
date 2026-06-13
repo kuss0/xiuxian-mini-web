@@ -58,6 +58,7 @@ def build_get_routes(handlers: Mapping[str, Callable]) -> dict[str, Callable]:
         "/api/schedule/templates": handlers["_get_schedule_templates"],
         "/api/schedule": handlers["_get_schedule"],
         "/api/schedule/sync": handlers["_get_schedule_sync"],
+        "/api/schedule/renew": handlers["_get_schedule_renew"],
         "/api/skills": handlers["_get_skills"],
         "/api/notify/card-titles": handlers["_get_notify_card_titles"],
         "/api/filter/diagnostics": handlers["_get_filter_diagnostics"],
@@ -102,6 +103,10 @@ def build_post_routes(handlers: Mapping[str, Callable]) -> dict[str, PostRoute]:
         "/api/schedule/retry-failed": PostRoute(handlers["_post_schedule_retry_failed"], needs_payload=True),
         "/api/schedule/activate-dry-run": PostRoute(handlers["_post_schedule_activate_dry_run"], needs_payload=True),
         "/api/schedule/sync/repair": PostRoute(handlers["_post_schedule_sync_repair"], needs_payload=True),
+        "/api/schedule/renew/save": PostRoute(handlers["_post_schedule_renew_save"], needs_payload=True),
+        "/api/schedule/renew/delete": PostRoute(handlers["_post_schedule_renew_delete"], needs_payload=True),
+        "/api/schedule/renew/preview": PostRoute(handlers["_post_schedule_renew_preview"], needs_payload=True),
+        "/api/schedule/renew/run": PostRoute(handlers["_post_schedule_renew_run"], needs_payload=True),
         "/api/skills/send": PostRoute(handlers["_post_skill_send"], needs_payload=True),
         "/api/notify/test": PostRoute(handlers["_post_notify_test"], needs_payload=True),
     }

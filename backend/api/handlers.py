@@ -443,6 +443,10 @@ def _get_schedule_sync(request: MiniWebRequest, query: dict) -> dict:
     return _app(request).schedule_sync_payload(send_as_id)
 
 
+def _get_schedule_renew(request: MiniWebRequest, query: dict) -> dict:
+    return _app(request).schedule_renew_profiles_payload()
+
+
 def _post_schedule_preview(request: MiniWebRequest, payload: dict) -> dict:
     return _app(request).schedule_preview_payload(payload)
 
@@ -477,6 +481,22 @@ def _post_schedule_activate_dry_run(request: MiniWebRequest, payload: dict) -> d
 
 def _post_schedule_sync_repair(request: MiniWebRequest, payload: dict) -> dict:
     return _app(request).schedule_sync_repair_payload(payload)
+
+
+def _post_schedule_renew_save(request: MiniWebRequest, payload: dict) -> dict:
+    return _app(request).schedule_renew_save_payload(payload)
+
+
+def _post_schedule_renew_delete(request: MiniWebRequest, payload: dict) -> dict:
+    return _app(request).schedule_renew_delete_payload(payload)
+
+
+def _post_schedule_renew_preview(request: MiniWebRequest, payload: dict) -> dict:
+    return _app(request).schedule_renew_preview_payload(payload)
+
+
+def _post_schedule_renew_run(request: MiniWebRequest, payload: dict) -> dict:
+    return _app(request).schedule_renew_run_payload(payload)
 
 
 # ---------- 技能盘(直接 / 回复发送)----------

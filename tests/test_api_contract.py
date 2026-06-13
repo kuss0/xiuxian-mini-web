@@ -6268,6 +6268,133 @@ def test_schedule_templates_roundtrip(tmp_path):
     assert deleted["templates"] == []
 
 
+def test_schedule_renew_profile_store_roundtrip(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+
+    saved = store.save_schedule_renew_profile({
+        "send_as_id": 12345,
+        "account_local_id": "main",
+        "preset_key": "concubine_tianji",
+        "module_key": "concubine_tianji",
+        "label": "天机代卜续期",
+        "renew_days": 2,
+        "threshold_hours": 12,
+        "soft_limit": 90,
+        "payload": {"preset_key": "concubine_tianji", "auto_anchor": True},
+    })
+
+    assert saved["id"] > 0
+    assert saved["renew_days"] == 2
+    assert saved["threshold_hours"] == 12
+    assert saved["soft_limit"] == 90
+    assert saved["payload"]["preset_key"] == "concubine_tianji"
+    assert store.list_schedule_renew_profiles()[0]["id"] == saved["id"]
+
+    updated = store.update_schedule_renew_profile_runtime(
+        saved["id"],
+        covered_until=1234567890,
+        last_batch_id=7,
+        last_run_at=1234567800,
+        last_error="",
+    )
+    assert updated["covered_until"] == 1234567890
+    assert updated["last_batch_id"] == 7
+    assert store.delete_schedule_renew_profile(saved["id"]) is True
+    assert store.list_schedule_renew_profiles() == []
+
+
+def test_schedule_renew_save_rejects_non_whitelisted_preset(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+
+    result = server.schedule_renew_save_payload({
+        "send_as_id": 12345,
+        "preset_key": "deep_retreat",
+        "module_key": "deep_retreat",
+    })
+
+    assert result["ok"] is False
+    assert "不允许自动续期" in result["error"]
+    assert store.list_schedule_renew_profiles() == []
+
+
+def test_schedule_renew_preview_and_run_use_state_machine_tail_and_metadata(tmp_path, monkeypatch):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_settings_payload({"target_chat": "-1001680975844", "target_topic_id": 7310786})
+    server.save_account_payload(
+        {
+            "local_id": "main",
+            "api_id": "123",
+            "api_hash": "hash",
+            "account_id": "12345",
+            "login_status": "done",
+        }
+    )
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+    now = time.time()
+    store.save_module_state(
+        12345,
+        "concubine_tianji",
+        {"cooldown_until": now + 1800, "last_observed_at": now, "last_status": "cooldown"},
+        source_message_id="raw-renew",
+    )
+
+    class FakeListeners:
+        def get_listener(self, account_local_id):
+            return None
+
+    submitted = {}
+
+    def fake_submit(**kwargs):
+        submitted.update(kwargs)
+        return "transient"
+
+    server._listeners = FakeListeners()
+    monkeypatch.setattr(server, "_submit_official_schedule_background", fake_submit)
+
+    saved = server.schedule_renew_save_payload({
+        "send_as_id": 12345,
+        "preset_key": "concubine_tianji",
+        "module_key": "concubine_tianji",
+        "renew_days": 1,
+        "threshold_hours": 6,
+        "soft_limit": 95,
+    })
+    assert saved["ok"] is True
+    profile_id = saved["profile"]["id"]
+
+    preview = server.schedule_renew_preview_payload({"profile_id": profile_id})
+    assert preview["ok"] is True
+    assert preview["status"] in {"ready", "quota_capped"}
+    assert preview["state_contract"]["semiauto_ready"] is True
+    assert preview["items"]
+    assert preview["items"][0]["command"] == ".天机代卜"
+    assert preview["items"][0]["schedule_at"] >= now + 1800
+
+    run = server.schedule_renew_run_payload({"profile_id": profile_id})
+    assert run["ok"] is True, run
+    assert run["renew_status"] == "submitted"
+    assert run["status"] == "sending"
+    assert submitted["account_local_id"] == "main"
+
+    batch = store.list_schedule_batches(include_inactive=True)[0]
+    assert batch["options"]["renew_profile_id"] == profile_id
+    assert batch["options"]["renewed_by"] == "schedule_renew"
+    assert batch["options"]["schedule_semiauto"] is True
+    messages = store.list_schedule_messages(batch_id=batch["id"], include_inactive=True)
+    assert len(messages) == run["planned_count"]
+    assert messages[-1]["schedule_at"] == run["covered_until"]
+
+    after = server.schedule_renew_preview_payload({"profile_id": profile_id})
+    assert after["ok"] is True
+    assert after["status"] == "not_due"
+    assert after["items"] == []
+
+
 def test_schedule_routes_are_wired():
     from backend.app import GET_ROUTES, POST_ROUTES
     assert "/api/schedule/bootstrap" in GET_ROUTES
@@ -6276,11 +6403,16 @@ def test_schedule_routes_are_wired():
     assert "/api/schedule/templates" in GET_ROUTES
     assert "/api/schedule" in GET_ROUTES
     assert "/api/schedule/sync" in GET_ROUTES
+    assert "/api/schedule/renew" in GET_ROUTES
     assert "/api/schedule/preview" in POST_ROUTES
     assert "/api/schedule/create" in POST_ROUTES
     assert "/api/schedule/delete" in POST_ROUTES
     assert "/api/schedule/templates/save" in POST_ROUTES
     assert "/api/schedule/templates/delete" in POST_ROUTES
+    assert "/api/schedule/renew/save" in POST_ROUTES
+    assert "/api/schedule/renew/delete" in POST_ROUTES
+    assert "/api/schedule/renew/preview" in POST_ROUTES
+    assert "/api/schedule/renew/run" in POST_ROUTES
 
 
 def test_outbox_logs_route_and_store_roundtrip(tmp_path):
@@ -6598,6 +6730,10 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert "/api/schedule/retry-failed" in POST_ROUTES
     assert "/api/schedule/activate-dry-run" in POST_ROUTES
     assert "/api/schedule/sync/repair" in POST_ROUTES
+    assert "/api/schedule/renew/save" in POST_ROUTES
+    assert "/api/schedule/renew/preview" in POST_ROUTES
+    assert "/api/schedule/renew/run" in POST_ROUTES
+    assert "/api/schedule/renew/delete" in POST_ROUTES
     assert 'SCHEDULE_BOOTSTRAP_URL = "/api/schedule/bootstrap?include=presets,modules,templates"' in schedule_js
     assert "function refreshScheduleModalBatches(deps = {}, dialog, setStatus = null)" in schedule_js
     assert 'fetchJson("/api/schedule?history=0")' in schedule_js
@@ -6660,6 +6796,15 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert "排到 TG" in schedule_js
     assert 'id="scheduleSyncRepairButton"' in schedule_js
     assert 'postJson("/api/schedule/sync/repair"' in schedule_js
+    assert 'id="scheduleRenewForm"' in schedule_js
+    assert 'id="scheduleRenewProfileList"' in schedule_js
+    assert 'SCHEDULE_RENEW_ALLOWED_PRESETS' in schedule_js
+    assert 'postJson("/api/schedule/renew/save"' in schedule_js
+    assert 'postJson("/api/schedule/renew/preview"' in schedule_js
+    assert 'postJson("/api/schedule/renew/run"' in schedule_js
+    assert 'postJson("/api/schedule/renew/delete"' in schedule_js
+    assert 'fetchJson("/api/schedule/renew")' in schedule_js
+    assert 'data-schedule-renew-action="run"' in schedule_js
     assert 'form.querySelectorAll("[data-schedule-action]")' in schedule_js
     assert "function bindScheduleBatchActions(deps = {}, dialog, setStatus = null)" in schedule_js
     assert 'btn.textContent = "重排中";' in schedule_js

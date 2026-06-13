@@ -25,6 +25,7 @@ from backend.external.tianjige import (
     tianjige_profile_patches,
 )
 from backend.identity_state.scheduling import (
+    SEMIAUTO_MODULE_KEYS,
     apply_schedule_contract_defaults,
     build_schedule_state_contract,
     schedule_hint,
@@ -152,6 +153,26 @@ SECRET_SETTING_KEYS = {
     "tianjige_cookie",
 }
 INVENTORY_SNAPSHOT_STALE_SECONDS = 6 * 60 * 60
+SCHEDULE_RENEW_DEFAULT_SOFT_LIMIT = 95
+SCHEDULE_RENEW_DEFAULT_THRESHOLD_HOURS = 24
+SCHEDULE_RENEW_MAX_DAYS = 3
+SCHEDULE_RENEW_MIN_LEAD_SEC = 30
+SCHEDULE_RENEW_ALLOWED_PRESETS: dict[str, tuple[str, int]] = {
+    "wild_training": ("wild_training", 150 * 60),
+    "checkin": ("checkin", 24 * 3600),
+    "tower": ("tower", 24 * 3600),
+    "ranch": ("ranch", 4 * 3600 + 20 * 60),
+    "concubine_dream": ("concubine_dream", 8 * 3600),
+    "concubine_tianji": ("concubine_tianji", 12 * 3600),
+    "tianti_climb": ("tianti_climb", 4 * 3600),
+    "tianti_climb_elder": ("tianti_climb", 3 * 3600),
+    "tianti_wenxin": ("tianti_wenxin", 24 * 3600),
+    "tianti_gangfeng": ("tianti_gangfeng", 12 * 3600),
+    "second_soul": ("second_soul", 24 * 3600),
+    "taiyi_cycle": ("taiyi_cycle", 12 * 3600),
+    "wendao": ("wendao", 12 * 3600),
+    "yindao": ("yindao", 12 * 3600),
+}
 
 
 def _parse_utc_datetime(value: object) -> datetime | None:
@@ -2883,6 +2904,429 @@ class MiniWebServer:
         except Exception as exc:
             print(f"[send-log] append failed: {exc}")
 
+    def _schedule_renew_bool(self, value: object, default: bool = True) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() not in {"0", "false", "no", "off"}
+
+    def _schedule_renew_account_local_id(self, send_as_id: int) -> str:
+        identity = self._store.get_identity(send_as_id)
+        account_local_id = str((identity or {}).get("account_local_id") or "")
+        if account_local_id or send_as_id <= 0:
+            return account_local_id
+        for account in self._store.list_accounts():
+            try:
+                if int(account.get("account_id") or 0) == int(send_as_id):
+                    return str(account.get("local_id") or "")
+            except (TypeError, ValueError):
+                continue
+        return ""
+
+    def _schedule_renew_preset_label(self, preset_key: str) -> str:
+        for item in list_schedule_presets():
+            if item.get("key") == preset_key:
+                return str(item.get("label") or preset_key)
+        return PRESET_LABELS.get(preset_key, preset_key)
+
+    def _schedule_renew_allowed_module_for_preset(self, preset_key: str) -> str:
+        return SCHEDULE_RENEW_ALLOWED_PRESETS.get(str(preset_key or "").strip(), ("", 0))[0]
+
+    def _schedule_renew_interval_sec(self, profile: dict, contract: dict | None = None) -> int:
+        preset_key = str(profile.get("preset_key") or "").strip()
+        if preset_key in SCHEDULE_RENEW_ALLOWED_PRESETS:
+            return int(SCHEDULE_RENEW_ALLOWED_PRESETS[preset_key][1])
+        suggestion = (contract or {}).get("suggestion") or {}
+        try:
+            interval = int(suggestion.get("interval_sec") or 0)
+        except (TypeError, ValueError):
+            interval = 0
+        if interval > 0:
+            return interval
+        payload = profile.get("payload") or {}
+        try:
+            return int(payload.get("interval_sec") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _schedule_renew_profile_view(self, profile: dict, *, include_contract: bool = True) -> dict:
+        out = dict(profile or {})
+        try:
+            tail_at = self._schedule_renew_profile_tail(out)
+        except Exception:
+            tail_at = 0.0
+        out["tail_at"] = tail_at
+        out["tail_text"] = schedule_fmt_ts(tail_at)
+        out["covered_until"] = max(float(out.get("covered_until") or 0), tail_at)
+        out["covered_until_text"] = schedule_fmt_ts(float(out.get("covered_until") or 0))
+        out["last_run_text"] = schedule_fmt_ts(float(out.get("last_run_at") or 0))
+        out["current_usage"] = self._official_schedule_identity_usage(int(out.get("send_as_id") or 0))
+        out["soft_remaining"] = max(0, int(out.get("soft_limit") or SCHEDULE_RENEW_DEFAULT_SOFT_LIMIT) - out["current_usage"])
+        out["allowed"] = (
+            self._schedule_renew_allowed_module_for_preset(str(out.get("preset_key") or "")) == str(out.get("module_key") or "")
+            and str(out.get("module_key") or "") in SEMIAUTO_MODULE_KEYS
+        )
+        if include_contract and out.get("send_as_id") and out.get("module_key"):
+            try:
+                out["state_contract"] = self._schedule_state_contract(int(out["send_as_id"]), str(out["module_key"]))
+            except Exception:
+                out["state_contract"] = None
+        return out
+
+    def _schedule_renew_normalize_profile(self, payload: dict) -> tuple[dict | None, dict | None, str]:
+        raw = dict(payload or {})
+        embedded = raw.get("payload") if isinstance(raw.get("payload"), dict) else {}
+        base_payload = dict(embedded or raw)
+        for key in (
+            "id", "profile_id", "profile", "label", "enabled", "renew_days",
+            "threshold_hours", "soft_limit", "covered_until", "last_batch_id",
+            "last_run_at", "last_error", "payload",
+        ):
+            base_payload.pop(key, None)
+
+        send_as_id = _safe_int(raw.get("send_as_id") or base_payload.get("send_as_id"))
+        if not send_as_id:
+            return None, None, "请选择续期身份"
+        preset_key = str(raw.get("preset_key") or base_payload.get("preset_key") or "").strip()
+        if not preset_key:
+            return None, None, "请选择续期预设"
+        allowed_module = self._schedule_renew_allowed_module_for_preset(preset_key)
+        if not allowed_module:
+            return None, None, "该预设暂不允许自动续期;请保留人工预览/创建"
+        module_key = str(
+            raw.get("module_key")
+            or raw.get("auto_anchor_module")
+            or base_payload.get("auto_anchor_module")
+            or base_payload.get("state_module_key")
+            or allowed_module
+        ).strip()
+        if module_key != allowed_module:
+            return None, None, f"续期状态机必须与预设匹配: {preset_key} -> {allowed_module}"
+        if module_key not in SEMIAUTO_MODULE_KEYS:
+            return None, None, f"{module_key} 不在半自动白名单,不能自动续期"
+        renew_days = max(1, min(SCHEDULE_RENEW_MAX_DAYS, _safe_int(raw.get("renew_days")) or 1))
+        threshold_hours = max(1, min(72, _safe_int(raw.get("threshold_hours")) or SCHEDULE_RENEW_DEFAULT_THRESHOLD_HOURS))
+        soft_limit = max(1, min(MAX_SCHEDULED_MESSAGES_PER_IDENTITY, _safe_int(raw.get("soft_limit")) or SCHEDULE_RENEW_DEFAULT_SOFT_LIMIT))
+        account_local_id = str(raw.get("account_local_id") or self._schedule_renew_account_local_id(send_as_id))
+
+        base_payload.update(
+            {
+                "send_as_id": send_as_id,
+                "preset_key": preset_key,
+                "horizon_days": renew_days,
+                "auto_anchor": True,
+                "auto_anchor_module": module_key,
+                "schedule_use_module_defaults": preset_key == module_key,
+                "schedule_semiauto": True,
+                "dry_run": False,
+            }
+        )
+        base_payload.pop("send_as_ids", None)
+        label = str(raw.get("label") or "").strip() or self._schedule_renew_preset_label(preset_key)
+        profile = {
+            "id": _safe_int(raw.get("id") or raw.get("profile_id")),
+            "send_as_id": send_as_id,
+            "account_local_id": account_local_id,
+            "preset_key": preset_key,
+            "module_key": module_key,
+            "label": label,
+            "enabled": self._schedule_renew_bool(raw.get("enabled"), True),
+            "renew_days": renew_days,
+            "threshold_hours": threshold_hours,
+            "soft_limit": soft_limit,
+            "payload": base_payload,
+        }
+        contract = self._schedule_state_contract(send_as_id, module_key)
+        return profile, contract, ""
+
+    def schedule_renew_profiles_payload(self) -> dict:
+        if not hasattr(self._store, "list_schedule_renew_profiles"):
+            return {"ok": False, "error": "store does not support schedule renew profiles", "profiles": []}
+        profiles = [
+            self._schedule_renew_profile_view(profile)
+            for profile in self._store.list_schedule_renew_profiles()
+        ]
+        return {
+            "ok": True,
+            "profiles": profiles,
+            "allowed_presets": [
+                {"preset_key": preset, "module_key": module, "interval_sec": interval}
+                for preset, (module, interval) in SCHEDULE_RENEW_ALLOWED_PRESETS.items()
+            ],
+            "defaults": {
+                "renew_days": 1,
+                "threshold_hours": SCHEDULE_RENEW_DEFAULT_THRESHOLD_HOURS,
+                "soft_limit": SCHEDULE_RENEW_DEFAULT_SOFT_LIMIT,
+            },
+        }
+
+    def schedule_renew_save_payload(self, payload: dict) -> dict:
+        if not hasattr(self._store, "save_schedule_renew_profile"):
+            return {"ok": False, "error": "store does not support schedule renew profiles"}
+        profile, contract, error = self._schedule_renew_normalize_profile(payload or {})
+        if error:
+            return {"ok": False, "error": error}
+        saved = self._store.save_schedule_renew_profile(profile or {})
+        view = self._schedule_renew_profile_view(saved)
+        if contract is not None:
+            view["state_contract"] = contract
+        return {"ok": True, "profile": view, "profiles": self.schedule_renew_profiles_payload().get("profiles") or []}
+
+    def schedule_renew_delete_payload(self, payload: dict) -> dict:
+        if not hasattr(self._store, "delete_schedule_renew_profile"):
+            return {"ok": False, "error": "store does not support schedule renew profiles"}
+        profile_id = _safe_int((payload or {}).get("profile_id") or (payload or {}).get("id"))
+        if not profile_id:
+            return {"ok": False, "error": "请提供续期策略 id"}
+        deleted = self._store.delete_schedule_renew_profile(profile_id)
+        return {"ok": deleted, "deleted": deleted, "profile_id": profile_id, "profiles": self.schedule_renew_profiles_payload().get("profiles") or []}
+
+    def _schedule_renew_load_profile(self, payload: dict) -> tuple[dict | None, str]:
+        profile_id = _safe_int((payload or {}).get("profile_id") or (payload or {}).get("id"))
+        if profile_id:
+            profile = self._store.get_schedule_renew_profile(profile_id) if hasattr(self._store, "get_schedule_renew_profile") else None
+            if not profile:
+                return None, "续期策略不存在"
+            return profile, ""
+        profile, _contract, error = self._schedule_renew_normalize_profile(payload or {})
+        return profile, error
+
+    def _schedule_renew_batch_matches_profile(self, batch: dict, profile: dict) -> bool:
+        if int(batch.get("send_as_id") or 0) != int(profile.get("send_as_id") or 0):
+            return False
+        options = batch.get("options") or {}
+        profile_id = int(profile.get("id") or 0)
+        if profile_id and int(options.get("renew_profile_id") or 0) == profile_id:
+            return True
+        if str(batch.get("preset_key") or "") != str(profile.get("preset_key") or ""):
+            return False
+        state_contract = options.get("state_contract") or {}
+        module_key = str(
+            options.get("auto_anchor_module")
+            or state_contract.get("module_key")
+            or self._schedule_renew_allowed_module_for_preset(str(batch.get("preset_key") or ""))
+        )
+        return module_key == str(profile.get("module_key") or "")
+
+    def _schedule_renew_profile_tail(self, profile: dict) -> float:
+        now = time.time()
+        batches = [
+            batch for batch in self._store.list_schedule_batches(include_inactive=False)
+            if self._schedule_renew_batch_matches_profile(batch, profile)
+        ]
+        batch_by_id = {int(batch.get("id") or 0): batch for batch in batches}
+        if not batch_by_id:
+            return 0.0
+        tail = 0.0
+        for msg in self._store.list_schedule_messages(send_as_id=int(profile.get("send_as_id") or 0), include_inactive=False):
+            batch = batch_by_id.get(int(msg.get("batch_id") or 0))
+            if not batch:
+                continue
+            status = str(msg.get("status") or "")
+            schedule_at = float(msg.get("schedule_at") or 0)
+            if schedule_at <= now - 60:
+                continue
+            if status == "scheduled":
+                tail = max(tail, schedule_at)
+            elif (
+                status == "planned"
+                and str(batch.get("status") or "") in {"active", "queued", "sending"}
+                and not bool((batch.get("options") or {}).get("dry_run"))
+            ):
+                tail = max(tail, schedule_at)
+        return tail
+
+    def _schedule_renew_plan(self, profile: dict, *, force: bool = False) -> dict:
+        profile = dict(profile or {})
+        send_as_id = int(profile.get("send_as_id") or 0)
+        preset_key = str(profile.get("preset_key") or "").strip()
+        module_key = str(profile.get("module_key") or "").strip()
+        allowed_module = self._schedule_renew_allowed_module_for_preset(preset_key)
+        if not send_as_id:
+            return {"ok": False, "error": "请选择续期身份", "items": []}
+        if not allowed_module or module_key != allowed_module or module_key not in SEMIAUTO_MODULE_KEYS:
+            return {
+                "ok": False,
+                "status": "renew_blocked",
+                "manual_required": True,
+                "manual_message": "该预设/状态机组合不允许自动续期,请人工预览后创建。",
+                "error": "该预设/状态机组合不允许自动续期",
+                "items": [],
+                "profile": self._schedule_renew_profile_view(profile, include_contract=False),
+            }
+        contract = self._schedule_state_contract(send_as_id, module_key)
+        semiauto_check = self._schedule_semiauto_block_payload(contract)
+        if not semiauto_check.get("ok"):
+            return {**semiauto_check, "status": "renew_blocked", "items": [], "profile": self._schedule_renew_profile_view(profile, include_contract=False)}
+
+        soft_limit = max(1, min(MAX_SCHEDULED_MESSAGES_PER_IDENTITY, int(profile.get("soft_limit") or SCHEDULE_RENEW_DEFAULT_SOFT_LIMIT)))
+        current_usage = self._official_schedule_identity_usage(send_as_id)
+        remaining = max(0, soft_limit - current_usage)
+        tail_at = self._schedule_renew_profile_tail(profile)
+        threshold_sec = max(1, int(profile.get("threshold_hours") or SCHEDULE_RENEW_DEFAULT_THRESHOLD_HOURS)) * 3600
+        now = time.time()
+        if tail_at and tail_at - now > threshold_sec and not force:
+            return {
+                "ok": True,
+                "status": "not_due",
+                "items": [],
+                "planned_count": 0,
+                "message": "当前覆盖还没低于续期阈值",
+                "tail_at": tail_at,
+                "tail_text": schedule_fmt_ts(tail_at),
+                "current_usage": current_usage,
+                "soft_limit": soft_limit,
+                "soft_remaining": remaining,
+                "state_contract": contract,
+                "profile": self._schedule_renew_profile_view(profile, include_contract=False),
+            }
+        if remaining <= 0:
+            msg = f"官方定时软上限已满: send_as {send_as_id} 当前 {current_usage}/{soft_limit},已停止续期。"
+            return {
+                "ok": False,
+                "status": "quota_soft_blocked",
+                "manual_required": True,
+                "manual_message": msg,
+                "error": msg,
+                "items": [],
+                "current_usage": current_usage,
+                "soft_limit": soft_limit,
+                "soft_remaining": 0,
+                "state_contract": contract,
+                "profile": self._schedule_renew_profile_view(profile, include_contract=False),
+            }
+
+        interval_sec = max(60, self._schedule_renew_interval_sec(profile, contract))
+        next_at = float((contract or {}).get("next_at") or 0)
+        anchor_at = max(now, next_at)
+        if tail_at:
+            anchor_at = max(anchor_at, tail_at + interval_sec)
+        renew_days = max(1, min(SCHEDULE_RENEW_MAX_DAYS, int(profile.get("renew_days") or 1)))
+        plan_payload = dict(profile.get("payload") or {})
+        plan_payload.update(
+            {
+                "send_as_id": send_as_id,
+                "preset_key": preset_key,
+                "horizon_days": renew_days,
+                "anchor_at": anchor_at,
+                "auto_anchor": True,
+                "auto_anchor_module": module_key,
+                "auto_anchor_send_as_id": send_as_id,
+                "schedule_use_module_defaults": preset_key == module_key,
+                "schedule_semiauto": True,
+                "dry_run": False,
+                "renew_profile_id": int(profile.get("id") or 0),
+                "renewed_by": "schedule_renew",
+            }
+        )
+        prepared, prepared_contract = self._prepare_schedule_payload_with_state(plan_payload, send_as_id=send_as_id)
+        plan = build_schedule_plan(prepared, anchor_resolver=self._resolve_module_anchor)
+        min_due = max(now + SCHEDULE_RENEW_MIN_LEAD_SEC, tail_at + SCHEDULE_RENEW_MIN_LEAD_SEC if tail_at else 0)
+        items = [
+            item for item in (plan.get("items") or [])
+            if float(item.get("schedule_at") or 0) > min_due
+        ]
+        quota_capped = len(items) > remaining
+        if quota_capped:
+            items = items[:remaining]
+        status = "ready"
+        if not items:
+            status = "no_items"
+        elif quota_capped:
+            status = "quota_capped"
+        return {
+            "ok": True,
+            "status": status,
+            "preset_key": plan.get("preset_key") or preset_key,
+            "preset_label": plan.get("preset_label") or self._schedule_renew_preset_label(preset_key),
+            "anchor_at": plan.get("anchor_at") or anchor_at,
+            "anchor_text": schedule_fmt_ts(float(plan.get("anchor_at") or anchor_at)),
+            "horizon_days": renew_days,
+            "items": items,
+            "planned_count": len(items),
+            "quota_capped": quota_capped,
+            "tail_at": tail_at,
+            "tail_text": schedule_fmt_ts(tail_at),
+            "current_usage": current_usage,
+            "soft_limit": soft_limit,
+            "soft_remaining": remaining,
+            "state_contract": prepared_contract or contract,
+            "create_payload": prepared,
+            "profile": self._schedule_renew_profile_view(profile, include_contract=False),
+        }
+
+    def schedule_renew_preview_payload(self, payload: dict) -> dict:
+        if not hasattr(self._store, "list_schedule_renew_profiles"):
+            return {"ok": False, "error": "store does not support schedule renew profiles", "items": []}
+        profile, error = self._schedule_renew_load_profile(payload or {})
+        if error:
+            return {"ok": False, "error": error, "items": []}
+        force = self._schedule_renew_bool((payload or {}).get("force"), False)
+        return self._schedule_renew_plan(profile or {}, force=force)
+
+    def schedule_renew_run_payload(self, payload: dict) -> dict:
+        if not hasattr(self._store, "update_schedule_renew_profile_runtime"):
+            return {"ok": False, "error": "store does not support schedule renew profiles", "items": []}
+        profile, error = self._schedule_renew_load_profile(payload or {})
+        if error:
+            return {"ok": False, "error": error, "items": []}
+        profile_id = int((profile or {}).get("id") or 0)
+        if not profile_id:
+            return {"ok": False, "error": "请先保存续期策略再立即续期", "items": []}
+        if not bool((profile or {}).get("enabled", True)):
+            return {"ok": False, "status": "disabled", "error": "续期策略已停用", "items": []}
+        force = self._schedule_renew_bool((payload or {}).get("force"), False)
+        plan = self._schedule_renew_plan(profile or {}, force=force)
+        if not plan.get("ok") or not plan.get("items"):
+            if not plan.get("ok"):
+                self._store.update_schedule_renew_profile_runtime(
+                    profile_id,
+                    last_run_at=time.time(),
+                    last_error=str(plan.get("error") or plan.get("manual_message") or ""),
+                )
+            return plan
+        create_payload = dict(plan.get("create_payload") or {})
+        create_payload.update(
+            {
+                "plan_items": plan.get("items") or [],
+                "renew_profile_id": profile_id,
+                "renewed_by": "schedule_renew",
+                "renew_run_at": time.time(),
+                "dry_run": False,
+            }
+        )
+        with self._schedule_create_lock:
+            result = self._create_one_schedule(create_payload)
+        if not result.get("ok"):
+            self._store.update_schedule_renew_profile_runtime(
+                profile_id,
+                last_run_at=time.time(),
+                last_error=str(result.get("error") or "续期创建失败"),
+            )
+            return {**result, "status": result.get("status") or "renew_failed", "renew_plan": plan}
+        batch_id = int(result.get("batch_id") or 0)
+        covered_until = 0.0
+        if batch_id:
+            messages = self._store.list_schedule_messages(batch_id=batch_id, include_inactive=True)
+            covered_until = max([float(m.get("schedule_at") or 0) for m in messages] or [0.0])
+        updated = self._store.update_schedule_renew_profile_runtime(
+            profile_id,
+            covered_until=covered_until,
+            last_batch_id=batch_id,
+            last_run_at=time.time(),
+            last_error="",
+        )
+        return {
+            **result,
+            "renew_status": "submitted",
+            "covered_until": covered_until,
+            "covered_until_text": schedule_fmt_ts(covered_until),
+            "renew_plan": {k: v for k, v in plan.items() if k != "create_payload"},
+            "profile": self._schedule_renew_profile_view(updated or profile),
+            "profiles": self.schedule_renew_profiles_payload().get("profiles") or [],
+        }
+
     def schedule_preview_payload(self, payload: dict) -> dict:
         try:
             prepared, contract = self._prepare_schedule_payload_with_state(payload or {})
@@ -3040,7 +3484,43 @@ class MiniWebServer:
                 if not semiauto_check.get("ok"):
                     return semiauto_check
 
-            plan = build_schedule_plan(payload or {}, anchor_resolver=self._resolve_module_anchor)
+            plan_items_override = (
+                payload.get("plan_items")
+                if str(payload.get("renewed_by") or "") == "schedule_renew"
+                else None
+            )
+            if isinstance(plan_items_override, list):
+                override_items = []
+                for item in plan_items_override:
+                    if not isinstance(item, dict):
+                        continue
+                    command = str(item.get("command") or "").strip()
+                    try:
+                        schedule_at = float(item.get("schedule_at") or 0)
+                    except (TypeError, ValueError):
+                        schedule_at = 0.0
+                    if not command or schedule_at <= 0:
+                        continue
+                    override_items.append(
+                        {
+                            "command": command,
+                            "schedule_at": schedule_at,
+                            "schedule_text": schedule_fmt_ts(schedule_at),
+                        }
+                    )
+                override_items.sort(key=lambda item: float(item.get("schedule_at") or 0))
+                override_items = override_items[:MAX_SCHEDULED_MESSAGES_PER_IDENTITY]
+                preset_key = str(payload.get("preset_key") or "").strip()
+                label = self._schedule_renew_preset_label(preset_key)
+                plan = {
+                    "preset_key": preset_key,
+                    "preset_label": label,
+                    "anchor_at": float(payload.get("anchor_at") or (override_items[0]["schedule_at"] if override_items else time.time())),
+                    "horizon_days": int(payload.get("horizon_days") or 1),
+                    "items": override_items,
+                }
+            else:
+                plan = build_schedule_plan(payload or {}, anchor_resolver=self._resolve_module_anchor)
             preset_key = plan["preset_key"]
             label = plan.get("preset_label") or PRESET_LABELS.get(preset_key, preset_key)
             if not plan["items"]:
@@ -3107,6 +3587,9 @@ class MiniWebServer:
                         "auto_anchor": bool(payload.get("auto_anchor")),
                         "auto_anchor_module": payload.get("auto_anchor_module") or "",
                         "schedule_semiauto": bool(payload.get("schedule_semiauto") or payload.get("semiauto")),
+                        "renew_profile_id": int(payload.get("renew_profile_id") or 0),
+                        "renewed_by": str(payload.get("renewed_by") or ""),
+                        "renew_run_at": float(payload.get("renew_run_at") or 0),
                         "state_contract": {
                             "module_key": (state_contract or {}).get("module_key") or "",
                             "label": (state_contract or {}).get("label") or "",

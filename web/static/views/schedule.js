@@ -6,6 +6,22 @@
   const { openModal } = window.MiniwebModal;
   const { clipGraphemes, escapeAttr, escapeHtml } = window.MiniwebFormat;
   const SCHEDULE_BOOTSTRAP_URL = "/api/schedule/bootstrap?include=presets,modules,templates";
+  const SCHEDULE_RENEW_ALLOWED_PRESETS = {
+    wild_training: "wild_training",
+    checkin: "checkin",
+    tower: "tower",
+    ranch: "ranch",
+    concubine_dream: "concubine_dream",
+    concubine_tianji: "concubine_tianji",
+    tianti_climb: "tianti_climb",
+    tianti_climb_elder: "tianti_climb",
+    tianti_wenxin: "tianti_wenxin",
+    tianti_gangfeng: "tianti_gangfeng",
+    second_soul: "second_soul",
+    taiyi_cycle: "taiyi_cycle",
+    wendao: "wendao",
+    yindao: "yindao",
+  };
 
   function scheduleState(deps = {}) {
     return deps.state || window.MiniwebState?.state || {};
@@ -429,6 +445,7 @@
     const presetOptions = presets
       .map((p) => `<option value="${escapeAttr(p.key)}">${escapeHtml(p.label)} — ${escapeHtml(p.description)}</option>`)
       .join("");
+    const renewPresetOptions = renderScheduleRenewPresetOptions(presets);
     const moduleOptions = renderScheduleModuleOptions(scheduleModules.modules || []);
     return `
       <div class="schedule-modal-grid">
@@ -572,6 +589,56 @@
           </section>
 
           <section class="modal-section">
+            <h4>续期策略</h4>
+            <form id="scheduleRenewForm" class="settings-form">
+              <input type="hidden" name="id" />
+              <div class="form-grid">
+                <label>
+                  <span>续期身份</span>
+                  <select name="send_as_id" id="scheduleRenewSendAsSelect">${identityOptions || '<option value="">没有可用身份</option>'}</select>
+                </label>
+                <label>
+                  <span>续期预设</span>
+                  <select name="preset_key" id="scheduleRenewPresetSelect">${renewPresetOptions || '<option value="">暂无可续期预设</option>'}</select>
+                </label>
+                <label>
+                  <span>状态机</span>
+                  <select name="module_key" id="scheduleRenewModuleSelect">
+                    ${moduleOptions || '<option value="">暂无状态机</option>'}
+                  </select>
+                </label>
+                <label>
+                  <span>每次续期(1-3 天)</span>
+                  <input name="renew_days" inputmode="numeric" min="1" max="3" value="1" />
+                </label>
+                <label>
+                  <span>低于阈值再续(h)</span>
+                  <input name="threshold_hours" inputmode="numeric" min="1" max="72" value="24" />
+                </label>
+                <label>
+                  <span>软上限</span>
+                  <input name="soft_limit" inputmode="numeric" min="1" max="100" value="95" />
+                </label>
+              </div>
+              <label class="toggle-row">
+                <input type="checkbox" name="enabled" checked />
+                <span>启用策略</span>
+              </label>
+              <div class="form-actions">
+                <button type="button" id="scheduleRenewNewButton">新策略</button>
+                <button type="button" id="scheduleRenewSaveButton">保存策略</button>
+                <button type="button" id="scheduleRenewPreviewButton">预览续期</button>
+                <button type="button" class="primary" id="scheduleRenewRunButton">立即续期</button>
+              </div>
+            </form>
+            <p class="modal-status-line info" id="scheduleRenewStatus" hidden></p>
+            <div id="scheduleRenewPreview" class="send-as-result" hidden></div>
+            <div id="scheduleRenewProfileList" class="schedule-renew-profile-list">
+              <p class="empty inline">正在读取续期策略...</p>
+            </div>
+          </section>
+
+          <section class="modal-section">
             <h4>对账 Telegram 端</h4>
             <p class="muted">拉 TG 的 GetScheduledHistory,跟本地批次对账,标出「TG 有 mini-web 没记录」(orphans)、「未来丢失」(lost) 和「已过期释放」(expired) 的项。</p>
             <div class="form-grid">
@@ -668,6 +735,56 @@
         return `<option value="${escapeAttr(module.key)}">${escapeHtml(module.label || module.key)}${escapeHtml(badge)}</option>`;
       })
       .join("");
+  }
+
+  function scheduleRenewModuleForPreset(presetKey) {
+    return SCHEDULE_RENEW_ALLOWED_PRESETS[String(presetKey || "").trim()] || "";
+  }
+
+  function renderScheduleRenewPresetOptions(presets) {
+    return (presets || [])
+      .filter((preset) => scheduleRenewModuleForPreset(preset.key))
+      .map((preset) => `<option value="${escapeAttr(preset.key)}">${escapeHtml(preset.label)} — ${escapeHtml(preset.description || "")}</option>`)
+      .join("");
+  }
+
+  function renderScheduleRenewProfiles(deps = {}, profiles = []) {
+    if (!profiles.length) {
+      return '<p class="empty inline">还没有续期策略。</p>';
+    }
+    return profiles.map((profile) => {
+      const contract = profile.state_contract || {};
+      const enabled = profile.enabled !== false;
+      const ready = Boolean(contract.semiauto_ready);
+      const statusPill = enabled
+        ? `<span class="status-pill ${ready ? "ok" : "warn"}">${ready ? "可续期" : "待观察"}</span>`
+        : '<span class="status-pill">停用</span>';
+      const identity = scheduleIdentityLabel(deps, profile.send_as_id) || `send_as ${profile.send_as_id || ""}`;
+      const coverage = profile.covered_until_text || profile.tail_text || "未覆盖";
+      const error = profile.last_error
+        ? `<small class="warn">${escapeHtml(profile.last_error)}</small>`
+        : "";
+      return `
+        <article class="account-row" data-schedule-renew-profile-id="${escapeAttr(String(profile.id || ""))}">
+          <span class="account-row-dot ${enabled && ready ? "live" : profile.last_error ? "warn" : "idle"}" aria-hidden="true"></span>
+          <div class="account-row-body">
+            <div class="account-row-title">
+              <strong>${escapeHtml(profile.label || profile.preset_key || "")}</strong>
+              ${statusPill}
+              <span class="account-row-meta">${escapeHtml(identity)}｜${escapeHtml(profile.module_key || "")}｜续 ${escapeHtml(String(profile.renew_days || 1))} 天｜余量 ${escapeHtml(String(profile.soft_remaining ?? ""))}</span>
+            </div>
+            <p class="muted">覆盖到 ${escapeHtml(coverage)}｜阈值 ${escapeHtml(String(profile.threshold_hours || 24))}h</p>
+            ${error}
+          </div>
+          <div class="account-row-actions">
+            <button type="button" data-schedule-renew-action="load" data-profile-id="${escapeAttr(String(profile.id || ""))}">载入</button>
+            <button type="button" data-schedule-renew-action="preview" data-profile-id="${escapeAttr(String(profile.id || ""))}">预览</button>
+            <button type="button" data-schedule-renew-action="run" data-profile-id="${escapeAttr(String(profile.id || ""))}">立即续期</button>
+            <button type="button" data-schedule-renew-action="delete" data-profile-id="${escapeAttr(String(profile.id || ""))}">删除</button>
+          </div>
+        </article>
+      `;
+    }).join("");
   }
 
   function renderScheduleBatches(deps = {}, batches) {
@@ -1044,6 +1161,17 @@
     const templateLoadButton = dialog.querySelector("#scheduleTemplateLoadButton");
     const templateSaveButton = dialog.querySelector("#scheduleTemplateSaveButton");
     const templateDeleteButton = dialog.querySelector("#scheduleTemplateDeleteButton");
+    const renewForm = dialog.querySelector("#scheduleRenewForm");
+    const renewStatus = dialog.querySelector("#scheduleRenewStatus");
+    const renewPreview = dialog.querySelector("#scheduleRenewPreview");
+    const renewProfileList = dialog.querySelector("#scheduleRenewProfileList");
+    const renewSendAsSelect = dialog.querySelector("#scheduleRenewSendAsSelect");
+    const renewPresetSelect = dialog.querySelector("#scheduleRenewPresetSelect");
+    const renewModuleSelect = dialog.querySelector("#scheduleRenewModuleSelect");
+    const renewNewButton = dialog.querySelector("#scheduleRenewNewButton");
+    const renewSaveButton = dialog.querySelector("#scheduleRenewSaveButton");
+    const renewPreviewButton = dialog.querySelector("#scheduleRenewPreviewButton");
+    const renewRunButton = dialog.querySelector("#scheduleRenewRunButton");
     const stateModuleSelect = dialog.querySelector("#scheduleStateModuleSelect");
     const stateHint = dialog.querySelector("#scheduleStateHint");
     const applyStateSuggestionButton = dialog.querySelector("#scheduleApplyStateSuggestion");
@@ -1069,6 +1197,17 @@
       preview.hidden = !html;
       preview.innerHTML = html || "";
     };
+    const setRenewStatus = (kind, text) => {
+      if (!renewStatus) return;
+      renewStatus.hidden = !text;
+      renewStatus.className = `modal-status-line ${kind}`;
+      renewStatus.textContent = text || "";
+    };
+    const showRenewPreview = (html) => {
+      if (!renewPreview) return;
+      renewPreview.hidden = !html;
+      renewPreview.innerHTML = html || "";
+    };
     const updateFieldVisibility = () => {
       const key = form.querySelector('[name="preset_key"]').value;
       const required = new Set(presetMap.get(key)?.fields || []);
@@ -1079,6 +1218,7 @@
     };
     const presetSelect = form.querySelector('[name="preset_key"]');
     updateFieldVisibility();
+    let renewProfiles = [];
 
     const selectedPrimarySendAs = () => {
       const select = dialog.querySelector("#scheduleSendAsSelect");
@@ -1165,6 +1305,203 @@
       }
       return payload;
     };
+
+    const syncRenewModuleToPreset = () => {
+      if (!renewPresetSelect || !renewModuleSelect) return;
+      const moduleKey = scheduleRenewModuleForPreset(renewPresetSelect.value);
+      if (!moduleKey) return;
+      const option = Array.from(renewModuleSelect.options).find((item) => item.value === moduleKey);
+      if (option) renewModuleSelect.value = moduleKey;
+    };
+
+    const resetRenewForm = () => {
+      if (!renewForm) return;
+      renewForm.reset();
+      const idField = renewForm.querySelector('[name="id"]');
+      if (idField) idField.value = "";
+      if (renewSendAsSelect) {
+        const selected = selectedPrimarySendAs();
+        if (selected && Array.from(renewSendAsSelect.options).some((option) => Number(option.value || 0) === selected)) {
+          renewSendAsSelect.value = String(selected);
+        }
+      }
+      syncRenewModuleToPreset();
+      showRenewPreview("");
+      setRenewStatus("info", "");
+    };
+
+    const collectRenewPayload = () => {
+      if (!renewForm) return {};
+      const data = new FormData(renewForm);
+      const presetKey = String(data.get("preset_key") || "").trim();
+      const moduleKey = String(data.get("module_key") || scheduleRenewModuleForPreset(presetKey) || "").trim();
+      const sendAsId = Number(data.get("send_as_id") || 0);
+      return {
+        id: Number(data.get("id") || 0) || 0,
+        send_as_id: sendAsId,
+        preset_key: presetKey,
+        module_key: moduleKey,
+        renew_days: data.get("renew_days") || 1,
+        threshold_hours: data.get("threshold_hours") || 24,
+        soft_limit: data.get("soft_limit") || 95,
+        enabled: data.get("enabled") === "on",
+        payload: {
+          send_as_id: sendAsId,
+          preset_key: presetKey,
+          horizon_days: data.get("renew_days") || 1,
+          auto_anchor: true,
+          auto_anchor_module: moduleKey,
+          schedule_use_module_defaults: presetKey === moduleKey,
+          schedule_semiauto: true,
+          dry_run: false,
+        },
+      };
+    };
+
+    const fillRenewForm = (profile) => {
+      if (!renewForm || !profile) return;
+      const setValue = (name, value) => {
+        const field = renewForm.querySelector(`[name="${CSS.escape(name)}"]`);
+        if (!field) return;
+        if (field.type === "checkbox") field.checked = Boolean(value);
+        else field.value = String(value ?? "");
+      };
+      setValue("id", profile.id || "");
+      setValue("send_as_id", profile.send_as_id || "");
+      setValue("preset_key", profile.preset_key || "");
+      setValue("module_key", profile.module_key || "");
+      setValue("renew_days", profile.renew_days || 1);
+      setValue("threshold_hours", profile.threshold_hours || 24);
+      setValue("soft_limit", profile.soft_limit || 95);
+      setValue("enabled", profile.enabled !== false);
+      syncRenewModuleToPreset();
+      setRenewStatus("ok", `已载入续期策略 #${profile.id}`);
+    };
+
+    const renderRenewPlan = (result) => {
+      const items = result.items || [];
+      const profile = result.profile || {};
+      const contractHtml = result.state_contract ? `<div class="schedule-preview-extras">${scheduleContractHtml(result.state_contract)}</div>` : "";
+      const statusText = result.status === "not_due"
+        ? `覆盖到 ${result.tail_text || "未来"},暂不需要续期`
+        : result.status === "quota_capped"
+          ? `按软上限裁剪为 ${items.length} 条`
+          : result.status === "no_items"
+            ? "没有需要补排的未来项"
+            : `可续期 ${items.length} 条`;
+      return `
+        <p><strong>${escapeHtml(profile.label || result.preset_label || "")}</strong>｜${escapeHtml(statusText)}｜额度 ${escapeHtml(String(result.current_usage ?? ""))}/${escapeHtml(String(result.soft_limit ?? ""))}</p>
+        ${contractHtml}
+        <ul class="send-as-result-list">
+          ${items.map((it) => `<li class="ok"><code>${escapeHtml(it.command)}</code> <small>${escapeHtml(it.schedule_text || "")}</small></li>`).join("") || "<li>(0 条)</li>"}
+        </ul>
+      `;
+    };
+
+    const refreshRenewProfiles = async () => {
+      if (!renewProfileList) return [];
+      renewProfileList.innerHTML = '<p class="empty inline">正在读取续期策略...</p>';
+      const result = await fetchJson("/api/schedule/renew");
+      if (!result.ok) throw new Error(result.error || "读取续期策略失败");
+      renewProfiles = result.profiles || [];
+      renewProfileList.innerHTML = renderScheduleRenewProfiles(deps, renewProfiles);
+      bindRenewProfileActions();
+      return renewProfiles;
+    };
+
+    const saveRenewProfile = async () => {
+      const payload = collectRenewPayload();
+      const result = await postJson("/api/schedule/renew/save", payload);
+      if (!result.ok) throw new Error(result.error || "保存续期策略失败");
+      renewProfiles = result.profiles || [];
+      if (renewProfileList) renewProfileList.innerHTML = renderScheduleRenewProfiles(deps, renewProfiles);
+      bindRenewProfileActions();
+      if (result.profile) fillRenewForm(result.profile);
+      return result.profile;
+    };
+
+    const previewRenewProfile = async (profileId = 0) => {
+      const payload = profileId ? { profile_id: Number(profileId) } : collectRenewPayload();
+      const result = await postJson("/api/schedule/renew/preview", payload);
+      if (!result.ok) throw new Error(result.error || "预览续期失败");
+      showRenewPreview(renderRenewPlan(result));
+      setRenewStatus(result.status === "not_due" || result.status === "no_items" ? "info" : "ok", result.message || `预览续期 ${result.planned_count || 0} 条`);
+      return result;
+    };
+
+    const runRenewProfile = async (profileId = 0) => {
+      let id = Number(profileId || collectRenewPayload().id || 0);
+      if (!id) {
+        const saved = await saveRenewProfile();
+        id = Number(saved?.id || 0);
+      }
+      if (!id) throw new Error("请先保存续期策略");
+      const result = await postJson("/api/schedule/renew/run", { profile_id: id });
+      if (!result.ok) throw new Error(result.error || "立即续期失败");
+      showRenewPreview(renderRenewPlan(result.renew_plan || result));
+      renewProfiles = result.profiles || renewProfiles;
+      if (renewProfileList) renewProfileList.innerHTML = renderScheduleRenewProfiles(deps, renewProfiles);
+      bindRenewProfileActions();
+      if (result.status === "not_due" || result.status === "no_items") {
+        setRenewStatus("info", result.message || "当前不需要续期");
+        return result;
+      }
+      const estimate = scheduleEstimateText(result.estimate_seconds || 0);
+      setRenewStatus("ok", `已提交续期批次 #${result.batch_id}｜${result.planned_count || 0} 条｜预估 ${estimate}`);
+      if (result.batch_id) scheduleProgressPolling(deps, dialog, result.batch_id);
+      const refreshed = await fetchJson("/api/schedule?history=0");
+      if (batchList) batchList.innerHTML = renderScheduleBatches(deps, syncScheduleBatches(deps, refreshed));
+      bindScheduleBatchActions(deps, dialog, setStatus);
+      return result;
+    };
+
+    function bindRenewProfileActions() {
+      if (!renewProfileList) return;
+      renewProfileList.querySelectorAll("[data-schedule-renew-action]").forEach((btn) => {
+        if (btn.dataset.bound === "1") return;
+        btn.dataset.bound = "1";
+        btn.addEventListener("click", async () => {
+          const action = btn.dataset.scheduleRenewAction;
+          const profileId = Number(btn.dataset.profileId || 0);
+          const profile = renewProfiles.find((item) => Number(item.id || 0) === profileId);
+          if (action === "load") {
+            fillRenewForm(profile);
+            return;
+          }
+          btn.disabled = true;
+          const originalText = btn.textContent;
+          try {
+            if (action === "preview") {
+              btn.textContent = "预览中";
+              setRenewStatus("info", `预览续期策略 #${profileId}…`);
+              await previewRenewProfile(profileId);
+            } else if (action === "run") {
+              btn.textContent = "续期中";
+              setRenewStatus("info", `提交续期策略 #${profileId}…`);
+              await runRenewProfile(profileId);
+            } else if (action === "delete") {
+              if (!window.confirm(`删除续期策略 #${profileId}?`)) return;
+              btn.textContent = "删除中";
+              const result = await postJson("/api/schedule/renew/delete", { profile_id: profileId });
+              if (!result.ok) throw new Error(result.error || "删除续期策略失败");
+              renewProfiles = result.profiles || [];
+              renewProfileList.innerHTML = renderScheduleRenewProfiles(deps, renewProfiles);
+              bindRenewProfileActions();
+              resetRenewForm();
+              setRenewStatus("ok", `已删除续期策略 #${profileId}`);
+            }
+          } catch (error) {
+            setRenewStatus("error", error.message || "续期操作失败");
+            window.alert(error.message || "续期操作失败");
+          } finally {
+            if (btn.isConnected) {
+              btn.disabled = false;
+              btn.textContent = originalText;
+            }
+          }
+        });
+      });
+    }
 
     const setTemplateStatus = (kind, text) => {
       if (!templateStatus) return;
@@ -1276,6 +1613,9 @@
       if (syncSelect && selected[0] && Array.from(syncSelect.options).some((option) => Number(option.value || 0) === Number(selected[0]))) {
         syncSelect.value = String(selected[0]);
       }
+      if (renewSendAsSelect && selected[0] && Array.from(renewSendAsSelect.options).some((option) => Number(option.value || 0) === Number(selected[0]))) {
+        renewSendAsSelect.value = String(selected[0]);
+      }
       renderStateHint();
     }
     function setScheduleIdentitySelection(ids) {
@@ -1376,6 +1716,58 @@
     }
     syncStateModuleToPreset({ onlyIfEmpty: true });
     renderStateHint();
+    if (renewPresetSelect) {
+      renewPresetSelect.addEventListener("change", syncRenewModuleToPreset);
+      syncRenewModuleToPreset();
+    }
+    if (renewNewButton) {
+      renewNewButton.addEventListener("click", resetRenewForm);
+    }
+    if (renewSaveButton) {
+      renewSaveButton.addEventListener("click", async () => {
+        renewSaveButton.disabled = true;
+        setRenewStatus("info", "保存续期策略中…");
+        try {
+          const saved = await saveRenewProfile();
+          setRenewStatus("ok", `已保存续期策略 #${saved?.id || ""}`);
+        } catch (error) {
+          setRenewStatus("error", error.message || "保存续期策略失败");
+        } finally {
+          renewSaveButton.disabled = false;
+        }
+      });
+    }
+    if (renewPreviewButton) {
+      renewPreviewButton.addEventListener("click", async () => {
+        renewPreviewButton.disabled = true;
+        setRenewStatus("info", "预览续期中…");
+        try {
+          await previewRenewProfile();
+        } catch (error) {
+          setRenewStatus("error", error.message || "预览续期失败");
+        } finally {
+          renewPreviewButton.disabled = false;
+        }
+      });
+    }
+    if (renewRunButton) {
+      renewRunButton.addEventListener("click", async () => {
+        renewRunButton.disabled = true;
+        setRenewStatus("info", "提交续期中…");
+        try {
+          await runRenewProfile();
+        } catch (error) {
+          setRenewStatus("error", error.message || "立即续期失败");
+        } finally {
+          renewRunButton.disabled = false;
+        }
+      });
+    }
+    resetRenewForm();
+    refreshRenewProfiles().catch((error) => {
+      if (renewProfileList) renewProfileList.innerHTML = '<p class="empty inline warn">续期策略读取失败。</p>';
+      setRenewStatus("error", error.message || "续期策略读取失败");
+    });
 
     refreshTemplateSelect();
     if (templateSelect) {
