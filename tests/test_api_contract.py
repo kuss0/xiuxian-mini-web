@@ -9642,6 +9642,65 @@ def test_heavy_dashboard_payloads_are_cached_by_parameter(tmp_path):
     assert calls["resource"] == 1
 
 
+def test_message_health_summary_uses_fast_path_and_caches_invalid_date_count(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.ingest_event(RawMessageEvent(
+        id="sample-1",
+        chat_id=0,
+        msg_id=1,
+        text="sample",
+        source="sample",
+        date="bad-date",
+        sender_id=0,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="tg:-1:100",
+        chat_id=-1,
+        msg_id=100,
+        text="first",
+        source="玩家",
+        date="2026-06-13T10:00:00+00:00",
+        sender_id=1000,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="tg:-1:200",
+        chat_id=-1,
+        msg_id=200,
+        text="latest",
+        source="玩家",
+        date="2026-06-13T11:00:00+00:00",
+        sender_id=1000,
+    ))
+
+    first = store.message_health_summary()
+
+    assert first["raw_total"] == 3
+    assert first["real_raw_total"] == 2
+    assert first["invalid_date_total"] == 1
+    assert first["first_message_time"] == "2026-06-13T10:00:00+00:00"
+    assert first["latest_message_time"] == "2026-06-13T11:00:00+00:00"
+    assert first["first_msg_id"] == 100
+    assert first["latest_msg_id"] == 200
+
+    store.ingest_event(RawMessageEvent(
+        id="tg:-1:300",
+        chat_id=-1,
+        msg_id=300,
+        text="invalid",
+        source="玩家",
+        date="bad-date-2",
+        sender_id=1000,
+    ))
+    cached = store.message_health_summary()
+    assert cached["invalid_date_total"] == 1
+
+    store._runtime_cache_clear("message_health_invalid_date_total")
+    refreshed = store.message_health_summary()
+    assert refreshed["invalid_date_total"] == 2
+    assert refreshed["real_raw_total"] == 2
+    assert refreshed["latest_msg_id"] == 200
+
+
 def test_message_id_gaps_detects_short_large_msg_id_gap(tmp_path):
     from datetime import datetime, timedelta, timezone
 

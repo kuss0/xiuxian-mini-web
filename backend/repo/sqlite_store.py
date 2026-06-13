@@ -420,42 +420,78 @@ class SQLiteStore:
         return deleted
 
     def message_health_summary(self) -> dict:
+        def looks_like_message_time(value: object) -> bool:
+            return bool(re.match(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}", str(value or "")))
+
         with self._connect() as conn:
             total = int(conn.execute("SELECT COUNT(*) FROM raw_messages").fetchone()[0] or 0)
-            real = conn.execute(
-                """
-                SELECT COUNT(*), MIN(date), MAX(date), MIN(msg_id), MAX(msg_id)
-                FROM raw_messages
-                WHERE chat_id != 0
-                  AND (
-                    date LIKE '____-__-__T__:__:__%'
-                    OR date LIKE '____-__-__ __:__:__%'
-                  )
-                """
-            ).fetchone()
-            invalid = int(
-                conn.execute(
-                    """
-                    SELECT COUNT(*)
-                    FROM raw_messages
-                    WHERE date NOT LIKE '____-__-__T__:__:__%'
-                      AND date NOT LIKE '____-__-__ __:__:__%'
-                    """
-                ).fetchone()[0]
-                or 0
+            sample_total = int(
+                conn.execute("SELECT COUNT(*) FROM raw_messages WHERE chat_id=0").fetchone()[0] or 0
             )
+            invalid = self._runtime_cache_get("message_health_invalid_date_total")
+            if invalid is None:
+                first_any = conn.execute("SELECT date FROM raw_messages ORDER BY date ASC LIMIT 1").fetchone()
+                latest_any = conn.execute("SELECT date FROM raw_messages ORDER BY date DESC LIMIT 1").fetchone()
+                if (
+                    total > 0
+                    and looks_like_message_time((first_any or [""])[0])
+                    and looks_like_message_time((latest_any or [""])[0])
+                ):
+                    invalid = 0
+                else:
+                    invalid = int(
+                        conn.execute(
+                            """
+                            SELECT COUNT(*)
+                            FROM raw_messages
+                            WHERE date NOT LIKE '____-__-__T__:__:__%'
+                              AND date NOT LIKE '____-__-__ __:__:__%'
+                            """
+                        ).fetchone()[0]
+                        or 0
+                    )
+                self._runtime_cache_set("message_health_invalid_date_total", invalid, ttl=600.0)
+            if int(invalid or 0) > 0:
+                real = conn.execute(
+                    """
+                    SELECT COUNT(*), MIN(date), MAX(date), MIN(msg_id), MAX(msg_id)
+                    FROM raw_messages
+                    WHERE chat_id != 0
+                      AND (
+                        date LIKE '____-__-__T__:__:__%'
+                        OR date LIKE '____-__-__ __:__:__%'
+                      )
+                    """
+                ).fetchone()
+                real_total = int((real or [0])[0] or 0)
+                first_message_time = (real or [None, "", ""])[1] or ""
+                latest_message_time = (real or [None, "", ""])[2] or ""
+                first_msg_id = int((real or [None, None, None, 0, 0])[3] or 0)
+                latest_msg_id = int((real or [None, None, None, 0, 0])[4] or 0)
+            else:
+                first_row = conn.execute(
+                    "SELECT date, msg_id FROM raw_messages WHERE chat_id != 0 ORDER BY date ASC LIMIT 1"
+                ).fetchone()
+                latest_row = conn.execute(
+                    "SELECT date, msg_id FROM raw_messages WHERE chat_id != 0 ORDER BY date DESC LIMIT 1"
+                ).fetchone()
+                real_total = max(0, total - sample_total)
+                first_message_time = (first_row or ["", 0])[0] or ""
+                latest_message_time = (latest_row or ["", 0])[0] or ""
+                first_msg_id = int((first_row or ["", 0])[1] or 0)
+                latest_msg_id = int((latest_row or ["", 0])[1] or 0)
             cards = int(conn.execute("SELECT COUNT(*) FROM parsed_cards").fetchone()[0] or 0)
             resources = int(conn.execute("SELECT COUNT(*) FROM resource_events").fetchone()[0] or 0)
         return {
             "raw_total": total,
-            "real_raw_total": int((real or [0])[0] or 0),
-            "invalid_date_total": invalid,
+            "real_raw_total": real_total,
+            "invalid_date_total": int(invalid or 0),
             "parsed_cards": cards,
             "resource_events": resources,
-            "first_message_time": (real or [None, "", ""])[1] or "",
-            "latest_message_time": (real or [None, "", ""])[2] or "",
-            "first_msg_id": int((real or [None, None, None, 0, 0])[3] or 0),
-            "latest_msg_id": int((real or [None, None, None, 0, 0])[4] or 0),
+            "first_message_time": first_message_time,
+            "latest_message_time": latest_message_time,
+            "first_msg_id": first_msg_id,
+            "latest_msg_id": latest_msg_id,
         }
 
     def backfill_state_patches_if_empty(self) -> int:
