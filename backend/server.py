@@ -4327,37 +4327,65 @@ class MiniWebServer:
         include_history=False 用于弹窗首屏:隐藏纯历史批次,减少 DOM 渲染量。
         """
         self._repair_stale_sending_schedule_batches()
+        now = time.time()
+
+        def api_message_view(raw: dict, *, batch_status: str = "") -> dict:
+            msg = dict(raw or {})
+            msg["schedule_text"] = schedule_fmt_ts(msg.get("schedule_at"))
+            status = str(msg.get("status") or "")
+            try:
+                schedule_at = float(msg.get("schedule_at") or 0)
+            except (TypeError, ValueError):
+                schedule_at = 0.0
+            if schedule_at and schedule_at <= now - 60 and status == "scheduled":
+                msg["status"] = "expired"
+                if not str(msg.get("last_error") or ""):
+                    msg["last_error"] = "计划时间已过;如 TG 待发送列表已无该项,可释放本地额度。"
+            elif schedule_at and schedule_at <= now - 60 and status == "planned" and str(batch_status or "") != "sending":
+                msg["status"] = "expired"
+                if not str(msg.get("last_error") or ""):
+                    msg["last_error"] = "计划时间已过,本地待排项已从当前视图收起。"
+            return msg
+
+        def item_counts(items: list[dict]) -> dict:
+            return {
+                "planned": sum(1 for x in items if x["status"] == "planned"),
+                "scheduled": sum(1 for x in items if x["status"] == "scheduled"),
+                "failed": sum(1 for x in items if x["status"] == "failed"),
+                "expired": sum(1 for x in items if x["status"] == "expired"),
+                "deleted": sum(1 for x in items if x["status"] == "deleted"),
+            }
+
+        def is_current_item(item: dict) -> bool:
+            return str(item.get("status") or "planned") not in {"expired", "deleted"}
+
         batches = self._store.list_schedule_batches(include_inactive=False)
         all_messages = self._store.list_schedule_messages(include_inactive=False)
         msgs_by_batch: dict[int, list[dict]] = {}
         for m in all_messages:
-            m["schedule_text"] = schedule_fmt_ts(m["schedule_at"])
             msgs_by_batch.setdefault(m["batch_id"], []).append(m)
         for b in batches:
             b["anchor_text"] = schedule_fmt_ts(b["anchor_at"])
-            b["items"] = msgs_by_batch.get(b["id"], [])
-            b["counts"] = {
-                "planned": sum(1 for x in b["items"] if x["status"] == "planned"),
-                "scheduled": sum(1 for x in b["items"] if x["status"] == "scheduled"),
-                "failed": sum(1 for x in b["items"] if x["status"] == "failed"),
-                "expired": sum(1 for x in b["items"] if x["status"] == "expired"),
-                "deleted": sum(1 for x in b["items"] if x["status"] == "deleted"),
-            }
+            b["items"] = [
+                api_message_view(m, batch_status=str(b.get("status") or ""))
+                for m in msgs_by_batch.get(b["id"], [])
+            ]
+            b["counts"] = item_counts(b["items"])
             if summary:
-                current = [
-                    x for x in b["items"]
-                    if str(x.get("status") or "planned") not in {"expired", "deleted"}
-                ]
+                current = [x for x in b["items"] if is_current_item(x)]
                 b["items"] = current[:2]
                 b["hidden_item_count"] = max(0, len(current) - len(b["items"]))
+                b["counts"] = item_counts(current)
             elif not include_history:
-                has_current = any(
-                    str(x.get("status") or "planned") not in {"expired", "deleted"}
-                    for x in b["items"]
-                )
+                current = [x for x in b["items"] if is_current_item(x)]
+                has_current = bool(current)
                 is_dry_run = bool((b.get("options") or {}).get("dry_run") or b.get("status") == "dry_run")
                 if not has_current and not is_dry_run:
                     b["_hide_from_initial_view"] = True
+                elif not is_dry_run:
+                    b["hidden_expired_item_count"] = max(0, len(b["items"]) - len(current))
+                    b["items"] = current
+                    b["counts"] = item_counts(current)
         if not include_history:
             batches = [b for b in batches if not b.pop("_hide_from_initial_view", False)]
         return {"ok": True, "batches": batches}

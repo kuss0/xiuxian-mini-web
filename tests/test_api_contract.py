@@ -5913,6 +5913,57 @@ def test_schedule_create_dry_run_writes_batch_without_telegram(tmp_path):
     assert listing["batches"][0]["counts"]["planned"] > 0
 
 
+def test_schedule_list_initial_view_hides_past_scheduled_items(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    now = time.time()
+    old_batch_id = store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "preset_key": "custom",
+            "label": "旧批次",
+            "anchor_at": now - 7200,
+            "horizon_days": 1,
+            "options": {},
+        },
+        [{"command": ".旧", "schedule_at": now - 3600, "scheduled_msg_id": 101, "status": "scheduled"}],
+    )
+    store.set_schedule_batch_status(old_batch_id, "completed")
+    mixed_batch_id = store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "preset_key": "custom",
+            "label": "混合批次",
+            "anchor_at": now - 3600,
+            "horizon_days": 1,
+            "options": {},
+        },
+        [
+            {"command": ".已过", "schedule_at": now - 1800, "scheduled_msg_id": 102, "status": "scheduled"},
+            {"command": ".未来", "schedule_at": now + 1800, "scheduled_msg_id": 103, "status": "scheduled"},
+        ],
+    )
+    store.set_schedule_batch_status(mixed_batch_id, "completed")
+
+    initial = server.schedule_list_payload(include_history=False)
+
+    assert [batch["id"] for batch in initial["batches"]] == [mixed_batch_id]
+    batch = initial["batches"][0]
+    assert batch["hidden_expired_item_count"] == 1
+    assert batch["counts"]["scheduled"] == 1
+    assert batch["counts"]["expired"] == 0
+    assert [item["command"] for item in batch["items"]] == [".未来"]
+
+    history = server.schedule_list_payload(include_history=True)
+    old = next(batch for batch in history["batches"] if batch["id"] == old_batch_id)
+    mixed = next(batch for batch in history["batches"] if batch["id"] == mixed_batch_id)
+    assert old["counts"]["expired"] == 1
+    assert old["items"][0]["status"] == "expired"
+    assert {item["status"] for item in mixed["items"]} == {"expired", "scheduled"}
+
+
 def test_schedule_create_real_send_does_not_fall_back_to_dry_run_without_listener(tmp_path, monkeypatch):
     store = SQLiteStore(tmp_path / "miniweb.db")
     server = MiniWebServer(store=store)
