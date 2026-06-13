@@ -883,3 +883,263 @@ body {
     max-height: calc(100dvh - 300px);
   }
 }
+
+/* Tool-first schedule workspace pass.
+   The schedule rail is the primary surface; chat is a compact supporting pane. */
+@media (min-width: 901px) {
+  .chat-client-shell {
+    grid-template-columns: clamp(420px, 34vw, 560px) minmax(0, 1fr);
+  }
+
+  .chat-client-shell .conversation-rail {
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .chat-client-shell .workspace-tools-panel {
+    left: max(calc(clamp(420px, 34vw, 560px) + 14px), calc(100vw - 934px));
+    right: 14px;
+    width: auto;
+    max-width: none;
+  }
+
+  .chat-client-shell .schedule-rail-panel {
+    padding: 10px;
+    border-color: rgba(96, 165, 250, 0.22);
+    background: rgba(8, 13, 24, 0.92);
+  }
+
+  .chat-client-shell .schedule-rail-panel .panel-head {
+    min-height: 30px;
+    margin-bottom: 7px;
+  }
+
+  .chat-client-shell .schedule-rail-panel .panel-head h2 {
+    color: #f8fafc;
+    font-size: 13px;
+  }
+
+  .chat-client-shell .schedule-rail-panel .panel-head button {
+    min-height: 28px;
+    padding: 4px 9px;
+    font-size: 12px;
+  }
+
+  .chat-client-shell .schedule-identity-dock {
+    grid-template-columns: minmax(0, 1fr) auto;
+    margin-bottom: 7px;
+    padding: 4px 6px;
+  }
+
+  .chat-client-shell .schedule-rail {
+    gap: 6px;
+  }
+
+  .chat-client-shell .common-action-panel {
+    padding: 8px;
+    background: rgba(15, 23, 42, 0.58);
+  }
+
+  .chat-client-shell .common-action-panel .panel-head {
+    min-height: 24px;
+    margin-bottom: 6px;
+  }
+
+  .chat-client-shell .primary-toolbox {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .chat-client-shell .primary-toolbox button {
+    min-height: 28px;
+    padding: 4px 6px;
+    font-size: 11.5px;
+  }
+
+  .chat-client-shell .chat-pane .section-head {
+    min-height: 42px;
+    padding: 6px 108px 6px 10px;
+  }
+
+  .chat-client-shell .message-list {
+    padding: 12px clamp(10px, 1.4vw, 22px) 18px;
+  }
+
+  .chat-client-shell .chat-body {
+    max-width: min(760px, 88%);
+  }
+
+  .chat-client-shell .chat-message.kind-mine .chat-body {
+    max-width: min(680px, 86%);
+  }
+
+  .chat-client-shell .chat-composer {
+    max-height: min(22dvh, 150px);
+    padding: 4px 8px 5px;
+  }
+
+  .chat-client-shell .quick-action-hotbar {
+    grid-template-rows: repeat(2, 18px);
+    max-height: 38px;
+  }
+
+  .chat-client-shell .direct-send-head {
+    margin-bottom: 2px;
+  }
+
+  .chat-client-shell .direct-send-actions .composer-tool-button {
+    min-height: 24px;
+    padding: 2px 7px;
+  }
+
+  .chat-client-shell .direct-send-row {
+    grid-template-columns: clamp(108px, 11vw, 150px) minmax(0, 1fr) 64px;
+    gap: 6px;
+  }
+
+  .chat-client-shell .direct-send-row select,
+  .chat-client-shell .direct-send-row textarea,
+  .chat-client-shell #directSendSubmit {
+    min-height: 38px;
+  }
+
+  .chat-client-shell .direct-send-row textarea {
+    max-height: 82px;
+  }
+}
+
+.chat-client-shell .schedule-tool-summary {
+  gap: 7px;
+  padding: 8px;
+}
+
+.chat-client-shell .schedule-tool-summary-title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-client-shell .schedule-tool-summary-title strong,
+.chat-client-shell .schedule-tool-summary-title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-client-shell .schedule-tool-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.chat-client-shell .schedule-tool-metrics span {
+  display: grid;
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.10);
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.58);
+  padding: 5px 6px;
+}
+
+.chat-client-shell .schedule-tool-metrics span.warn {
+  border-color: rgba(245, 158, 11, 0.42);
+  background: rgba(120, 53, 15, 0.22);
+}
+
+.chat-client-shell .schedule-tool-metrics b {
+  color: #f8fafc;
+  font-size: 14px;
+  line-height: 1.05;
+}
+
+.chat-client-shell .schedule-tool-metrics small {
+  overflow: hidden;
+  color: #94a3b8;
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-client-shell .schedule-tool-meta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 4px;
+  white-space: normal;
+}
+
+.chat-client-shell .schedule-tool-meta small {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.08);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.48);
+  color: #94a3b8;
+  padding: 2px 6px;
+  font-size: 10.5px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .chat-client-shell {
+    grid-template-rows: clamp(162px, 22dvh, 210px) minmax(0, 1fr);
+  }
+
+  .chat-client-shell .conversation-rail {
+    height: clamp(162px, 22dvh, 210px);
+  }
+
+  .chat-client-shell .chat-composer {
+    max-height: min(30dvh, 160px);
+    padding: 5px 8px;
+  }
+
+  .chat-client-shell .quick-action-hotbar {
+    grid-template-rows: repeat(2, 18px);
+    max-height: 38px;
+  }
+
+  .chat-client-shell .direct-send-row textarea {
+    min-height: 38px;
+    max-height: 86px;
+  }
+}
+
+@media (max-width: 720px) {
+  .chat-client-shell .conversation-rail {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  }
+
+  .chat-client-shell .schedule-tool-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .chat-client-shell .schedule-tool-meta {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .chat-client-shell .schedule-tool-meta small:nth-child(2) {
+    display: none;
+  }
+}
+
+@media (max-width: 460px) {
+  .chat-client-shell {
+    grid-template-rows: 218px minmax(0, 1fr);
+  }
+
+  .chat-client-shell .conversation-rail {
+    height: 218px;
+  }
+
+  .chat-client-shell .workspace-tools-panel {
+    top: 268px;
+    max-height: calc(100dvh - 282px);
+  }
+}

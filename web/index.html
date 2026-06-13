@@ -24,16 +24,16 @@
     <div class="app-shell chat-client-shell">
       <aside class="sidebar conversation-rail command-rail">
         <div class="sidebar-title">
-          <strong>修仙群聊</strong>
-          <span>Telegram 游戏客户端</span>
+          <strong>定时工具台</strong>
+          <span>官方 TG 排班 / 状态机锚点</span>
         </div>
 
         <section class="panel schedule-rail-panel">
           <div class="panel-head">
-            <h2>官方定时</h2>
+            <h2>官方定时工具</h2>
             <div class="panel-head-actions">
               <button id="scheduleRailRefreshButton" type="button">刷新</button>
-              <button id="scheduleButton" type="button">新建</button>
+              <button id="scheduleButton" type="button">新建排班</button>
             </div>
           </div>
           <div id="scheduleIdentityDock" class="schedule-identity-dock" aria-label="排程身份">
@@ -198,7 +198,7 @@
           <div id="quickActionHotbar" class="quick-action-hotbar" aria-label="常用操作"></div>
           <div class="direct-send-head">
             <div class="direct-send-title">
-              <strong>消息</strong>
+              <strong>聊天</strong>
               <span id="directSendIdentityLine">未选身份</span>
             </div>
             <div class="direct-send-actions">
@@ -216,7 +216,7 @@
             </label>
             <label class="direct-send-command">
               <span>发送内容</span>
-              <textarea id="directSendInput" rows="2" placeholder="输入消息或命令。Enter 发送，Shift+Enter 换行"></textarea>
+              <textarea id="directSendInput" rows="1" placeholder="输入消息或命令。Enter 发送，Shift+Enter 换行"></textarea>
             </label>
             <button id="directSendSubmit" type="button">发送</button>
           </div>

@@ -118,9 +118,17 @@
     }, { planned: 0, scheduled: 0, failed: 0, sending: 0 });
     const visible = railBatches.slice(0, 4);
     scheduleRail.innerHTML = `
-      <div class="schedule-rail-summary">
-        <strong>${escapeHtml(String(railBatches.length))} 批排班</strong>
-        <span>${totals.sending ? `${escapeHtml(String(totals.sending))} 批发送中｜` : ""}${escapeHtml(String(totals.scheduled))} 已排 / ${escapeHtml(String(totals.planned))} 待排${totals.failed ? `｜${escapeHtml(String(totals.failed))} 待重排` : ""}</span>
+      <div class="schedule-rail-summary schedule-tool-summary">
+        <div class="schedule-tool-summary-title">
+          <strong>官方定时</strong>
+          <span>${totals.sending ? `${escapeHtml(String(totals.sending))} 批发送中` : "TG 排班工作台"}</span>
+        </div>
+        <div class="schedule-tool-metrics">
+          <span><b>${escapeHtml(String(railBatches.length))}</b><small>批次</small></span>
+          <span><b>${escapeHtml(String(totals.scheduled))}</b><small>已排</small></span>
+          <span><b>${escapeHtml(String(totals.planned))}</b><small>待排</small></span>
+          <span class="${totals.failed ? "warn" : ""}"><b>${escapeHtml(String(totals.failed))}</b><small>失败</small></span>
+        </div>
       </div>
       <div class="schedule-rail-list">
         ${visible.map((batch) => renderScheduleRailRow(deps, batch)).join("")}
@@ -169,7 +177,11 @@
             <strong>${escapeHtml(batch.label || batch.preset_key || `排班 #${batch.id}`)}</strong>
             ${statusPill}
           </span>
-          <span class="schedule-rail-row-meta">${escapeHtml(identity)}｜${escapeHtml(batch.anchor_text || "未设锚点")}｜${escapeHtml(scheduleStatusText(statusKey, counts))}</span>
+          <span class="schedule-rail-row-meta schedule-tool-meta">
+            <small>${escapeHtml(identity)}</small>
+            <small>${escapeHtml(batch.anchor_text || "未设锚点")}</small>
+            <small>${escapeHtml(scheduleStatusText(statusKey, counts))}</small>
+          </span>
           ${total ? `<span class="schedule-progress compact"><span class="schedule-progress-bar" style="width:${pct}%"></span></span>` : ""}
           <span class="schedule-rail-snippets">
             ${snippets || "<small>没有待展示命令</small>"}
