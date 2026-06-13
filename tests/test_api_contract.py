@@ -6395,6 +6395,61 @@ def test_schedule_renew_preview_and_run_use_state_machine_tail_and_metadata(tmp_
     assert after["items"] == []
 
 
+def test_schedule_renew_worker_runs_enabled_due_profiles_without_autostart(tmp_path, monkeypatch):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    assert server.schedule_renew_worker_status_payload()["running"] is False
+    server.save_settings_payload({"target_chat": "-1001680975844", "target_topic_id": 7310786})
+    server.save_account_payload(
+        {
+            "local_id": "main",
+            "api_id": "123",
+            "api_hash": "hash",
+            "account_id": "12345",
+            "login_status": "done",
+        }
+    )
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+    now = time.time()
+    store.save_module_state(
+        12345,
+        "concubine_tianji",
+        {"cooldown_until": now + 120, "last_observed_at": now, "last_status": "cooldown"},
+        source_message_id="raw-renew-worker",
+    )
+
+    class FakeListeners:
+        def get_listener(self, account_local_id):
+            return None
+
+    def fake_submit(**kwargs):
+        return "transient"
+
+    server._listeners = FakeListeners()
+    monkeypatch.setattr(server, "_submit_official_schedule_background", fake_submit)
+    saved = server.schedule_renew_save_payload({
+        "send_as_id": 12345,
+        "preset_key": "concubine_tianji",
+        "module_key": "concubine_tianji",
+        "renew_days": 1,
+        "threshold_hours": 1,
+        "soft_limit": 95,
+    })
+    assert saved["ok"] is True
+
+    result = server.run_schedule_renew_once()
+
+    assert result["ok"] is True
+    assert result["processed"] == 1
+    assert result["created"] == 1
+    assert result["results"][0]["batch_id"] > 0
+    assert server.schedule_renew_worker_status_payload()["last_result"]["created"] == 1
+    batch = store.list_schedule_batches(include_inactive=True)[0]
+    assert batch["options"]["renewed_by"] == "schedule_renew"
+
+
 def test_schedule_routes_are_wired():
     from backend.app import GET_ROUTES, POST_ROUTES
     assert "/api/schedule/bootstrap" in GET_ROUTES

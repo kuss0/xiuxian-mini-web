@@ -420,7 +420,15 @@ def main() -> None:
     else:
         print("[mini-web] API 需要认证")
 
-    server = create_http_server(args.host, args.port)
+    app_server = MiniWebServer()
+    renew_worker_enabled = os.environ.get("MINIWEB_SCHEDULE_RENEW_WORKER", "1").strip().lower() not in {"0", "false", "no", "off"}
+    if renew_worker_enabled:
+        app_server.start_schedule_renew_worker()
+        print("[mini-web] 官方定时续期 worker 已启用: 15 分钟扫描一次")
+    else:
+        print("[mini-web] 官方定时续期 worker 已禁用")
+
+    server = create_http_server(args.host, args.port, app_server)
     print(f"Xiuxian Mini Web listening on http://{args.host}:{args.port}")
     server.serve_forever()
 

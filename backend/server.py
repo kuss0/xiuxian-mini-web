@@ -423,6 +423,11 @@ class MiniWebServer:
         self._schedule_create_lock = threading.Lock()
         self._schedule_client_locks_lock = threading.Lock()
         self._schedule_client_locks: dict[str, threading.Lock] = {}
+        self._schedule_renew_worker_lock = threading.Lock()
+        self._schedule_renew_worker_stop = threading.Event()
+        self._schedule_renew_worker_thread: threading.Thread | None = None
+        self._schedule_renew_worker_last_run = 0.0
+        self._schedule_renew_worker_last_result: dict = {}
         self._skill_send_recent_lock = threading.Lock()
         self._skill_send_recent: dict[str, dict[str, float | str]] = {}
         self._payload_cache_lock = threading.Lock()
@@ -3059,6 +3064,7 @@ class MiniWebServer:
                 "threshold_hours": SCHEDULE_RENEW_DEFAULT_THRESHOLD_HOURS,
                 "soft_limit": SCHEDULE_RENEW_DEFAULT_SOFT_LIMIT,
             },
+            "worker": self.schedule_renew_worker_status_payload(),
         }
 
     def schedule_renew_save_payload(self, payload: dict) -> dict:
@@ -3081,6 +3087,101 @@ class MiniWebServer:
             return {"ok": False, "error": "请提供续期策略 id"}
         deleted = self._store.delete_schedule_renew_profile(profile_id)
         return {"ok": deleted, "deleted": deleted, "profile_id": profile_id, "profiles": self.schedule_renew_profiles_payload().get("profiles") or []}
+
+    def schedule_renew_worker_status_payload(self) -> dict:
+        thread = self._schedule_renew_worker_thread
+        return {
+            "running": bool(thread and thread.is_alive()),
+            "last_run_at": self._schedule_renew_worker_last_run,
+            "last_run_text": schedule_fmt_ts(self._schedule_renew_worker_last_run),
+            "last_result": dict(self._schedule_renew_worker_last_result or {}),
+        }
+
+    def run_schedule_renew_once(self, *, limit: int = 20) -> dict:
+        if not hasattr(self._store, "list_schedule_renew_profiles"):
+            return {"ok": False, "error": "store does not support schedule renew profiles", "processed": 0, "created": 0}
+        try:
+            limit = max(1, min(100, int(limit or 20)))
+        except (TypeError, ValueError):
+            limit = 20
+        profiles = self._store.list_schedule_renew_profiles(enabled_only=True)
+        processed = 0
+        created = 0
+        skipped = 0
+        blocked = 0
+        results = []
+        for profile in profiles[:limit]:
+            processed += 1
+            try:
+                result = self.schedule_renew_run_payload({"profile_id": int(profile.get("id") or 0)})
+            except Exception as exc:
+                result = {"ok": False, "error": str(exc) or exc.__class__.__name__, "profile_id": int(profile.get("id") or 0)}
+            status = str(result.get("status") or result.get("renew_status") or "")
+            if result.get("ok") and result.get("batch_id"):
+                created += 1
+            elif result.get("ok") and status in {"not_due", "no_items"}:
+                skipped += 1
+            elif not result.get("ok"):
+                blocked += 1
+            results.append(
+                {
+                    "profile_id": int(profile.get("id") or 0),
+                    "ok": bool(result.get("ok")),
+                    "status": status,
+                    "batch_id": int(result.get("batch_id") or 0),
+                    "planned_count": int(result.get("planned_count") or 0),
+                    "error": str(result.get("error") or result.get("manual_message") or ""),
+                }
+            )
+        out = {
+            "ok": True,
+            "processed": processed,
+            "created": created,
+            "skipped": skipped,
+            "blocked": blocked,
+            "results": results,
+        }
+        self._schedule_renew_worker_last_run = time.time()
+        self._schedule_renew_worker_last_result = out
+        return out
+
+    def _schedule_renew_worker_loop(self, *, interval_sec: float, initial_delay_sec: float) -> None:
+        if self._schedule_renew_worker_stop.wait(max(0.0, float(initial_delay_sec or 0))):
+            return
+        while not self._schedule_renew_worker_stop.is_set():
+            try:
+                result = self.run_schedule_renew_once()
+                if result.get("created") or result.get("blocked"):
+                    print(
+                        "[schedule-renew] scan "
+                        f"processed={result.get('processed', 0)} "
+                        f"created={result.get('created', 0)} "
+                        f"blocked={result.get('blocked', 0)}"
+                    )
+            except Exception as exc:
+                self._schedule_renew_worker_last_run = time.time()
+                self._schedule_renew_worker_last_result = {"ok": False, "error": str(exc) or exc.__class__.__name__}
+                print(f"[schedule-renew] worker scan failed: {exc}")
+            if self._schedule_renew_worker_stop.wait(max(60.0, float(interval_sec or 900))):
+                return
+
+    def start_schedule_renew_worker(self, *, interval_sec: float = 900.0, initial_delay_sec: float = 60.0) -> bool:
+        with self._schedule_renew_worker_lock:
+            thread = self._schedule_renew_worker_thread
+            if thread and thread.is_alive():
+                return False
+            self._schedule_renew_worker_stop.clear()
+            self._schedule_renew_worker_thread = threading.Thread(
+                target=self._schedule_renew_worker_loop,
+                kwargs={"interval_sec": interval_sec, "initial_delay_sec": initial_delay_sec},
+                name="schedule-renew-worker",
+                daemon=True,
+            )
+            self._schedule_renew_worker_thread.start()
+            return True
+
+    def stop_schedule_renew_worker(self) -> None:
+        self._schedule_renew_worker_stop.set()
 
     def _schedule_renew_load_profile(self, payload: dict) -> tuple[dict | None, str]:
         profile_id = _safe_int((payload or {}).get("profile_id") or (payload or {}).get("id"))
