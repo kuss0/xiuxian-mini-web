@@ -6650,6 +6650,9 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert "payload_defaults" in schedule_js
     assert "syncStateModuleToPreset" in schedule_js
     assert 'presetMap.get(key)?.module_key' in schedule_js
+    assert "const clearStaleModule = () => {" in schedule_js
+    assert "if (!moduleKey) return clearStaleModule();" in schedule_js
+    assert "if (autoAnchor) autoAnchor.checked = false;" in schedule_js
     assert 'payload.auto_anchor_module = stateModule || data.get("preset_key");' in schedule_js
     assert 'data-schedule-action="retry-failed"' in schedule_js
     assert 'data-schedule-action="activate-dry-run"' in schedule_js
@@ -7736,6 +7739,7 @@ def test_schedule_state_contract_suggests_new_manual_preset_modules(tmp_path):
     collect = by_module["stargazer_collect"]
     assert retreat["suggestion"]["preset_key"] == "retreat_shallow"
     assert retreat["suggestion"]["command"] == ".闭关修炼"
+    assert retreat["suggestion"]["payload_defaults"]["count"] == 24
     assert retreat["semiauto_ready"] is False
     assert any(w["code"] == "high_frequency" for w in retreat["warnings"])
     assert collect["suggestion"]["preset_key"] == "stargazer_collect"

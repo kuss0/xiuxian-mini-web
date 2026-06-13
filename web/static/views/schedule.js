@@ -1091,12 +1091,19 @@
     };
     const syncStateModuleToPreset = ({ onlyIfEmpty = false } = {}) => {
       const moduleKey = matchedModuleForPreset();
-      if (!moduleKey || !stateModuleSelect) return false;
+      if (!stateModuleSelect) return false;
+      const autoAnchor = form.querySelector('[name="auto_anchor"]');
+      const clearStaleModule = () => {
+        if (onlyIfEmpty) return false;
+        stateModuleSelect.value = "";
+        if (autoAnchor) autoAnchor.checked = false;
+        return false;
+      };
+      if (!moduleKey) return clearStaleModule();
       if (onlyIfEmpty && stateModuleSelect.value) return false;
       const option = Array.from(stateModuleSelect.options).find((item) => item.value === moduleKey);
-      if (!option) return false;
+      if (!option) return clearStaleModule();
       stateModuleSelect.value = moduleKey;
-      const autoAnchor = form.querySelector('[name="auto_anchor"]');
       if (autoAnchor) autoAnchor.checked = true;
       return true;
     };

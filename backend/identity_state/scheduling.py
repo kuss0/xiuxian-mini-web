@@ -60,6 +60,7 @@ MODULE_HINTS: dict[str, dict[str, Any]] = {
         "preset_key": "retreat_shallow",
         "command": ".闭关修炼",
         "interval_sec": 10 * 60,
+        "count": 24,
         "automation_level": "one_click",
         "reason": "高频闭关只允许小批量人工确认",
     },
@@ -195,7 +196,13 @@ def schedule_hint(module: object, state: dict | None = None) -> dict:
     if command and arg_value and arg_key:
         command = f"{command} {arg_value}"
     interval_sec = int(hint.get("interval_sec") or 0)
-    count = _default_count(interval_sec)
+    try:
+        count = int(hint.get("count") or 0)
+    except (TypeError, ValueError):
+        count = 0
+    if count <= 0:
+        count = _default_count(interval_sec)
+    count = max(1, min(100, count))
     payload_defaults = {
         "preset_key": str(hint.get("preset_key") or "custom"),
         "command": command,
