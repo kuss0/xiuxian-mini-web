@@ -56,6 +56,34 @@ MODULE_HINTS: dict[str, dict[str, Any]] = {
         "automation_level": "one_click",
         "reason": "需要确认器灵名",
     },
+    "retreat_shallow": {
+        "preset_key": "retreat_shallow",
+        "command": ".闭关修炼",
+        "interval_sec": 10 * 60,
+        "automation_level": "one_click",
+        "reason": "高频闭关只允许小批量人工确认",
+    },
+    "stargazer_guide": {
+        "preset_key": "stargazer_guide",
+        "command": ".牵引星辰",
+        "interval_sec": 6 * 3600,
+        "automation_level": "one_click",
+        "reason": "星宫牵引按观测到的 CD 起点排",
+    },
+    "stargazer_soothe": {
+        "preset_key": "stargazer_soothe",
+        "command": ".安抚星辰",
+        "interval_sec": 6 * 3600,
+        "automation_level": "one_click",
+        "reason": "安抚是否需要执行取决于观星台状态,先保留人工确认",
+    },
+    "stargazer_collect": {
+        "preset_key": "stargazer_collect",
+        "command": ".收集精华",
+        "interval_sec": 6 * 3600,
+        "automation_level": "one_click",
+        "reason": "收集是否有产出取决于观星台状态,先保留人工确认",
+    },
     "wendao": {
         "preset_key": "wendao",
         "command": ".问道",
@@ -104,6 +132,10 @@ PRESET_MODULE_KEYS = {
     "pet_touch",
     "pet_warm",
     "pet_trial",
+    "retreat_shallow",
+    "stargazer_guide",
+    "stargazer_soothe",
+    "stargazer_collect",
     *SEMIAUTO_MODULE_KEYS,
 }
 

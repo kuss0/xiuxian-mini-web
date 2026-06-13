@@ -5602,13 +5602,21 @@ def test_schedule_presets_payload_lists_known_presets():
     by_key = {p["key"]: p for p in payload["presets"]}
     assert set(by_key) >= {
         "deep_retreat", "yuanying", "pet_touch", "pet_warm", "pet_trial", "custom",
-        "wild_training", "checkin", "tower", "ranch", "concubine_dream",
+        "retreat_shallow", "wild_training", "checkin", "tower", "daily_essentials",
+        "ranch", "concubine_dream",
         "concubine_tianji", "tianti_climb", "tianti_climb_elder", "tianti_wenxin",
-        "tianti_gangfeng", "second_soul", "wendao", "yindao",
-        "search_node", "taiyi_cycle",
+        "tianti_gangfeng", "lingxiao_standard", "lingxiao_elder",
+        "stargazer_guide", "stargazer_soothe", "stargazer_collect", "stargazer_care",
+        "second_soul", "wendao", "yindao",
+        "search_node", "taiyi_cycle", "taiyi_patrol",
     }
     assert by_key["concubine_tianji"]["module_key"] == "concubine_tianji"
     assert by_key["tianti_climb_elder"]["module_key"] == "tianti_climb"
+    assert by_key["lingxiao_elder"]["module_key"] == "tianti_climb"
+    assert by_key["stargazer_guide"]["module_key"] == "stargazer_guide"
+    assert by_key["taiyi_patrol"]["module_key"] == "taiyi_cycle"
+    assert "count" in by_key["retreat_shallow"]["fields"]
+    assert "command_gap_sec" in by_key["daily_essentials"]["fields"]
     assert by_key["custom"]["module_key"] == ""
     assert "command_gap_sec" in by_key["custom"]["fields"]
     assert "horizon_days" in by_key["custom"]["fields"]
@@ -5742,6 +5750,92 @@ def test_schedule_preview_elder_tianti_uses_three_hour_cd(tmp_path):
     lower = 3 * 3600 + DEFAULT_TRIGGER_DELAY_SEC + DEFAULT_COMMAND_DELAY_SEC
     upper = lower + JITTER_MAX_SEC + 5
     assert all(lower <= gap <= upper for gap in gaps)
+
+
+def test_schedule_preview_combo_presets_emit_expected_commands(tmp_path):
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "miniweb.db"))
+    anchor = 1_800_000_000
+
+    daily = server.schedule_preview_payload({
+        "preset_key": "daily_essentials",
+        "anchor_at": anchor,
+        "horizon_days": 1,
+        "command_gap_sec": 180,
+    })
+    assert daily["ok"] is True
+    assert daily["preset_label"] == "每日包"
+    assert [item["command"] for item in daily["items"][:4]] == [
+        ".宗门点卯", ".闯塔", ".问心台", ".元神修炼",
+    ]
+
+    stargazer = server.schedule_preview_payload({
+        "preset_key": "stargazer_care",
+        "anchor_at": anchor,
+        "horizon_days": 1,
+        "command_gap_sec": 180,
+    })
+    assert stargazer["ok"] is True
+    assert stargazer["preset_label"] == "星宫维护"
+    assert [item["command"] for item in stargazer["items"][:3]] == [
+        ".牵引星辰", ".安抚星辰", ".收集精华",
+    ]
+
+    taiyi = server.schedule_preview_payload({
+        "preset_key": "taiyi_patrol",
+        "anchor_at": anchor,
+        "horizon_days": 1,
+        "command_gap_sec": 180,
+    })
+    assert taiyi["ok"] is True
+    assert taiyi["preset_label"] == "太一巡检"
+    assert [item["command"] for item in taiyi["items"][:2]] == [".引道", ".搜寻节点"]
+
+
+def test_schedule_preview_lingxiao_packages_include_daily_and_periodic_items(tmp_path):
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "miniweb.db"))
+    anchor = 1_800_000_000
+
+    standard = server.schedule_preview_payload({
+        "preset_key": "lingxiao_standard",
+        "anchor_at": anchor,
+        "horizon_days": 1,
+    })
+    elder = server.schedule_preview_payload({
+        "preset_key": "lingxiao_elder",
+        "anchor_at": anchor,
+        "horizon_days": 1,
+    })
+
+    assert standard["ok"] is True
+    assert elder["ok"] is True
+    standard_commands = [item["command"] for item in standard["items"]]
+    elder_commands = [item["command"] for item in elder["items"]]
+    assert {".登天阶", ".引九天罡风", ".问心台"} <= set(standard_commands)
+    assert {".登天阶", ".引九天罡风", ".问心台"} <= set(elder_commands)
+    assert elder_commands.count(".登天阶") > standard_commands.count(".登天阶")
+    assert len(elder_commands) <= 100
+
+
+def test_schedule_preview_shallow_retreat_small_batch_is_count_limited(tmp_path):
+    from backend.outbox.schedule import RETREAT_SHALLOW_CD, RETREAT_SHALLOW_MAX_COUNT
+
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "miniweb.db"))
+    result = server.schedule_preview_payload({
+        "preset_key": "retreat_shallow",
+        "anchor_at": 1_800_000_000,
+        "count": 99,
+        "horizon_days": 1,
+    })
+
+    assert result["ok"] is True
+    assert result["preset_label"] == "闭关修炼·小批量"
+    assert len(result["items"]) == RETREAT_SHALLOW_MAX_COUNT
+    assert {item["command"] for item in result["items"]} == {".闭关修炼"}
+    gaps = [
+        result["items"][idx + 1]["schedule_at"] - result["items"][idx]["schedule_at"]
+        for idx in range(3)
+    ]
+    assert all(gap >= RETREAT_SHALLOW_CD for gap in gaps)
 
 
 def test_schedule_preview_state_machine_defaults_can_override_fixed_command(tmp_path):
@@ -7612,6 +7706,42 @@ def test_schedule_create_semiauto_accepts_observed_low_risk_module(tmp_path):
     messages = store.list_schedule_messages(batch_id=batch["id"], include_inactive=True)
     assert messages
     assert messages[0]["command"] == ".天机代卜"
+
+
+def test_schedule_state_contract_suggests_new_manual_preset_modules(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+    now = time.time()
+    store.save_module_state(
+        12345,
+        "retreat_shallow",
+        {"cooldown_until": now + 600, "last_observed_at": now, "last_status": "cooldown"},
+        source_message_id="raw-retreat",
+    )
+    store.save_module_state(
+        12345,
+        "stargazer_collect",
+        {"cooldown_until": now + 3600, "last_observed_at": now, "last_status": "cooldown"},
+        source_message_id="raw-star",
+    )
+    server = MiniWebServer(store=store)
+
+    payload = server.schedule_modules_payload("")
+    group = next(item for item in payload["by_identity"] if item["send_as_id"] == 12345)
+    by_module = {item["module_key"]: item for item in group["items"]}
+
+    retreat = by_module["retreat_shallow"]
+    collect = by_module["stargazer_collect"]
+    assert retreat["suggestion"]["preset_key"] == "retreat_shallow"
+    assert retreat["suggestion"]["command"] == ".闭关修炼"
+    assert retreat["semiauto_ready"] is False
+    assert any(w["code"] == "high_frequency" for w in retreat["warnings"])
+    assert collect["suggestion"]["preset_key"] == "stargazer_collect"
+    assert collect["suggestion"]["command"] == ".收集精华"
+    assert collect["semiauto_ready"] is False
+    assert collect["one_click_ready"] is True
 
 
 def test_identity_state_route_is_wired():

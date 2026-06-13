@@ -35,7 +35,13 @@ CMD_PET_TRIAL = ".器灵试炼"
 CMD_WENDAO = ".问道"
 CMD_YINDAO = ".引道"
 CMD_SEARCH_NODE = ".搜寻节点"
+CMD_RETREAT_SHALLOW = ".闭关修炼"
+CMD_STARGAZER_GUIDE = ".牵引星辰"
+CMD_STARGAZER_SOOTHE = ".安抚星辰"
+CMD_STARGAZER_COLLECT = ".收集精华"
 DEEP_RETREAT_CD = 8 * 3600  # 默认 8h
+RETREAT_SHALLOW_CD = 10 * 60
+RETREAT_SHALLOW_MAX_COUNT = 24
 
 PRESET_DEEP_RETREAT = "deep_retreat"
 PRESET_PET_TOUCH = "pet_touch"
@@ -305,6 +311,109 @@ def _build_custom(
     return items
 
 
+def _safe_command_gap(value, default: int = 180) -> int:
+    return max(30, min(3600, _positive_int(value, default)))
+
+
+def _safe_base_delay(trigger_delay_sec: float = 0, command_delay_sec: float = 0) -> float:
+    trigger_delay = (
+        float(trigger_delay_sec)
+        if trigger_delay_sec and trigger_delay_sec > 0
+        else DEFAULT_TRIGGER_DELAY_SEC
+    )
+    command_delay = (
+        float(command_delay_sec)
+        if command_delay_sec and command_delay_sec > 0
+        else DEFAULT_COMMAND_DELAY_SEC
+    )
+    return trigger_delay + command_delay
+
+
+def _build_counted_periodic(
+    *, anchor: float, horizon_days: int, command_prefix: str, interval_sec: int,
+    count: int = 1, max_count: int = MAX_SCHEDULED_MESSAGES_PER_IDENTITY,
+    end_at: float = 0.0, trigger_delay_sec: float = 0, command_delay_sec: float = 0,
+    **_kw,
+) -> list[dict]:
+    end = float(end_at) if end_at and end_at > 0 else (anchor + horizon_days * 86400)
+    command = _norm(command_prefix)
+    if not command:
+        return []
+    interval_sec = _positive_int(interval_sec, 3600)
+    count = min(_positive_int(count, 1), max(1, int(max_count or 1)), MAX_SCHEDULED_MESSAGES_PER_IDENTITY)
+    base_delay = _safe_base_delay(trigger_delay_sec, command_delay_sec)
+    items: list[dict] = []
+    last_command_at = anchor - interval_sec
+    while len(items) < count:
+        schedule_at = last_command_at + interval_sec + _jitter(base_delay)
+        if schedule_at > end:
+            break
+        items.append({"command": command, "schedule_at": schedule_at})
+        last_command_at = schedule_at
+    return items
+
+
+def _build_combo_rounds(
+    *, anchor: float, horizon_days: int, commands: tuple[str, ...], interval_sec: int,
+    command_gap_sec: int = 180, end_at: float = 0.0,
+    trigger_delay_sec: float = 0, command_delay_sec: float = 0, **_kw,
+) -> list[dict]:
+    command_list = tuple(c for c in (_norm(c) for c in commands) if c)
+    if not command_list:
+        return []
+    end = float(end_at) if end_at and end_at > 0 else (anchor + horizon_days * 86400)
+    interval_sec = _positive_int(interval_sec, 24 * 3600)
+    gap = _safe_command_gap(command_gap_sec)
+    base_delay = _safe_base_delay(trigger_delay_sec, command_delay_sec)
+    items: list[dict] = []
+    last_round_at = anchor - interval_sec
+    while True:
+        round_at = last_round_at + interval_sec + _jitter(base_delay)
+        if round_at > end:
+            break
+        for index, command in enumerate(command_list):
+            schedule_at = round_at + index * gap + _jitter(0)
+            if schedule_at > end:
+                return items
+            items.append({"command": command, "schedule_at": schedule_at})
+            if len(items) >= MAX_SCHEDULED_MESSAGES_PER_IDENTITY:
+                return items
+        last_round_at = round_at
+    return items
+
+
+def _build_mixed_periodic(
+    *, anchor: float, horizon_days: int, streams: tuple[dict, ...],
+    end_at: float = 0.0, trigger_delay_sec: float = 0, command_delay_sec: float = 0,
+    **_kw,
+) -> list[dict]:
+    end = float(end_at) if end_at and end_at > 0 else (anchor + horizon_days * 86400)
+    base_delay = _safe_base_delay(trigger_delay_sec, command_delay_sec)
+    items: list[dict] = []
+    for stream in streams:
+        command = _norm(stream.get("command"))
+        interval_sec = _positive_int(stream.get("interval_sec"), 0)
+        if not command or interval_sec <= 0:
+            continue
+        try:
+            offset_sec = float(stream.get("offset_sec") or 0)
+        except (TypeError, ValueError):
+            offset_sec = 0.0
+        last_command_at = anchor + offset_sec - interval_sec
+        while True:
+            schedule_at = last_command_at + interval_sec + _jitter(base_delay)
+            if schedule_at > end:
+                break
+            items.append({"command": command, "schedule_at": schedule_at})
+            last_command_at = schedule_at
+            if len(items) >= MAX_SCHEDULED_MESSAGES_PER_IDENTITY:
+                break
+        if len(items) >= MAX_SCHEDULED_MESSAGES_PER_IDENTITY:
+            break
+    items.sort(key=lambda item: float(item.get("schedule_at") or 0))
+    return items[:MAX_SCHEDULED_MESSAGES_PER_IDENTITY]
+
+
 # ---------- preset registry ----------
 
 @dataclass(frozen=True)
@@ -405,6 +514,19 @@ PRESETS: dict[str, PresetSpec] = {
             **{k: v for k, v in kw.items() if k not in {"interval_sec", "command_prefix"}},
         ),
     ),
+    "retreat_shallow": PresetSpec(
+        key="retreat_shallow",
+        label="闭关修炼·小批量",
+        description="10min CD 小批量闭关;次数可填,单批最多 24 次",
+        fields=("count",),
+        module_key="retreat_shallow",
+        builder=lambda **kw: _build_counted_periodic(
+            command_prefix=CMD_RETREAT_SHALLOW,
+            interval_sec=RETREAT_SHALLOW_CD,
+            max_count=RETREAT_SHALLOW_MAX_COUNT,
+            **{k: v for k, v in kw.items() if k not in {"command_prefix", "interval_sec", "max_count"}},
+        ),
+    ),
     "wild_training": _fixed_preset(
         key="wild_training",
         label="野外历练",
@@ -426,6 +548,17 @@ PRESETS: dict[str, PresetSpec] = {
         interval_sec=24 * 3600,
         description="按闯塔状态机/每日窗口,一天一轮",
     ),
+    "daily_essentials": PresetSpec(
+        key="daily_essentials",
+        label="每日包",
+        description="点卯/闯塔/问心台/第二元神,每天错峰一轮",
+        fields=("horizon_days", "command_gap_sec"),
+        builder=lambda **kw: _build_combo_rounds(
+            commands=(".宗门点卯", ".闯塔", ".问心台", ".元神修炼"),
+            interval_sec=24 * 3600,
+            **{k: v for k, v in kw.items() if k not in {"commands", "interval_sec"}},
+        ),
+    ),
     "ranch": _fixed_preset(
         key="ranch",
         label="一键放养",
@@ -446,6 +579,38 @@ PRESETS: dict[str, PresetSpec] = {
         command=".天机代卜",
         interval_sec=12 * 3600,
         description="按天机代卜状态机起点,12h 一轮",
+    ),
+    "stargazer_guide": _fixed_preset(
+        key="stargazer_guide",
+        label="牵引星辰",
+        command=CMD_STARGAZER_GUIDE,
+        interval_sec=6 * 3600,
+        description="按牵引星辰状态机起点,6h 一轮",
+    ),
+    "stargazer_soothe": _fixed_preset(
+        key="stargazer_soothe",
+        label="安抚星辰",
+        command=CMD_STARGAZER_SOOTHE,
+        interval_sec=6 * 3600,
+        description="按安抚星辰状态机起点,6h 巡查一轮",
+    ),
+    "stargazer_collect": _fixed_preset(
+        key="stargazer_collect",
+        label="收集精华",
+        command=CMD_STARGAZER_COLLECT,
+        interval_sec=6 * 3600,
+        description="按收集精华状态机起点,6h 巡查一轮",
+    ),
+    "stargazer_care": PresetSpec(
+        key="stargazer_care",
+        label="星宫维护",
+        description="牵引/安抚/收集三件套,每 6h 错峰一轮",
+        fields=("horizon_days", "command_gap_sec"),
+        builder=lambda **kw: _build_combo_rounds(
+            commands=(CMD_STARGAZER_GUIDE, CMD_STARGAZER_SOOTHE, CMD_STARGAZER_COLLECT),
+            interval_sec=6 * 3600,
+            **{k: v for k, v in kw.items() if k not in {"commands", "interval_sec"}},
+        ),
     ),
     "tianti_climb": _fixed_preset(
         key="tianti_climb",
@@ -475,6 +640,36 @@ PRESETS: dict[str, PresetSpec] = {
         command=".引九天罡风",
         interval_sec=12 * 3600,
         description="按九天罡风状态机起点,12h 一轮",
+    ),
+    "lingxiao_standard": PresetSpec(
+        key="lingxiao_standard",
+        label="凌霄宫·标准",
+        description="登天阶 4h / 九天罡风 12h / 问心台每日,错峰排",
+        fields=("horizon_days",),
+        module_key="tianti_climb",
+        builder=lambda **kw: _build_mixed_periodic(
+            streams=(
+                {"command": ".登天阶", "interval_sec": 4 * 3600, "offset_sec": 0},
+                {"command": ".引九天罡风", "interval_sec": 12 * 3600, "offset_sec": 180},
+                {"command": ".问心台", "interval_sec": 24 * 3600, "offset_sec": 360},
+            ),
+            **{k: v for k, v in kw.items() if k != "streams"},
+        ),
+    ),
+    "lingxiao_elder": PresetSpec(
+        key="lingxiao_elder",
+        label="凌霄宫·长老",
+        description="登天阶 3h / 九天罡风 12h / 问心台每日,错峰排",
+        fields=("horizon_days",),
+        module_key="tianti_climb",
+        builder=lambda **kw: _build_mixed_periodic(
+            streams=(
+                {"command": ".登天阶", "interval_sec": 3 * 3600, "offset_sec": 0},
+                {"command": ".引九天罡风", "interval_sec": 12 * 3600, "offset_sec": 180},
+                {"command": ".问心台", "interval_sec": 24 * 3600, "offset_sec": 360},
+            ),
+            **{k: v for k, v in kw.items() if k != "streams"},
+        ),
     ),
     "second_soul": _fixed_preset(
         key="second_soul",
@@ -510,6 +705,18 @@ PRESETS: dict[str, PresetSpec] = {
         command=".引道",
         interval_sec=12 * 3600,
         description="按太一周期状态机起点,12h 一轮",
+    ),
+    "taiyi_patrol": PresetSpec(
+        key="taiyi_patrol",
+        label="太一巡检",
+        description="引道/搜寻节点,每 12h 错峰一轮;定星后续仍需人工确认",
+        fields=("horizon_days", "command_gap_sec"),
+        module_key="taiyi_cycle",
+        builder=lambda **kw: _build_combo_rounds(
+            commands=(CMD_YINDAO, CMD_SEARCH_NODE),
+            interval_sec=12 * 3600,
+            **{k: v for k, v in kw.items() if k not in {"commands", "interval_sec"}},
+        ),
     ),
 }
 
