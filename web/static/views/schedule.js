@@ -590,6 +590,9 @@
 
           <section class="modal-section">
             <h4>续期策略</h4>
+            <div id="scheduleRenewWorkerStatus" class="schedule-renew-worker-status" aria-live="polite">
+              ${renderScheduleRenewWorkerStatus()}
+            </div>
             <form id="scheduleRenewForm" class="settings-form">
               <input type="hidden" name="id" />
               <div class="form-grid">
@@ -748,6 +751,25 @@
       .join("");
   }
 
+  function renderScheduleRenewWorkerStatus(worker = null) {
+    if (!worker) {
+      return '<span class="status-pill">读取中</span><small>后台续期 worker 状态读取中</small>';
+    }
+    const running = Boolean(worker.running);
+    const result = worker.last_result || {};
+    const lastRun = worker.last_run_text ? `上次扫描 ${worker.last_run_text}` : "尚未扫描";
+    let summary = "等待首次扫描";
+    if (result.ok === false) {
+      summary = result.error || "扫描失败";
+    } else if (Object.prototype.hasOwnProperty.call(result, "processed")) {
+      summary = `处理 ${Number(result.processed || 0)}｜新建 ${Number(result.created || 0)}｜跳过 ${Number(result.skipped || 0)}｜阻塞 ${Number(result.blocked || 0)}`;
+    }
+    return `
+      <span class="status-pill ${running ? "ok" : "warn"}">${running ? "worker 运行中" : "worker 未运行"}</span>
+      <small>${escapeHtml(lastRun)}｜${escapeHtml(summary)}</small>
+    `;
+  }
+
   function renderScheduleRenewProfiles(deps = {}, profiles = []) {
     if (!profiles.length) {
       return '<p class="empty inline">还没有续期策略。</p>';
@@ -760,7 +782,11 @@
         ? `<span class="status-pill ${ready ? "ok" : "warn"}">${ready ? "可续期" : "待观察"}</span>`
         : '<span class="status-pill">停用</span>';
       const identity = scheduleIdentityLabel(deps, profile.send_as_id) || `send_as ${profile.send_as_id || ""}`;
-      const coverage = profile.covered_until_text || profile.tail_text || "未覆盖";
+      const coverage = profile.covered_until_text || profile.tail_text || "当前无未来项";
+      const storedCoverage = profile.stored_covered_until_text || "";
+      const storedHint = storedCoverage && storedCoverage !== coverage
+        ? `<small class="muted">上次记录覆盖到 ${escapeHtml(storedCoverage)}</small>`
+        : "";
       const error = profile.last_error
         ? `<small class="warn">${escapeHtml(profile.last_error)}</small>`
         : "";
@@ -773,7 +799,8 @@
               ${statusPill}
               <span class="account-row-meta">${escapeHtml(identity)}｜${escapeHtml(profile.module_key || "")}｜续 ${escapeHtml(String(profile.renew_days || 1))} 天｜余量 ${escapeHtml(String(profile.soft_remaining ?? ""))}</span>
             </div>
-            <p class="muted">覆盖到 ${escapeHtml(coverage)}｜阈值 ${escapeHtml(String(profile.threshold_hours || 24))}h</p>
+            <p class="muted">当前覆盖到 ${escapeHtml(coverage)}｜阈值 ${escapeHtml(String(profile.threshold_hours || 24))}h</p>
+            ${storedHint}
             ${error}
           </div>
           <div class="account-row-actions">
@@ -1165,6 +1192,7 @@
     const renewStatus = dialog.querySelector("#scheduleRenewStatus");
     const renewPreview = dialog.querySelector("#scheduleRenewPreview");
     const renewProfileList = dialog.querySelector("#scheduleRenewProfileList");
+    const renewWorkerStatus = dialog.querySelector("#scheduleRenewWorkerStatus");
     const renewSendAsSelect = dialog.querySelector("#scheduleRenewSendAsSelect");
     const renewPresetSelect = dialog.querySelector("#scheduleRenewPresetSelect");
     const renewModuleSelect = dialog.querySelector("#scheduleRenewModuleSelect");
@@ -1208,6 +1236,10 @@
       renewPreview.hidden = !html;
       renewPreview.innerHTML = html || "";
     };
+    const updateRenewWorkerStatus = (worker) => {
+      if (!renewWorkerStatus) return;
+      renewWorkerStatus.innerHTML = renderScheduleRenewWorkerStatus(worker || null);
+    };
     const updateFieldVisibility = () => {
       const key = form.querySelector('[name="preset_key"]').value;
       const required = new Set(presetMap.get(key)?.fields || []);
@@ -1219,6 +1251,7 @@
     const presetSelect = form.querySelector('[name="preset_key"]');
     updateFieldVisibility();
     let renewProfiles = [];
+    let renewWorker = null;
 
     const selectedPrimarySendAs = () => {
       const select = dialog.querySelector("#scheduleSendAsSelect");
@@ -1404,6 +1437,8 @@
       const result = await fetchJson("/api/schedule/renew");
       if (!result.ok) throw new Error(result.error || "读取续期策略失败");
       renewProfiles = result.profiles || [];
+      renewWorker = result.worker || null;
+      updateRenewWorkerStatus(renewWorker);
       renewProfileList.innerHTML = renderScheduleRenewProfiles(deps, renewProfiles);
       bindRenewProfileActions();
       return renewProfiles;

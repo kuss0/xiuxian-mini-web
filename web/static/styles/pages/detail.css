@@ -914,6 +914,24 @@
   border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 }
 
+.schedule-renew-worker-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.30);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.schedule-renew-worker-status small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .schedule-identity-picker-empty {
   padding: 10px;
   color: var(--muted);

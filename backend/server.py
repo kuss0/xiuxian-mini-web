@@ -3134,7 +3134,10 @@ class MiniWebServer:
         profile_id = _safe_int((payload or {}).get("profile_id") or (payload or {}).get("id"))
         if not profile_id:
             return {"ok": False, "error": "请提供续期策略 id"}
-        deleted = self._store.delete_schedule_renew_profile(profile_id)
+        lock = self._schedule_renew_profile_lock(profile_id)
+        with lock:
+            deleted = self._store.delete_schedule_renew_profile(profile_id)
+        self._schedule_renew_discard_profile_lock(profile_id, lock)
         return {"ok": deleted, "deleted": deleted, "profile_id": profile_id, "profiles": self.schedule_renew_profiles_payload().get("profiles") or []}
 
     def schedule_renew_worker_status_payload(self) -> dict:
@@ -3240,6 +3243,15 @@ class MiniWebServer:
                 lock = threading.Lock()
                 self._schedule_renew_profile_locks[pid] = lock
             return lock
+
+    def _schedule_renew_discard_profile_lock(self, profile_id: int, lock: threading.Lock | None = None) -> None:
+        pid = int(profile_id or 0)
+        if not pid:
+            return
+        with self._schedule_renew_profile_locks_lock:
+            current = self._schedule_renew_profile_locks.get(pid)
+            if current is not None and (lock is None or current is lock):
+                self._schedule_renew_profile_locks.pop(pid, None)
 
     def _schedule_renew_load_profile(self, payload: dict) -> tuple[dict | None, str]:
         profile_id = _safe_int((payload or {}).get("profile_id") or (payload or {}).get("id"))
@@ -3450,18 +3462,24 @@ class MiniWebServer:
         force = self._schedule_renew_bool((payload or {}).get("force"), False)
         with self._schedule_renew_profile_lock(profile_id):
             fresh = self._store.get_schedule_renew_profile(profile_id) if hasattr(self._store, "get_schedule_renew_profile") else None
-            if fresh:
-                profile = fresh
+            if not fresh:
+                return {"ok": False, "status": "missing", "error": "续期策略不存在", "items": []}
+            profile = fresh
             if not bool((profile or {}).get("enabled", True)):
                 return {"ok": False, "status": "disabled", "error": "续期策略已停用", "items": []}
             plan = self._schedule_renew_plan(profile or {}, force=force)
             if not plan.get("ok") or not plan.get("items"):
-                if not plan.get("ok"):
-                    self._store.update_schedule_renew_profile_runtime(
-                        profile_id,
-                        last_run_at=time.time(),
-                        last_error=str(plan.get("error") or plan.get("manual_message") or ""),
-                    )
+                updated = self._store.update_schedule_renew_profile_runtime(
+                    profile_id,
+                    last_run_at=time.time(),
+                    last_error=str(plan.get("error") or plan.get("manual_message") or "") if not plan.get("ok") else "",
+                )
+                if plan.get("ok"):
+                    return {
+                        **plan,
+                        "profile": self._schedule_renew_profile_view(updated or profile, include_contract=False),
+                        "profiles": self.schedule_renew_profiles_payload().get("profiles") or [],
+                    }
                 return plan
             create_payload = dict(plan.get("create_payload") or {})
             create_payload.update(

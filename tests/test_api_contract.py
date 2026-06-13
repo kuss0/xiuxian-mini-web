@@ -6375,6 +6375,96 @@ def test_schedule_renew_profile_view_does_not_show_stale_covered_until_as_curren
     assert profile["stored_covered_until_text"]
 
 
+def test_schedule_renew_run_clears_stale_error_when_not_due(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+    now = time.time()
+    store.save_module_state(
+        12345,
+        "concubine_tianji",
+        {"cooldown_until": now + 1800, "last_observed_at": now, "last_status": "cooldown"},
+        source_message_id="raw-renew-not-due",
+    )
+    saved = store.save_schedule_renew_profile({
+        "send_as_id": 12345,
+        "preset_key": "concubine_tianji",
+        "module_key": "concubine_tianji",
+        "renew_days": 1,
+        "threshold_hours": 1,
+        "soft_limit": 95,
+        "last_error": "旧失败",
+        "payload": {"send_as_id": 12345, "preset_key": "concubine_tianji"},
+    })
+    store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "preset_key": "concubine_tianji",
+            "label": "天机代卜续期",
+            "anchor_at": now + 7200,
+            "horizon_days": 1,
+            "options": {"renew_profile_id": saved["id"], "renewed_by": "schedule_renew", "dry_run": False},
+        },
+        [{"command": ".天机代卜", "schedule_at": now + 7200, "status": "planned"}],
+    )
+
+    result = server.schedule_renew_run_payload({"profile_id": saved["id"]})
+    refreshed = store.get_schedule_renew_profile(saved["id"])
+
+    assert result["ok"] is True
+    assert result["status"] == "not_due"
+    assert refreshed["last_error"] == ""
+    assert refreshed["last_run_at"] > 0
+    assert result["profile"]["last_error"] == ""
+    assert result["profiles"][0]["last_error"] == ""
+    assert len(store.list_schedule_batches(include_inactive=True)) == 1
+
+
+def test_schedule_renew_run_rejects_profile_deleted_before_locked_refresh(tmp_path, monkeypatch):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+    now = time.time()
+    store.save_module_state(
+        12345,
+        "concubine_tianji",
+        {"cooldown_until": now + 120, "last_observed_at": now, "last_status": "cooldown"},
+        source_message_id="raw-renew-delete-race",
+    )
+    saved = store.save_schedule_renew_profile({
+        "send_as_id": 12345,
+        "preset_key": "concubine_tianji",
+        "module_key": "concubine_tianji",
+        "renew_days": 1,
+        "threshold_hours": 1,
+        "soft_limit": 95,
+        "payload": {"send_as_id": 12345, "preset_key": "concubine_tianji"},
+    })
+    original_get = store.get_schedule_renew_profile
+    calls = 0
+
+    def get_then_delete(profile_id):
+        nonlocal calls
+        calls += 1
+        profile = original_get(profile_id)
+        if calls == 1:
+            store.delete_schedule_renew_profile(profile_id)
+        return profile
+
+    monkeypatch.setattr(store, "get_schedule_renew_profile", get_then_delete)
+
+    result = server.schedule_renew_run_payload({"profile_id": saved["id"]})
+
+    assert result["ok"] is False
+    assert result["status"] == "missing"
+    assert "不存在" in result["error"]
+    assert store.list_schedule_batches(include_inactive=True) == []
+
+
 def test_schedule_renew_preview_and_run_use_state_machine_tail_and_metadata(tmp_path, monkeypatch):
     import time
 
@@ -6914,6 +7004,9 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert 'postJson("/api/schedule/sync/repair"' in schedule_js
     assert 'id="scheduleRenewForm"' in schedule_js
     assert 'id="scheduleRenewProfileList"' in schedule_js
+    assert 'id="scheduleRenewWorkerStatus"' in schedule_js
+    assert "function renderScheduleRenewWorkerStatus(worker = null)" in schedule_js
+    assert "上次记录覆盖到" in schedule_js
     assert 'SCHEDULE_RENEW_ALLOWED_PRESETS' in schedule_js
     assert 'postJson("/api/schedule/renew/save"' in schedule_js
     assert 'postJson("/api/schedule/renew/preview"' in schedule_js
