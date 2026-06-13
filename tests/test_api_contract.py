@@ -7104,8 +7104,18 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert 'id="scheduleRenewForm"' in schedule_js
     assert 'id="scheduleRenewProfileList"' in schedule_js
     assert 'id="scheduleRenewWorkerStatus"' in schedule_js
+    assert 'id="scheduleRenewOverview"' in schedule_js
     assert "function renderScheduleRenewWorkerStatus(worker = null)" in schedule_js
+    assert "function renderScheduleRenewOverview(deps = {}, options = {})" in schedule_js
+    assert "function parseScheduleShanghaiLocalTimestamp(value)" in schedule_js
+    assert 'DISPLAY_TIME_ZONE = "Asia/Shanghai"' in schedule_js
+    assert "SCHEDULE_TIME_ZONE_LABEL" in schedule_js
+    assert "上海时间" in schedule_js
+    assert "new Date(String(anchorText))" not in schedule_js
     assert "上次记录覆盖到" in schedule_js
+    assert "自动中" in schedule_js
+    assert "可新增" in schedule_js
+    assert "需先观察" in schedule_js
     assert "const markRenewFormAsDraft = () => {" in schedule_js
     assert "if (!profileId) delete payload.id;" in schedule_js
     assert 'SCHEDULE_RENEW_ALLOWED_PRESETS' in schedule_js

@@ -4,8 +4,15 @@
 
   const { fetchJson, postJson } = window.MiniwebApi;
   const { openModal } = window.MiniwebModal;
-  const { clipGraphemes, escapeAttr, escapeHtml } = window.MiniwebFormat;
+  const {
+    DISPLAY_TIME_ZONE = "Asia/Shanghai",
+    clipGraphemes,
+    escapeAttr,
+    escapeHtml,
+  } = window.MiniwebFormat;
   const SCHEDULE_BOOTSTRAP_URL = "/api/schedule/bootstrap?include=presets,modules,templates";
+  const SCHEDULE_TIME_ZONE_LABEL = DISPLAY_TIME_ZONE === "Asia/Shanghai" ? "上海时间" : DISPLAY_TIME_ZONE;
+  const SCHEDULE_SHANGHAI_OFFSET_MINUTES = 8 * 60;
   const SCHEDULE_RENEW_ALLOWED_PRESETS = {
     wild_training: "wild_training",
     checkin: "checkin",
@@ -22,6 +29,37 @@
     wendao: "wendao",
     yindao: "yindao",
   };
+
+  function scheduleTimeZonePill() {
+    return `<span class="status-pill schedule-timezone-pill">${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}</span>`;
+  }
+
+  function parseScheduleShanghaiLocalTimestamp(value) {
+    const text = String(value || "").trim();
+    if (!text) return null;
+    const match = text.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const hour = Number(match[4]);
+    const minute = Number(match[5]);
+    const second = Number(match[6] || 0);
+    const wallMs = Date.UTC(year, month - 1, day, hour, minute, second);
+    const utcMs = wallMs - SCHEDULE_SHANGHAI_OFFSET_MINUTES * 60 * 1000;
+    const check = new Date(utcMs + SCHEDULE_SHANGHAI_OFFSET_MINUTES * 60 * 1000);
+    if (
+      check.getUTCFullYear() !== year
+      || check.getUTCMonth() !== month - 1
+      || check.getUTCDate() !== day
+      || check.getUTCHours() !== hour
+      || check.getUTCMinutes() !== minute
+      || check.getUTCSeconds() !== second
+    ) {
+      return null;
+    }
+    return Math.floor(utcMs / 1000);
+  }
 
   function scheduleState(deps = {}) {
     return deps.state || window.MiniwebState?.state || {};
@@ -137,6 +175,7 @@
       <div class="schedule-rail-summary schedule-tool-summary">
         <div class="schedule-tool-summary-title">
           <strong>官方定时</strong>
+          ${scheduleTimeZonePill()}
           <span>${totals.sending ? `${escapeHtml(String(totals.sending))} 批发送中` : "TG 排班工作台"}</span>
         </div>
         <div class="schedule-tool-metrics">
@@ -196,6 +235,7 @@
           <span class="schedule-rail-row-meta schedule-tool-meta">
             <small>${escapeHtml(identity)}</small>
             <small>${escapeHtml(batch.anchor_text || "未设锚点")}</small>
+            <small>${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}</small>
             <small>${escapeHtml(scheduleStatusText(statusKey, counts))}</small>
           </span>
           ${total ? `<span class="schedule-progress compact"><span class="schedule-progress-bar" style="width:${pct}%"></span></span>` : ""}
@@ -531,7 +571,7 @@
                   <input name="offset_minutes" inputmode="numeric" value="0" placeholder="0 = 不偏" title="多账号同时建议各错开 3-15 分钟,避免天尊同一刻被多账号挤" />
                 </label>
                 <label class="span-2">
-                  <span>锚点时间(留空 = 现在)</span>
+                  <span>锚点时间(${SCHEDULE_TIME_ZONE_LABEL})</span>
                   <input name="anchor_at_text" type="datetime-local" />
                 </label>
               </div>
@@ -589,9 +629,12 @@
           </section>
 
           <section class="modal-section">
-            <h4>续期策略</h4>
+            <h4>续期策略 ${scheduleTimeZonePill()}</h4>
             <div id="scheduleRenewWorkerStatus" class="schedule-renew-worker-status" aria-live="polite">
               ${renderScheduleRenewWorkerStatus()}
+            </div>
+            <div id="scheduleRenewOverview" class="schedule-renew-overview" aria-live="polite">
+              <p class="empty inline">正在读取续期状态...</p>
             </div>
             <form id="scheduleRenewForm" class="settings-form">
               <input type="hidden" name="id" />
@@ -766,7 +809,98 @@
     }
     return `
       <span class="status-pill ${running ? "ok" : "warn"}">${running ? "worker 运行中" : "worker 未运行"}</span>
+      ${scheduleTimeZonePill()}
       <small>${escapeHtml(lastRun)}｜${escapeHtml(summary)}</small>
+    `;
+  }
+
+  function scheduleRenewAllowedPresetRows(allowedPresets = [], presetMap = null) {
+    return (allowedPresets || [])
+      .map((item) => {
+        const presetKey = String(item.preset_key || item.key || "").trim();
+        const moduleKey = String(item.module_key || scheduleRenewModuleForPreset(presetKey) || "").trim();
+        if (!presetKey || !moduleKey) return null;
+        const preset = presetMap?.get?.(presetKey) || null;
+        return {
+          preset_key: presetKey,
+          module_key: moduleKey,
+          label: preset?.label || item.label || presetKey,
+          interval_sec: Number(item.interval_sec || 0),
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function scheduleRenewProfileKey(sendAsId, presetKey) {
+    return `${Number(sendAsId || 0)}:${String(presetKey || "").trim()}`;
+  }
+
+  function scheduleRenewStatusChip(label, tone = "") {
+    return `<span class="status-pill ${escapeAttr(tone)}">${escapeHtml(label)}</span>`;
+  }
+
+  function renderScheduleRenewOverview(deps = {}, options = {}) {
+    const profiles = options.profiles || [];
+    const presetMap = options.presetMap || null;
+    const allowedRows = scheduleRenewAllowedPresetRows(options.allowedPresets || [], presetMap);
+    const selectedSendAsId = Number(options.selectedSendAsId || 0);
+    const scheduleModules = options.scheduleModules || {};
+    const configured = new Set(profiles.map((profile) => scheduleRenewProfileKey(profile.send_as_id, profile.preset_key)));
+    const enabled = profiles.filter((profile) => profile.enabled !== false);
+    const automatic = enabled.filter((profile) => Boolean(profile.state_contract?.semiauto_ready) && !profile.last_error);
+    const waiting = enabled.filter((profile) => !Boolean(profile.state_contract?.semiauto_ready) || profile.last_error);
+    const disabled = profiles.filter((profile) => profile.enabled === false);
+    const addable = [];
+    const blocked = [];
+    if (selectedSendAsId) {
+      allowedRows.forEach((row) => {
+        const key = scheduleRenewProfileKey(selectedSendAsId, row.preset_key);
+        if (configured.has(key)) return;
+        const contract = findScheduleContract(scheduleModules, selectedSendAsId, row.module_key);
+        const target = {
+          ...row,
+          contract,
+          identity: scheduleIdentityLabel(deps, selectedSendAsId) || `send_as ${selectedSendAsId}`,
+        };
+        if (contract?.semiauto_ready) addable.push(target);
+        else blocked.push(target);
+      });
+    }
+    const profileChip = (profile, tone) => `
+      <button type="button" class="schedule-renew-chip" data-schedule-renew-action="load" data-profile-id="${escapeAttr(String(profile.id || ""))}">
+        <strong>${escapeHtml(profile.label || profile.preset_key || "")}</strong>
+        <small>${escapeHtml(scheduleIdentityLabel(deps, profile.send_as_id) || `send_as ${profile.send_as_id || ""}`)}</small>
+        ${scheduleRenewStatusChip(profile.last_error ? "异常" : profile.enabled === false ? "停用" : "已配置", tone)}
+      </button>
+    `;
+    const presetChip = (row, tone, action = "apply") => `
+      <button type="button" class="schedule-renew-chip" data-schedule-renew-overview-action="${escapeAttr(action)}" data-schedule-renew-preset="${escapeAttr(row.preset_key)}" data-schedule-renew-send-as="${escapeAttr(String(selectedSendAsId))}">
+        <strong>${escapeHtml(row.label)}</strong>
+        <small>${escapeHtml(row.module_key)}${row.interval_sec ? `｜${escapeHtml(String(Math.round(row.interval_sec / 60)))}min` : ""}</small>
+        ${scheduleRenewStatusChip(action === "apply" ? "套用" : "需观察", tone)}
+      </button>
+    `;
+    const group = (title, rowsHtml, count, emptyText) => `
+      <div class="schedule-renew-overview-group">
+        <div class="schedule-renew-overview-head">
+          <strong>${escapeHtml(title)}</strong>
+          <span>${escapeHtml(String(count))}</span>
+        </div>
+        <div class="schedule-renew-chip-list">${rowsHtml || `<small class="muted">${escapeHtml(emptyText)}</small>`}</div>
+      </div>
+    `;
+    const selectedHint = selectedSendAsId
+      ? `当前新增身份: ${scheduleIdentityLabel(deps, selectedSendAsId)}`
+      : "当前新增身份: 未选择";
+    return `
+      <div class="schedule-renew-overview-top">
+        ${scheduleTimeZonePill()}
+        <small>${escapeHtml(selectedHint)}</small>
+      </div>
+      ${group("自动中", automatic.map((profile) => profileChip(profile, "ok")).join(""), automatic.length, "暂无可自动运行策略")}
+      ${group("待观察", waiting.map((profile) => profileChip(profile, "warn")).join("") + disabled.map((profile) => profileChip(profile, "")).join(""), waiting.length + disabled.length, "暂无阻塞策略")}
+      ${group("可新增", addable.map((row) => presetChip(row, "ok", "apply")).join(""), addable.length, selectedSendAsId ? "当前身份暂无可新增预设" : "先选择续期身份")}
+      ${group("需先观察", blocked.slice(0, 8).map((row) => presetChip(row, "warn", "blocked")).join(""), blocked.length, "没有缺观察的白名单预设")}
     `;
   }
 
@@ -799,7 +933,7 @@
               ${statusPill}
               <span class="account-row-meta">${escapeHtml(identity)}｜${escapeHtml(profile.module_key || "")}｜续 ${escapeHtml(String(profile.renew_days || 1))} 天｜余量 ${escapeHtml(String(profile.soft_remaining ?? ""))}</span>
             </div>
-            <p class="muted">当前覆盖到 ${escapeHtml(coverage)}｜阈值 ${escapeHtml(String(profile.threshold_hours || 24))}h</p>
+            <p class="muted">当前覆盖到 ${escapeHtml(coverage)}｜${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}｜阈值 ${escapeHtml(String(profile.threshold_hours || 24))}h</p>
             ${storedHint}
             ${error}
           </div>
@@ -889,7 +1023,7 @@
               <div class="account-row-title">
                 <strong>${escapeHtml(b.label || b.preset_key)}</strong>
                 ${statusPill}
-                <span class="account-row-meta">send_as ${escapeHtml(String(b.send_as_id || ""))}｜${escapeHtml(b.anchor_text || "")}｜${escapeHtml(String(b.horizon_days || ""))} 天｜${escapeHtml(statusText)}</span>
+                <span class="account-row-meta">send_as ${escapeHtml(String(b.send_as_id || ""))}｜${escapeHtml(b.anchor_text || "")}｜${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}｜${escapeHtml(String(b.horizon_days || ""))} 天｜${escapeHtml(statusText)}</span>
               </div>
               ${showProgress ? `<div class="schedule-progress"><div class="schedule-progress-bar" style="width:${pct}%"></div></div>` : ""}
               <ul class="schedule-item-list">${items || '<li><small>没有待展示命令</small></li>'}</ul>
@@ -948,7 +1082,7 @@
     return `
       <div class="schedule-preview-extras" style="margin-top:8px">
         ${rows}
-        <p class="muted" style="margin:6px 0 2px">未来时间线(${byDay.size} 天):</p>
+        <p class="muted" style="margin:6px 0 2px">未来时间线(${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}｜${byDay.size} 天):</p>
         <ul class="send-as-result-list">${timeline}</ul>
         ${multiNote}
       </div>
@@ -1193,6 +1327,7 @@
     const renewPreview = dialog.querySelector("#scheduleRenewPreview");
     const renewProfileList = dialog.querySelector("#scheduleRenewProfileList");
     const renewWorkerStatus = dialog.querySelector("#scheduleRenewWorkerStatus");
+    const renewOverview = dialog.querySelector("#scheduleRenewOverview");
     const renewSendAsSelect = dialog.querySelector("#scheduleRenewSendAsSelect");
     const renewPresetSelect = dialog.querySelector("#scheduleRenewPresetSelect");
     const renewModuleSelect = dialog.querySelector("#scheduleRenewModuleSelect");
@@ -1252,10 +1387,22 @@
     updateFieldVisibility();
     let renewProfiles = [];
     let renewWorker = null;
+    let renewAllowedPresets = [];
 
     const selectedPrimarySendAs = () => {
       const select = dialog.querySelector("#scheduleSendAsSelect");
       return Number(select?.selectedOptions?.[0]?.value || 0);
+    };
+    const updateRenewOverview = () => {
+      if (!renewOverview) return;
+      renewOverview.innerHTML = renderScheduleRenewOverview(deps, {
+        profiles: renewProfiles,
+        allowedPresets: renewAllowedPresets,
+        presetMap,
+        scheduleModules,
+        selectedSendAsId: Number(renewSendAsSelect?.value || selectedPrimarySendAs() || 0),
+      });
+      bindRenewOverviewActions();
     };
     const selectedStateModule = () => String(stateModuleSelect?.value || "").trim();
     const matchedModuleForPreset = () => {
@@ -1331,9 +1478,9 @@
       }
       const anchorText = data.get("anchor_at_text");
       if (anchorText) {
-        const parsed = new Date(String(anchorText));
-        if (!Number.isNaN(parsed.getTime())) {
-          payload.anchor_at = Math.floor(parsed.getTime() / 1000);
+        const parsed = parseScheduleShanghaiLocalTimestamp(String(anchorText));
+        if (parsed !== null) {
+          payload.anchor_at = parsed;
         }
       }
       return payload;
@@ -1352,6 +1499,7 @@
       const idField = renewForm.querySelector('[name="id"]');
       if (idField && idField.value) idField.value = "";
       showRenewPreview("");
+      updateRenewOverview();
     };
 
     const resetRenewForm = () => {
@@ -1368,6 +1516,7 @@
       syncRenewModuleToPreset();
       showRenewPreview("");
       setRenewStatus("info", "");
+      updateRenewOverview();
     };
 
     const collectRenewPayload = () => {
@@ -1416,6 +1565,7 @@
       setValue("enabled", profile.enabled !== false);
       syncRenewModuleToPreset();
       setRenewStatus("ok", `已载入续期策略 #${profile.id}`);
+      updateRenewOverview();
     };
 
     const renderRenewPlan = (result) => {
@@ -1430,7 +1580,7 @@
             ? "没有需要补排的未来项"
             : `可续期 ${items.length} 条`;
       return `
-        <p><strong>${escapeHtml(profile.label || result.preset_label || "")}</strong>｜${escapeHtml(statusText)}｜额度 ${escapeHtml(String(result.current_usage ?? ""))}/${escapeHtml(String(result.soft_limit ?? ""))}</p>
+        <p><strong>${escapeHtml(profile.label || result.preset_label || "")}</strong>｜${escapeHtml(statusText)}｜${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}｜额度 ${escapeHtml(String(result.current_usage ?? ""))}/${escapeHtml(String(result.soft_limit ?? ""))}</p>
         ${contractHtml}
         <ul class="send-as-result-list">
           ${items.map((it) => `<li class="ok"><code>${escapeHtml(it.command)}</code> <small>${escapeHtml(it.schedule_text || "")}</small></li>`).join("") || "<li>(0 条)</li>"}
@@ -1445,7 +1595,9 @@
       if (!result.ok) throw new Error(result.error || "读取续期策略失败");
       renewProfiles = result.profiles || [];
       renewWorker = result.worker || null;
+      renewAllowedPresets = result.allowed_presets || [];
       updateRenewWorkerStatus(renewWorker);
+      updateRenewOverview();
       renewProfileList.innerHTML = renderScheduleRenewProfiles(deps, renewProfiles);
       bindRenewProfileActions();
       return renewProfiles;
@@ -1457,6 +1609,7 @@
       if (!result.ok) throw new Error(result.error || "保存续期策略失败");
       renewProfiles = result.profiles || [];
       if (renewProfileList) renewProfileList.innerHTML = renderScheduleRenewProfiles(deps, renewProfiles);
+      updateRenewOverview();
       bindRenewProfileActions();
       if (result.profile) fillRenewForm(result.profile);
       return result.profile;
@@ -1484,6 +1637,7 @@
       showRenewPreview(renderRenewPlan(result.renew_plan || result));
       renewProfiles = result.profiles || renewProfiles;
       if (renewProfileList) renewProfileList.innerHTML = renderScheduleRenewProfiles(deps, renewProfiles);
+      updateRenewOverview();
       bindRenewProfileActions();
       if (result.status === "not_due" || result.status === "no_items") {
         setRenewStatus("info", result.message || "当前不需要续期");
@@ -1529,6 +1683,7 @@
               if (!result.ok) throw new Error(result.error || "删除续期策略失败");
               renewProfiles = result.profiles || [];
               renewProfileList.innerHTML = renderScheduleRenewProfiles(deps, renewProfiles);
+              updateRenewOverview();
               bindRenewProfileActions();
               resetRenewForm();
               setRenewStatus("ok", `已删除续期策略 #${profileId}`);
@@ -1542,6 +1697,35 @@
               btn.textContent = originalText;
             }
           }
+        });
+      });
+    }
+
+    function bindRenewOverviewActions() {
+      if (!renewOverview) return;
+      renewOverview.querySelectorAll("[data-schedule-renew-action], [data-schedule-renew-overview-action]").forEach((btn) => {
+        if (btn.dataset.bound === "1") return;
+        btn.dataset.bound = "1";
+        btn.addEventListener("click", () => {
+          const profileId = Number(btn.dataset.profileId || 0);
+          if (profileId) {
+            const profile = renewProfiles.find((item) => Number(item.id || 0) === profileId);
+            fillRenewForm(profile);
+            return;
+          }
+          const action = btn.dataset.scheduleRenewOverviewAction || "";
+          const presetKey = String(btn.dataset.scheduleRenewPreset || "").trim();
+          const sendAsId = Number(btn.dataset.scheduleRenewSendAs || renewSendAsSelect?.value || 0);
+          if (!presetKey) return;
+          if (renewSendAsSelect && sendAsId && Array.from(renewSendAsSelect.options).some((option) => Number(option.value || 0) === sendAsId)) {
+            renewSendAsSelect.value = String(sendAsId);
+          }
+          if (renewPresetSelect && Array.from(renewPresetSelect.options).some((option) => option.value === presetKey)) {
+            renewPresetSelect.value = presetKey;
+          }
+          syncRenewModuleToPreset();
+          markRenewFormAsDraft();
+          setRenewStatus(action === "blocked" ? "warn" : "ok", action === "blocked" ? "已套用;该状态机还需先观察到可半自动状态" : "已套用可新增续期预设");
         });
       });
     }
@@ -1664,6 +1848,7 @@
         }
       }
       renderStateHint();
+      updateRenewOverview();
     }
     function setScheduleIdentitySelection(ids) {
       if (!sendAsSelect) return;
@@ -1899,7 +2084,7 @@
               if (Array.isArray(sched.batches)) curBatches = sched.batches;
             } catch (e) { /* 用打开模态时的批次兜底 */ }
             showPreview(`
-              <p>预设 <strong>${escapeHtml(result.preset_label)}</strong>｜锚点 ${escapeHtml(result.anchor_text)}${result.auto_anchor_used ? '<small class="status-pill ok" style="margin-left:6px">自动锚点</small>' : ""}｜首次发送 ${escapeHtml(result.first_due_text || result.anchor_text)}｜${result.horizon_days} 天</p>
+              <p>预设 <strong>${escapeHtml(result.preset_label)}</strong>｜锚点 ${escapeHtml(result.anchor_text)}${result.auto_anchor_used ? '<small class="status-pill ok" style="margin-left:6px">自动锚点</small>' : ""}｜首次发送 ${escapeHtml(result.first_due_text || result.anchor_text)}｜${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}｜${result.horizon_days} 天</p>
               ${result.state_contract ? `<div class="schedule-preview-extras">${scheduleContractHtml(result.state_contract)}</div>` : ""}
               <ul class="send-as-result-list">
                 ${(result.items || []).map((it) => `<li class="ok"><code>${escapeHtml(it.command)}</code> <small>${escapeHtml(it.schedule_text || "")}</small></li>`).join("") || "<li>(0 条)</li>"}
@@ -2213,6 +2398,7 @@
     renderScheduleModuleOptions,
     renderScheduleBatches,
     renderScheduleBatchRows,
+    parseScheduleShanghaiLocalTimestamp,
     scheduleStatusText,
     scheduleStatusPill,
     scheduleDisplayStatusKey,
