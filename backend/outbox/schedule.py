@@ -454,6 +454,14 @@ PRESETS: dict[str, PresetSpec] = {
         interval_sec=4 * 3600,
         description="按登天阶状态机起点,4h 一轮",
     ),
+    "tianti_climb_elder": _fixed_preset(
+        key="tianti_climb_elder",
+        label="登天阶·长老",
+        command=".登天阶",
+        interval_sec=3 * 3600,
+        description="按登天阶状态机起点,长老 3h 一轮",
+        module_key="tianti_climb",
+    ),
     "tianti_wenxin": _fixed_preset(
         key="tianti_wenxin",
         label="问心台",

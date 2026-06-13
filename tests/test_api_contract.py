@@ -5603,11 +5603,12 @@ def test_schedule_presets_payload_lists_known_presets():
     assert set(by_key) >= {
         "deep_retreat", "yuanying", "pet_touch", "pet_warm", "pet_trial", "custom",
         "wild_training", "checkin", "tower", "ranch", "concubine_dream",
-        "concubine_tianji", "tianti_climb", "tianti_wenxin",
+        "concubine_tianji", "tianti_climb", "tianti_climb_elder", "tianti_wenxin",
         "tianti_gangfeng", "second_soul", "wendao", "yindao",
         "search_node", "taiyi_cycle",
     }
     assert by_key["concubine_tianji"]["module_key"] == "concubine_tianji"
+    assert by_key["tianti_climb_elder"]["module_key"] == "tianti_climb"
     assert by_key["custom"]["module_key"] == ""
     assert "command_gap_sec" in by_key["custom"]["fields"]
     assert "horizon_days" in by_key["custom"]["fields"]
@@ -5720,6 +5721,27 @@ def test_schedule_preview_state_machine_preset_uses_fixed_command(tmp_path):
     assert result["preset_label"] == "天机代卜"
     assert result["items"]
     assert {item["command"] for item in result["items"]} == {".天机代卜"}
+
+
+def test_schedule_preview_elder_tianti_uses_three_hour_cd(tmp_path):
+    from backend.outbox.schedule import DEFAULT_COMMAND_DELAY_SEC, DEFAULT_TRIGGER_DELAY_SEC, JITTER_MAX_SEC
+
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "miniweb.db"))
+    result = server.schedule_preview_payload(
+        {"preset_key": "tianti_climb_elder", "anchor_at": 1_800_000_000, "horizon_days": 1}
+    )
+
+    assert result["ok"] is True
+    assert result["preset_label"] == "登天阶·长老"
+    assert len(result["items"]) >= 6
+    assert {item["command"] for item in result["items"]} == {".登天阶"}
+    gaps = [
+        result["items"][idx + 1]["schedule_at"] - result["items"][idx]["schedule_at"]
+        for idx in range(3)
+    ]
+    lower = 3 * 3600 + DEFAULT_TRIGGER_DELAY_SEC + DEFAULT_COMMAND_DELAY_SEC
+    upper = lower + JITTER_MAX_SEC + 5
+    assert all(lower <= gap <= upper for gap in gaps)
 
 
 def test_schedule_preview_state_machine_defaults_can_override_fixed_command(tmp_path):
