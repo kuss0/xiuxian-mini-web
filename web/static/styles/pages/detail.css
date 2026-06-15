@@ -671,6 +671,10 @@
   overflow: hidden;
 }
 
+.modal-dialog.schedule-preview-dialog {
+  width: min(760px, 100%);
+}
+
 .modal-head {
   display: flex;
   flex: 0 0 auto;

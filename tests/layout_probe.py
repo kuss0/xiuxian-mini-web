@@ -351,7 +351,12 @@ PROBE_SCRIPT = """
   }
   await wait(1600);
   var shell = document.querySelector(".workspace-tools-shell");
-  if (shell) shell.open = true;
+  var systemMenu = document.querySelector(".sidebar-primary-tools");
+  var commonMenu = document.querySelector(".common-action-panel");
+  var chatSecondary = document.querySelector(".chat-secondary-shell");
+  [shell, systemMenu, commonMenu, chatSecondary].forEach(function(menu) {
+    if (menu) menu.open = false;
+  });
   await wait(120);
   var boxes = {
     shell: rect(".chat-client-shell"),
@@ -360,12 +365,23 @@ PROBE_SCRIPT = """
     scheduleIdentityDock: rect("#scheduleIdentityDock"),
     scheduleRefresh: rect("#scheduleRailRefreshButton"),
     scheduleNew: rect("#scheduleButton"),
+    activeIdentityDock: rect("#activeIdentityDock"),
+    activeIdentitySelect: rect("#activeIdentityQuickSelect"),
+    activeIdentityStatus: rect("#activeIdentityStatusButton"),
+    systemMenu: rect(".sidebar-primary-tools"),
+    systemMenuToggle: rect(".sidebar-primary-tools > summary"),
     commonPanel: rect(".common-action-panel"),
+    commonPanelToggle: rect(".common-action-panel > summary"),
     logsButton: rect("#logsButton"),
     dungeonStatusButton: rect("#dungeonStatusButton"),
     resourceStatsButton: rect("#resourceStatsButton"),
     inventoryButton: rect("#inventoryButton"),
     outboxButton: rect("#outboxButton"),
+    chatSecondary: rect(".chat-secondary-shell"),
+    chatSecondaryContent: rect(".chat-secondary-content"),
+    chatSecondaryToggle: rect(".chat-secondary-toggle"),
+    accountMenu: rect(".sidebar-tools-shell"),
+    accountMenuToggle: rect(".sidebar-tools-shell > summary"),
     workspace: rect(".chat-workspace"),
     header: rect(".chat-pane .section-head"),
     toolsToggle: rect(".workspace-tools-toggle"),
@@ -377,7 +393,8 @@ PROBE_SCRIPT = """
     hotbar: rect("#quickActionHotbar"),
     emojiButton: rect("#emojiPickerButton"),
     cultivationButton: rect("#openCultivationButton"),
-    health: rect("#healthButton")
+    health: rect("#healthButton"),
+    settings: rect("#settingsButton")
   };
   var checks = [];
   function check(name, ok, detail) {
@@ -387,12 +404,15 @@ PROBE_SCRIPT = """
     document.documentElement.scrollWidth + " <= " + window.innerWidth);
   check("no body horizontal overflow", document.body.scrollWidth <= window.innerWidth + 1,
     document.body.scrollWidth + " <= " + window.innerWidth);
-  check("schedule panel visible", visible(boxes.schedulePanel, 160, 42), JSON.stringify(boxes.schedulePanel));
+  check("schedule panel visible", visible(boxes.schedulePanel, 220, 160), JSON.stringify(boxes.schedulePanel));
   check("schedule identity dock compact", visible(boxes.scheduleIdentityDock, 120, 24) && boxes.scheduleIdentityDock.height <= 42,
     JSON.stringify(boxes.scheduleIdentityDock));
-  check("schedule panel stays inside rail",
-    boxes.schedulePanel.left >= boxes.rail.left - 1 && boxes.schedulePanel.right <= boxes.rail.right + 1,
-    JSON.stringify({ schedulePanel: boxes.schedulePanel, rail: boxes.rail }));
+  check("schedule panel stays inside workspace",
+    boxes.schedulePanel.left >= boxes.workspace.left - 1 && boxes.schedulePanel.right <= boxes.workspace.right + 1,
+    JSON.stringify({ schedulePanel: boxes.schedulePanel, workspace: boxes.workspace }));
+  check("schedule panel is primary surface",
+    boxes.schedulePanel.height >= Math.min(260, boxes.workspace.height * 0.60),
+    JSON.stringify({ schedulePanel: boxes.schedulePanel, workspace: boxes.workspace }));
   if (window.innerWidth > 900) {
     check("desktop rail touches workspace",
       Math.abs(boxes.workspace.left - boxes.rail.right) <= 1,
@@ -402,6 +422,39 @@ PROBE_SCRIPT = """
     hitDetail("#scheduleRailRefreshButton"));
   check("schedule new clickable", visible(boxes.scheduleNew, 34, 24) && centerHit("#scheduleButton"),
     hitDetail("#scheduleButton"));
+  check("active identity dock visible", visible(boxes.activeIdentityDock, 160, 42),
+    JSON.stringify(boxes.activeIdentityDock));
+  check("active identity select clickable", visible(boxes.activeIdentitySelect, 80, 28) && centerHit("#activeIdentityQuickSelect"),
+    hitDetail("#activeIdentityQuickSelect"));
+  check("active identity status button clickable", visible(boxes.activeIdentityStatus, 36, 26) && centerHit("#activeIdentityStatusButton"),
+    hitDetail("#activeIdentityStatusButton"));
+  check("system menu visible", visible(boxes.systemMenuToggle, 120, 28) && centerHit(".sidebar-primary-tools > summary"),
+    hitDetail(".sidebar-primary-tools > summary"));
+  check("common menu visible", visible(boxes.commonPanelToggle, 120, 28) && centerHit(".common-action-panel > summary"),
+    hitDetail(".common-action-panel > summary"));
+  check("account management menu visible", visible(boxes.accountMenuToggle, 120, 28) && centerHit(".sidebar-tools-shell > summary"),
+    hitDetail(".sidebar-tools-shell > summary"));
+  check("chat menu visible", visible(boxes.chatSecondaryToggle, 80, 28) && centerHit(".chat-secondary-toggle"),
+    hitDetail(".chat-secondary-toggle"));
+  check("chat secondary defaults collapsed", chatSecondary && !chatSecondary.open,
+    JSON.stringify(boxes.chatSecondary));
+  if (systemMenu) systemMenu.open = true;
+  await wait(160);
+  boxes.settings = rect("#settingsButton");
+  boxes.health = rect("#healthButton");
+  check("settings button clickable in system menu", visible(boxes.settings, 44, 28) && centerHit("#settingsButton"),
+    hitDetail("#settingsButton"));
+  check("health button clickable in system menu", visible(boxes.health, 40, 28) && centerHit("#healthButton"),
+    hitDetail("#healthButton"));
+  if (systemMenu) systemMenu.open = false;
+  if (commonMenu) commonMenu.open = true;
+  await wait(160);
+  boxes.commonPanel = rect(".common-action-panel");
+  boxes.logsButton = rect("#logsButton");
+  boxes.dungeonStatusButton = rect("#dungeonStatusButton");
+  boxes.resourceStatsButton = rect("#resourceStatsButton");
+  boxes.inventoryButton = rect("#inventoryButton");
+  boxes.outboxButton = rect("#outboxButton");
   check("common panel visible", visible(boxes.commonPanel, 160, 48), JSON.stringify(boxes.commonPanel));
   check("logs button clickable", visible(boxes.logsButton, 34, 24) && centerHit("#logsButton"),
     hitDetail("#logsButton"));
@@ -410,8 +463,32 @@ PROBE_SCRIPT = """
     check("common action " + key + " clickable", visible(boxes[key], 46, 24) && centerHit(selector),
       hitDetail(selector));
   });
-  check("message list visible", visible(boxes.messageList, 180, 120), JSON.stringify(boxes.messageList));
-  check("composer visible", visible(boxes.composer, 180, 80), JSON.stringify(boxes.composer));
+  if (shell) shell.open = true;
+  await wait(120);
+  boxes.toolsPanel = rect(".workspace-tools-panel");
+  check("account management menu opens", visible(boxes.toolsPanel, 160, 80), JSON.stringify(boxes.toolsPanel));
+  if (chatSecondary) chatSecondary.open = true;
+  await wait(160);
+  boxes.chatSecondary = rect(".chat-secondary-shell");
+  boxes.chatSecondaryContent = rect(".chat-secondary-content");
+  boxes.chatSecondaryToggle = rect(".chat-secondary-toggle");
+  boxes.header = rect(".chat-pane .section-head");
+  boxes.messageList = rect("#messageList");
+  boxes.composer = rect("#directSendComposer");
+  boxes.composerHead = rect("#directSendComposer .direct-send-head");
+  boxes.input = rect("#directSendInput");
+  boxes.hotbar = rect("#quickActionHotbar");
+  check("chat opens as fullscreen overlay",
+    boxes.chatSecondary.left <= 10 && boxes.chatSecondary.top <= 10 &&
+      boxes.chatSecondary.right >= window.innerWidth - 10 &&
+      boxes.chatSecondary.bottom >= window.innerHeight - 10,
+    JSON.stringify({ chatSecondary: boxes.chatSecondary, viewport: { width: window.innerWidth, height: window.innerHeight } }));
+  check("chat overlay close summary remains visible", visible(boxes.chatSecondaryToggle, 80, 28) && centerHit(".chat-secondary-toggle"),
+    hitDetail(".chat-secondary-toggle"));
+  check("chat overlay content fills available body", visible(boxes.chatSecondaryContent, 220, 160),
+    JSON.stringify(boxes.chatSecondaryContent));
+  check("message list visible as support pane", visible(boxes.messageList, 180, 60), JSON.stringify(boxes.messageList));
+  check("composer visible", visible(boxes.composer, 180, 68), JSON.stringify(boxes.composer));
   check("composer within viewport", boxes.composer.bottom <= window.innerHeight + 1 && boxes.composer.top >= -1,
     JSON.stringify(boxes.composer));
   check("composer stays compact", boxes.composer.height <= 170,
@@ -419,10 +496,6 @@ PROBE_SCRIPT = """
   check("composer tool row stays compact", visible(boxes.composerHead, 160, 20) && boxes.composerHead.height <= 32,
     JSON.stringify(boxes.composerHead));
   check("input visible", visible(boxes.input, 80, 38), JSON.stringify(boxes.input));
-  check("tool center toggle visible", visible(boxes.toolsToggle, 90, 28), JSON.stringify(boxes.toolsToggle));
-  check("tool center opens", visible(boxes.toolsPanel, 160, 120), JSON.stringify(boxes.toolsPanel));
-  check("health button clickable when tools open", visible(boxes.health, 40, 28) && centerHit("#healthButton"),
-    JSON.stringify(boxes.health));
   check("hotbar does not cover composer", boxes.hotbar.bottom <= boxes.composer.bottom + 1,
     JSON.stringify({ hotbar: boxes.hotbar, composer: boxes.composer }));
   var hotbarChips = Array.from(document.querySelectorAll("#quickActionHotbar .skill-chip"));
@@ -474,6 +547,9 @@ PROBE_SCRIPT = """
     JSON.stringify(boxes.emojiButton));
   check("cultivation button clickable", visible(boxes.cultivationButton, 54, 24) && centerHit("#openCultivationButton"),
     JSON.stringify(boxes.cultivationButton));
+  if (chatSecondary) chatSecondary.open = false;
+  if (commonMenu) commonMenu.open = true;
+  await wait(120);
   boxes.dungeonTrigger = rect("#dungeonStatusButton");
   check("dungeon status trigger visible", visible(boxes.dungeonTrigger, 60, 28), JSON.stringify(boxes.dungeonTrigger));
   check("dungeon status trigger clickable", centerHit("#dungeonStatusButton"), hitDetail("#dungeonStatusButton"));

@@ -17,6 +17,7 @@
     wild_training: "wild_training",
     checkin: "checkin",
     tower: "tower",
+    daily_essentials: "checkin",
     ranch: "ranch",
     concubine_dream: "concubine_dream",
     concubine_tianji: "concubine_tianji",
@@ -24,11 +25,42 @@
     tianti_climb_elder: "tianti_climb",
     tianti_wenxin: "tianti_wenxin",
     tianti_gangfeng: "tianti_gangfeng",
+    lingxiao_standard: "tianti_climb",
+    lingxiao_elder: "tianti_climb",
     second_soul: "second_soul",
     taiyi_cycle: "taiyi_cycle",
     wendao: "wendao",
     yindao: "yindao",
   };
+  const SCHEDULE_RAIL_GROUP_META = {
+    daily: { label: "日常", order: 1 },
+    sect: { label: "宗门", order: 2 },
+    concubine: { label: "侍妾", order: 3 },
+  };
+  const SCHEDULE_RAIL_CONCUBINE_KEYS = new Set([
+    "concubine_dream",
+    "concubine_tianji",
+    "concubine_heart",
+  ]);
+  const SCHEDULE_RAIL_SECT_KEYS = new Set([
+    "ranch",
+    "stargazer_guide",
+    "stargazer_soothe",
+    "stargazer_collect",
+    "stargazer_care",
+    "tianti_climb",
+    "tianti_climb_elder",
+    "tianti_wenxin",
+    "tianti_gangfeng",
+    "lingxiao_standard",
+    "lingxiao_elder",
+    "second_soul",
+    "taiyi_cycle",
+    "taiyi_patrol",
+    "wendao",
+    "yindao",
+    "search_node",
+  ]);
 
   function scheduleTimeZonePill() {
     return `<span class="status-pill schedule-timezone-pill">${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}</span>`;
@@ -69,6 +101,10 @@
     return deps.scheduleRail || document.querySelector("#scheduleRail");
   }
 
+  function scheduleRailIsWorkbench(deps = {}) {
+    return Boolean(scheduleRailElement(deps)?.closest(".schedule-workbench"));
+  }
+
   function scheduleSelectedSendAsIds(deps = {}) {
     const state = scheduleState(deps);
     const identities = state.identities || [];
@@ -82,6 +118,7 @@
     const state = scheduleState(deps);
     state.scheduleSelectedSendAsIds = (ids || []).map((id) => Number(id || 0)).filter(Boolean);
     renderScheduleIdentityDock(deps);
+    renderScheduleRail(deps);
   }
 
   async function loadScheduleRail(deps = {}, { silent = false } = {}) {
@@ -95,7 +132,11 @@
     }
     try {
       const payload = await fetchJson("/api/schedule?summary=1&history=0");
-      return syncScheduleBatches(deps, payload);
+      const batches = syncScheduleBatches(deps, payload, { fullPreview: false });
+      loadScheduleRenewSummary(deps, { silent: true }).catch((error) => {
+        console.warn("[mini-web] schedule renew rail status:", error);
+      });
+      return batches;
     } catch (error) {
       state.scheduleError = error.message || String(error);
       if (!silent || !(state.scheduleBatches || []).length) {
@@ -108,15 +149,55 @@
     }
   }
 
-  function syncScheduleBatches(deps = {}, payload) {
+  function syncScheduleBatches(deps = {}, payload, options = {}) {
     const state = scheduleState(deps);
     const batches = Array.isArray(payload?.batches) ? payload.batches : [];
     state.scheduleBatches = batches;
     state.scheduleError = "";
     state.scheduleLoading = false;
-    renderScheduleIdentityDock(deps);
-    renderScheduleRail(deps);
+    if (Object.prototype.hasOwnProperty.call(options || {}, "fullPreview")) {
+      state.scheduleRailFullPreviewLoaded = Boolean(options.fullPreview);
+    }
+    if ((options || {}).render !== false) {
+      renderScheduleIdentityDock(deps);
+      renderScheduleRail(deps);
+    }
     return batches;
+  }
+
+  async function loadScheduleRenewSummary(deps = {}, { silent = false } = {}) {
+    const state = scheduleState(deps);
+    if (!silent) {
+      state.scheduleRenewLoading = true;
+      state.scheduleRenewError = "";
+      renderScheduleRail(deps);
+    }
+    try {
+      const payload = await fetchJson("/api/schedule/renew");
+      return syncScheduleRenewProfiles(deps, payload);
+    } catch (error) {
+      state.scheduleRenewError = error.message || String(error);
+      renderScheduleRail(deps);
+      throw error;
+    } finally {
+      state.scheduleRenewLoading = false;
+      if (!silent) renderScheduleRail(deps);
+    }
+  }
+
+  function syncScheduleRenewProfiles(deps = {}, payload = {}) {
+    const state = scheduleState(deps);
+    if (payload?.ok === false) {
+      state.scheduleRenewError = payload.error || "续期状态读取失败";
+    } else {
+      state.scheduleRenewProfiles = Array.isArray(payload?.profiles) ? payload.profiles : [];
+      state.scheduleRenewAllowedPresets = Array.isArray(payload?.allowed_presets) ? payload.allowed_presets : [];
+      state.scheduleRenewWorker = payload?.worker || null;
+      state.scheduleRenewError = "";
+    }
+    state.scheduleRenewLoading = false;
+    renderScheduleRail(deps);
+    return state.scheduleRenewProfiles || [];
   }
 
   function renderScheduleRail(deps = {}) {
@@ -146,12 +227,16 @@
       `;
       return;
     }
-    const railBatches = batches.filter(scheduleBatchHasCurrentWork);
+    const scopedBatches = scheduleRailScopedBatches(deps, batches);
+    const railBatches = scheduleVisibleRailBatches(deps, batches);
     if (!railBatches.length) {
-      const previewCount = batches.filter(scheduleBatchIsDryRun).length;
+      const selectedIds = scheduleRailSelectedSendAsIds(deps);
+      const previewCount = scopedBatches.filter(scheduleBatchIsDryRun).length;
       const hiddenText = previewCount
         ? `本地预演 ${previewCount} 批已收起。`
-        : "过期历史已收起。";
+        : selectedIds.length
+          ? "当前身份没有进行中的排班。"
+          : "过期历史已收起。";
       scheduleRail.innerHTML = `
         <div class="schedule-rail-empty">
           <strong>没有进行中的排班</strong>
@@ -170,16 +255,17 @@
       acc.sending += batch.status === "sending" ? 1 : 0;
       return acc;
     }, { planned: 0, scheduled: 0, failed: 0, sending: 0 });
-    const visible = railBatches.slice(0, 4);
+    const visibleLimit = scheduleRailIsWorkbench(deps) ? 12 : 4;
+    const visible = railBatches.slice(0, visibleLimit);
+    const showManageButton = scheduleRailIsWorkbench(deps) || railBatches.length > visible.length || scopedBatches.length > railBatches.length;
     scheduleRail.innerHTML = `
       <div class="schedule-rail-summary schedule-tool-summary">
         <div class="schedule-tool-summary-title">
           <strong>官方定时</strong>
-          ${scheduleTimeZonePill()}
           <span>${totals.sending ? `${escapeHtml(String(totals.sending))} 批发送中` : "TG 排班工作台"}</span>
         </div>
         <div class="schedule-tool-metrics">
-          <span><b>${escapeHtml(String(railBatches.length))}</b><small>批次</small></span>
+          <span><b>${escapeHtml(String(railBatches.length))}</b><small>分组</small></span>
           <span><b>${escapeHtml(String(totals.scheduled))}</b><small>已排</small></span>
           <span><b>${escapeHtml(String(totals.planned))}</b><small>待排</small></span>
           <span class="${totals.failed ? "warn" : ""}"><b>${escapeHtml(String(totals.failed))}</b><small>失败</small></span>
@@ -188,9 +274,30 @@
       <div class="schedule-rail-list">
         ${visible.map((batch) => renderScheduleRailRow(deps, batch)).join("")}
       </div>
-      ${batches.length > visible.length ? `<button type="button" class="schedule-rail-more" data-schedule-open>管理排班</button>` : ""}
+      ${showManageButton ? `<button type="button" class="schedule-rail-more" data-schedule-open>管理排班</button>` : ""}
     `;
     bindScheduleOpenButtons(deps, scheduleRail);
+  }
+
+  function scheduleRailSelectedSendAsIds(deps = {}) {
+    const explicit = scheduleSelectedSendAsIds(deps);
+    if (explicit.length) return explicit;
+    const state = scheduleState(deps);
+    const active = Number(state.activeIdentityId || 0);
+    const known = new Set((state.identities || []).map((item) => Number(item.send_as_id || 0)).filter(Boolean));
+    if (active && known.has(active)) return [active];
+    return [];
+  }
+
+  function scheduleRailScopedBatches(deps = {}, batches = []) {
+    const selected = scheduleRailSelectedSendAsIds(deps);
+    if (!selected.length) return batches || [];
+    const selectedSet = new Set(selected);
+    return (batches || []).filter((batch) => selectedSet.has(Number(batch?.send_as_id || 0)));
+  }
+
+  function scheduleVisibleRailBatches(deps = {}, batches = []) {
+    return aggregateScheduleRailBatches(scheduleRailScopedBatches(deps, batches).filter(scheduleBatchHasCurrentWork));
   }
 
   function bindScheduleOpenButtons(deps = {}, root) {
@@ -207,9 +314,497 @@
         }
       });
     });
+    root.querySelectorAll("[data-schedule-preview-toggle]").forEach((button) => {
+      const openPreview = async () => {
+        const key = String(button.dataset.schedulePreviewKey || "");
+        if (!key) return;
+        await openScheduleRailPreviewModal(deps, key);
+      };
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        openPreview().catch((error) => {
+          scheduleState(deps).scheduleRailPreviewError = error.message || String(error);
+          deps.showError?.(error);
+        });
+      });
+      button.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        openPreview().catch((error) => {
+          scheduleState(deps).scheduleRailPreviewError = error.message || String(error);
+          deps.showError?.(error);
+        });
+      });
+    });
+    root.querySelectorAll("[data-schedule-renew-toggle]").forEach((button) => {
+      button.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const profileIds = String(button.dataset.profileIds || button.dataset.profileId || "")
+          .split(",")
+          .map((id) => Number(id || 0))
+          .filter(Boolean);
+        const profiles = profileIds.map((id) => scheduleRenewProfileById(deps, id)).filter(Boolean);
+        if (!profiles.length) return;
+        button.disabled = true;
+        const nextEnabled = !profiles.some((profile) => profile.enabled !== false);
+        try {
+          let result = null;
+          for (const profile of profiles) {
+            result = await postJson("/api/schedule/renew/save", scheduleRenewTogglePayload(profile, nextEnabled));
+            if (!result.ok) throw new Error(result.error || "切换续约失败");
+          }
+          if (result) syncScheduleRenewProfiles(deps, result);
+        } catch (error) {
+          const state = scheduleState(deps);
+          state.scheduleRenewError = error.message || String(error);
+          deps.showError?.(error);
+          renderScheduleRail(deps);
+        }
+      });
+    });
+    root.querySelectorAll("[data-schedule-renew-config]").forEach((button) => {
+      button.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        try {
+          await openScheduleModal(deps);
+        } catch (error) {
+          deps.showError?.(error);
+        }
+      });
+    });
+  }
+
+  async function ensureScheduleRailFullPreview(deps = {}, key = "", options = {}) {
+    const state = scheduleState(deps);
+    const renderRail = options.renderRail !== false;
+    state.scheduleRailPreviewLoadingKey = key;
+    state.scheduleRailPreviewError = "";
+    if (renderRail) renderScheduleRail(deps);
+    try {
+      const payload = await fetchJson("/api/schedule?history=0");
+      syncScheduleBatches(deps, payload, { fullPreview: true, render: renderRail });
+    } catch (error) {
+      state.scheduleRailPreviewError = error.message || String(error);
+      throw error;
+    } finally {
+      if (state.scheduleRailPreviewLoadingKey === key) {
+        state.scheduleRailPreviewLoadingKey = "";
+      }
+      if (renderRail) renderScheduleRail(deps);
+    }
+  }
+
+  function scheduleRailBatchByPreviewKey(deps = {}, key = "") {
+    const state = scheduleState(deps);
+    return scheduleVisibleRailBatches(deps, state.scheduleBatches || [])
+      .find((batch) => scheduleRailPreviewKey(batch) === key) || null;
+  }
+
+  async function openScheduleRailPreviewModal(deps = {}, key = "") {
+    let batch = scheduleRailBatchByPreviewKey(deps, key);
+    if (!batch) throw new Error("找不到这组排班");
+    const identity = scheduleIdentityLabel(deps, batch.send_as_id);
+    const title = `${identity}｜${batch.label || "计划预览"}`;
+    const needsFull = scheduleRailNeedsFullPreview(batch) && !scheduleState(deps).scheduleRailFullPreviewLoaded;
+    const dialog = openModal({
+      title,
+      body: renderScheduleRailPreview(deps, batch, { hiddenTotal: Number(batch.hidden_item_count || 0), modal: true, loading: needsFull }),
+      footer: '<button type="button" data-modal-close>关闭</button>',
+    });
+    if (!dialog) return null;
+    dialog.classList.add("schedule-preview-dialog");
+    dialog.dataset.schedulePreviewKey = key;
+    if (!needsFull) return dialog;
+    try {
+      await ensureScheduleRailFullPreview(deps, key, { renderRail: false });
+      batch = scheduleRailBatchByPreviewKey(deps, key) || batch;
+      if (dialog.isConnected && dialog.dataset.schedulePreviewKey === key) {
+        const body = dialog.querySelector(".modal-body");
+        if (body) {
+          body.innerHTML = renderScheduleRailPreview(deps, batch, { hiddenTotal: Number(batch.hidden_item_count || 0), modal: true });
+        }
+      }
+    } catch (error) {
+      if (dialog.isConnected && dialog.dataset.schedulePreviewKey === key) {
+        const body = dialog.querySelector(".modal-body");
+        if (body) {
+          body.innerHTML = renderScheduleRailPreview(deps, batch, {
+            hiddenTotal: Number(batch.hidden_item_count || 0),
+            modal: true,
+            error: error.message || String(error),
+          });
+        }
+      }
+    }
+    return dialog;
+  }
+
+  function aggregateScheduleRailBatches(batches = []) {
+    const groups = new Map();
+    for (const batch of batches || []) {
+      if (!batch) continue;
+      const key = scheduleRailGroupKey(batch);
+      const existing = groups.get(key);
+      if (!existing) {
+        groups.set(key, scheduleRailGroupFromBatch(batch));
+      } else {
+        mergeScheduleRailGroup(existing, batch);
+      }
+    }
+    return Array.from(groups.values()).sort(compareScheduleRailGroups);
+  }
+
+  function scheduleRailGroupKey(batch) {
+    const identityId = Number(batch?.send_as_id || 0) || 0;
+    return `${identityId}:${scheduleRailGroupCategoryKey(batch)}`;
+  }
+
+  function scheduleRailGroupModuleKey(batch) {
+    const moduleKeys = Array.isArray(batch?.__groupModuleKeys) ? batch.__groupModuleKeys.filter(Boolean) : [];
+    if (moduleKeys.length) return moduleKeys[0];
+    const presetKey = String(batch?.preset_key || "").trim();
+    const contractModule = String(batch?.options?.state_contract?.module_key || "").trim();
+    const autoModule = String(batch?.options?.auto_anchor_module || "").trim();
+    return SCHEDULE_RENEW_ALLOWED_PRESETS[presetKey] || contractModule || autoModule || presetKey || "custom";
+  }
+
+  function scheduleRailGroupCategoryKey(batch) {
+    const existing = String(batch?.__groupCategoryKey || "").trim();
+    if (existing) return existing;
+    const presetKey = String(batch?.preset_key || "").trim();
+    const moduleKey = scheduleRailGroupModuleKey(batch);
+    const keys = new Set([presetKey, moduleKey].filter(Boolean));
+    if ([...keys].some((key) => key.startsWith("concubine_") || SCHEDULE_RAIL_CONCUBINE_KEYS.has(key))) {
+      return "concubine";
+    }
+    if ([...keys].some((key) => SCHEDULE_RAIL_SECT_KEYS.has(key) || key.startsWith("tianti_") || key.startsWith("lingxiao_") || key.startsWith("stargazer_") || key.startsWith("taiyi_"))) {
+      return "sect";
+    }
+    return "daily";
+  }
+
+  function scheduleRailGroupCategoryLabel(categoryKey) {
+    return SCHEDULE_RAIL_GROUP_META[categoryKey]?.label || "日常";
+  }
+
+  function mergeUniqueValues(left = [], right = []) {
+    return Array.from(new Set([...(left || []), ...(right || [])].map((value) => String(value || "").trim()).filter(Boolean)));
+  }
+
+  function scheduleRailGroupFromBatch(batch) {
+    const clone = { ...batch };
+    const categoryKey = scheduleRailGroupCategoryKey(batch);
+    const moduleKey = scheduleRailGroupModuleKey(batch);
+    const presetKey = String(batch.preset_key || "").trim();
+    clone.items = [...(batch.items || [])];
+    clone.counts = scheduleCurrentCounts(batch.counts || {});
+    clone.hidden_item_count = Number(batch.hidden_item_count || 0);
+    clone.__grouped = true;
+    clone.__batchCount = 1;
+    clone.__batchIds = [batch.id].filter((id) => id !== undefined && id !== null);
+    clone.__groupCategoryKey = categoryKey;
+    clone.__groupModuleKey = moduleKey;
+    clone.__groupModuleKeys = moduleKey ? [moduleKey] : [];
+    clone.__groupPresetKeys = presetKey ? [presetKey] : [];
+    clone.__renewProfileIds = scheduleBatchRenewProfileIds(batch);
+    clone.label = scheduleRailGroupCategoryLabel(categoryKey);
+    clone.__latestUpdatedAt = Number(batch.updated_at || batch.created_at || 0) || 0;
+    clone.__earliestAnchorAt = Number(batch.anchor_at || 0) || 0;
+    return clone;
+  }
+
+  function mergeScheduleRailGroup(group, batch) {
+    group.__batchCount = Number(group.__batchCount || 1) + 1;
+    if (batch.id !== undefined && batch.id !== null) {
+      group.__batchIds = [...(group.__batchIds || []), batch.id];
+    }
+    group.__renewProfileIds = Array.from(new Set([...(group.__renewProfileIds || []), ...scheduleBatchRenewProfileIds(batch)]));
+    group.__groupModuleKeys = mergeUniqueValues(group.__groupModuleKeys, [scheduleRailGroupModuleKey(batch)]);
+    group.__groupPresetKeys = mergeUniqueValues(group.__groupPresetKeys, [batch.preset_key]);
+    group.__groupModuleKey = group.__groupModuleKeys[0] || group.__groupModuleKey || "";
+    group.label = scheduleRailGroupCategoryLabel(group.__groupCategoryKey || scheduleRailGroupCategoryKey(group));
+    const current = scheduleCurrentCounts(group.counts || {});
+    const incoming = scheduleCurrentCounts(batch.counts || {});
+    group.counts = {
+      planned: current.planned + incoming.planned,
+      scheduled: current.scheduled + incoming.scheduled,
+      failed: current.failed + incoming.failed,
+      expired: 0,
+      deleted: current.deleted + incoming.deleted,
+    };
+    group.hidden_item_count = Number(group.hidden_item_count || 0) + Number(batch.hidden_item_count || 0);
+    group.items = [...(group.items || []), ...(batch.items || [])].sort(compareScheduleMessages);
+    group.status = scheduleRailMergedStatus(group.status, batch.status, group.counts);
+    const batchAnchor = Number(batch.anchor_at || 0) || 0;
+    const groupAnchor = Number(group.__earliestAnchorAt || 0) || 0;
+    if (batchAnchor && (!groupAnchor || batchAnchor < groupAnchor)) {
+      group.__earliestAnchorAt = batchAnchor;
+      group.anchor_at = batch.anchor_at;
+      group.anchor_text = batch.anchor_text || group.anchor_text;
+    }
+    const batchUpdated = Number(batch.updated_at || batch.created_at || 0) || 0;
+    if (batchUpdated > Number(group.__latestUpdatedAt || 0)) {
+      group.__latestUpdatedAt = batchUpdated;
+      group.label = scheduleRailGroupLabel(group, batch);
+      group.preset_key = batch.preset_key || group.preset_key;
+      group.options = { ...(group.options || {}), ...(batch.options || {}) };
+    }
+  }
+
+  function scheduleRailGroupLabel(group, batch) {
+    const categoryKey = String(group?.__groupCategoryKey || "").trim();
+    if (categoryKey) return scheduleRailGroupCategoryLabel(categoryKey);
+    const currentLabel = String(group?.label || "").trim();
+    const nextLabel = String(batch?.label || "").trim();
+    if (!currentLabel) return nextLabel;
+    if (!nextLabel || nextLabel === currentLabel) return currentLabel;
+    const currentModule = scheduleRailGroupModuleKey(group);
+    const nextModule = scheduleRailGroupModuleKey(batch);
+    if (currentModule && currentModule === nextModule) return currentLabel;
+    return nextLabel;
+  }
+
+  function scheduleRailMergedStatus(left, right, counts = {}) {
+    if (left === "sending" || right === "sending") return "sending";
+    if (Number(counts.failed || 0) > 0) return "failed";
+    if (Number(counts.planned || 0) > 0) return "active";
+    return left || right || "active";
+  }
+
+  function compareScheduleMessages(a, b) {
+    return (Number(a?.schedule_at || 0) || 0) - (Number(b?.schedule_at || 0) || 0);
+  }
+
+  function compareScheduleRailGroups(a, b) {
+    const aFailed = Number(a?.counts?.failed || 0) > 0 ? 1 : 0;
+    const bFailed = Number(b?.counts?.failed || 0) > 0 ? 1 : 0;
+    if (aFailed !== bFailed) return bFailed - aFailed;
+    const aSending = a?.status === "sending" ? 1 : 0;
+    const bSending = b?.status === "sending" ? 1 : 0;
+    if (aSending !== bSending) return bSending - aSending;
+    const aGroup = SCHEDULE_RAIL_GROUP_META[scheduleRailGroupCategoryKey(a)]?.order || 99;
+    const bGroup = SCHEDULE_RAIL_GROUP_META[scheduleRailGroupCategoryKey(b)]?.order || 99;
+    if (aGroup !== bGroup) return aGroup - bGroup;
+    return (Number(a?.__earliestAnchorAt || a?.anchor_at || 0) || 0) - (Number(b?.__earliestAnchorAt || b?.anchor_at || 0) || 0);
+  }
+
+  function scheduleBatchRenewProfileIds(batch) {
+    const id = Number(batch?.options?.renew_profile_id || 0);
+    return id ? [id] : [];
+  }
+
+  function scheduleRailPreviewKey(batch) {
+    return scheduleRailGroupKey(batch);
+  }
+
+  function scheduleRailNeedsFullPreview(batch) {
+    return Number(batch?.hidden_item_count || 0) > 0;
+  }
+
+  function scheduleRenewProfileById(deps = {}, profileId) {
+    const id = Number(profileId || 0);
+    if (!id) return null;
+    return (scheduleState(deps).scheduleRenewProfiles || []).find((profile) => Number(profile.id || 0) === id) || null;
+  }
+
+  function scheduleRailRenewProfile(deps = {}, batch) {
+    return scheduleRailRenewProfiles(deps, batch)[0] || null;
+  }
+
+  function scheduleRailRenewProfiles(deps = {}, batch) {
+    const state = scheduleState(deps);
+    const profiles = state.scheduleRenewProfiles || [];
+    if (!profiles.length || !batch) return [];
+    const sendAsId = Number(batch.send_as_id || 0);
+    const moduleKeys = new Set((batch.__groupModuleKeys || [scheduleRailGroupModuleKey(batch)]).map((key) => String(key || "").trim()).filter(Boolean));
+    const presetKeys = new Set((batch.__groupPresetKeys || [batch.preset_key]).map((key) => String(key || "").trim()).filter(Boolean));
+    const profileIds = new Set((batch.__renewProfileIds || []).map((id) => Number(id || 0)).filter(Boolean));
+    const matched = profiles.filter((profile) => {
+      if (Number(profile.send_as_id || 0) !== sendAsId) return false;
+      const id = Number(profile.id || 0);
+      const profileModule = String(profile.module_key || "").trim();
+      const profilePreset = String(profile.preset_key || "").trim();
+      return (
+        (id && profileIds.has(id)) ||
+        (profileModule && moduleKeys.has(profileModule)) ||
+        (profilePreset && presetKeys.has(profilePreset))
+      );
+    });
+    return matched.sort((a, b) => {
+      const aEnabled = a.enabled !== false ? 1 : 0;
+      const bEnabled = b.enabled !== false ? 1 : 0;
+      if (aEnabled !== bEnabled) return bEnabled - aEnabled;
+      return String(a.label || a.preset_key || "").localeCompare(String(b.label || b.preset_key || ""), "zh-Hans-CN");
+    });
+  }
+
+  function scheduleRailRenewAllowed(batch) {
+    const moduleKeys = new Set((batch?.__groupModuleKeys || [scheduleRailGroupModuleKey(batch)]).map((key) => String(key || "").trim()).filter(Boolean));
+    const presetKeys = new Set((batch?.__groupPresetKeys || [batch?.preset_key]).map((key) => String(key || "").trim()).filter(Boolean));
+    if ([...presetKeys].some((presetKey) => scheduleRenewModuleForPreset(presetKey))) return true;
+    return [...moduleKeys].some((moduleKey) => Object.values(SCHEDULE_RENEW_ALLOWED_PRESETS).includes(moduleKey));
+  }
+
+  function scheduleRailRenewInfo(deps = {}, batch) {
+    const state = scheduleState(deps);
+    const profiles = scheduleRailRenewProfiles(deps, batch);
+    const profile = profiles[0] || null;
+    const allowed = scheduleRailRenewAllowed(batch);
+    if (!profile) {
+      if (state.scheduleRenewLoading) {
+        return { profile: null, allowed, label: "读取中", tone: "", note: "续约状态" };
+      }
+      if (state.scheduleRenewError) {
+        return { profile: null, allowed, label: "读取失败", tone: "warn", note: state.scheduleRenewError };
+      }
+      return {
+        profile: null,
+        allowed,
+        label: allowed ? "未配置" : "手动",
+        tone: allowed ? "" : "muted",
+        note: allowed ? "可配续约" : "不自动",
+      };
+    }
+    if (profiles.length > 1) {
+      const total = profiles.length;
+      const enabledCount = profiles.filter((item) => item.enabled !== false).length;
+      const errorCount = profiles.filter((item) => String(item.last_error || "").trim()).length;
+      const waitingCount = profiles.filter((item) => item.enabled !== false && !String(item.last_error || "").trim() && item.state_contract && !item.state_contract.semiauto_ready).length;
+      const coverage = profiles
+        .map((item) => item.covered_until_text || item.tail_text || "")
+        .filter(Boolean)
+        .sort()[0] || "";
+      if (errorCount) {
+        return { profile, profiles, allowed: true, label: `异常 ${errorCount}`, tone: "warn", note: coverage || `${enabledCount}/${total} 自动` };
+      }
+      if (waitingCount) {
+        return { profile, profiles, allowed: true, label: `待观察 ${waitingCount}`, tone: "warn", note: coverage || `${enabledCount}/${total} 自动` };
+      }
+      if (!enabledCount) {
+        return { profile, profiles, allowed: true, label: "全停用", tone: "", note: coverage || `${total} 个策略` };
+      }
+      return {
+        profile,
+        profiles,
+        allowed: true,
+        label: enabledCount === total ? `自动 ${total}` : `自动 ${enabledCount}/${total}`,
+        tone: "ok",
+        note: coverage || `${enabledCount}/${total} 自动`,
+      };
+    }
+    const enabled = profile.enabled !== false;
+    const ready = Boolean(profile.state_contract?.semiauto_ready);
+    const error = String(profile.last_error || "").trim();
+    const coverage = profile.covered_until_text || profile.tail_text || "";
+    if (error) return { profile, profiles, allowed: true, label: "异常", tone: "warn", note: error };
+    if (!enabled) return { profile, profiles, allowed: true, label: "已停用", tone: "", note: coverage || "续约关闭" };
+    if (!ready && profile.state_contract) return { profile, profiles, allowed: true, label: "待观察", tone: "warn", note: coverage || "状态机未就绪" };
+    return { profile, profiles, allowed: true, label: "自动中", tone: "ok", note: coverage || `续 ${profile.renew_days || 1} 天` };
+  }
+
+  function scheduleRenewTogglePayload(profile, enabled) {
+    const presetKey = String(profile?.preset_key || "").trim();
+    const moduleKey = String(profile?.module_key || scheduleRenewModuleForPreset(presetKey) || "").trim();
+    return {
+      id: Number(profile?.id || 0),
+      send_as_id: Number(profile?.send_as_id || 0),
+      account_local_id: profile?.account_local_id || "",
+      preset_key: presetKey,
+      module_key: moduleKey,
+      label: profile?.label || presetKey,
+      enabled: Boolean(enabled),
+      renew_days: profile?.renew_days || 1,
+      threshold_hours: profile?.threshold_hours || 24,
+      soft_limit: profile?.soft_limit || 95,
+      payload: profile?.payload || {
+        send_as_id: Number(profile?.send_as_id || 0),
+        preset_key: presetKey,
+        horizon_days: profile?.renew_days || 1,
+        auto_anchor: true,
+        auto_anchor_module: moduleKey,
+        schedule_use_module_defaults: presetKey === moduleKey,
+        schedule_semiauto: true,
+        dry_run: false,
+      },
+    };
+  }
+
+  function renderScheduleRailRenewControl(deps = {}, info = {}) {
+    if (info.profile) {
+      const profiles = (info.profiles || [info.profile]).filter(Boolean);
+      const enabled = profiles.some((profile) => profile.enabled !== false);
+      const title = enabled ? "关闭本组自动续约" : "开启本组自动续约";
+      const profileIds = profiles.map((profile) => Number(profile.id || 0)).filter(Boolean).join(",");
+      return `
+        <span class="schedule-rail-renew-control ${escapeAttr(info.tone || "")}">
+          <button type="button" class="schedule-renew-switch ${enabled ? "is-on" : ""}" data-schedule-renew-toggle data-profile-ids="${escapeAttr(profileIds)}" aria-pressed="${enabled ? "true" : "false"}" title="${escapeAttr(title)}">
+            <span aria-hidden="true"></span>
+            <strong>续约</strong>
+          </button>
+          <small title="${escapeAttr(info.note || "")}">${escapeHtml(info.label || "")}</small>
+        </span>
+      `;
+    }
+    if (info.allowed) {
+      return `
+        <span class="schedule-rail-renew-control">
+          <button type="button" class="schedule-renew-config" data-schedule-renew-config title="配置自动续约">续约</button>
+          <small title="${escapeAttr(info.note || "")}">${escapeHtml(info.label || "未配置")}</small>
+        </span>
+      `;
+    }
+    return `
+      <span class="schedule-rail-renew-control muted">
+        <small title="${escapeAttr(info.note || "")}">${escapeHtml(info.label || "手动")}</small>
+      </span>
+    `;
+  }
+
+  function renderScheduleRailPreview(deps = {}, batch, options = {}) {
+    const state = scheduleState(deps);
+    const key = scheduleRailPreviewKey(batch);
+    const loading = Boolean(options.loading) || state.scheduleRailPreviewLoadingKey === key;
+    const error = String(options.error || state.scheduleRailPreviewError || "");
+    const items = (batch.items || []).filter(scheduleMessageHasCurrentWork).sort(compareScheduleMessages);
+    const hiddenTotal = Number(options.hiddenTotal || 0);
+    const visibleLimit = scheduleRailIsWorkbench(deps) ? 80 : 32;
+    const visible = items.slice(0, visibleLimit);
+    const clipped = Math.max(0, items.length - visible.length);
+    const rows = visible.map((item) => {
+      const view = scheduleMessageStatusView(item);
+      return `
+        <li>
+          <code>${escapeHtml(item.command || "")}</code>
+          <small>${escapeHtml(item.schedule_text || "")}</small>
+          ${view.pill}
+          ${item.scheduled_msg_id ? `<small>TG #${escapeHtml(String(item.scheduled_msg_id))}</small>` : ""}
+          ${view.note ? `<small class="${escapeAttr(view.noteClass)}">${escapeHtml(view.note)}</small>` : ""}
+        </li>
+      `;
+    }).join("");
+    const summary = loading
+      ? "正在读取完整计划"
+      : `${items.length} 条未来计划${clipped ? `｜再收起 ${clipped} 条` : ""}`;
+    const hiddenHint = hiddenTotal && !state.scheduleRailFullPreviewLoaded
+      ? `<small class="muted">还有 ${escapeHtml(String(hiddenTotal))} 条正在补全。</small>`
+      : "";
+    return `
+      <div class="schedule-rail-preview" data-schedule-preview-panel="${escapeAttr(key)}">
+        <div class="schedule-rail-preview-head">
+          <strong>计划预览</strong>
+          <small>${escapeHtml(summary)}</small>
+        </div>
+        ${error ? `<p class="modal-status-line warn">${escapeHtml(error)}</p>` : ""}
+        ${hiddenHint}
+        <ul class="schedule-item-list">${rows || '<li><small>没有待展示命令</small></li>'}</ul>
+      </div>
+    `;
   }
 
   function renderScheduleRailRow(deps = {}, batch) {
+    const state = scheduleState(deps);
     const counts = scheduleCurrentCounts(batch.counts || {});
     const total = (counts.planned || 0) + (counts.scheduled || 0) + (counts.failed || 0) + (counts.expired || 0);
     const done = (counts.scheduled || 0) + (counts.expired || 0);
@@ -219,15 +814,24 @@
     const identity = scheduleIdentityLabel(deps, batch.send_as_id);
     const currentItems = (batch.items || []).filter(scheduleMessageHasCurrentWork);
     const hiddenItemCount = Number(batch.hidden_item_count || 0);
-    const snippets = currentItems.slice(0, 2).map((item) => `
+    const snippetLimit = scheduleRailIsWorkbench(deps) ? 3 : 2;
+    const hiddenTotal = Number(hiddenItemCount || 0) + Math.max(0, currentItems.length - snippetLimit);
+    const snippets = currentItems.slice(0, snippetLimit).map((item) => `
       <span>
         <code>${escapeHtml(item.command || "")}</code>
         <small>${escapeHtml(item.schedule_text || "")}</small>
       </span>
     `).join("");
+    const groupedText = Number(batch.__batchCount || 0) > 1
+      ? `<small>合并 ${escapeHtml(String(batch.__batchCount))} 批</small>`
+      : "";
+    const previewKey = scheduleRailPreviewKey(batch);
+    const needsFull = scheduleRailNeedsFullPreview(batch) && !state.scheduleRailFullPreviewLoaded;
+    const renewInfo = scheduleRailRenewInfo(deps, batch);
+    const renewControl = renderScheduleRailRenewControl(deps, renewInfo);
     return `
       <article class="schedule-rail-row ${escapeAttr(scheduleRailStatusClass(statusKey, counts))}">
-        <button type="button" class="schedule-rail-row-main" data-schedule-open title="打开官方定时排班">
+        <div class="schedule-rail-row-main" role="button" tabindex="0" data-schedule-preview-toggle data-schedule-preview-key="${escapeAttr(previewKey)}" data-schedule-needs-full="${needsFull ? "1" : "0"}" title="打开计划预览">
           <span class="schedule-rail-row-title">
             <strong>${escapeHtml(batch.label || batch.preset_key || `排班 #${batch.id}`)}</strong>
             ${statusPill}
@@ -235,15 +839,19 @@
           <span class="schedule-rail-row-meta schedule-tool-meta">
             <small>${escapeHtml(identity)}</small>
             <small>${escapeHtml(batch.anchor_text || "未设锚点")}</small>
-            <small>${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}</small>
             <small>${escapeHtml(scheduleStatusText(statusKey, counts))}</small>
+            ${groupedText}
           </span>
           ${total ? `<span class="schedule-progress compact"><span class="schedule-progress-bar" style="width:${pct}%"></span></span>` : ""}
           <span class="schedule-rail-snippets">
             ${snippets || "<small>没有待展示命令</small>"}
-            ${hiddenItemCount || currentItems.length > 2 ? `<small>+${escapeHtml(String(hiddenItemCount || (currentItems.length - 2)))} 条</small>` : ""}
+            ${hiddenTotal ? `<small>+${escapeHtml(String(hiddenTotal))} 条</small>` : ""}
           </span>
-        </button>
+          <span class="schedule-rail-row-controls">
+            ${renewControl}
+            <small class="schedule-rail-preview-hint">查看计划</small>
+          </span>
+        </div>
       </article>
     `;
   }
@@ -595,14 +1203,19 @@
                 <button type="button" id="scheduleApplyStateSuggestion">套用状态机建议</button>
               </div>
               <div id="scheduleStateHint" class="send-as-result" hidden></div>
-              <div class="form-actions">
-                <button type="button" data-schedule-action="preview">预览计划</button>
-                <button type="button" class="primary" data-schedule-action="create">创建</button>
-              </div>
             </form>
             <p class="modal-status-line info" id="scheduleStatus" hidden></p>
-            <div id="schedulePreview" class="send-as-result" hidden></div>
           </section>
+
+          <details class="modal-section schedule-secondary-section schedule-preview-section" id="schedulePreviewShell">
+            <summary>
+              <span>
+                <strong>预览计划</strong>
+                <small id="schedulePreviewSummary">尚未生成</small>
+              </span>
+            </summary>
+            <div id="schedulePreview" class="send-as-result" hidden></div>
+          </details>
 
           <section class="modal-section">
             <h4>模板复用</h4>
@@ -1310,6 +1923,8 @@
     const form = dialog.querySelector("#scheduleForm");
     const status = dialog.querySelector("#scheduleStatus");
     const preview = dialog.querySelector("#schedulePreview");
+    const previewShell = dialog.querySelector("#schedulePreviewShell");
+    const previewSummary = dialog.querySelector("#schedulePreviewSummary");
     const batchList = dialog.querySelector("#scheduleBatchList");
     const syncButton = dialog.querySelector("#scheduleSyncButton");
     const syncRepairButton = dialog.querySelector("#scheduleSyncRepairButton");
@@ -1355,10 +1970,12 @@
       status.textContent = text || "";
     };
     dialog._scheduleSetStatus = setStatus;
-    const showPreview = (html) => {
+    const showPreview = (html, summary = "") => {
       if (!preview) return;
       preview.hidden = !html;
       preview.innerHTML = html || "";
+      if (previewShell && html) previewShell.open = true;
+      if (previewSummary) previewSummary.textContent = summary || (html ? "已生成" : "尚未生成");
     };
     const setRenewStatus = (kind, text) => {
       if (!renewStatus) return;
@@ -1813,6 +2430,7 @@
       const state = scheduleState(deps);
       state.scheduleSelectedSendAsIds = selected;
       renderScheduleIdentityDock(deps);
+      renderScheduleRail(deps);
       if (sendAsCount) sendAsCount.textContent = String(selected.length);
       if (identitySummary) {
         if (!selected.length) {
@@ -2083,15 +2701,16 @@
               const sched = await fetchJson("/api/schedule");
               if (Array.isArray(sched.batches)) curBatches = sched.batches;
             } catch (e) { /* 用打开模态时的批次兜底 */ }
+            const previewItems = result.items || [];
             showPreview(`
               <p>预设 <strong>${escapeHtml(result.preset_label)}</strong>｜锚点 ${escapeHtml(result.anchor_text)}${result.auto_anchor_used ? '<small class="status-pill ok" style="margin-left:6px">自动锚点</small>' : ""}｜首次发送 ${escapeHtml(result.first_due_text || result.anchor_text)}｜${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}｜${result.horizon_days} 天</p>
               ${result.state_contract ? `<div class="schedule-preview-extras">${scheduleContractHtml(result.state_contract)}</div>` : ""}
               <ul class="send-as-result-list">
-                ${(result.items || []).map((it) => `<li class="ok"><code>${escapeHtml(it.command)}</code> <small>${escapeHtml(it.schedule_text || "")}</small></li>`).join("") || "<li>(0 条)</li>"}
+                ${previewItems.map((it) => `<li class="ok"><code>${escapeHtml(it.command)}</code> <small>${escapeHtml(it.schedule_text || "")}</small></li>`).join("") || "<li>(0 条)</li>"}
               </ul>
               ${scheduleQuotaConflictHtml(deps, payload, result, curBatches)}
-            `);
-            setStatus("ok", `共 ${(result.items || []).length} 条`);
+            `, `共 ${previewItems.length} 条`);
+            setStatus("ok", `共 ${previewItems.length} 条`);
           } catch (error) {
             setStatus("error", error.message);
           }
@@ -2387,8 +3006,12 @@
   window.MiniwebViews = window.MiniwebViews || {};
   window.MiniwebViews.schedule = {
     loadScheduleRail,
+    loadScheduleRenewSummary,
     syncScheduleBatches,
+    syncScheduleRenewProfiles,
     renderScheduleRail,
+    aggregateScheduleRailBatches,
+    scheduleVisibleRailBatches,
     renderScheduleIdentityDock,
     renderScheduleRailRow,
     scheduleRailStatusClass,

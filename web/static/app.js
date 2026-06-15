@@ -91,6 +91,10 @@ const gameActionDock = document.querySelector("#gameActionDock");
 const quickActionHotbar = document.querySelector("#quickActionHotbar");
 const sidebarIdentityList = document.querySelector("#identityList");
 const currentAccountLine = document.querySelector("#currentAccountLine");
+const activeIdentityDock = document.querySelector("#activeIdentityDock");
+const activeIdentityQuickSelect = document.querySelector("#activeIdentityQuickSelect");
+const activeIdentityStatusButton = document.querySelector("#activeIdentityStatusButton");
+const activeIdentityQuickMeta = document.querySelector("#activeIdentityQuickMeta");
 const gameBotsButton = document.querySelector("#gameBotsButton");
 const notifySettingsButton = document.querySelector("#notifySettingsButton");
 const filterSettingsButton = document.querySelector("#filterSettingsButton");
@@ -401,6 +405,7 @@ async function loadAccounts() {
   state.accountLimit = payload.max_accounts || 0;
   state.listenerSummary = payload.listener || null;
   renderSidebarIdentityList();
+  renderActiveIdentityDock();
   renderScheduleIdentityDock();
   renderDirectSendComposer();
   renderGameCockpit();
@@ -416,9 +421,14 @@ async function loadIdentities() {
   const previousActiveId = Number(state.activeIdentityId || 0) || null;
   ensureActiveIdentity();
   const activeChanged = previousActiveId !== (Number(state.activeIdentityId || 0) || null);
+  if (activeChanged) {
+    syncScheduleSelectionToActiveIdentity();
+  }
   renderSidebarIdentityList();
+  renderActiveIdentityDock();
   renderSkillViews();
   renderScheduleIdentityDock();
+  renderScheduleRail();
   renderDirectSendComposer();
   renderGameCockpit();
   if (activeChanged && previousActiveId !== null) {
@@ -439,6 +449,7 @@ async function loadIdentityModuleStates() {
     }
     state.identityModuleStates = map;
     renderSidebarIdentityList();
+    renderActiveIdentityDock();
     renderCultivationModules();
     renderDirectSendComposer();
     renderSkillViews();
@@ -458,6 +469,7 @@ function activeIdentityPatches() {
 
 function renderIdentityProfileViews() {
   renderIdentitySnapshot();
+  renderActiveIdentityDock();
   renderGameCockpit();
   renderSkillViews();
   renderDirectSendComposer();
@@ -3177,6 +3189,60 @@ function identityById(identityId) {
   return (state.identities || []).find((identity) => Number(identity.send_as_id || 0) === id) || null;
 }
 
+function activeIdentityProfileLabel() {
+  const patches = activeIdentityPatches();
+  const patchMap = new Map((patches || []).map((patch) => [patch.key, patch.value]));
+  return (
+    patchMap.get("角色名") ||
+    patchMap.get("道号") ||
+    patchMap.get("境界") ||
+    ""
+  );
+}
+
+function renderActiveIdentityDock() {
+  if (!activeIdentityQuickSelect) return;
+  const identities = state.identities || [];
+  const activeId = Number(state.activeIdentityId || 0) || 0;
+  if (!identities.length) {
+    activeIdentityQuickSelect.innerHTML = '<option value="">先登录账号</option>';
+    activeIdentityQuickSelect.disabled = true;
+    if (activeIdentityStatusButton) activeIdentityStatusButton.disabled = true;
+    if (activeIdentityQuickMeta) activeIdentityQuickMeta.textContent = "还没有可用身份";
+    return;
+  }
+  activeIdentityQuickSelect.disabled = false;
+  activeIdentityQuickSelect.innerHTML = [
+    '<option value="">未选择</option>',
+    ...identities.map((identity) => {
+      const id = Number(identity.send_as_id || 0);
+      const account = accountForIdentity(identity);
+      const name = identity.label || identity.username || identity.send_as_id || "未命名";
+      const accountLabel = account?.label || identity.account_local_id || "未绑定";
+      const status = identityCanSend(identity) ? "" : "｜不可发";
+      return `<option value="${escapeAttr(String(id))}" ${id === activeId ? "selected" : ""}>${escapeHtml(String(name))}｜${escapeHtml(String(accountLabel))}${escapeHtml(status)}</option>`;
+    }),
+  ].join("");
+  activeIdentityQuickSelect.value = activeId ? String(activeId) : "";
+  const identity = activeId ? identityById(activeId) : null;
+  const profile = activeIdentityProfileLabel();
+  if (activeIdentityStatusButton) activeIdentityStatusButton.disabled = !identity;
+  if (activeIdentityQuickMeta) {
+    activeIdentityQuickMeta.textContent = identity
+      ? [profile, identityCanSend(identity) ? "可发送" : "账号未就绪"].filter(Boolean).join("｜")
+      : "选择后同步聊天与定时";
+  }
+  if (activeIdentityDock) {
+    activeIdentityDock.classList.toggle("is-ready", Boolean(identity && identityCanSend(identity)));
+    activeIdentityDock.classList.toggle("is-warn", Boolean(identity && !identityCanSend(identity)));
+  }
+}
+
+function syncScheduleSelectionToActiveIdentity(identityId = state.activeIdentityId) {
+  const id = Number(identityId || 0) || 0;
+  state.scheduleSelectedSendAsIds = id ? [id] : [];
+}
+
 function accountForIdentity(identity) {
   if (!identity) return null;
   const localId = String(identity.account_local_id || "");
@@ -3215,6 +3281,11 @@ async function setActiveIdentity(identityId, options = {}) {
     return current;
   }
   if (current === resolved) {
+    if (options.syncSchedule !== false) {
+      syncScheduleSelectionToActiveIdentity(resolved);
+      renderScheduleIdentityDock();
+      renderScheduleRail();
+    }
     renderIdentityProfileViews();
     renderCultivationModules();
     return resolved;
@@ -3222,7 +3293,13 @@ async function setActiveIdentity(identityId, options = {}) {
   state.activeIdentityId = resolved;
   state.directSendIdentityId = resolved;
   state.directSendLastActiveId = resolved;
+  if (options.syncSchedule !== false) {
+    syncScheduleSelectionToActiveIdentity(resolved);
+  }
   clearIdentityPatchesForActive();
+  renderActiveIdentityDock();
+  renderScheduleIdentityDock();
+  renderScheduleRail();
   renderCultivationModules();
   if (options.loadPatches !== false) {
     await loadIdentityPatches({ reset: true });
@@ -3471,6 +3548,30 @@ if (healthButton) {
 }
 
 directComposerView().bindDirectComposer(directComposerDeps());
+
+if (activeIdentityQuickSelect) {
+  activeIdentityQuickSelect.addEventListener("change", async () => {
+    const id = Number(activeIdentityQuickSelect.value || 0) || null;
+    try {
+      await setActiveIdentity(id, { loadPatches: true });
+      showSkillToast(id ? "已切换当前身份" : "已清空当前身份", "ok");
+    } catch (error) {
+      console.warn("[mini-web] active identity quick switch failed:", error);
+      showSkillToast(`切换身份失败: ${error.message || error}`, "err");
+      renderActiveIdentityDock();
+    }
+  });
+}
+
+if (activeIdentityStatusButton) {
+  activeIdentityStatusButton.addEventListener("click", () => {
+    try {
+      openIdentityStatusModal();
+    } catch (error) {
+      showError(error);
+    }
+  });
+}
 
 outboxButton.addEventListener("click", async () => {
   try {

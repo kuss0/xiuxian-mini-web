@@ -1884,7 +1884,7 @@ def test_inventory_modal_keeps_auto_refresh_with_manual_owner_fallback():
     assert "${formatNumber(estimated)} 类估算项,关键转移前建议 .储物袋" in inventory_js
 
 
-def test_chat_viewport_layout_contract_keeps_composer_visible():
+def test_sidebar_chat_menu_and_schedule_workbench_layout_contract():
     root = Path(__file__).resolve().parents[1]
     html = (root / "web" / "index.html").read_text(encoding="utf-8")
     css = (root / "web" / "static" / "chat-layout.css").read_text(encoding="utf-8")
@@ -1892,16 +1892,32 @@ def test_chat_viewport_layout_contract_keeps_composer_visible():
     state_js = (root / "web" / "static" / "state.js").read_text(encoding="utf-8")
 
     workspace = html.index('<main class="main chat-workspace">')
+    chat_menu = html.index('<details class="sidebar-menu chat-secondary-shell" name="sidebar-menu">')
     layout = html.index('<section class="layout-grid detail-closed">')
     composer = html.index('<footer id="directSendComposer" class="direct-send-composer chat-composer"')
+    schedule_workbench = html.index('<section class="panel schedule-rail-panel schedule-workbench"')
     styles_link = html.index('<link rel="stylesheet" href="/static/styles/base/reset.css"')
     layout_link = html.index('<link rel="stylesheet" href="/static/chat-layout.css"')
     assert styles_link < layout_link
-    assert workspace < layout < composer
+    assert chat_menu < layout < composer < workspace < schedule_workbench
+    assert html.count('name="sidebar-menu"') == 4
+    assert '<section id="activeIdentityDock" class="active-identity-dock"' in html
+    assert '<select id="activeIdentityQuickSelect">' in html
+    assert '<button id="activeIdentityStatusButton" type="button" title="查看当前角色详情">详情</button>' in html
+    assert '<details class="sidebar-menu sidebar-primary-tools" name="sidebar-menu">' in html
+    assert '<details class="workspace-tools-shell sidebar-tools-shell sidebar-menu" name="sidebar-menu" aria-label="账号管理">' in html
+    assert '<span>账号管理</span>' in html
+    assert '<span>账号操作</span>' in html
+    assert 'class="identity-list sidebar-identity-list sidebar-identity-cache" hidden' in html
+    assert 'class="panel session-drawer sidebar-state-cache" hidden' in html
+    assert '<span>角色详情</span>' in html
+    assert '<span>更多面板</span>' in html
+    assert '<details class="sidebar-menu common-action-panel" name="sidebar-menu">' in html
     assert '<section id="gamePrimaryStrip" class="game-primary-strip"' in html
     assert '<div id="messageList" class="message-list"></div>' in html
     assert '<div id="quickActionHotbar" class="quick-action-hotbar"' in html
     assert '<textarea id="directSendInput"' in html
+    assert '<h2>官方定时工作台</h2>' in html
 
     final_contract = css
     required_fragments = [
@@ -1946,12 +1962,20 @@ def test_chat_viewport_layout_contract_keeps_composer_visible():
         ".chat-client-shell {\n    grid-template-rows: 236px minmax(0, 1fr);",
         ".chat-client-shell .conversation-rail {\n    grid-template-columns: minmax(0, 1fr);\n    grid-template-rows: minmax(0, 1fr) auto;",
         ".chat-client-shell .primary-toolbox {\n    grid-template-columns: repeat(4, minmax(0, 1fr));",
+        "Chat fullscreen overlay: the left-rail chat entry is only the trigger.",
+        ".chat-client-shell .conversation-rail .chat-secondary-shell[open] {\n  position: fixed;\n  inset: 8px;",
+        ".chat-client-shell .conversation-rail .chat-secondary-shell[open] .chat-secondary-content {\n  position: static;\n  grid-row: 2;\n  display: grid;\n  grid-template-rows: minmax(0, 1fr) auto;",
+        "First-level identity switch: status details stay secondary.",
+        ".chat-client-shell .active-identity-dock {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr) auto;",
     ]
     for fragment in required_fragments:
         assert fragment in final_contract
 
     assert "messageLoading: false" in state_js
     assert "messageError: \"\"" in state_js
+    assert 'const activeIdentityQuickSelect = document.querySelector("#activeIdentityQuickSelect");' in app_js
+    assert "function renderActiveIdentityDock()" in app_js
+    assert 'await setActiveIdentity(id, { loadPatches: true });' in app_js
     assert 'const scheduleReady = startupTask("initial schedule rail", () => loadScheduleRail({ silent: true }));' in app_js
     assert "function delayedStartupTask(label, task, delayMs = 3000)" in app_js
     assert 'delayedStartupTask("initial world snapshot", () => loadWorldSnapshot({ silent: true }), 5000)' in app_js
@@ -6362,6 +6386,35 @@ def test_schedule_renew_save_rejects_non_whitelisted_preset(tmp_path):
     assert store.list_schedule_renew_profiles() == []
 
 
+def test_schedule_renew_allows_safe_package_presets(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+
+    payload = server.schedule_renew_profiles_payload()
+    allowed = {item["preset_key"]: item for item in payload["allowed_presets"]}
+
+    assert allowed["daily_essentials"]["module_key"] == "checkin"
+    assert allowed["lingxiao_standard"]["module_key"] == "tianti_climb"
+    assert allowed["lingxiao_elder"]["module_key"] == "tianti_climb"
+
+    daily = server.schedule_renew_save_payload({
+        "send_as_id": 12345,
+        "preset_key": "daily_essentials",
+        "module_key": "checkin",
+    })
+    elder = server.schedule_renew_save_payload({
+        "send_as_id": 12345,
+        "preset_key": "lingxiao_elder",
+        "module_key": "tianti_climb",
+    })
+
+    assert daily["ok"] is True, daily
+    assert elder["ok"] is True, elder
+    assert daily["profile"]["payload"]["schedule_use_module_defaults"] is False
+    assert elder["profile"]["payload"]["schedule_use_module_defaults"] is False
+
+
 def test_schedule_create_ignores_forged_renew_plan_items(tmp_path):
     import time
 
@@ -7021,6 +7074,7 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     from backend.app import POST_ROUTES
 
     repo_root = Path(__file__).resolve().parents[1]
+    app_js = (repo_root / "web/static/app.js").read_text(encoding="utf-8")
     schedule_js = (repo_root / "web/static/views/schedule.js").read_text(encoding="utf-8")
     detail_css = (repo_root / "web/static/styles/pages/detail.css").read_text(encoding="utf-8")
 
@@ -7065,7 +7119,41 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert "function scheduleMessageStatusView(message)" in schedule_js
     assert "function scheduleEstimateText(seconds)" in schedule_js
     assert "function scheduleBatchIsDryRun(batch)" in schedule_js
-    assert "const railBatches = batches.filter(scheduleBatchHasCurrentWork);" in schedule_js
+    assert "const railBatches = scheduleVisibleRailBatches(deps, batches);" in schedule_js
+    assert "function scheduleRailSelectedSendAsIds(deps = {})" in schedule_js
+    assert "function scheduleRailScopedBatches(deps = {}, batches = [])" in schedule_js
+    assert "function scheduleVisibleRailBatches(deps = {}, batches = [])" in schedule_js
+    assert "scheduleVisibleRailBatches," in schedule_js
+    assert "function aggregateScheduleRailBatches(batches = [])" in schedule_js
+    assert "function scheduleRailGroupKey(batch)" in schedule_js
+    assert "function scheduleRailGroupModuleKey(batch)" in schedule_js
+    assert "function scheduleRailGroupCategoryKey(batch)" in schedule_js
+    assert "function scheduleRailGroupCategoryLabel(categoryKey)" in schedule_js
+    assert "SCHEDULE_RAIL_GROUP_META" in schedule_js
+    assert 'daily: { label: "日常", order: 1 }' in schedule_js
+    assert 'sect: { label: "宗门", order: 2 }' in schedule_js
+    assert 'concubine: { label: "侍妾", order: 3 }' in schedule_js
+    assert "return `${identityId}:${scheduleRailGroupCategoryKey(batch)}`;" in schedule_js
+    assert 'SCHEDULE_RENEW_ALLOWED_PRESETS[presetKey] || contractModule || autoModule || presetKey || "custom"' in schedule_js
+    assert "合并 ${escapeHtml(String(batch.__batchCount))} 批" in schedule_js
+    assert "aggregateScheduleRailBatches," in schedule_js
+    assert 'class="schedule-rail-row-main" data-schedule-open' not in schedule_js
+    assert 'data-schedule-preview-toggle' in schedule_js
+    assert 'data-schedule-renew-toggle' in schedule_js
+    assert 'data-schedule-renew-config' in schedule_js
+    assert "function ensureScheduleRailFullPreview(deps = {}, key = \"\", options = {})" in schedule_js
+    assert "function openScheduleRailPreviewModal(deps = {}, key = \"\")" in schedule_js
+    assert "function renderScheduleRailPreview(deps = {}, batch, options = {})" in schedule_js
+    assert 'dialog.classList.add("schedule-preview-dialog");' in schedule_js
+    assert ".modal-dialog.schedule-preview-dialog" in detail_css
+    assert "function scheduleRailRenewInfo(deps = {}, batch)" in schedule_js
+    assert "function scheduleRenewTogglePayload(profile, enabled)" in schedule_js
+    assert "loadScheduleRenewSummary," in schedule_js
+    assert "syncScheduleRenewProfiles," in schedule_js
+    assert "<small>${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}</small>" not in schedule_js
+    assert "function syncScheduleSelectionToActiveIdentity(identityId = state.activeIdentityId)" in app_js
+    assert "syncScheduleSelectionToActiveIdentity(resolved);" in app_js
+    assert "renderScheduleRail();" in app_js
     assert "const currentItems = (batch.items || []).filter(scheduleMessageHasCurrentWork);" in schedule_js
     assert "已收起" in schedule_js
     assert 'return "needs_retry";' in schedule_js
