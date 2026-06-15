@@ -258,6 +258,7 @@
     const visibleLimit = scheduleRailIsWorkbench(deps) ? 12 : 4;
     const visible = railBatches.slice(0, visibleLimit);
     const showManageButton = scheduleRailIsWorkbench(deps) || railBatches.length > visible.length || scopedBatches.length > railBatches.length;
+    const renewSummary = renderScheduleRailRenewSummary(deps);
     scheduleRail.innerHTML = `
       <div class="schedule-rail-summary schedule-tool-summary">
         <div class="schedule-tool-summary-title">
@@ -270,6 +271,7 @@
           <span><b>${escapeHtml(String(totals.planned))}</b><small>待排</small></span>
           <span class="${totals.failed ? "warn" : ""}"><b>${escapeHtml(String(totals.failed))}</b><small>失败</small></span>
         </div>
+        ${renewSummary}
       </div>
       <div class="schedule-rail-list">
         ${visible.map((batch) => renderScheduleRailRow(deps, batch)).join("")}
@@ -298,6 +300,66 @@
 
   function scheduleVisibleRailBatches(deps = {}, batches = []) {
     return aggregateScheduleRailBatches(scheduleRailScopedBatches(deps, batches).filter(scheduleBatchHasCurrentWork));
+  }
+
+  function scheduleRailRenewSummaryData(deps = {}) {
+    const state = scheduleState(deps);
+    const selectedIds = scheduleRailSelectedSendAsIds(deps);
+    const selectedSet = new Set(selectedIds);
+    const profiles = (state.scheduleRenewProfiles || []).filter((profile) => {
+      if (!selectedSet.size) return true;
+      return selectedSet.has(Number(profile.send_as_id || 0));
+    });
+    const allowedPresets = Array.isArray(state.scheduleRenewAllowedPresets)
+      ? state.scheduleRenewAllowedPresets
+      : [];
+    const targetIds = selectedIds.length
+      ? selectedIds
+      : Array.from(new Set(profiles.map((profile) => Number(profile.send_as_id || 0)).filter(Boolean)));
+    const configured = new Set(profiles.map((profile) => scheduleRenewProfileKey(profile.send_as_id, profile.preset_key)));
+    let addable = 0;
+    if (targetIds.length && allowedPresets.length) {
+      targetIds.forEach((sendAsId) => {
+        allowedPresets.forEach((row) => {
+          const presetKey = String(row?.preset_key || "").trim();
+          if (presetKey && !configured.has(scheduleRenewProfileKey(sendAsId, presetKey))) addable += 1;
+        });
+      });
+    }
+    const enabled = profiles.filter((profile) => profile.enabled !== false);
+    const automatic = enabled.filter((profile) => Boolean(profile.state_contract?.semiauto_ready) && !String(profile.last_error || "").trim());
+    const waiting = enabled.filter((profile) => !Boolean(profile.state_contract?.semiauto_ready) || String(profile.last_error || "").trim());
+    const disabled = profiles.filter((profile) => profile.enabled === false);
+    return {
+      loading: Boolean(state.scheduleRenewLoading),
+      error: String(state.scheduleRenewError || ""),
+      automatic: automatic.length,
+      waiting: waiting.length,
+      disabled: disabled.length,
+      configured: profiles.length,
+      addable,
+    };
+  }
+
+  function renderScheduleRailRenewSummary(deps = {}) {
+    const summary = scheduleRailRenewSummaryData(deps);
+    if (summary.loading && !summary.configured) {
+      return '<div class="schedule-rail-renew-summary"><span><b>续约</b><small>读取中</small></span></div>';
+    }
+    if (summary.error) {
+      return `<div class="schedule-rail-renew-summary"><span class="warn"><b>续约</b><small>${escapeHtml(summary.error)}</small></span></div>`;
+    }
+    if (!summary.configured && !summary.addable) {
+      return '<div class="schedule-rail-renew-summary"><span><b>续约</b><small>未配置</small></span></div>';
+    }
+    return `
+      <div class="schedule-rail-renew-summary" aria-label="续约覆盖摘要">
+        <span class="ok"><b>${escapeHtml(String(summary.automatic))}</b><small>自动中</small></span>
+        <span class="${summary.waiting ? "warn" : ""}"><b>${escapeHtml(String(summary.waiting))}</b><small>待处理</small></span>
+        <span><b>${escapeHtml(String(summary.disabled))}</b><small>停用</small></span>
+        <span class="${summary.addable ? "accent" : ""}"><b>${escapeHtml(String(summary.addable))}</b><small>可新增</small></span>
+      </div>
+    `;
   }
 
   function bindScheduleOpenButtons(deps = {}, root) {

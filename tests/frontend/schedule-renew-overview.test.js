@@ -323,6 +323,75 @@ describe('Official schedule renewal overview', () => {
     expect(concubine.__groupPresetKeys.sort()).toEqual(['concubine_dream', 'concubine_tianji']);
   });
 
+  test('rail summary exposes renewal coverage counts', () => {
+    const schedule = window.MiniwebViews.schedule;
+    window.MiniwebState.state.identities = [{ send_as_id: 101, label: 'Wise', enabled: true }];
+    window.MiniwebState.state.scheduleSelectedSendAsIds = [101];
+    window.MiniwebState.state.scheduleRenewAllowedPresets = [
+      { preset_key: 'checkin', module_key: 'checkin', interval_sec: 86400 },
+      { preset_key: 'tower', module_key: 'tower', interval_sec: 86400 },
+      { preset_key: 'wild_training', module_key: 'wild_training', interval_sec: 9000 },
+      { preset_key: 'concubine_dream', module_key: 'concubine_dream', interval_sec: 28800 },
+    ];
+    window.MiniwebState.state.scheduleRenewProfiles = [
+      {
+        id: 1,
+        send_as_id: 101,
+        preset_key: 'checkin',
+        module_key: 'checkin',
+        enabled: true,
+        state_contract: { semiauto_ready: true },
+      },
+      {
+        id: 2,
+        send_as_id: 101,
+        preset_key: 'tower',
+        module_key: 'tower',
+        enabled: true,
+        state_contract: { semiauto_ready: false },
+      },
+      {
+        id: 3,
+        send_as_id: 101,
+        preset_key: 'wild_training',
+        module_key: 'wild_training',
+        enabled: false,
+        state_contract: { semiauto_ready: true },
+      },
+    ];
+    window.MiniwebState.state.scheduleBatches = [
+      {
+        id: 1,
+        send_as_id: 101,
+        preset_key: 'checkin',
+        label: '宗门点卯',
+        status: 'completed',
+        anchor_at: 1000,
+        counts: { scheduled: 1 },
+        items: [{ command: '.宗门点卯', schedule_at: 1000, status: 'scheduled' }],
+      },
+    ];
+
+    const scheduleRail = document.createElement('section');
+    document.body.appendChild(scheduleRail);
+    schedule.renderScheduleRail({
+      state: window.MiniwebState.state,
+      scheduleRail,
+      showError: jest.fn(),
+    });
+
+    const summary = scheduleRail.querySelector('.schedule-rail-renew-summary');
+    expect(summary).not.toBeNull();
+    expect(summary.textContent).toContain('自动中');
+    expect(summary.textContent).toContain('待处理');
+    expect(summary.textContent).toContain('停用');
+    expect(summary.textContent).toContain('可新增');
+    expect(summary.textContent).toContain('1自动中');
+    expect(summary.textContent).toContain('1待处理');
+    expect(summary.textContent).toContain('1停用');
+    expect(summary.textContent).toContain('1可新增');
+  });
+
   test('rail card opens plan preview modal and toggles renewal profile', async () => {
     const schedule = window.MiniwebViews.schedule;
     window.MiniwebState.state.identities = [{ send_as_id: 101, label: 'Wise', enabled: true }];

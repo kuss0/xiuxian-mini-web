@@ -1067,6 +1067,54 @@
   min-width: 0;
 }
 
+.chat-client-shell .schedule-rail-renew-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+  min-width: 0;
+}
+
+.chat-client-shell .schedule-rail-renew-summary span {
+  display: grid;
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.50);
+  padding: 4px 6px;
+}
+
+.chat-client-shell .schedule-rail-renew-summary b,
+.chat-client-shell .schedule-rail-renew-summary small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-client-shell .schedule-rail-renew-summary b {
+  color: #e2e8f0;
+  font-size: 13px;
+  line-height: 1.1;
+}
+
+.chat-client-shell .schedule-rail-renew-summary small {
+  color: #64748b;
+  font-size: 10px;
+}
+
+.chat-client-shell .schedule-rail-renew-summary .ok b {
+  color: #86efac;
+}
+
+.chat-client-shell .schedule-rail-renew-summary .warn b,
+.chat-client-shell .schedule-rail-renew-summary .warn small {
+  color: #fbbf24;
+}
+
+.chat-client-shell .schedule-rail-renew-summary .accent b {
+  color: #bfdbfe;
+}
+
 .chat-client-shell .schedule-rail-preview-hint {
   flex: 0 0 auto;
   color: #64748b;
