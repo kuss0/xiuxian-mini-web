@@ -7,19 +7,18 @@ services:
     container_name: xiuxian-web-prod
     restart: always
     ports:
-      - "8787:8787"
+      - "127.0.0.1:8787:8787"
     volumes:
       - data:/app/data
       - logs:/app/logs
     environment:
-      - MINIWEB_ACCESS_TOKEN=${MINIWEB_ACCESS_TOKEN}
       - MINIWEB_HOST=0.0.0.0
       - MINIWEB_PORT=8787
       - RATE_LIMIT_ENABLED=true
       - RATE_LIMIT_MAX_REQUESTS=100
       - RATE_LIMIT_WINDOW_SEC=60
     healthcheck:
-      test: ["CMD-SHELL", "curl -f -H \"X-Miniweb-Token: $$MINIWEB_ACCESS_TOKEN\" http://localhost:8787/api/health"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8787/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3

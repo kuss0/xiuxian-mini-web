@@ -3,7 +3,7 @@ from pathlib import Path
 
 from backend.domain import CHANNELS
 from backend.domain.models import ActionSuggestion, ParsedCard, RawMessageEvent, utc_now_iso
-from backend.app import MiniWebHandler, create_handler, is_authorized_api_headers
+from backend.app import MiniWebHandler, create_handler
 from backend.config import MAX_ACCOUNTS, MAX_IDENTITIES, MAX_LISTENERS
 from backend.external.tianjige import TianjigeConfig, TianjigeGateway
 import backend.server as server_module
@@ -5453,23 +5453,15 @@ def test_telegram_topics_require_target_chat(tmp_path):
     assert "目标群" in result["error"]
 
 
-def test_api_auth_helper_accepts_header_or_bearer_token():
-    assert is_authorized_api_headers({}, "") is True
-    assert is_authorized_api_headers({"X-Miniweb-Token": "secret"}, "secret") is True
-    assert is_authorized_api_headers({"Authorization": "Bearer secret"}, "secret") is True
-    assert is_authorized_api_headers({"X-Miniweb-Token": "wrong"}, "secret") is False
-
-
 def test_app_import_does_not_create_default_server():
     assert MiniWebHandler.app_server is None
 
 
 def test_create_handler_injects_server_instance():
     server = MiniWebServer(store=SampleStore())
-    handler = create_handler(server, access_token="test-token")
+    handler = create_handler(server)
 
     assert handler.app_server is server
-    assert handler.access_token == "test-token"
 
 
 def test_telethon_proxy_config_matches_old_script_shape():

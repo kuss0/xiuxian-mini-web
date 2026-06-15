@@ -19,7 +19,6 @@ sleep 2
 echo "2. 创建环境变量文件..."
 cat > .env << 'EOF'
 # Xiuxian Mini Web Environment Variables
-MINIWEB_ACCESS_TOKEN=dev-token-12345
 MINIWEB_HOST=0.0.0.0
 MINIWEB_PORT=8787
 RATE_LIMIT_ENABLED=true

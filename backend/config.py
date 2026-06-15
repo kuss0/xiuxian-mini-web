@@ -9,7 +9,6 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT_DIR / "data"
 SESSION_DIR = DATA_DIR / "sessions"
 WEB_DIR = ROOT_DIR / "web"
-ACCESS_TOKEN = os.environ.get("MINIWEB_ACCESS_TOKEN", "").strip()
 MAX_ACCOUNTS = int(os.environ.get("MINIWEB_MAX_ACCOUNTS", "100") or "100")
 MAX_IDENTITIES = int(os.environ.get("MINIWEB_MAX_IDENTITIES", "100") or "100")
 MAX_LISTENERS = int(os.environ.get("MINIWEB_MAX_LISTENERS", "1") or "1")

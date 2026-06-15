@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import gzip
-import hmac
 import json
 import mimetypes
 import os
@@ -17,7 +16,7 @@ from urllib.parse import parse_qs, urlparse
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from backend.config import ACCESS_TOKEN, WEB_DIR, RATE_LIMIT_ENABLED, RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW_SEC
+from backend.config import WEB_DIR, RATE_LIMIT_ENABLED, RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW_SEC
 from backend.api import handlers
 from backend.api.routes import RawResponse, build_get_routes, build_post_routes
 from backend.rate_limiter import RateLimiter
@@ -26,16 +25,6 @@ from backend.server import MiniWebServer
 
 BUILD_ID = os.environ.get("MINIWEB_BUILD_ID") or str(int(time.time()))
 STATIC_REF_RE = re.compile(r'(?P<attr>\b(?:href|src))="/static/(?P<asset>[^"?#]+)"')
-
-
-def is_authorized_api_headers(headers, access_token: str) -> bool:
-    if not access_token:
-        return True
-    token = str(headers.get("X-Miniweb-Token") or "").strip()
-    authorization = str(headers.get("Authorization") or "").strip()
-    if authorization.lower().startswith("bearer "):
-        token = authorization[7:].strip()
-    return hmac.compare_digest(token, access_token)
 
 
 def _inject_build_id(body: bytes) -> bytes:
@@ -54,7 +43,6 @@ class MiniWebHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"  # 开启 keep-alive: 反代复用连接, 避免首屏几十个静态请求把短连接打满导致 502
     timeout = 30  # 空闲 keep-alive 连接最多占用线程 30s, 防止线程堆积
     app_server: MiniWebServer | None = None
-    access_token = ACCESS_TOKEN
     web_dir = WEB_DIR
     rate_limiter: RateLimiter | None = None
 
@@ -83,10 +71,6 @@ class MiniWebHandler(BaseHTTPRequestHandler):
             if not self._check_rate_limit(include_body):
                 return
 
-            if not self._is_authorized_api_request():
-                self._send_error(HTTPStatus.UNAUTHORIZED, "需要访问口令", include_body=include_body)
-                return
-
         route = GET_ROUTES.get(path)
         try:
             if route:
@@ -110,9 +94,6 @@ class MiniWebHandler(BaseHTTPRequestHandler):
             if not self._check_rate_limit(True):
                 return
 
-            if not self._is_authorized_api_request():
-                self._send_error(HTTPStatus.UNAUTHORIZED, "需要访问口令")
-                return
             content_type = str(self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             if content_type != "application/json":
                 self._send_error(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "POST 请求必须使用 application/json")
@@ -194,9 +175,6 @@ class MiniWebHandler(BaseHTTPRequestHandler):
             return
         query = f"?{parsed.query}" if getattr(parsed, "query", "") else ""
         print(f"[mini-web] slow api {method} {parsed.path}{query} {elapsed:.3f}s")
-
-    def _is_authorized_api_request(self) -> bool:
-        return is_authorized_api_headers(self.headers, self.access_token)
 
     def _check_rate_limit(self, include_body: bool = True) -> bool:
         """检查速率限制
@@ -370,16 +348,13 @@ POST_ROUTES = build_post_routes(API_HANDLERS)
 def create_handler(
     app_server: MiniWebServer | None = None,
     *,
-    access_token: str = ACCESS_TOKEN,
     web_dir: Path = WEB_DIR,
 ):
     configured_app = app_server or MiniWebServer()
-    configured_access_token = access_token
     configured_web_dir = web_dir
 
     class ConfiguredMiniWebHandler(MiniWebHandler):
         app_server = configured_app
-        access_token = configured_access_token
         web_dir = configured_web_dir
 
     return ConfiguredMiniWebHandler
@@ -415,10 +390,7 @@ def main() -> None:
         MiniWebHandler.set_rate_limiter(None)
         print("[mini-web] 速率限制已禁用")
 
-    if not ACCESS_TOKEN:
-        print("[mini-web] 未设置 MINIWEB_ACCESS_TOKEN, API 不需要认证(仅本地使用)")
-    else:
-        print("[mini-web] API 需要认证")
+    print("[mini-web] API 内置认证已移除, 请通过 Cloudflare/反代或本地绑定控制访问")
 
     app_server = MiniWebServer()
     renew_worker_enabled = os.environ.get("MINIWEB_SCHEDULE_RENEW_WORKER", "1").strip().lower() not in {"0", "false", "no", "off"}

@@ -9,7 +9,7 @@ services:
     container_name: xiuxian-web-dev
     restart: unless-stopped
     ports:
-      - "8787:8787"
+      - "127.0.0.1:8787:8787"
     volumes:
       # Mount source code for hot reload
       - ./backend:/app/backend
@@ -17,7 +17,6 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
     environment:
-      - MINIWEB_ACCESS_TOKEN=${MINIWEB_ACCESS_TOKEN:-dev-token-123}
       - MINIWEB_HOST=0.0.0.0
       - MINIWEB_PORT=8787
       - RATE_LIMIT_ENABLED=false

@@ -41,14 +41,13 @@ nano .env
 ### 配置说明
 
 ```env
-# 访问令牌（必须）
-MINIWEB_ACCESS_TOKEN=your-secret-token-here
-
 # 速率限制
 RATE_LIMIT_ENABLED=true
 RATE_LIMIT_MAX_REQUESTS=100
 RATE_LIMIT_WINDOW_SEC=60
 ```
+
+Compose 默认只把 Web 端口绑定到 `127.0.0.1:8787`。如需公网访问,请通过 Cloudflare Access、反代认证或网络层访问控制转发到本机端口,不要直接暴露未认证 API。
 
 ---
 
