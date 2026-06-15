@@ -11237,3 +11237,63 @@ def test_notify_dispatcher_fires_on_card_when_enabled(tmp_path, monkeypatch):
     assert len(captured) == 1
     assert captured[0].title in {"风险提醒", "天道审判"}
     assert captured[0].severity == "risk"
+
+
+def test_notify_dispatcher_scopes_personal_cards_to_logged_in_identities(tmp_path):
+    """已登记但未登录的身份不能触发个人类外部通知。"""
+    from backend.notifications import NotificationEvent
+    from backend.domain.models import RawMessageEvent
+
+    class FakeDispatcher:
+        def __init__(self) -> None:
+            self.events: list[NotificationEvent] = []
+
+        def event_is_enabled(self, title: str) -> bool:
+            return title == "共历心劫"
+
+        def dispatch(self, event: NotificationEvent):
+            self.events.append(event)
+            return []
+
+    store = SQLiteStore(tmp_path / "m.db")
+    store.save_account({"local_id": "main", "account_id": "12345", "login_status": "done"})
+    store.save_identity({"send_as_id": "12345", "account_local_id": "main", "label": "logged"})
+    store.save_account({"local_id": "alt", "account_id": "67890", "login_status": "idle"})
+    store.save_identity({"send_as_id": "67890", "account_local_id": "alt", "label": "logged-out"})
+    dispatcher = FakeDispatcher()
+    store.set_notify_dispatcher(dispatcher)
+
+    def parent_event(msg_id: int, sender_id: int) -> RawMessageEvent:
+        return RawMessageEvent(
+            id=f"tg:-1001:{msg_id}",
+            chat_id=-1001,
+            msg_id=msg_id,
+            text=".共历心劫",
+            source="player",
+            date="2026-05-17T00:00:00+00:00",
+            sender_id=sender_id,
+        )
+
+    def bot_reply(msg_id: int, reply_to_msg_id: int) -> RawMessageEvent:
+        return RawMessageEvent(
+            id=f"tg:-1001:{msg_id}",
+            chat_id=-1001,
+            msg_id=msg_id,
+            text=(
+                "【坠魔心劫·第3轮】\n"
+                "幻境再变，请继续回复 .稳 / .狠 / .骗。"
+            ),
+            source="韩天尊",
+            date="2026-05-17T00:00:01+00:00",
+            sender_id=7900199668,
+            reply_to_msg_id=reply_to_msg_id,
+        )
+
+    store.ingest_event(parent_event(91001, 67890))
+    cards = store.ingest_event(bot_reply(91002, 91001))
+    assert any(card.title == "共历心劫" for card in cards)
+    assert dispatcher.events == []
+
+    store.ingest_event(parent_event(91003, 12345))
+    store.ingest_event(bot_reply(91004, 91003))
+    assert [event.title for event in dispatcher.events] == ["共历心劫"]

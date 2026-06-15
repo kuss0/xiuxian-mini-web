@@ -168,6 +168,103 @@ class SQLiteStore:
     def module_registry(self):
         return self._module_registry
 
+    def _collect_logged_in_notification_identities(self) -> tuple[bool, set[int]]:
+        """Return (has_account_config, ids) for notification scoping.
+
+        Existing installs may have notifications configured before accounts are
+        added, so no account rows keeps the old behavior. Once accounts exist,
+        personal notifications must prove they belong to a `login_status=done`
+        account or an identity bound to that account.
+        """
+        cached = self._runtime_cache_get("logged_in_notification_ids")
+        if cached is not None:
+            strict, values = cached
+            return bool(strict), {int(item) for item in values}
+        try:
+            accounts = self.list_accounts()
+        except Exception:
+            accounts = []
+        if not accounts:
+            self._runtime_cache_set("logged_in_notification_ids", (False, ()))
+            return False, set()
+        done_local_ids: set[str] = set()
+        ids: set[int] = set()
+        for account in accounts:
+            if str((account or {}).get("login_status") or "") != "done":
+                continue
+            local_id = str((account or {}).get("local_id") or "").strip()
+            if local_id:
+                done_local_ids.add(local_id)
+            account_id = _safe_int((account or {}).get("account_id"))
+            if account_id:
+                ids.add(account_id)
+        if done_local_ids:
+            try:
+                identities = self.list_identities()
+            except Exception:
+                identities = []
+            for identity in identities:
+                if not bool((identity or {}).get("enabled", True)):
+                    continue
+                account_local_id = str((identity or {}).get("account_local_id") or "").strip()
+                send_as_id = _safe_int((identity or {}).get("send_as_id"))
+                if send_as_id and account_local_id in done_local_ids:
+                    ids.add(send_as_id)
+        result = (True, tuple(sorted(ids)))
+        self._runtime_cache_set("logged_in_notification_ids", result)
+        return True, set(ids)
+
+    def _notification_card_needs_identity_scope(self, card: ParsedCard, event: RawMessageEvent) -> bool:
+        tags = {str(item or "").strip() for item in (card.tags or ()) if str(item or "").strip()}
+        channels = {str(item or "").strip() for item in (card.channels or ()) if str(item or "").strip()}
+        if tags.intersection({"我发出", "回复我", "回复别人", "提到别人", "被@"}):
+            return True
+        if channels.intersection({"mine", "prompt"}):
+            return True
+        if card.actions:
+            return True
+        reply_id = _safe_int(card.reply_to_msg_id) or _safe_int(event.reply_to_msg_id)
+        if not reply_id:
+            return False
+        sender_id = _safe_int(event.sender_id)
+        return bool(event.sender_is_bot or self._is_game_bot_sender(sender_id) or sender_id < 0)
+
+    def _notification_card_is_in_logged_in_scope(self, card: ParsedCard, event: RawMessageEvent) -> bool:
+        strict, logged_ids = self._collect_logged_in_notification_identities()
+        if not strict:
+            return True
+        tags = {str(item or "").strip() for item in (card.tags or ()) if str(item or "").strip()}
+        clearly_other = (
+            ("回复别人" in tags and "回复我" not in tags)
+            or ("提到别人" in tags and "被@" not in tags and "回复我" not in tags)
+        )
+        if clearly_other:
+            return False
+        if not self._notification_card_needs_identity_scope(card, event):
+            return True
+        if not logged_ids:
+            return False
+        direct_ids = {
+            _safe_int(card.sender_id),
+            _safe_int(event.sender_id),
+        }
+        for action in card.actions or ():
+            direct_ids.add(_safe_int(getattr(action, "identity_id", None)))
+        if any(item in logged_ids for item in direct_ids if item):
+            return True
+        reply_id = _safe_int(card.reply_to_msg_id) or _safe_int(event.reply_to_msg_id)
+        if reply_id and event.chat_id:
+            parent = self._lookup_parent_event(int(event.chat_id), int(reply_id))
+            parent_id = _safe_int(parent.sender_id if parent else None)
+            if parent_id and parent_id in logged_ids:
+                return True
+            return False
+        # @我的通知依赖 own_aliases,没有稳定 sender 身份可反查;只要不是明显提到别人,
+        # 保留它,避免用户手动配置的别名通知被误静音。
+        if "被@" in tags and "提到别人" not in tags:
+            return True
+        return False
+
     def _lookup_parent_event(self, chat_id: int, msg_id: int) -> RawMessageEvent | None:
         """给 pipeline 用的父消息 lookup,只查不写,失败返 None。"""
         if not chat_id or not msg_id:
@@ -1684,6 +1781,8 @@ class SQLiteStore:
             for card in cards:
                 title = str(card.title or "")
                 if not self._notify_dispatcher.event_is_enabled(title):
+                    continue
+                if not self._notification_card_is_in_logged_in_scope(card, event):
                     continue
                 try:
                     self._notify_dispatcher.dispatch(
@@ -3470,7 +3569,7 @@ class SQLiteStore:
                     json.dumps(normalized, ensure_ascii=False),
                 ),
             )
-        self._runtime_cache_clear("my_identities")
+        self._runtime_cache_clear("my_identities", "logged_in_notification_ids")
         return normalized
 
     def delete_account(self, local_id: str) -> bool:
@@ -3481,7 +3580,7 @@ class SQLiteStore:
             cursor = conn.execute("DELETE FROM accounts WHERE local_id=?", (local_id,))
             deleted = cursor.rowcount > 0
         if deleted:
-            self._runtime_cache_clear("my_identities")
+            self._runtime_cache_clear("my_identities", "logged_in_notification_ids")
         return deleted
 
     def list_identities(self) -> list[dict]:
@@ -3523,7 +3622,7 @@ class SQLiteStore:
                     json.dumps(normalized, ensure_ascii=False),
                 ),
             )
-        self._runtime_cache_clear("my_identities")
+        self._runtime_cache_clear("my_identities", "logged_in_notification_ids")
         return normalized
 
     def delete_identity(self, send_as_id: int | str) -> bool:
@@ -3534,7 +3633,7 @@ class SQLiteStore:
             cursor = conn.execute("DELETE FROM identities WHERE send_as_id=?", (send_as_id,))
             deleted = cursor.rowcount > 0
         if deleted:
-            self._runtime_cache_clear("my_identities")
+            self._runtime_cache_clear("my_identities", "logged_in_notification_ids")
         return deleted
 
     def list_outbox_drafts(self, status: str = "draft") -> list[dict]:
