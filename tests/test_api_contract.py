@@ -6377,13 +6377,109 @@ def test_schedule_renew_save_rejects_non_whitelisted_preset(tmp_path):
 
     result = server.schedule_renew_save_payload({
         "send_as_id": 12345,
-        "preset_key": "deep_retreat",
-        "module_key": "deep_retreat",
+        "preset_key": "yuanying",
+        "module_key": "yuanying",
     })
 
     assert result["ok"] is False
     assert "不允许自动续期" in result["error"]
     assert store.list_schedule_renew_profiles() == []
+
+
+def test_schedule_renew_deep_retreat_requires_fresh_phaseful_evidence(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+
+    saved = server.schedule_renew_save_payload({
+        "send_as_id": 12345,
+        "preset_key": "deep_retreat",
+        "module_key": "deep_retreat",
+        "renew_days": 1,
+    })
+    assert saved["ok"] is True
+    assert saved["profile"]["allowed"] is True
+    assert saved["profile"]["renew_ready"] is False
+    assert "状态机证据" in saved["profile"]["renew_block_reason"]
+
+    run = server.schedule_renew_run_payload({"profile_id": saved["profile"]["id"]})
+    assert run["ok"] is False
+    assert run["status"] == "renew_blocked"
+    assert "状态机证据" in run["error"]
+
+    now = time.time()
+    store.save_module_state(
+        12345,
+        "deep_retreat",
+        {"phase": "running", "cooldown_until": now + 3600, "last_observed_at": now, "last_status": "running"},
+        source_message_id="raw-deep-running",
+    )
+    run2 = server.schedule_renew_run_payload({"profile_id": saved["profile"]["id"]})
+    assert run2["ok"] is False
+    assert run2["status"] == "renew_blocked"
+    assert "仍在运行" in run2["error"]
+
+
+def test_schedule_renew_deep_retreat_runs_with_fresh_idle_evidence(tmp_path, monkeypatch):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_settings_payload({"target_chat": "-1001680975844", "target_topic_id": 7310786})
+    server.save_account_payload(
+        {
+            "local_id": "main",
+            "api_id": "123",
+            "api_hash": "hash",
+            "account_id": "12345",
+            "login_status": "done",
+        }
+    )
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+    now = time.time()
+    store.save_module_state(
+        12345,
+        "deep_retreat",
+        {"phase": "idle", "cooldown_until": now + 120, "last_observed_at": now, "last_status": "idle"},
+        source_message_id="raw-deep-idle",
+    )
+
+    class FakeListeners:
+        def get_listener(self, account_local_id):
+            return None
+
+    submitted = {}
+
+    def fake_submit(**kwargs):
+        submitted.update(kwargs)
+        return "transient"
+
+    server._listeners = FakeListeners()
+    monkeypatch.setattr(server, "_submit_official_schedule_background", fake_submit)
+
+    saved = server.schedule_renew_save_payload({
+        "send_as_id": 12345,
+        "preset_key": "deep_retreat",
+        "module_key": "deep_retreat",
+        "renew_days": 1,
+        "threshold_hours": 1,
+    })
+    assert saved["ok"] is True
+    assert saved["profile"]["renew_ready"] is True
+
+    run = server.schedule_renew_run_payload({"profile_id": saved["profile"]["id"]})
+    assert run["ok"] is True, run
+    assert run["renew_status"] == "submitted"
+    assert submitted["account_local_id"] == "main"
+    batch = store.list_schedule_batches(include_inactive=True)[0]
+    assert batch["preset_key"] == "deep_retreat"
+    assert batch["options"]["schedule_phaseful_renew"] is True
+    assert batch["options"]["renewed_by"] == "schedule_renew"
+    messages = store.list_schedule_messages(batch_id=batch["id"], include_inactive=True)
+    assert messages[0]["command"] == "查看闭关"
+    assert messages[1]["command"] == ".深度闭关"
 
 
 def test_schedule_renew_allows_safe_package_presets(tmp_path):

@@ -14,6 +14,7 @@
   const SCHEDULE_TIME_ZONE_LABEL = DISPLAY_TIME_ZONE === "Asia/Shanghai" ? "上海时间" : DISPLAY_TIME_ZONE;
   const SCHEDULE_SHANGHAI_OFFSET_MINUTES = 8 * 60;
   const SCHEDULE_RENEW_ALLOWED_PRESETS = {
+    deep_retreat: "deep_retreat",
     wild_training: "wild_training",
     checkin: "checkin",
     tower: "tower",
@@ -327,8 +328,8 @@
       });
     }
     const enabled = profiles.filter((profile) => profile.enabled !== false);
-    const automatic = enabled.filter((profile) => Boolean(profile.state_contract?.semiauto_ready) && !String(profile.last_error || "").trim());
-    const waiting = enabled.filter((profile) => !Boolean(profile.state_contract?.semiauto_ready) || String(profile.last_error || "").trim());
+    const automatic = enabled.filter((profile) => scheduleRenewProfileReady(profile) && !String(profile.last_error || "").trim());
+    const waiting = enabled.filter((profile) => !scheduleRenewProfileReady(profile) || String(profile.last_error || "").trim());
     const disabled = profiles.filter((profile) => profile.enabled === false);
     return {
       loading: Boolean(state.scheduleRenewLoading),
@@ -675,6 +676,10 @@
     return scheduleRailRenewProfiles(deps, batch)[0] || null;
   }
 
+  function scheduleRenewProfileReady(profile) {
+    return Boolean(profile?.renew_ready || profile?.state_contract?.semiauto_ready);
+  }
+
   function scheduleRailRenewProfiles(deps = {}, batch) {
     const state = scheduleState(deps);
     const profiles = state.scheduleRenewProfiles || [];
@@ -733,7 +738,7 @@
       const total = profiles.length;
       const enabledCount = profiles.filter((item) => item.enabled !== false).length;
       const errorCount = profiles.filter((item) => String(item.last_error || "").trim()).length;
-      const waitingCount = profiles.filter((item) => item.enabled !== false && !String(item.last_error || "").trim() && item.state_contract && !item.state_contract.semiauto_ready).length;
+      const waitingCount = profiles.filter((item) => item.enabled !== false && !String(item.last_error || "").trim() && item.state_contract && !scheduleRenewProfileReady(item)).length;
       const coverage = profiles
         .map((item) => item.covered_until_text || item.tail_text || "")
         .filter(Boolean)
@@ -757,12 +762,12 @@
       };
     }
     const enabled = profile.enabled !== false;
-    const ready = Boolean(profile.state_contract?.semiauto_ready);
+    const ready = scheduleRenewProfileReady(profile);
     const error = String(profile.last_error || "").trim();
     const coverage = profile.covered_until_text || profile.tail_text || "";
     if (error) return { profile, profiles, allowed: true, label: "异常", tone: "warn", note: error };
     if (!enabled) return { profile, profiles, allowed: true, label: "已停用", tone: "", note: coverage || "续约关闭" };
-    if (!ready && profile.state_contract) return { profile, profiles, allowed: true, label: "待观察", tone: "warn", note: coverage || "状态机未就绪" };
+    if (!ready && profile.state_contract) return { profile, profiles, allowed: true, label: "待观察", tone: "warn", note: profile.renew_block_reason || coverage || "状态机未就绪" };
     return { profile, profiles, allowed: true, label: "自动中", tone: "ok", note: coverage || `续 ${profile.renew_days || 1} 天` };
   }
 
@@ -1160,7 +1165,7 @@
     return `
       <div class="schedule-modal-grid">
         <div class="schedule-modal-main">
-          <section class="modal-section">
+          <section class="modal-section schedule-create-section">
             <h4>新建排班</h4>
             <form id="scheduleForm" class="settings-form">
               <div class="schedule-native-send-as" aria-hidden="true">
@@ -1191,7 +1196,7 @@
                 <button type="button" data-schedule-action="preview">预览计划</button>
                 <button type="button" class="primary" data-schedule-action="create">创建</button>
               </div>
-              <div class="form-grid">
+              <div class="form-grid schedule-primary-fields">
                 <label>
                   <span>预设</span>
                   <select name="preset_key">${presetOptions}</select>
@@ -1204,43 +1209,11 @@
                   </select>
                   <small class="muted">状态机决定 next_at,定时只从这个起点排官方消息。</small>
                 </label>
-                <label>
-                  <span>批量阶梯(每个身份递增分钟)</span>
-                  <input name="offset_step_minutes" inputmode="numeric" value="5" placeholder="批量时每个身份 offset 递增,1 个就不生效" />
-                </label>
-                <label data-show-when="pet_name">
-                  <span>法宝名</span>
-                  <input name="pet_name" placeholder="留空表示不带名字" />
-                </label>
-                <label data-show-when="trigger_command">
-                  <span>触发词(可选)</span>
-                  <input name="trigger_command" placeholder="深闭默认「查看闭关」,留空走默认;其他 preset 留空 = 不发触发" />
-                </label>
                 <label data-show-when="horizon_days">
                   <span>排几天(1-7)</span>
                   <input name="horizon_days" inputmode="numeric" min="1" max="7" value="3" />
                 </label>
-                <label class="span-2" data-show-when="command">
-                  <span>自定义命令</span>
-                  <textarea name="command" rows="4" placeholder="每行一条命令；例如&#10;.宗门点卯&#10;.闯塔&#10;.天机代卜"></textarea>
-                </label>
-                <label data-show-when="interval_sec">
-                  <span>间隔 / CD(秒)</span>
-                  <input name="interval_sec" inputmode="numeric" value="3600" />
-                </label>
-                <label data-show-when="count">
-                  <span>次数 / 轮数</span>
-                  <input name="count" inputmode="numeric" value="3" />
-                </label>
-                <label data-show-when="command_gap_sec">
-                  <span>同轮命令间隔(秒)</span>
-                  <input name="command_gap_sec" inputmode="numeric" value="180" placeholder="多条自定义命令之间错开" />
-                </label>
                 <label>
-                  <span>错峰偏移(分钟)</span>
-                  <input name="offset_minutes" inputmode="numeric" value="0" placeholder="0 = 不偏" title="多账号同时建议各错开 3-15 分钟,避免天尊同一刻被多账号挤" />
-                </label>
-                <label class="span-2">
                   <span>锚点时间(${SCHEDULE_TIME_ZONE_LABEL})</span>
                   <input name="anchor_at_text" type="datetime-local" />
                 </label>
@@ -1253,14 +1226,56 @@
                 <input type="checkbox" name="schedule_use_module_defaults" checked />
                 <span>套用状态机建议命令/间隔/参数</span>
               </label>
-              <label class="toggle-row">
-                <input type="checkbox" name="schedule_semiauto" />
-                <span>白名单半自动(后端会拒绝未知、缺参数、阶段型和非白名单模块)</span>
-              </label>
-              <label class="toggle-row">
-                <input type="checkbox" name="dry_run" />
-                <span>本地预演(只记录计划,不排到 Telegram)</span>
-              </label>
+              <details class="schedule-secondary-section schedule-advanced-section">
+                <summary>
+                  <span>
+                    <strong>高级参数</strong>
+                    <small>自定义命令 / 错峰 / dry-run</small>
+                  </span>
+                </summary>
+                <div class="form-grid">
+                  <label>
+                    <span>批量阶梯(每个身份递增分钟)</span>
+                    <input name="offset_step_minutes" inputmode="numeric" value="5" placeholder="批量时每个身份 offset 递增,1 个就不生效" />
+                  </label>
+                  <label>
+                    <span>错峰偏移(分钟)</span>
+                    <input name="offset_minutes" inputmode="numeric" value="0" placeholder="0 = 不偏" title="多账号同时建议各错开 3-15 分钟,避免天尊同一刻被多账号挤" />
+                  </label>
+                  <label data-show-when="pet_name">
+                    <span>法宝名</span>
+                    <input name="pet_name" placeholder="留空表示不带名字" />
+                  </label>
+                  <label data-show-when="trigger_command">
+                    <span>触发词(可选)</span>
+                    <input name="trigger_command" placeholder="深闭默认「查看闭关」,留空走默认;其他 preset 留空 = 不发触发" />
+                  </label>
+                  <label data-show-when="interval_sec">
+                    <span>间隔 / CD(秒)</span>
+                    <input name="interval_sec" inputmode="numeric" value="3600" />
+                  </label>
+                  <label data-show-when="count">
+                    <span>次数 / 轮数</span>
+                    <input name="count" inputmode="numeric" value="3" />
+                  </label>
+                  <label data-show-when="command_gap_sec">
+                    <span>同轮命令间隔(秒)</span>
+                    <input name="command_gap_sec" inputmode="numeric" value="180" placeholder="多条自定义命令之间错开" />
+                  </label>
+                  <label class="span-2" data-show-when="command">
+                    <span>自定义命令</span>
+                    <textarea name="command" rows="4" placeholder="每行一条命令；例如&#10;.宗门点卯&#10;.闯塔&#10;.天机代卜"></textarea>
+                  </label>
+                </div>
+                <label class="toggle-row">
+                  <input type="checkbox" name="schedule_semiauto" />
+                  <span>白名单半自动(后端会拒绝未知、缺参数、阶段型和非白名单模块)</span>
+                </label>
+                <label class="toggle-row">
+                  <input type="checkbox" name="dry_run" />
+                  <span>本地预演(只记录计划,不排到 Telegram)</span>
+                </label>
+              </details>
               <div class="form-actions">
                 <button type="button" id="scheduleApplyStateSuggestion">套用状态机建议</button>
               </div>
@@ -1279,8 +1294,13 @@
             <div id="schedulePreview" class="send-as-result" hidden></div>
           </details>
 
-          <section class="modal-section">
-            <h4>模板复用</h4>
+          <details class="modal-section schedule-secondary-section schedule-template-section">
+            <summary>
+              <span>
+                <strong>模板复用</strong>
+                <small>保存 / 套用常用参数</small>
+              </span>
+            </summary>
             <p class="muted">把常用排班参数存成模板，后续一键套用后再微调即可。模板只存参数，不存具体锚点时间。</p>
             <div class="form-grid">
               <label class="span-2">
@@ -1301,9 +1321,9 @@
               <button type="button" id="scheduleTemplateDeleteButton">删除模板</button>
             </div>
             <p class="modal-status-line info" id="scheduleTemplateStatus" hidden></p>
-          </section>
+          </details>
 
-          <section class="modal-section">
+          <section class="modal-section schedule-renew-section">
             <h4>续期策略 ${scheduleTimeZonePill()}</h4>
             <div id="scheduleRenewWorkerStatus" class="schedule-renew-worker-status" aria-live="polite">
               ${renderScheduleRenewWorkerStatus()}
@@ -1359,8 +1379,13 @@
             </div>
           </section>
 
-          <section class="modal-section">
-            <h4>对账 Telegram 端</h4>
+          <details class="modal-section schedule-secondary-section schedule-sync-section">
+            <summary>
+              <span>
+                <strong>对账 Telegram 端</strong>
+                <small>漂移修复 / TG 待发送列表</small>
+              </span>
+            </summary>
             <p class="muted">拉 TG 的 GetScheduledHistory,跟本地批次对账,标出「TG 有 mini-web 没记录」(orphans)、「未来丢失」(lost) 和「已过期释放」(expired) 的项。</p>
             <div class="form-grid">
               <label class="span-2">
@@ -1374,7 +1399,7 @@
             </div>
             <p class="modal-status-line info" id="scheduleSyncStatus" hidden></p>
             <div id="scheduleSyncResult" class="send-as-result" hidden></div>
-          </section>
+          </details>
         </div>
 
         <aside class="schedule-modal-records" aria-label="本地排班记录">
@@ -1522,8 +1547,8 @@
     const scheduleModules = options.scheduleModules || {};
     const configured = new Set(profiles.map((profile) => scheduleRenewProfileKey(profile.send_as_id, profile.preset_key)));
     const enabled = profiles.filter((profile) => profile.enabled !== false);
-    const automatic = enabled.filter((profile) => Boolean(profile.state_contract?.semiauto_ready) && !profile.last_error);
-    const waiting = enabled.filter((profile) => !Boolean(profile.state_contract?.semiauto_ready) || profile.last_error);
+    const automatic = enabled.filter((profile) => scheduleRenewProfileReady(profile) && !profile.last_error);
+    const waiting = enabled.filter((profile) => !scheduleRenewProfileReady(profile) || profile.last_error);
     const disabled = profiles.filter((profile) => profile.enabled === false);
     const addable = [];
     const blocked = [];
@@ -1537,23 +1562,29 @@
           contract,
           identity: scheduleIdentityLabel(deps, selectedSendAsId) || `send_as ${selectedSendAsId}`,
         };
-        if (contract?.semiauto_ready) addable.push(target);
+        if (contract?.semiauto_ready || row.preset_key === "deep_retreat") addable.push(target);
         else blocked.push(target);
       });
     }
     const profileChip = (profile, tone) => `
-      <button type="button" class="schedule-renew-chip" data-schedule-renew-action="load" data-profile-id="${escapeAttr(String(profile.id || ""))}">
-        <strong>${escapeHtml(profile.label || profile.preset_key || "")}</strong>
-        <small>${escapeHtml(scheduleIdentityLabel(deps, profile.send_as_id) || `send_as ${profile.send_as_id || ""}`)}</small>
-        ${scheduleRenewStatusChip(profile.last_error ? "异常" : profile.enabled === false ? "停用" : "已配置", tone)}
-      </button>
+      <label class="schedule-renew-chip schedule-renew-check ${escapeAttr(tone || "")}">
+        <input type="checkbox" data-schedule-renew-overview-action="toggle-profile" data-profile-id="${escapeAttr(String(profile.id || ""))}" ${profile.enabled !== false ? "checked" : ""} />
+        <span>
+          <strong>${escapeHtml(profile.label || profile.preset_key || "")}</strong>
+          <small>${escapeHtml(scheduleIdentityLabel(deps, profile.send_as_id) || `send_as ${profile.send_as_id || ""}`)}</small>
+        </span>
+        ${scheduleRenewStatusChip(profile.last_error ? "异常" : profile.enabled === false ? "停用" : scheduleRenewProfileReady(profile) ? "自动" : "待观察", tone)}
+      </label>
     `;
     const presetChip = (row, tone, action = "apply") => `
-      <button type="button" class="schedule-renew-chip" data-schedule-renew-overview-action="${escapeAttr(action)}" data-schedule-renew-preset="${escapeAttr(row.preset_key)}" data-schedule-renew-send-as="${escapeAttr(String(selectedSendAsId))}">
-        <strong>${escapeHtml(row.label)}</strong>
-        <small>${escapeHtml(row.module_key)}${row.interval_sec ? `｜${escapeHtml(String(Math.round(row.interval_sec / 60)))}min` : ""}</small>
-        ${scheduleRenewStatusChip(action === "apply" ? "套用" : "需观察", tone)}
-      </button>
+      <label class="schedule-renew-chip schedule-renew-check ${escapeAttr(tone || "")} ${action === "blocked" ? "disabled" : ""}">
+        <input type="checkbox" data-schedule-renew-overview-action="${escapeAttr(action === "blocked" ? "blocked" : "enable")}" data-schedule-renew-preset="${escapeAttr(row.preset_key)}" data-schedule-renew-module="${escapeAttr(row.module_key)}" data-schedule-renew-send-as="${escapeAttr(String(selectedSendAsId))}" ${action === "blocked" ? "disabled" : ""} />
+        <span>
+          <strong>${escapeHtml(row.label)}</strong>
+          <small>${escapeHtml(row.module_key)}${row.interval_sec ? `｜${escapeHtml(String(Math.round(row.interval_sec / 60)))}min` : ""}</small>
+        </span>
+        ${scheduleRenewStatusChip(action === "blocked" ? "需观察" : "可勾选", tone)}
+      </label>
     `;
     const group = (title, rowsHtml, count, emptyText) => `
       <div class="schedule-renew-overview-group">
@@ -1572,9 +1603,9 @@
         ${scheduleTimeZonePill()}
         <small>${escapeHtml(selectedHint)}</small>
       </div>
-      ${group("自动中", automatic.map((profile) => profileChip(profile, "ok")).join(""), automatic.length, "暂无可自动运行策略")}
-      ${group("待观察", waiting.map((profile) => profileChip(profile, "warn")).join("") + disabled.map((profile) => profileChip(profile, "")).join(""), waiting.length + disabled.length, "暂无阻塞策略")}
       ${group("可新增", addable.map((row) => presetChip(row, "ok", "apply")).join(""), addable.length, selectedSendAsId ? "当前身份暂无可新增预设" : "先选择续期身份")}
+      ${group("自动中", automatic.map((profile) => profileChip(profile, "ok")).join(""), automatic.length, "暂无可自动运行策略")}
+      ${group("待处理", waiting.map((profile) => profileChip(profile, "warn")).join("") + disabled.map((profile) => profileChip(profile, "")).join(""), waiting.length + disabled.length, "暂无阻塞策略")}
       ${group("需先观察", blocked.slice(0, 8).map((row) => presetChip(row, "warn", "blocked")).join(""), blocked.length, "没有缺观察的白名单预设")}
     `;
   }
@@ -1586,7 +1617,7 @@
     return profiles.map((profile) => {
       const contract = profile.state_contract || {};
       const enabled = profile.enabled !== false;
-      const ready = Boolean(contract.semiauto_ready);
+      const ready = scheduleRenewProfileReady(profile);
       const statusPill = enabled
         ? `<span class="status-pill ${ready ? "ok" : "warn"}">${ready ? "可续期" : "待观察"}</span>`
         : '<span class="status-pill">停用</span>';
@@ -1610,6 +1641,7 @@
             </div>
             <p class="muted">当前覆盖到 ${escapeHtml(coverage)}｜${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}｜阈值 ${escapeHtml(String(profile.threshold_hours || 24))}h</p>
             ${storedHint}
+            ${profile.renew_block_reason && !ready ? `<small class="warn">${escapeHtml(profile.renew_block_reason)}</small>` : ""}
             ${error}
           </div>
           <div class="account-row-actions">
@@ -2226,6 +2258,34 @@
       };
     };
 
+    const scheduleRenewPresetPayload = ({ sendAsId, presetKey, moduleKey, enabled = true } = {}) => {
+      const renewDays = renewForm?.querySelector('[name="renew_days"]')?.value || 1;
+      const thresholdHours = renewForm?.querySelector('[name="threshold_hours"]')?.value || 24;
+      const softLimit = renewForm?.querySelector('[name="soft_limit"]')?.value || 95;
+      const sid = Number(sendAsId || 0);
+      const preset = String(presetKey || "").trim();
+      const module = String(moduleKey || scheduleRenewModuleForPreset(preset) || "").trim();
+      return {
+        send_as_id: sid,
+        preset_key: preset,
+        module_key: module,
+        renew_days: renewDays,
+        threshold_hours: thresholdHours,
+        soft_limit: softLimit,
+        enabled: Boolean(enabled),
+        payload: {
+          send_as_id: sid,
+          preset_key: preset,
+          horizon_days: renewDays,
+          auto_anchor: true,
+          auto_anchor_module: module,
+          schedule_use_module_defaults: preset === module,
+          schedule_semiauto: true,
+          dry_run: false,
+        },
+      };
+    };
+
     const fillRenewForm = (profile) => {
       if (!renewForm || !profile) return;
       const setValue = (name, value) => {
@@ -2385,6 +2445,64 @@
       renewOverview.querySelectorAll("[data-schedule-renew-action], [data-schedule-renew-overview-action]").forEach((btn) => {
         if (btn.dataset.bound === "1") return;
         btn.dataset.bound = "1";
+        btn.addEventListener("change", async () => {
+          const profileId = Number(btn.dataset.profileId || 0);
+          const action = btn.dataset.scheduleRenewOverviewAction || "";
+          if (profileId && action === "toggle-profile") {
+            const profile = renewProfiles.find((item) => Number(item.id || 0) === profileId);
+            if (!profile) return;
+            const nextEnabled = Boolean(btn.checked);
+            btn.disabled = true;
+            try {
+              setRenewStatus("info", `${nextEnabled ? "开启" : "关闭"}续期策略 #${profileId}...`);
+              const result = await postJson("/api/schedule/renew/save", scheduleRenewTogglePayload(profile, nextEnabled));
+              if (!result.ok) throw new Error(result.error || "切换续期失败");
+              renewProfiles = result.profiles || renewProfiles;
+              if (renewProfileList) renewProfileList.innerHTML = renderScheduleRenewProfiles(deps, renewProfiles);
+              updateRenewOverview();
+              bindRenewProfileActions();
+              setRenewStatus("ok", `${nextEnabled ? "已开启" : "已关闭"}续期策略 #${profileId}`);
+            } catch (error) {
+              btn.checked = !nextEnabled;
+              setRenewStatus("error", error.message || "切换续期失败");
+              window.alert(error.message || "切换续期失败");
+            } finally {
+              if (btn.isConnected) btn.disabled = false;
+            }
+            return;
+          }
+          const presetKey = String(btn.dataset.scheduleRenewPreset || "").trim();
+          const sendAsId = Number(btn.dataset.scheduleRenewSendAs || renewSendAsSelect?.value || 0);
+          if (!presetKey) return;
+          if (action === "enable") {
+            const moduleKey = String(btn.dataset.scheduleRenewModule || scheduleRenewModuleForPreset(presetKey) || "").trim();
+            const nextEnabled = Boolean(btn.checked);
+            btn.disabled = true;
+            try {
+              setRenewStatus("info", `开启 ${presetKey} 续期...`);
+              const result = await postJson("/api/schedule/renew/save", scheduleRenewPresetPayload({
+                sendAsId,
+                presetKey,
+                moduleKey,
+                enabled: nextEnabled,
+              }));
+              if (!result.ok) throw new Error(result.error || "保存续期策略失败");
+              renewProfiles = result.profiles || renewProfiles;
+              if (renewProfileList) renewProfileList.innerHTML = renderScheduleRenewProfiles(deps, renewProfiles);
+              updateRenewOverview();
+              bindRenewProfileActions();
+              if (result.profile) fillRenewForm(result.profile);
+              setRenewStatus("ok", `已开启 ${result.profile?.label || presetKey} 自动续期`);
+            } catch (error) {
+              btn.checked = false;
+              setRenewStatus("error", error.message || "保存续期策略失败");
+              window.alert(error.message || "保存续期策略失败");
+            } finally {
+              if (btn.isConnected) btn.disabled = false;
+            }
+            return;
+          }
+        });
         btn.addEventListener("click", () => {
           const profileId = Number(btn.dataset.profileId || 0);
           if (profileId) {
@@ -2395,7 +2513,7 @@
           const action = btn.dataset.scheduleRenewOverviewAction || "";
           const presetKey = String(btn.dataset.scheduleRenewPreset || "").trim();
           const sendAsId = Number(btn.dataset.scheduleRenewSendAs || renewSendAsSelect?.value || 0);
-          if (!presetKey) return;
+          if (!presetKey || action === "enable" || action === "toggle-profile") return;
           if (renewSendAsSelect && sendAsId && Array.from(renewSendAsSelect.options).some((option) => Number(option.value || 0) === sendAsId)) {
             renewSendAsSelect.value = String(sendAsId);
           }

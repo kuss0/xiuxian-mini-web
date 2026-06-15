@@ -66,7 +66,7 @@ describe('Official schedule renewal overview', () => {
     require('../../web/static/views/schedule.js');
   });
 
-  test('clicking addable renewal preset only fills the draft form', async () => {
+  test('checking addable renewal preset saves the profile directly', async () => {
     window.MiniwebApi.fetchJson.mockImplementation((url) => {
       if (url === '/api/schedule/renew') {
         return Promise.resolve({
@@ -79,6 +79,27 @@ describe('Official schedule renewal overview', () => {
         });
       }
       return Promise.resolve({ ok: true, batches: [] });
+    });
+    window.MiniwebApi.postJson.mockResolvedValue({
+      ok: true,
+      profile: {
+        id: 9,
+        send_as_id: 101,
+        preset_key: 'checkin',
+        module_key: 'checkin',
+        label: '点卯',
+        enabled: true,
+        state_contract: { semiauto_ready: true },
+      },
+      profiles: [{
+        id: 9,
+        send_as_id: 101,
+        preset_key: 'checkin',
+        module_key: 'checkin',
+        label: '点卯',
+        enabled: true,
+        state_contract: { semiauto_ready: true },
+      }],
     });
 
     const dialog = buildDialog();
@@ -101,18 +122,29 @@ describe('Official schedule renewal overview', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    const applyButton = dialog.querySelector('[data-schedule-renew-overview-action="apply"][data-schedule-renew-preset="checkin"]');
-    expect(applyButton).not.toBeNull();
+    const checkbox = dialog.querySelector('[data-schedule-renew-overview-action="enable"][data-schedule-renew-preset="checkin"]');
+    expect(checkbox).not.toBeNull();
 
     dialog.querySelector('[name="id"]').value = '42';
-    applyButton.click();
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(dialog.querySelector('#scheduleRenewSendAsSelect').value).toBe('101');
     expect(dialog.querySelector('#scheduleRenewPresetSelect').value).toBe('checkin');
     expect(dialog.querySelector('#scheduleRenewModuleSelect').value).toBe('checkin');
-    expect(dialog.querySelector('[name="id"]').value).toBe('');
-    expect(dialog.querySelector('#scheduleRenewStatus').textContent).toBe('已套用可新增续期预设');
-    expect(window.MiniwebApi.postJson).not.toHaveBeenCalled();
+    expect(dialog.querySelector('[name="id"]').value).toBe('9');
+    expect(dialog.querySelector('#scheduleRenewStatus').textContent).toBe('已开启 点卯 自动续期');
+    expect(window.MiniwebApi.postJson).toHaveBeenCalledWith(
+      '/api/schedule/renew/save',
+      expect.objectContaining({
+        send_as_id: 101,
+        preset_key: 'checkin',
+        module_key: 'checkin',
+        enabled: true,
+      })
+    );
   });
 
   test('rail aggregates same identity and tianti module batches', () => {

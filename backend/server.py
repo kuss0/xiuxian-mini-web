@@ -157,7 +157,9 @@ SCHEDULE_RENEW_DEFAULT_SOFT_LIMIT = 95
 SCHEDULE_RENEW_DEFAULT_THRESHOLD_HOURS = 24
 SCHEDULE_RENEW_MAX_DAYS = 3
 SCHEDULE_RENEW_MIN_LEAD_SEC = 30
+SCHEDULE_RENEW_PHASEFUL_MODULE_KEYS = {"deep_retreat"}
 SCHEDULE_RENEW_ALLOWED_PRESETS: dict[str, tuple[str, int]] = {
+    "deep_retreat": ("deep_retreat", 8 * 3600),
     "wild_training": ("wild_training", 150 * 60),
     "checkin": ("checkin", 24 * 3600),
     "tower": ("tower", 24 * 3600),
@@ -2944,6 +2946,54 @@ class MiniWebServer:
     def _schedule_renew_allowed_module_for_preset(self, preset_key: str) -> str:
         return SCHEDULE_RENEW_ALLOWED_PRESETS.get(str(preset_key or "").strip(), ("", 0))[0]
 
+    def _schedule_renew_module_allowed(self, module_key: str) -> bool:
+        key = str(module_key or "").strip()
+        return key in SEMIAUTO_MODULE_KEYS or key in SCHEDULE_RENEW_PHASEFUL_MODULE_KEYS
+
+    def _schedule_renew_phaseful_fresh_sec(self, profile: dict, contract: dict | None = None) -> int:
+        interval = self._schedule_renew_interval_sec(profile, contract)
+        return max(3600, min(48 * 3600, max(interval, interval * 2)))
+
+    def _schedule_phaseful_renew_block_payload(self, profile: dict, contract: dict | None) -> dict:
+        module_key = str((contract or {}).get("module_key") or profile.get("module_key") or "")
+        label = str((contract or {}).get("label") or profile.get("label") or module_key or "阶段型模块")
+        if module_key not in SCHEDULE_RENEW_PHASEFUL_MODULE_KEYS:
+            msg = f"{label} 未进入阶段型续期白名单"
+            return {"ok": False, "manual_required": True, "status": "phaseful_renew_blocked", "error": msg, "manual_message": msg}
+        if not contract:
+            msg = f"{label} 缺少状态机证据,不能自动续期"
+            return {"ok": False, "manual_required": True, "status": "stale_evidence", "error": msg, "manual_message": msg}
+        updated_at = float((contract or {}).get("updated_at") or 0)
+        now = time.time()
+        fresh_sec = self._schedule_renew_phaseful_fresh_sec(profile, contract)
+        if updated_at <= 0 or now - updated_at > fresh_sec:
+            msg = f"{label} 状态机证据不新鲜,请先观察一次结算/查询回复"
+            return {
+                "ok": False,
+                "manual_required": True,
+                "status": "stale_evidence",
+                "error": msg,
+                "manual_message": msg,
+                "evidence_age_sec": max(0, now - updated_at) if updated_at else 0,
+                "evidence_fresh_sec": fresh_sec,
+            }
+        if not float((contract or {}).get("next_at") or 0):
+            msg = f"{label} 状态机没有给出下次可用时间,不能自动续期"
+            return {"ok": False, "manual_required": True, "status": "missing_anchor", "error": msg, "manual_message": msg}
+        summary = dict((contract or {}).get("summary") or {})
+        phase = str(summary.get("phase") or "").strip()
+        if phase in {"running", "waiting_summary"}:
+            msg = f"{label} 仍在运行或等待总结,不能自动续期"
+            return {"ok": False, "manual_required": True, "status": "phaseful_active", "error": msg, "manual_message": msg}
+        blocking_warnings = [
+            warning for warning in ((contract or {}).get("warnings") or [])
+            if str(warning.get("severity") or "") == "risk"
+        ]
+        if blocking_warnings:
+            msg = str(blocking_warnings[0].get("message") or f"{label} 状态机证据不足")
+            return {"ok": False, "manual_required": True, "status": "stale_evidence", "error": msg, "manual_message": msg}
+        return {"ok": True}
+
     def _schedule_renew_interval_sec(self, profile: dict, contract: dict | None = None) -> int:
         preset_key = str(profile.get("preset_key") or "").strip()
         if preset_key in SCHEDULE_RENEW_ALLOWED_PRESETS:
@@ -2987,15 +3037,25 @@ class MiniWebServer:
             current_usage = self._official_schedule_identity_usage(int(out.get("send_as_id") or 0))
         out["current_usage"] = int(current_usage or 0)
         out["soft_remaining"] = max(0, int(out.get("soft_limit") or SCHEDULE_RENEW_DEFAULT_SOFT_LIMIT) - out["current_usage"])
+        module_key = str(out.get("module_key") or "")
         out["allowed"] = (
-            self._schedule_renew_allowed_module_for_preset(str(out.get("preset_key") or "")) == str(out.get("module_key") or "")
-            and str(out.get("module_key") or "") in SEMIAUTO_MODULE_KEYS
+            self._schedule_renew_allowed_module_for_preset(str(out.get("preset_key") or "")) == module_key
+            and self._schedule_renew_module_allowed(module_key)
         )
+        out["renew_ready"] = False
+        out["renew_block_reason"] = ""
         if include_contract and out.get("send_as_id") and out.get("module_key"):
             try:
                 out["state_contract"] = self._schedule_state_contract(int(out["send_as_id"]), str(out["module_key"]))
+                if module_key in SCHEDULE_RENEW_PHASEFUL_MODULE_KEYS:
+                    phaseful_check = self._schedule_phaseful_renew_block_payload(out, out.get("state_contract"))
+                    out["renew_ready"] = bool(phaseful_check.get("ok"))
+                    out["renew_block_reason"] = "" if phaseful_check.get("ok") else str(phaseful_check.get("error") or "")
+                else:
+                    out["renew_ready"] = bool((out.get("state_contract") or {}).get("semiauto_ready"))
             except Exception:
                 out["state_contract"] = None
+                out["renew_ready"] = False
         return out
 
     def _schedule_renew_normalize_profile(self, payload: dict) -> tuple[dict | None, dict | None, str]:
@@ -3027,8 +3087,8 @@ class MiniWebServer:
         ).strip()
         if module_key != allowed_module:
             return None, None, f"续期状态机必须与预设匹配: {preset_key} -> {allowed_module}"
-        if module_key not in SEMIAUTO_MODULE_KEYS:
-            return None, None, f"{module_key} 不在半自动白名单,不能自动续期"
+        if not self._schedule_renew_module_allowed(module_key):
+            return None, None, f"{module_key} 不在自动续期白名单,不能自动续期"
         renew_days = max(1, min(SCHEDULE_RENEW_MAX_DAYS, _safe_int(raw.get("renew_days")) or 1))
         threshold_hours = max(1, min(72, _safe_int(raw.get("threshold_hours")) or SCHEDULE_RENEW_DEFAULT_THRESHOLD_HOURS))
         soft_limit = max(1, min(MAX_SCHEDULED_MESSAGES_PER_IDENTITY, _safe_int(raw.get("soft_limit")) or SCHEDULE_RENEW_DEFAULT_SOFT_LIMIT))
@@ -3043,6 +3103,7 @@ class MiniWebServer:
                 "auto_anchor_module": module_key,
                 "schedule_use_module_defaults": preset_key == module_key,
                 "schedule_semiauto": True,
+                "schedule_phaseful_renew": module_key in SCHEDULE_RENEW_PHASEFUL_MODULE_KEYS,
                 "dry_run": False,
             }
         )
@@ -3341,7 +3402,7 @@ class MiniWebServer:
         allowed_module = self._schedule_renew_allowed_module_for_preset(preset_key)
         if not send_as_id:
             return {"ok": False, "error": "请选择续期身份", "items": []}
-        if not allowed_module or module_key != allowed_module or module_key not in SEMIAUTO_MODULE_KEYS:
+        if not allowed_module or module_key != allowed_module or not self._schedule_renew_module_allowed(module_key):
             return {
                 "ok": False,
                 "status": "renew_blocked",
@@ -3352,9 +3413,14 @@ class MiniWebServer:
                 "profile": self._schedule_renew_profile_view(profile, include_contract=False),
             }
         contract = self._schedule_state_contract(send_as_id, module_key)
-        semiauto_check = self._schedule_semiauto_block_payload(contract)
-        if not semiauto_check.get("ok"):
-            return {**semiauto_check, "status": "renew_blocked", "items": [], "profile": self._schedule_renew_profile_view(profile, include_contract=False)}
+        if module_key in SCHEDULE_RENEW_PHASEFUL_MODULE_KEYS:
+            phaseful_check = self._schedule_phaseful_renew_block_payload(profile, contract)
+            if not phaseful_check.get("ok"):
+                return {**phaseful_check, "status": "renew_blocked", "items": [], "state_contract": contract, "profile": self._schedule_renew_profile_view(profile, include_contract=False)}
+        else:
+            semiauto_check = self._schedule_semiauto_block_payload(contract)
+            if not semiauto_check.get("ok"):
+                return {**semiauto_check, "status": "renew_blocked", "items": [], "profile": self._schedule_renew_profile_view(profile, include_contract=False)}
 
         soft_limit = max(1, min(MAX_SCHEDULED_MESSAGES_PER_IDENTITY, int(profile.get("soft_limit") or SCHEDULE_RENEW_DEFAULT_SOFT_LIMIT)))
         current_usage = self._official_schedule_identity_usage(send_as_id)
@@ -3411,6 +3477,7 @@ class MiniWebServer:
                 "auto_anchor_send_as_id": send_as_id,
                 "schedule_use_module_defaults": preset_key == module_key,
                 "schedule_semiauto": True,
+                "schedule_phaseful_renew": module_key in SCHEDULE_RENEW_PHASEFUL_MODULE_KEYS,
                 "dry_run": False,
                 "renew_profile_id": int(profile.get("id") or 0),
                 "renewed_by": "schedule_renew",
@@ -3702,9 +3769,15 @@ class MiniWebServer:
                 and str(payload.get("renewed_by") or "") == "schedule_renew"
             )
             if payload.get("schedule_semiauto") or payload.get("semiauto"):
-                semiauto_check = self._schedule_semiauto_block_payload(state_contract)
-                if not semiauto_check.get("ok"):
-                    return semiauto_check
+                phaseful_renew = bool(payload.get("schedule_phaseful_renew")) and internal_schedule_renew
+                if phaseful_renew:
+                    phaseful_check = self._schedule_phaseful_renew_block_payload(payload, state_contract)
+                    if not phaseful_check.get("ok"):
+                        return phaseful_check
+                else:
+                    semiauto_check = self._schedule_semiauto_block_payload(state_contract)
+                    if not semiauto_check.get("ok"):
+                        return semiauto_check
 
             plan_items_override = (
                 payload.get("plan_items")
@@ -3809,6 +3882,7 @@ class MiniWebServer:
                         "auto_anchor": bool(payload.get("auto_anchor")),
                         "auto_anchor_module": payload.get("auto_anchor_module") or "",
                         "schedule_semiauto": bool(payload.get("schedule_semiauto") or payload.get("semiauto")),
+                        "schedule_phaseful_renew": bool(payload.get("schedule_phaseful_renew")) if internal_schedule_renew else False,
                         "renew_profile_id": int(payload.get("renew_profile_id") or 0) if internal_schedule_renew else 0,
                         "renewed_by": str(payload.get("renewed_by") or "") if internal_schedule_renew else "",
                         "renew_run_at": float(payload.get("renew_run_at") or 0) if internal_schedule_renew else 0,

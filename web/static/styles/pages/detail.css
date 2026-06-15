@@ -793,6 +793,18 @@
   padding: 16px 18px;
 }
 
+.schedule-renew-section {
+  order: -3;
+}
+
+.schedule-create-section {
+  order: -2;
+}
+
+.schedule-preview-section {
+  order: -1;
+}
+
 .schedule-modal-records {
   border-left: 1px solid var(--line);
   background: rgba(2, 6, 23, 0.20);
@@ -945,6 +957,9 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   min-width: 0;
+  max-height: min(36dvh, 310px);
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .schedule-renew-overview-top {
@@ -964,6 +979,8 @@
 
 .schedule-renew-overview-group {
   display: grid;
+  align-content: start;
+  grid-template-rows: auto auto;
   gap: 6px;
   min-width: 0;
   padding: 8px;
@@ -982,9 +999,19 @@
 
 .schedule-renew-chip-list {
   display: flex;
+  align-items: flex-start;
+  align-content: flex-start;
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
+}
+
+.schedule-renew-profile-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(32dvh, 280px);
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .schedule-renew-chip {
@@ -1013,6 +1040,37 @@
 .schedule-renew-chip small {
   grid-column: 1 / -1;
   color: var(--muted);
+}
+
+.schedule-renew-check {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-self: flex-start;
+  cursor: pointer;
+}
+
+.schedule-renew-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #22c55e;
+}
+
+.schedule-renew-check > span {
+  display: grid;
+  min-width: 0;
+}
+
+.schedule-renew-check > span small {
+  grid-column: auto;
+}
+
+.schedule-renew-check.disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.schedule-renew-check.disabled input {
+  accent-color: #64748b;
 }
 
 .schedule-identity-picker-empty {
