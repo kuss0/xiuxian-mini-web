@@ -7302,6 +7302,282 @@ def test_schedule_sync_repair_marks_past_missing_rows_expired_and_releases_quota
     assert server._official_schedule_identity_usage(12345) == 0
 
 
+def test_schedule_refill_preview_appends_after_cloud_high_water_without_writing_batch(tmp_path, monkeypatch):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_settings_payload({"target_chat": "-1001680975844", "target_topic_id": 7310786})
+    server.save_account_payload({
+        "local_id": "main",
+        "api_id": "123",
+        "api_hash": "hash",
+        "account_id": "12345",
+        "login_status": "done",
+    })
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+    now = time.time()
+    cloud_tail = now + 12 * 3600
+
+    monkeypatch.setattr(
+        server,
+        "schedule_sync_payload",
+        lambda send_as_id: {
+            "ok": True,
+            "send_as_id": int(send_as_id),
+            "account_local_id": "main",
+            "tg_client_mode": "fake",
+            "tg_messages": [
+                {
+                    "scheduled_msg_id": 100,
+                    "message": ".天机代卜",
+                    "schedule_at": cloud_tail,
+                    "schedule_text": "cloud-tail",
+                },
+                {
+                    "scheduled_msg_id": 101,
+                    "message": ".手工其它",
+                    "schedule_at": now + 3600,
+                    "schedule_text": "manual",
+                },
+            ],
+            "matched": [],
+            "orphans": [],
+            "lost": [],
+            "expired": [],
+        },
+    )
+
+    result = server.schedule_refill_preview_payload({
+        "send_as_id": 12345,
+        "coverage_days": 2,
+        "tasks": [
+            {"command": ".天机代卜", "cd_seconds": 43380, "sect": "通用", "enabled": True, "module_key": "concubine_tianji"},
+        ],
+    })
+
+    assert result["ok"] is True
+    assert result["read_only"] is True
+    assert result["tg_client_mode"] == "fake"
+    assert result["current_usage"] == 2
+    assert result["planned_count"] >= 1
+    assert all(item["command"] == ".天机代卜" for item in result["items"])
+    assert min(item["schedule_at"] for item in result["items"]) > cloud_tail
+    assert result["tasks"][0]["cloud_high_water_at"] == cloud_tail
+    assert store.list_schedule_batches(include_inactive=True) == []
+    assert store.list_schedule_messages(include_inactive=True) == []
+
+
+def test_schedule_refill_preview_filters_sect_tasks_when_identity_sect_unknown(tmp_path, monkeypatch):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_identity_payload({"send_as_id": "12345"})
+    monkeypatch.setattr(
+        server,
+        "schedule_sync_payload",
+        lambda send_as_id: {
+            "ok": True,
+            "send_as_id": int(send_as_id),
+            "account_local_id": "main",
+            "tg_client_mode": "fake",
+            "tg_messages": [],
+            "matched": [],
+            "orphans": [],
+            "lost": [],
+            "expired": [],
+        },
+    )
+
+    result = server.schedule_refill_preview_payload({
+        "send_as_id": 12345,
+        "tasks": [
+            {"command": ".探寻裂缝", "cd_seconds": 43380, "sect": "通用", "enabled": True},
+            {"command": ".安抚星辰", "cd_seconds": 129780, "sect": "星宫", "enabled": True, "module_key": "stargazer_soothe"},
+        ],
+    })
+
+    assert result["ok"] is True
+    assert result["sect"] == ""
+    assert any("缺少宗门资料" in note for note in result["notes"])
+    by_command = {task["command"]: task for task in result["tasks"]}
+    assert by_command[".探寻裂缝"]["status"] == "ready"
+    assert by_command[".探寻裂缝"]["items"]
+    assert by_command[".安抚星辰"]["status"] == "filtered"
+    assert "宗门未知" in by_command[".安抚星辰"]["reason"]
+
+
+def test_schedule_refill_preview_uses_state_machine_anchor_for_matching_sect(tmp_path, monkeypatch):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    store.save_identity({"send_as_id": 12345, "label": "me", "account_local_id": "main"})
+    store.save_state_patches(
+        [{"scope": "identity_profile", "key": "宗门", "value": "【元婴宗】"}],
+        send_as_id=12345,
+        source="test",
+        source_message_id="profile-raw",
+    )
+    now = time.time()
+    next_at = now + 1800
+    store.save_module_state(
+        12345,
+        "wendao",
+        {"cooldown_until": next_at, "last_observed_at": now, "last_status": "cooldown"},
+        source_message_id="raw-wendao",
+    )
+    monkeypatch.setattr(
+        server,
+        "schedule_sync_payload",
+        lambda send_as_id: {
+            "ok": True,
+            "send_as_id": int(send_as_id),
+            "account_local_id": "main",
+            "tg_client_mode": "fake",
+            "tg_messages": [],
+            "matched": [],
+            "orphans": [],
+            "lost": [],
+            "expired": [],
+        },
+    )
+
+    result = server.schedule_refill_preview_payload({
+        "send_as_id": 12345,
+        "tasks": [
+            {"command": ".问道", "cd_seconds": 43380, "sect": "元婴宗", "enabled": True, "module_key": "wendao"},
+        ],
+    })
+
+    assert result["ok"] is True
+    assert result["sect"] == "元婴宗"
+    assert result["items"]
+    assert result["items"][0]["schedule_at"] >= next_at
+    assert result["tasks"][0]["state_next_at"] >= next_at
+    assert result["tasks"][0]["state_contract"]["source_message_id"] == "raw-wendao"
+
+
+def test_schedule_refill_preview_blocks_phaseful_and_dangerous_by_default(tmp_path, monkeypatch):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_account_payload({"local_id": "main", "api_id": "123", "api_hash": "hash", "account_id": "12345"})
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+    monkeypatch.setattr(
+        server,
+        "schedule_sync_payload",
+        lambda send_as_id: {
+            "ok": True,
+            "send_as_id": int(send_as_id),
+            "account_local_id": "main",
+            "tg_client_mode": "fake",
+            "tg_messages": [],
+            "matched": [],
+            "orphans": [],
+            "lost": [],
+            "expired": [],
+        },
+    )
+
+    result = server.schedule_refill_preview_payload({
+        "send_as_id": 12345,
+        "tasks": [
+            {"command": ".深度闭关", "cd_seconds": 28980, "sect": "通用", "enabled": True, "module_key": "deep_retreat", "phaseful": True},
+            {"command": ".强行出关", "cd_seconds": "-", "sect": "通用", "enabled": True, "dangerous": True},
+        ],
+    })
+
+    assert result["ok"] is True
+    assert result["items"] == []
+    by_command = {task["command"]: task for task in result["tasks"]}
+    assert by_command[".深度闭关"]["status"] == "manual_only"
+    assert "阶段型" in by_command[".深度闭关"]["reason"]
+    assert by_command[".强行出关"]["status"] == "manual_only"
+    assert "危险命令" in by_command[".强行出关"]["reason"]
+
+
+def test_schedule_refill_run_requires_confirm_and_uses_preview_items(tmp_path, monkeypatch):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server.save_settings_payload({"target_chat": "-1001680975844", "target_topic_id": 7310786})
+    server.save_account_payload({
+        "local_id": "main",
+        "api_id": "123",
+        "api_hash": "hash",
+        "account_id": "12345",
+        "login_status": "done",
+    })
+    server.save_identity_payload({"send_as_id": "12345", "account_local_id": "main"})
+    now = time.time()
+    cloud_tail = now + 3600
+
+    monkeypatch.setattr(
+        server,
+        "schedule_sync_payload",
+        lambda send_as_id: {
+            "ok": True,
+            "send_as_id": int(send_as_id),
+            "account_local_id": "main",
+            "tg_client_mode": "fake",
+            "tg_messages": [
+                {
+                    "scheduled_msg_id": 100,
+                    "message": ".宗门点卯",
+                    "schedule_at": cloud_tail,
+                    "schedule_text": "cloud-tail",
+                },
+            ],
+            "matched": [],
+            "orphans": [],
+            "lost": [],
+            "expired": [],
+        },
+    )
+    submitted = []
+
+    def fake_submit(*, account_local_id, batch_id, target_chat, target_topic_id, send_as_id, messages):
+        submitted.append({
+            "account_local_id": account_local_id,
+            "batch_id": batch_id,
+            "target_chat": target_chat,
+            "target_topic_id": target_topic_id,
+            "send_as_id": send_as_id,
+            "messages": list(messages),
+        })
+        return "listener"
+
+    monkeypatch.setattr(server, "_submit_official_schedule_background", fake_submit)
+
+    blocked = server.schedule_refill_run_payload({"send_as_id": 12345})
+    assert blocked["ok"] is False
+    assert blocked["status"] == "confirm_required"
+
+    result = server.schedule_refill_run_payload({
+        "send_as_id": 12345,
+        "confirm": True,
+        "coverage_days": 2,
+        "tasks": [
+            {"command": ".宗门点卯", "cd_seconds": 86400, "sect": "通用", "enabled": True},
+        ],
+    })
+
+    assert result["ok"] is True, result
+    assert result["refill_status"] == "submitted"
+    assert result["batch_id"] > 0
+    assert result["planned_count"] >= 1
+    assert len(submitted) == 1
+    assert submitted[0]["send_as_id"] == 12345
+    assert submitted[0]["messages"]
+    batch = store.list_schedule_batches(include_inactive=True)[0]
+    assert batch["preset_key"] == "schedule_refill"
+    assert batch["label"] == "高水位补货"
+    assert batch["options"]["refilled_by"] == "schedule_refill"
+    assert batch["options"]["refill_confirmed"] is True
+    assert batch["options"]["refill_current_usage"] == 1
+    assert batch["options"]["refill_soft_limit"] >= 1
+
+
 def test_schedule_retry_failed_route_and_ui_are_wired():
     from backend.app import POST_ROUTES
 
@@ -7317,11 +7593,21 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert "/api/schedule/renew/preview" in POST_ROUTES
     assert "/api/schedule/renew/run" in POST_ROUTES
     assert "/api/schedule/renew/delete" in POST_ROUTES
+    assert "/api/schedule/refill-preview" in POST_ROUTES
+    assert "/api/schedule/refill-run" in POST_ROUTES
     assert 'SCHEDULE_BOOTSTRAP_URL = "/api/schedule/bootstrap?include=presets,modules,templates"' in schedule_js
     assert "function refreshScheduleModalBatches(deps = {}, dialog, setStatus = null)" in schedule_js
     assert 'fetchJson("/api/schedule?history=0")' in schedule_js
     assert "function fallbackSchedulePresets()" in schedule_js
     assert "function loadScheduleModalBootstrap(deps = {})" in schedule_js
+    assert "function scheduleRefillStatusView(status, hasItems = false)" in schedule_js
+    assert "function renderScheduleRefillPreview(deps = {}, result = {})" in schedule_js
+    assert "function renderScheduleRefillTaskRow(task = {})" in schedule_js
+    assert 'id="scheduleRefillSendAsSelect"' in schedule_js
+    assert 'id="scheduleRefillPreviewButton"' in schedule_js
+    assert 'id="scheduleRefillPreview"' in schedule_js
+    assert "schedule-refill-section" in schedule_js
+    assert 'data-schedule-refill-action="run"' in schedule_js or "scheduleRefillRunButton" in schedule_js
     assert 'dialog.classList.add("schedule-modal-dialog");' in schedule_js
     assert "schedule-modal-grid" in schedule_js
     assert "schedule-modal-records" in schedule_js

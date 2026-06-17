@@ -180,6 +180,48 @@ SCHEDULE_RENEW_ALLOWED_PRESETS: dict[str, tuple[str, int]] = {
     "yindao": ("yindao", 12 * 3600),
 }
 SCHEDULE_RENEW_HIDDEN_PRESETS = {"tianti_climb", "tianti_climb_elder"}
+SCHEDULE_REFILL_DEFAULT_COVERAGE_DAYS = 2
+SCHEDULE_REFILL_MAX_COVERAGE_DAYS = 3
+SCHEDULE_REFILL_DEFAULT_LEAD_SEC = 5 * 60
+SCHEDULE_REFILL_DEFAULT_OFFSET_SEC = 180
+SCHEDULE_REFILL_DEFAULT_SOFT_LIMIT = 95
+SCHEDULE_REFILL_DANGEROUS_COMMANDS = {".强行出关"}
+SCHEDULE_REFILL_PHASEFUL_COMMANDS = {
+    ".深度闭关",
+    "查看闭关",
+    ".查看闭关",
+    ".元婴出窍",
+    ".元婴状态",
+    ".搜寻节点",
+    ".引道",
+    ".引道 水",
+}
+SCHEDULE_REFILL_DEFAULT_TASKS: tuple[dict, ...] = (
+    {"command": ".探寻裂缝", "cd_seconds": 43380, "sect": "通用", "usage": "探索空间裂缝", "enabled": True},
+    {"command": ".搜寻节点", "cd_seconds": 43380, "sect": "通用", "usage": "搜寻飞升节点", "enabled": False, "module_key": "search_node", "phaseful": True},
+    {"command": ".天机代卜", "cd_seconds": 43380, "sect": "通用", "usage": "天机代卜", "enabled": True, "module_key": "concubine_tianji"},
+    {"command": ".深度闭关", "cd_seconds": 28980, "sect": "通用", "usage": "长时间自动闭关", "enabled": True, "module_key": "deep_retreat", "phaseful": True},
+    {"command": "查看闭关", "cd_seconds": 28980, "sect": "通用", "usage": "查看深度闭关进度", "enabled": True, "module_key": "deep_retreat", "phaseful": True},
+    {"command": ".元婴出窍", "cd_seconds": 28980, "sect": "通用", "usage": "元婴阶段相关操作", "enabled": True, "module_key": "yuanying", "phaseful": True},
+    {"command": ".入梦寻图", "cd_seconds": 28980, "sect": "通用", "usage": "入梦寻图", "enabled": True, "module_key": "concubine_dream"},
+    {"command": ".野外历练 谨慎", "cd_seconds": 7380, "sect": "通用", "usage": "野外历练", "enabled": True, "module_key": "wild_training"},
+    {"command": ".宗门传功", "cd_seconds": 90, "sect": "通用", "usage": "宗门传功获取收益", "enabled": True},
+    {"command": ".强行出关", "cd_seconds": "-", "sect": "通用", "usage": "提前结束深度闭关", "enabled": True, "module_key": "deep_retreat", "dangerous": True},
+    {"command": ".元婴状态", "cd_seconds": "-", "sect": "通用", "usage": "查看元婴状态", "enabled": True, "module_key": "yuanying", "phaseful": True},
+    {"command": ".宗门点卯", "cd_seconds": "-", "sect": "通用", "usage": "每日宗门签到", "enabled": True, "module_key": "checkin"},
+    {"command": ".闯塔", "cd_seconds": "-", "sect": "通用", "usage": "挑战琉璃塔", "enabled": True, "module_key": "tower"},
+    {"command": ".安抚星辰", "cd_seconds": 129780, "sect": "星宫", "usage": "种竹子", "enabled": True, "module_key": "stargazer_soothe"},
+    {"command": ".收集精华", "cd_seconds": 129780, "sect": "星宫", "usage": "种竹子", "enabled": True, "module_key": "stargazer_collect"},
+    {"command": ".牵引星辰 天雷星", "cd_seconds": 129780, "sect": "星宫", "usage": "种竹子", "enabled": True, "module_key": "stargazer_guide"},
+    {"command": ".每日问安", "cd_seconds": "-", "sect": "星宫", "usage": "星宫侍妾问安", "enabled": True},
+    {"command": ".借天门势", "cd_seconds": 43380, "sect": "凌霄宫", "usage": "日常", "enabled": True},
+    {"command": ".引九天罡风", "cd_seconds": 43380, "sect": "凌霄宫", "usage": "日常", "enabled": True, "module_key": "tianti_gangfeng"},
+    {"command": ".登天阶", "cd_seconds": 10980, "sect": "凌霄宫", "usage": "日常", "enabled": True, "module_key": "tianti_climb"},
+    {"command": ".召唤魔影", "cd_seconds": 43380, "sect": "阴罗宗", "usage": "日常", "enabled": True},
+    {"command": ".血洗山林", "cd_seconds": 14580, "sect": "阴罗宗", "usage": "日常", "enabled": True},
+    {"command": ".问道", "cd_seconds": 43380, "sect": "元婴宗", "usage": "元婴问道", "enabled": True, "module_key": "wendao"},
+    {"command": ".引道 水", "cd_seconds": 43380, "sect": "太一门", "usage": "引道", "enabled": True, "module_key": "yindao", "phaseful": True},
+)
 
 
 def _parse_utc_datetime(value: object) -> datetime | None:
@@ -431,6 +473,7 @@ class MiniWebServer:
         self._schedule_client_locks_lock = threading.Lock()
         self._schedule_client_locks: dict[str, threading.Lock] = {}
         self._schedule_renew_internal_token = object()
+        self._schedule_refill_internal_token = object()
         self._schedule_renew_profile_locks_lock = threading.Lock()
         self._schedule_renew_profile_locks: dict[int, threading.Lock] = {}
         self._schedule_renew_worker_lock = threading.Lock()
@@ -2818,6 +2861,455 @@ class MiniWebServer:
             },
         }
 
+    def _schedule_refill_bool(self, value: object, default: bool = False) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() not in {"0", "false", "no", "off"}
+
+    def _schedule_refill_positive_int(self, value: object, default: int, *, min_value: int = 0, max_value: int = 0) -> int:
+        try:
+            parsed = int(float(value))
+        except (TypeError, ValueError):
+            parsed = default
+        if min_value:
+            parsed = max(min_value, parsed)
+        if max_value:
+            parsed = min(max_value, parsed)
+        return parsed
+
+    def _schedule_refill_clean_sect(self, value: object) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        text = re.sub(r"^[【\[\(（]+", "", text)
+        text = re.sub(r"[】\]\)）]+$", "", text)
+        return text.strip()
+
+    def _schedule_refill_identity_sect(self, send_as_id: int) -> dict:
+        identity = self._store.get_identity(send_as_id) if send_as_id else None
+        direct = self._schedule_refill_clean_sect((identity or {}).get("sect_name"))
+        if direct:
+            return {"sect": direct, "source": "identity"}
+        try:
+            patches = self._store.list_state_patches("identity_profile", send_as_id=send_as_id)
+        except Exception:
+            patches = []
+        for patch in patches:
+            if str(patch.get("key") or "") != "宗门":
+                continue
+            sect = self._schedule_refill_clean_sect(patch.get("value"))
+            if sect:
+                return {
+                    "sect": sect,
+                    "source": str(patch.get("source_message_id") or "identity_profile"),
+                    "updated_at": str(patch.get("updated_at") or ""),
+                }
+        return {"sect": "", "source": ""}
+
+    def _schedule_refill_cd_seconds(self, value: object) -> int | None:
+        text = str(value or "").strip()
+        if not text or text in {"-", "—", "none", "null", "None"}:
+            return None
+        try:
+            parsed = int(float(text))
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
+
+    def _schedule_refill_module_for_command(self, command: str) -> str:
+        clean = self._schedule_refill_normalize_command(command)
+        for task in SCHEDULE_REFILL_DEFAULT_TASKS:
+            if self._schedule_refill_normalize_command(task.get("command")) == clean:
+                return str(task.get("module_key") or "")
+        return ""
+
+    def _schedule_refill_normalize_command(self, command: object) -> str:
+        return re.sub(r"\s+", " ", str(command or "").strip())
+
+    def _schedule_refill_task_rows(self, payload: dict) -> tuple[list[dict], list[dict]]:
+        raw_config = (payload or {}).get("config")
+        raw_tasks = (payload or {}).get("tasks")
+        if raw_tasks is None and isinstance(raw_config, dict):
+            raw_tasks = raw_config.get("tasks")
+        if raw_tasks is None:
+            raw_tasks = SCHEDULE_REFILL_DEFAULT_TASKS
+        rows = []
+        skipped = []
+        for index, item in enumerate(raw_tasks or []):
+            if not isinstance(item, dict):
+                skipped.append({"index": index, "reason": "not_object"})
+                continue
+            command = self._schedule_refill_normalize_command(item.get("command"))
+            if not command:
+                skipped.append({"index": index, "reason": "missing_command"})
+                continue
+            enabled = self._schedule_refill_bool(item.get("enabled"), True)
+            cd_seconds = self._schedule_refill_cd_seconds(item.get("cd_seconds"))
+            module_key = str(item.get("module_key") or self._schedule_refill_module_for_command(command) or "").strip()
+            rows.append(
+                {
+                    "index": index,
+                    "command": command,
+                    "cd_seconds": cd_seconds,
+                    "raw_cd_seconds": item.get("cd_seconds"),
+                    "sect": self._schedule_refill_clean_sect(item.get("sect")) or "通用",
+                    "usage": str(item.get("usage") or "").strip(),
+                    "enabled": enabled,
+                    "module_key": module_key,
+                    "phaseful": self._schedule_refill_bool(item.get("phaseful"), False),
+                    "dangerous": self._schedule_refill_bool(item.get("dangerous"), False),
+                }
+            )
+        return rows, skipped
+
+    def _schedule_refill_local_high_water(self, send_as_id: int, command: str, now: float) -> dict:
+        latest = 0.0
+        latest_item = None
+        target = self._schedule_refill_normalize_command(command)
+        try:
+            messages = self._store.list_schedule_messages(send_as_id=send_as_id, include_inactive=False)
+        except Exception:
+            messages = []
+        for item in messages:
+            if self._schedule_refill_normalize_command(item.get("command")) != target:
+                continue
+            if str(item.get("status") or "") not in {"planned", "scheduled"}:
+                continue
+            schedule_at = float(item.get("schedule_at") or 0)
+            if schedule_at <= now - 60:
+                continue
+            if schedule_at >= latest:
+                latest = schedule_at
+                latest_item = item
+        return {
+            "schedule_at": latest,
+            "schedule_text": schedule_fmt_ts(latest),
+            "item": latest_item,
+        }
+
+    def _schedule_refill_cloud_high_water(self, tg_messages: list[dict], command: str, now: float) -> dict:
+        latest = 0.0
+        latest_item = None
+        target = self._schedule_refill_normalize_command(command)
+        for item in tg_messages or []:
+            if self._schedule_refill_normalize_command(item.get("message")) != target:
+                continue
+            schedule_at = float(item.get("schedule_at") or 0)
+            if schedule_at and schedule_at <= now - 60:
+                continue
+            if schedule_at >= latest:
+                latest = schedule_at
+                latest_item = item
+        return {
+            "schedule_at": latest,
+            "schedule_text": schedule_fmt_ts(latest),
+            "item": latest_item,
+        }
+
+    def _schedule_refill_task_block(
+        self,
+        task: dict,
+        contract: dict | None,
+        *,
+        cloud_tail_at: float,
+        require_fresh_state: bool,
+        allow_phaseful: bool,
+        allow_dangerous: bool,
+    ) -> dict:
+        command = str(task.get("command") or "")
+        module_key = str(task.get("module_key") or "")
+        if not task.get("enabled", True):
+            return {"blocked": True, "status": "disabled", "reason": "任务已停用"}
+        if task.get("dangerous") or command in SCHEDULE_REFILL_DANGEROUS_COMMANDS:
+            if not allow_dangerous:
+                return {"blocked": True, "status": "manual_only", "reason": "危险命令默认不进入增量补货"}
+        phaseful = bool(task.get("phaseful")) or command in SCHEDULE_REFILL_PHASEFUL_COMMANDS
+        if contract and (contract.get("module_contract") or {}).get("phaseful"):
+            phaseful = True
+        if phaseful and not allow_phaseful:
+            return {"blocked": True, "status": "manual_only", "reason": "阶段型命令需要状态机专用规划,不按固定 CD 补货"}
+        cd_seconds = task.get("cd_seconds")
+        if cd_seconds and int(cd_seconds) < 3600:
+            return {"blocked": True, "status": "high_frequency", "reason": "间隔小于 1 小时,不进入官方定时补货"}
+        if module_key and not cloud_tail_at:
+            profile = {
+                "send_as_id": int((contract or {}).get("send_as_id") or 0),
+                "module_key": module_key,
+                "label": task.get("usage") or task.get("command") or module_key,
+                "preset_key": task.get("preset_key") or module_key,
+                "payload": {},
+            }
+            evidence_check = self._schedule_renew_evidence_block_payload(
+                profile,
+                contract,
+                require_semiauto=False,
+            )
+            if not evidence_check.get("ok") and require_fresh_state:
+                return {
+                    "blocked": True,
+                    "status": evidence_check.get("status") or "needs_evidence",
+                    "reason": evidence_check.get("error") or "缺少新鲜状态机证据",
+                    "evidence_check": evidence_check,
+                }
+            if not evidence_check.get("ok"):
+                return {
+                    "blocked": False,
+                    "status": "ready_with_warning",
+                    "reason": evidence_check.get("error") or "缺少新鲜状态机证据",
+                    "evidence_check": evidence_check,
+                }
+        return {"blocked": False, "status": "ready", "reason": ""}
+
+    def schedule_refill_preview_payload(self, payload: dict) -> dict:
+        """Read-only official schedule high-water refill preview.
+
+        This does not create local batches, does not send Telegram requests except
+        GetScheduledHistory, and never deletes or mutates existing scheduled
+        messages.  It exists as the report-only first stage for the high-water
+        refill design.
+        """
+        payload = payload or {}
+        send_as_id = _safe_int(payload.get("send_as_id"))
+        if not send_as_id:
+            return {"ok": False, "error": "请选择补货身份", "items": [], "tasks": []}
+        identity = self._store.get_identity(send_as_id)
+        account_local_id = str((identity or {}).get("account_local_id") or self._schedule_renew_account_local_id(send_as_id))
+        sect_state = self._schedule_refill_identity_sect(send_as_id)
+        sect = str(sect_state.get("sect") or "")
+        now = time.time()
+        coverage_days = self._schedule_refill_positive_int(
+            payload.get("coverage_days") or payload.get("horizon_days"),
+            SCHEDULE_REFILL_DEFAULT_COVERAGE_DAYS,
+            min_value=1,
+            max_value=SCHEDULE_REFILL_MAX_COVERAGE_DAYS,
+        )
+        lead_sec = self._schedule_refill_positive_int(payload.get("lead_sec"), SCHEDULE_REFILL_DEFAULT_LEAD_SEC, min_value=60, max_value=24 * 3600)
+        offset_sec = self._schedule_refill_positive_int(payload.get("offset_sec"), SCHEDULE_REFILL_DEFAULT_OFFSET_SEC, min_value=0, max_value=6 * 3600)
+        soft_limit = self._schedule_refill_positive_int(
+            payload.get("soft_limit"),
+            SCHEDULE_REFILL_DEFAULT_SOFT_LIMIT,
+            min_value=1,
+            max_value=MAX_SCHEDULED_MESSAGES_PER_IDENTITY,
+        )
+        include_boundary_first = self._schedule_refill_bool(payload.get("include_boundary_first"), True)
+        require_fresh_state = self._schedule_refill_bool(payload.get("require_fresh_state"), True)
+        allow_phaseful = self._schedule_refill_bool(payload.get("allow_phaseful"), False)
+        allow_dangerous = self._schedule_refill_bool(payload.get("allow_dangerous"), False)
+        tasks, skipped_tasks = self._schedule_refill_task_rows(payload)
+
+        sync = self.schedule_sync_payload(send_as_id)
+        if not sync.get("ok"):
+            return {
+                "ok": False,
+                "mode": "official_schedule_cloud_high_water_refill",
+                "read_only": True,
+                "error": sync.get("error") or "TG 定时列表读取失败",
+                "send_as_id": send_as_id,
+                "account_local_id": account_local_id,
+                "items": [],
+                "tasks": [],
+                "sync": sync,
+            }
+        tg_messages = [
+            item for item in (sync.get("tg_messages") or [])
+            if not float(item.get("schedule_at") or 0) or float(item.get("schedule_at") or 0) > now - 60
+        ]
+        current_usage = len(tg_messages)
+        planned_items: list[dict] = []
+        task_previews: list[dict] = []
+        notes = [
+            "只读预览: 不写本地批次,不创建或删除 Telegram 官方定时。",
+            "高水位来自 TG 当前 scheduled history; 外部/手工定时只参与顺延,不会被修改。",
+        ]
+        if not sect:
+            notes.append("当前身份缺少宗门资料,只纳入通用任务;门派任务需先刷新天命玉牒或天机阁资料。")
+        hard_end = now + coverage_days * 86400
+        remaining = max(0, soft_limit - current_usage)
+
+        filtered_index = 0
+        for task in tasks:
+            command = str(task.get("command") or "")
+            task_sect = str(task.get("sect") or "通用")
+            base_preview = {
+                "command": command,
+                "sect": task_sect,
+                "usage": task.get("usage") or "",
+                "cd_seconds": task.get("cd_seconds"),
+                "module_key": task.get("module_key") or "",
+                "items": [],
+                "warnings": [],
+            }
+            if not task.get("enabled", True):
+                task_previews.append({**base_preview, "status": "disabled", "reason": "任务已停用"})
+                continue
+            if task_sect != "通用" and (not sect or task_sect != sect):
+                reason = "宗门未知,已过滤门派任务" if not sect else f"宗门不匹配: 当前 {sect}"
+                task_previews.append({**base_preview, "status": "filtered", "reason": reason})
+                continue
+
+            cloud = self._schedule_refill_cloud_high_water(tg_messages, command, now)
+            local = self._schedule_refill_local_high_water(send_as_id, command, now)
+            contract = self._schedule_state_contract(send_as_id, str(task.get("module_key") or "")) if task.get("module_key") else None
+            state_next_at = float((contract or {}).get("next_at") or 0)
+            block = self._schedule_refill_task_block(
+                task,
+                contract,
+                cloud_tail_at=float(cloud.get("schedule_at") or 0),
+                require_fresh_state=require_fresh_state,
+                allow_phaseful=allow_phaseful,
+                allow_dangerous=allow_dangerous,
+            )
+            start_at = max(now + lead_sec + filtered_index * offset_sec, state_next_at or 0)
+            cd_seconds = task.get("cd_seconds")
+            if cloud.get("schedule_at") and cd_seconds:
+                start_at = max(start_at, float(cloud["schedule_at"]) + int(cd_seconds))
+            elif local.get("schedule_at") and cd_seconds:
+                start_at = max(start_at, float(local["schedule_at"]) + int(cd_seconds))
+
+            preview = {
+                **base_preview,
+                "status": block.get("status") or ("blocked" if block.get("blocked") else "ready"),
+                "reason": block.get("reason") or "",
+                "cloud_high_water_at": float(cloud.get("schedule_at") or 0),
+                "cloud_high_water_text": cloud.get("schedule_text") or "",
+                "local_high_water_at": float(local.get("schedule_at") or 0),
+                "local_high_water_text": local.get("schedule_text") or "",
+                "state_next_at": state_next_at,
+                "state_next_text": schedule_fmt_ts(state_next_at),
+                "state_contract": contract,
+                "manual_required": bool(block.get("blocked")) or block.get("status") in {"ready_with_warning"},
+            }
+            if block.get("evidence_check"):
+                preview["evidence_check"] = block["evidence_check"]
+            if block.get("reason") and not block.get("blocked"):
+                preview["warnings"].append(block.get("reason"))
+            if block.get("blocked"):
+                task_previews.append(preview)
+                filtered_index += 1
+                continue
+            if remaining <= 0:
+                preview["status"] = "quota_capped"
+                preview["reason"] = "软上限已满,不再追加"
+                task_previews.append(preview)
+                filtered_index += 1
+                continue
+
+            items = []
+            if cd_seconds:
+                next_at = start_at
+                appended_after_boundary = False
+                while len(items) < remaining and len(planned_items) + len(items) < MAX_SCHEDULED_MESSAGES_PER_IDENTITY:
+                    if next_at > hard_end:
+                        if not include_boundary_first or appended_after_boundary:
+                            break
+                        appended_after_boundary = True
+                    items.append({
+                        "command": command,
+                        "schedule_at": next_at,
+                        "schedule_text": schedule_fmt_ts(next_at),
+                        "source": "cloud_high_water" if cloud.get("schedule_at") else ("state_machine" if state_next_at else "offset_start"),
+                        "task_usage": task.get("usage") or "",
+                        "sect": task_sect,
+                    })
+                    if appended_after_boundary:
+                        break
+                    next_at += int(cd_seconds)
+            else:
+                if cloud.get("schedule_at") and float(cloud.get("schedule_at") or 0) > now - 60:
+                    preview["status"] = "already_scheduled"
+                    preview["reason"] = "TG 已有该单次任务,不重复追加"
+                else:
+                    items.append({
+                        "command": command,
+                        "schedule_at": start_at,
+                        "schedule_text": schedule_fmt_ts(start_at),
+                        "source": "state_machine" if state_next_at else "offset_start",
+                        "task_usage": task.get("usage") or "",
+                        "sect": task_sect,
+                    })
+
+            if items:
+                items = items[:remaining]
+                planned_items.extend(items)
+                remaining = max(0, soft_limit - current_usage - len(planned_items))
+                preview["items"] = items
+                preview["planned_count"] = len(items)
+            elif preview.get("status") == "ready":
+                preview["status"] = "no_items"
+                preview["reason"] = preview.get("reason") or "当前窗口没有需要追加的任务"
+            task_previews.append(preview)
+            filtered_index += 1
+
+        planned_items.sort(key=lambda item: float(item.get("schedule_at") or 0))
+        return {
+            "ok": True,
+            "mode": "official_schedule_cloud_high_water_refill",
+            "read_only": True,
+            "send_as_id": send_as_id,
+            "account_local_id": account_local_id,
+            "identity": public_identity(identity) if identity else None,
+            "sect": sect,
+            "sect_source": sect_state.get("source") or "",
+            "coverage_days": coverage_days,
+            "coverage_until": hard_end,
+            "coverage_until_text": schedule_fmt_ts(hard_end),
+            "soft_limit": soft_limit,
+            "current_usage": current_usage,
+            "remaining_after_preview": max(0, soft_limit - current_usage - len(planned_items)),
+            "planned_count": len(planned_items),
+            "items": planned_items,
+            "tasks": task_previews,
+            "skipped_tasks": skipped_tasks,
+            "tg_client_mode": sync.get("tg_client_mode") or "",
+            "tg_current_count": len(tg_messages),
+            "notes": notes,
+        }
+
+    def schedule_refill_run_payload(self, payload: dict) -> dict:
+        payload = payload or {}
+        if not self._schedule_refill_bool(payload.get("confirm"), False):
+            return {"ok": False, "status": "confirm_required", "error": "请先确认后再执行补货", "items": []}
+        preview = self.schedule_refill_preview_payload(payload)
+        if not preview.get("ok"):
+            return {**preview, "refill_preview": preview}
+        if not preview.get("items"):
+            return {
+                **preview,
+                "ok": False,
+                "status": "no_items",
+                "error": preview.get("error") or "没有可执行的补货项，请先预览或调整配置",
+                "refill_preview": preview,
+            }
+        items = list(preview.get("items") or [])
+        first_item = items[0] if items else {}
+        create_payload = {
+            "send_as_id": int(preview.get("send_as_id") or payload.get("send_as_id") or 0),
+            "preset_key": "schedule_refill",
+            "label": "高水位补货",
+            "anchor_at": float(first_item.get("schedule_at") or preview.get("coverage_until") or time.time()),
+            "horizon_days": int(preview.get("coverage_days") or payload.get("coverage_days") or SCHEDULE_REFILL_DEFAULT_COVERAGE_DAYS),
+            "plan_items": items,
+            "dry_run": False,
+            "refilled_by": "schedule_refill",
+            "refill_confirmed": True,
+            "refill_run_at": time.time(),
+            "refill_preview_at": time.time(),
+            "refill_coverage_days": int(preview.get("coverage_days") or 0),
+            "refill_soft_limit": int(preview.get("soft_limit") or 0),
+            "refill_current_usage": int(preview.get("current_usage") or 0),
+            "refill_remaining_after_preview": int(preview.get("remaining_after_preview") or 0),
+            "refill_sect": str(preview.get("sect") or ""),
+            "refill_mode": str(preview.get("mode") or ""),
+            "_schedule_refill_internal_token": self._schedule_refill_internal_token,
+        }
+        with self._schedule_create_lock:
+            result = self._create_one_schedule(create_payload)
+        if not result.get("ok"):
+            return {**result, "status": result.get("status") or "refill_failed", "refill_preview": preview}
+        return {**result, "refill_status": "submitted", "refill_preview": preview}
+
     def skills_payload(self) -> dict:
         return self._skill_registry.to_api()
 
@@ -3977,6 +4469,10 @@ class MiniWebServer:
                 and int(payload.get("renew_profile_id") or 0) > 0
                 and str(payload.get("renewed_by") or "") == "schedule_renew"
             )
+            internal_schedule_refill = (
+                payload.get("_schedule_refill_internal_token") is self._schedule_refill_internal_token
+                and str(payload.get("refilled_by") or "") == "schedule_refill"
+            )
             if payload.get("schedule_semiauto") or payload.get("semiauto"):
                 phaseful_renew = bool(payload.get("schedule_phaseful_renew")) and internal_schedule_renew
                 if phaseful_renew:
@@ -3990,7 +4486,7 @@ class MiniWebServer:
 
             plan_items_override = (
                 payload.get("plan_items")
-                if internal_schedule_renew
+                if internal_schedule_renew or internal_schedule_refill
                 else None
             )
             if isinstance(plan_items_override, list):
@@ -4015,7 +4511,12 @@ class MiniWebServer:
                 override_items.sort(key=lambda item: float(item.get("schedule_at") or 0))
                 override_items = override_items[:MAX_SCHEDULED_MESSAGES_PER_IDENTITY]
                 preset_key = str(payload.get("preset_key") or "").strip()
-                label = self._schedule_renew_preset_label(preset_key)
+                if internal_schedule_renew:
+                    label = self._schedule_renew_preset_label(preset_key)
+                elif internal_schedule_refill:
+                    label = str(payload.get("label") or "").strip() or "高水位补货"
+                else:
+                    label = PRESET_LABELS.get(preset_key, preset_key)
                 plan = {
                     "preset_key": preset_key,
                     "preset_label": label,
@@ -4095,6 +4596,16 @@ class MiniWebServer:
                         "renew_profile_id": int(payload.get("renew_profile_id") or 0) if internal_schedule_renew else 0,
                         "renewed_by": str(payload.get("renewed_by") or "") if internal_schedule_renew else "",
                         "renew_run_at": float(payload.get("renew_run_at") or 0) if internal_schedule_renew else 0,
+                        "refilled_by": str(payload.get("refilled_by") or "") if internal_schedule_refill else "",
+                        "refill_confirmed": bool(payload.get("refill_confirmed")) if internal_schedule_refill else False,
+                        "refill_run_at": float(payload.get("refill_run_at") or 0) if internal_schedule_refill else 0,
+                        "refill_preview_at": float(payload.get("refill_preview_at") or 0) if internal_schedule_refill else 0,
+                        "refill_coverage_days": int(payload.get("refill_coverage_days") or 0) if internal_schedule_refill else 0,
+                        "refill_soft_limit": int(payload.get("refill_soft_limit") or 0) if internal_schedule_refill else 0,
+                        "refill_current_usage": int(payload.get("refill_current_usage") or 0) if internal_schedule_refill else 0,
+                        "refill_remaining_after_preview": int(payload.get("refill_remaining_after_preview") or 0) if internal_schedule_refill else 0,
+                        "refill_sect": str(payload.get("refill_sect") or "") if internal_schedule_refill else "",
+                        "refill_mode": str(payload.get("refill_mode") or "") if internal_schedule_refill else "",
                         "state_contract": {
                             "module_key": (state_contract or {}).get("module_key") or "",
                             "label": (state_contract or {}).get("label") or "",

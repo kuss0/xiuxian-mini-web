@@ -501,6 +501,14 @@ def _post_schedule_sync_repair(request: MiniWebRequest, payload: dict) -> dict:
     return _app(request).schedule_sync_repair_payload(payload)
 
 
+def _post_schedule_refill_preview(request: MiniWebRequest, payload: dict) -> dict:
+    return _app(request).schedule_refill_preview_payload(payload)
+
+
+def _post_schedule_refill_run(request: MiniWebRequest, payload: dict) -> dict:
+    return _app(request).schedule_refill_run_payload(payload)
+
+
 def _post_schedule_renew_save(request: MiniWebRequest, payload: dict) -> dict:
     return _app(request).schedule_renew_save_payload(payload)
 

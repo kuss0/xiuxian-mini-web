@@ -104,6 +104,8 @@ def build_post_routes(handlers: Mapping[str, Callable]) -> dict[str, PostRoute]:
         "/api/schedule/retry-failed": PostRoute(handlers["_post_schedule_retry_failed"], needs_payload=True),
         "/api/schedule/activate-dry-run": PostRoute(handlers["_post_schedule_activate_dry_run"], needs_payload=True),
         "/api/schedule/sync/repair": PostRoute(handlers["_post_schedule_sync_repair"], needs_payload=True),
+        "/api/schedule/refill-preview": PostRoute(handlers["_post_schedule_refill_preview"], needs_payload=True),
+        "/api/schedule/refill-run": PostRoute(handlers["_post_schedule_refill_run"], needs_payload=True),
         "/api/schedule/renew/save": PostRoute(handlers["_post_schedule_renew_save"], needs_payload=True),
         "/api/schedule/renew/delete": PostRoute(handlers["_post_schedule_renew_delete"], needs_payload=True),
         "/api/schedule/renew/preview": PostRoute(handlers["_post_schedule_renew_preview"], needs_payload=True),

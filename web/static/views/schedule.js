@@ -1332,6 +1332,41 @@
             <div id="schedulePreview" class="send-as-result" hidden></div>
           </details>
 
+          <section class="modal-section schedule-refill-section">
+            <h4>高水位补货 ${scheduleTimeZonePill()}</h4>
+            <p class="muted">先核对 TG 当前高水位和状态机起点,确认后只在最晚任务之后增量追加,不删除或改写已有官方定时。</p>
+            <form id="scheduleRefillForm" class="settings-form">
+              <div class="form-grid">
+                <label>
+                  <span>补货身份</span>
+                  <select name="send_as_id" id="scheduleRefillSendAsSelect">${identityOptions || '<option value="">没有可用身份</option>'}</select>
+                </label>
+                <label>
+                  <span>覆盖天数(1-3)</span>
+                  <input name="coverage_days" inputmode="numeric" min="1" max="3" value="2" />
+                </label>
+                <label>
+                  <span>起跑提前(秒)</span>
+                  <input name="lead_sec" inputmode="numeric" min="60" max="86400" value="300" />
+                </label>
+                <label>
+                  <span>批次阶梯(秒)</span>
+                  <input name="offset_sec" inputmode="numeric" min="0" max="21600" value="180" />
+                </label>
+                <label>
+                  <span>软上限</span>
+                  <input name="soft_limit" inputmode="numeric" min="1" max="100" value="95" />
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="button" id="scheduleRefillPreviewButton">预览补货</button>
+                <button type="button" class="primary" id="scheduleRefillRunButton" data-schedule-refill-action="run">确认补货</button>
+              </div>
+            </form>
+            <p class="modal-status-line info" id="scheduleRefillStatus" hidden></p>
+            <div id="scheduleRefillPreview" class="send-as-result" hidden></div>
+          </section>
+
           <details class="modal-section schedule-secondary-section schedule-template-section">
             <summary>
               <span>
@@ -1874,6 +1909,115 @@
     `;
   }
 
+  function scheduleRefillStatusView(status, hasItems = false) {
+    const key = String(status || "").trim();
+    if (hasItems || key === "ready") return { label: "可追加", tone: "ok" };
+    if (key === "ready_with_warning") return { label: "证据告警", tone: "warn" };
+    if (key === "manual_only") return { label: "需人工", tone: "warn" };
+    if (key === "high_frequency") return { label: "高频阻断", tone: "warn" };
+    if (key === "quota_capped") return { label: "额度截止", tone: "warn" };
+    if (key === "filtered") return { label: "已过滤", tone: "" };
+    if (key === "disabled") return { label: "已停用", tone: "" };
+    if (key === "already_scheduled") return { label: "已存在", tone: "ok" };
+    if (key === "no_items") return { label: "无新增", tone: "" };
+    return { label: key || "未知", tone: key ? "warn" : "" };
+  }
+
+  function renderScheduleRefillPreview(deps = {}, result = {}) {
+    const items = result.items || [];
+    const tasks = result.tasks || [];
+    const sect = String(result.sect || "").trim() || "宗门未知";
+    const identity = scheduleIdentityLabel(deps, result.send_as_id) || `send_as ${result.send_as_id || ""}`;
+    const summary = [
+      ["身份", identity],
+      ["宗门", sect],
+      ["TG 当前", `${Number(result.current_usage || result.tg_current_count || 0)}/${Number(result.soft_limit || 0) || 100}`],
+      ["拟追加", `${Number(result.planned_count || items.length || 0)} 条`],
+      ["窗口", `${Number(result.coverage_days || 0) || 2} 天`],
+      ["覆盖到", result.coverage_until_text || ""],
+      ["剩余额度", String(result.remaining_after_preview ?? "")],
+      ["模式", result.read_only ? "只读预览" : "可执行"],
+    ];
+    const notes = (result.notes || [])
+      .map((note) => `<li><small>${escapeHtml(note)}</small></li>`)
+      .join("");
+    const timeline = scheduleRefillTimelineHtml(items);
+    const blockedTasks = tasks.filter((task) => !(task.items || []).length);
+    const taskRows = tasks.map((task) => renderScheduleRefillTaskRow(task)).join("");
+    const skipped = (result.skipped_tasks || [])
+      .map((task) => `<li class="warn"><small>#${escapeHtml(String(task.index ?? ""))} ${escapeHtml(task.reason || "")}</small></li>`)
+      .join("");
+    return `
+      <div class="schedule-refill-preview">
+        <div class="schedule-refill-summary">
+          ${summary.map(([label, value]) => `
+            <span>
+              <small>${escapeHtml(label)}</small>
+              <strong>${escapeHtml(String(value || "—"))}</strong>
+            </span>
+          `).join("")}
+        </div>
+        ${notes ? `<ul class="send-as-result-list schedule-refill-notes">${notes}</ul>` : ""}
+        <p><strong>拟追加项</strong><small>高水位之后 append-only,不改 TG 现有定时。</small></p>
+        ${timeline}
+        <p><strong>任务核对</strong><small>展示每个命令的高水位、状态机锚点和过滤/阻断原因。</small></p>
+        <div class="schedule-refill-task-list">${taskRows || '<p class="empty inline">没有可核对任务。</p>'}</div>
+        ${blockedTasks.length ? `<p class="muted">被过滤或阻断 ${escapeHtml(String(blockedTasks.length))} 项,未进入拟追加清单。</p>` : ""}
+        ${skipped ? `<p><strong>配置跳过</strong></p><ul class="send-as-result-list">${skipped}</ul>` : ""}
+      </div>
+    `;
+  }
+
+  function scheduleRefillTimelineHtml(items = []) {
+    if (!items.length) {
+      return '<ul class="send-as-result-list"><li>(0 条)</li></ul>';
+    }
+    const byDay = new Map();
+    for (const item of items) {
+      const parts = String(item.schedule_text || "").split(" ");
+      const day = parts[0] || "?";
+      if (!byDay.has(day)) byDay.set(day, []);
+      byDay.get(day).push(item);
+    }
+    return `
+      <ul class="send-as-result-list">
+        ${Array.from(byDay.entries()).map(([day, rows]) => `
+          <li class="ok">
+            <strong>${escapeHtml(day)}</strong>
+            <span class="status-pill">${escapeHtml(String(rows.length))}</span>
+            <small>${rows.slice(0, 8).map((row) => `${escapeHtml(String(row.schedule_text || "").split(" ")[1] || row.schedule_text || "")} ${escapeHtml(row.command || "")}`).join(" · ")}${rows.length > 8 ? " · ..." : ""}</small>
+          </li>
+        `).join("")}
+      </ul>
+    `;
+  }
+
+  function renderScheduleRefillTaskRow(task = {}) {
+    const items = task.items || [];
+    const status = scheduleRefillStatusView(task.status, items.length > 0);
+    const highWater = [
+      task.cloud_high_water_at ? `TG ${task.cloud_high_water_text || ""}` : "TG 无",
+      task.local_high_water_at ? `本地 ${task.local_high_water_text || ""}` : "",
+      task.state_next_at ? `状态机 ${task.state_next_text || ""}` : "",
+    ].filter(Boolean).join("｜");
+    const cd = task.cd_seconds ? `CD ${Math.round(Number(task.cd_seconds || 0) / 60)}min` : "单次";
+    const evidence = task.state_contract ? scheduleRenewEvidenceText(task.state_contract) : "";
+    const reason = task.reason || (task.warnings || [])[0] || "";
+    return `
+      <article class="schedule-refill-task ${escapeAttr(status.tone || "")}">
+        <div class="schedule-refill-task-head">
+          <strong><code>${escapeHtml(task.command || "")}</code></strong>
+          <span class="status-pill ${escapeAttr(status.tone)}">${escapeHtml(status.label)}</span>
+          <small>${escapeHtml(task.sect || "通用")}｜${escapeHtml(task.module_key || "无状态机")}｜${escapeHtml(cd)}</small>
+        </div>
+        <p class="muted">${escapeHtml(task.usage || "")}${task.usage && highWater ? "｜" : ""}${escapeHtml(highWater)}</p>
+        ${evidence ? `<p class="muted">证据 ${escapeHtml(evidence)}</p>` : ""}
+        ${reason ? `<small class="${status.tone === "ok" ? "muted" : "warn"}">${escapeHtml(reason)}</small>` : ""}
+        ${items.length ? `<ul class="schedule-item-list">${items.slice(0, 6).map((item) => `<li><code>${escapeHtml(item.command || "")}</code><small>${escapeHtml(item.schedule_text || "")}</small><small>${escapeHtml(item.source || "")}</small></li>`).join("")}${items.length > 6 ? `<li><small>另有 ${escapeHtml(String(items.length - 6))} 条</small></li>` : ""}</ul>` : ""}
+      </article>
+    `;
+  }
+
   function scheduleStatusText(statusKey, counts) {
     const c = counts || {};
     const total = (c.planned || 0) + (c.scheduled || 0) + (c.failed || 0) + (c.expired || 0);
@@ -2107,6 +2251,12 @@
     const preview = dialog.querySelector("#schedulePreview");
     const previewShell = dialog.querySelector("#schedulePreviewShell");
     const previewSummary = dialog.querySelector("#schedulePreviewSummary");
+    const refillForm = dialog.querySelector("#scheduleRefillForm");
+    const refillStatus = dialog.querySelector("#scheduleRefillStatus");
+    const refillPreview = dialog.querySelector("#scheduleRefillPreview");
+    const refillPreviewButton = dialog.querySelector("#scheduleRefillPreviewButton");
+    const refillRunButton = dialog.querySelector("#scheduleRefillRunButton");
+    const refillSendAsSelect = dialog.querySelector("#scheduleRefillSendAsSelect");
     const batchList = dialog.querySelector("#scheduleBatchList");
     const syncButton = dialog.querySelector("#scheduleSyncButton");
     const syncRepairButton = dialog.querySelector("#scheduleSyncRepairButton");
@@ -2145,6 +2295,7 @@
     if (!form) return null;
     const presetMap = new Map(presets.map((p) => [p.key, p]));
     let templates = Array.isArray(initialTemplates) ? [...initialTemplates] : [];
+    let lastRefillPreview = null;
     const setStatus = (kind, text) => {
       if (!status) return;
       status.hidden = !text;
@@ -2158,6 +2309,17 @@
       preview.innerHTML = html || "";
       if (previewShell && html) previewShell.open = true;
       if (previewSummary) previewSummary.textContent = summary || (html ? "已生成" : "尚未生成");
+    };
+    const setRefillStatus = (kind, text) => {
+      if (!refillStatus) return;
+      refillStatus.hidden = !text;
+      refillStatus.className = `modal-status-line ${kind}`;
+      refillStatus.textContent = text || "";
+    };
+    const showRefillPreview = (html) => {
+      if (!refillPreview) return;
+      refillPreview.hidden = !html;
+      refillPreview.innerHTML = html || "";
     };
     const setRenewStatus = (kind, text) => {
       if (!renewStatus) return;
@@ -2202,6 +2364,38 @@
         selectedSendAsId: Number(renewSendAsSelect?.value || selectedPrimarySendAs() || 0),
       });
       bindRenewOverviewActions();
+    };
+    const refillPrimarySendAs = () => Number(refillSendAsSelect?.value || selectedPrimarySendAs() || 0);
+    const collectRefillPayload = () => {
+      if (!refillForm) return {};
+      const data = new FormData(refillForm);
+      return {
+        send_as_id: Number(data.get("send_as_id") || refillPrimarySendAs() || 0),
+        coverage_days: data.get("coverage_days") || 2,
+        lead_sec: data.get("lead_sec") || 300,
+        offset_sec: data.get("offset_sec") || 180,
+        soft_limit: data.get("soft_limit") || 95,
+      };
+    };
+    const renderRefillPreview = (result) => {
+      lastRefillPreview = result || null;
+      showRefillPreview(renderScheduleRefillPreview(deps, result || {}));
+      const statusKind = result?.ok === false
+        ? "error"
+        : (result?.manual_required || (result?.tasks || []).some((task) => ["manual_only", "high_frequency", "filtered", "disabled"].includes(String(task?.status || ""))))
+          ? "warn"
+          : "ok";
+      const statusText = result?.ok === false
+        ? (result.error || "补货预览失败")
+        : `拟追加 ${Number(result.planned_count || 0)} 条｜${result.coverage_until_text || "未覆盖"}`;
+      setRefillStatus(statusKind, statusText);
+      return result;
+    };
+    const refreshModalBatchesAfterScheduleChange = async () => {
+      const refreshed = await fetchJson("/api/schedule?history=0");
+      if (batchList) batchList.innerHTML = renderScheduleBatches(deps, syncScheduleBatches(deps, refreshed));
+      bindScheduleBatchActions(deps, dialog, setStatus);
+      return refreshed;
     };
     const selectedStateModule = () => String(stateModuleSelect?.value || "").trim();
     const matchedModuleForPreset = () => {
@@ -2745,6 +2939,9 @@
           markRenewFormAsDraft();
         }
       }
+      if (refillSendAsSelect && selected[0] && Array.from(refillSendAsSelect.options).some((option) => Number(option.value || 0) === Number(selected[0])) && !refillSendAsSelect.value) {
+        refillSendAsSelect.value = String(selected[0]);
+      }
       renderStateHint();
       updateRenewOverview();
     }
@@ -2858,6 +3055,59 @@
     }
     if (renewModuleSelect) {
       renewModuleSelect.addEventListener("change", markRenewFormAsDraft);
+    }
+    if (refillSendAsSelect) {
+      const selected = selectedPrimarySendAs();
+      if (selected && Array.from(refillSendAsSelect.options).some((option) => Number(option.value || 0) === selected)) {
+        refillSendAsSelect.value = String(selected);
+      }
+      refillSendAsSelect.addEventListener("change", () => {
+        lastRefillPreview = null;
+        setRefillStatus("info", "");
+        showRefillPreview("");
+      });
+    }
+    if (refillPreviewButton) {
+      refillPreviewButton.addEventListener("click", async () => {
+        refillPreviewButton.disabled = true;
+        setRefillStatus("info", "读取 TG 高水位和状态机起点中…");
+        try {
+          const result = await postJson("/api/schedule/refill-preview", collectRefillPayload());
+          renderRefillPreview(result);
+        } catch (error) {
+          setRefillStatus("error", error.message || "补货预览失败");
+          showRefillPreview("");
+        } finally {
+          refillPreviewButton.disabled = false;
+        }
+      });
+    }
+    if (refillRunButton) {
+      refillRunButton.addEventListener("click", async () => {
+        const planned = Number(lastRefillPreview?.planned_count || 0);
+        const identity = scheduleIdentityLabel(deps, refillPrimarySendAs()) || `send_as ${refillPrimarySendAs() || ""}`;
+        const confirmText = planned
+          ? `确认给 ${identity} 追加 ${planned} 条官方定时? 执行前会重新读取 TG 高水位。`
+          : `还没有最近预览。仍要重新读取 TG 高水位并确认补货到 ${identity} 吗?`;
+        if (!window.confirm(confirmText)) return;
+        refillRunButton.disabled = true;
+        if (refillPreviewButton) refillPreviewButton.disabled = true;
+        setRefillStatus("info", "重新读取 TG 高水位并提交补货中…");
+        try {
+          const result = await postJson("/api/schedule/refill-run", { ...collectRefillPayload(), confirm: true });
+          if (!result.ok) throw new Error(result.error || "补货提交失败");
+          renderRefillPreview(result.refill_preview || result);
+          const estimate = scheduleEstimateText(result.estimate_seconds || 0);
+          setRefillStatus("ok", `已提交补货批次 #${result.batch_id}｜${result.planned_count || 0} 条｜预估 ${estimate}`);
+          if (result.batch_id) scheduleProgressPolling(deps, dialog, result.batch_id);
+          await refreshModalBatchesAfterScheduleChange();
+        } catch (error) {
+          setRefillStatus("error", error.message || "补货提交失败");
+        } finally {
+          refillRunButton.disabled = false;
+          if (refillPreviewButton) refillPreviewButton.disabled = false;
+        }
+      });
     }
     if (renewNewButton) {
       renewNewButton.addEventListener("click", resetRenewForm);
