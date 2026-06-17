@@ -59,6 +59,7 @@
     },
     // 玩法状态机: Map<send_as_id(number), Array<{module_key,label,summary,state}>>
     identityModuleStates: new Map(),
+    identityStateObservationSummary: {},
     // 技能盘
     skills: [],
     skillGroups: [],

@@ -12,6 +12,7 @@ from __future__ import annotations
 # 直接照搬,顺序不重要,值是 OR 关系
 BOT_REPLY_FAMILY_HINTS: dict[str, tuple[str, ...]] = {
     "checkin": ("点卯", "已点卯", "已经点过", "宗门"),
+    "wild_training": ("野外历练", "山中灵机", "灵机未复"),
     "sect_teach": ("传功", "宗门", "贡献"),
     "tower": ("闯塔", "古塔", "塔灵", "挑战", "道心受挫"),
     "pet": ("器灵", "法宝", "默契", "经验", "休息"),
@@ -32,6 +33,7 @@ BOT_REPLY_FAMILY_HINTS: dict[str, tuple[str, ...]] = {
     "tianti_climb": ("天梯", "登天", "层", "修为"),
     "tianti_gangfeng": ("九天罡风", "罡风", "再聚"),
     "yuanying": ("元婴", "出窍", "归窍", "法则碎片", "探寻"),
+    "wendao": ("问道", "问道得宝", "天机不可频繁窥探"),
     "deep_retreat": ("深度闭关", "闭关", "神魂", "功成圆满", "总结"),
     "small_world_preach": ("小世界", "香火", "信仰", "神识", "神迹"),
     "small_world_query": ("小世界", "香火", "祈愿", "显灵", "紫府"),

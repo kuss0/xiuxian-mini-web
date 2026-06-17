@@ -44,6 +44,7 @@ def build_get_routes(handlers: Mapping[str, Callable]) -> dict[str, Callable]:
         "/api/accounts": handlers["_get_accounts"],
         "/api/identities": handlers["_get_identities"],
         "/api/identity-state": handlers["_get_identity_state"],
+        "/api/state-observations": handlers["_get_state_observations"],
         "/api/tianjige/status": handlers["_get_tianjige_status"],
         "/api/tianjige/bootstrap": handlers["_get_tianjige_bootstrap"],
         "/api/listener/status": handlers["_get_listener_status"],

@@ -448,6 +448,7 @@ async function loadIdentityModuleStates() {
       map.set(Number(entry.send_as_id), entry.items || []);
     }
     state.identityModuleStates = map;
+    state.identityStateObservationSummary = payload.observation_summary || {};
     renderSidebarIdentityList();
     renderActiveIdentityDock();
     renderCultivationModules();

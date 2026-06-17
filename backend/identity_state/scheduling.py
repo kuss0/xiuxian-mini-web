@@ -9,6 +9,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from backend.identity_state.contracts import module_contract_api
+
 DEFAULT_SCHEDULE_HORIZON_DAYS = 3
 STALE_STATE_SECONDS = 7 * 86400
 
@@ -243,6 +245,7 @@ def build_schedule_state_contract(
     now: float,
     tianjige_status: dict | None = None,
     tianjige_profile: dict | None = None,
+    observation: dict | None = None,
 ) -> dict:
     state = dict((record or {}).get("state") or {})
     updated_at = _as_float((record or {}).get("updated_at"))
@@ -296,6 +299,7 @@ def build_schedule_state_contract(
     )
     tianjige = tianjige_status or {}
     api_profile = tianjige_profile or {}
+    evidence = dict(observation or {})
     sources = ["bot_reply"] if observed else []
     if api_profile.get("available"):
         sources.append("tianjige_profile")
@@ -307,6 +311,7 @@ def build_schedule_state_contract(
     return {
         "module_key": str(getattr(module, "key", "") or ""),
         "label": str(getattr(module, "label", "") or getattr(module, "key", "") or ""),
+        "module_contract": module_contract_api(str(getattr(module, "key", "") or "")),
         "send_as_id": int(send_as_id or 0),
         "summary": summary,
         "next_at": next_at if next_at > 0 else None,
@@ -315,6 +320,14 @@ def build_schedule_state_contract(
         "sources": sources,
         "source_message_id": source_message_id,
         "updated_at": updated_at,
+        "evidence": {
+            "latest_observation": evidence,
+            "latest_decision": str(evidence.get("decision") or ""),
+            "latest_reason": str(evidence.get("reason") or ""),
+            "latest_family": str(evidence.get("family") or ""),
+            "latest_observed_at": float(evidence.get("observed_at") or 0),
+            "has_state_update_event": str(evidence.get("decision") or "") == "updated",
+        },
         "suggestion": hint,
         "payload_defaults": dict(hint.get("payload_defaults") or {}),
         "warnings": warnings,

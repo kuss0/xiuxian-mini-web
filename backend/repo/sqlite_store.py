@@ -141,6 +141,7 @@ class SQLiteStore:
             save_module_state=lambda sid, key, state, src: self.save_module_state(
                 sid, key, state, source_message_id=src
             ),
+            save_state_observation=self.append_state_observation,
         )
 
     def set_module_registry(self, registry) -> None:
@@ -159,6 +160,7 @@ class SQLiteStore:
             save_module_state=lambda sid, key, state, src: self.save_module_state(
                 sid, key, state, source_message_id=src
             ),
+            save_state_observation=self.append_state_observation,
         )
 
     def set_notify_dispatcher(self, dispatcher) -> None:
@@ -4683,6 +4685,123 @@ class SQLiteStore:
             )
             return cur.rowcount > 0
 
+    # ---------- state_observations(状态机证据账本) ----------
+
+    def append_state_observation(self, payload: dict) -> int:
+        now = time.time()
+        matched_families = payload.get("matched_families")
+        if not isinstance(matched_families, list):
+            matched_families = []
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO state_observations(
+                    module_key, send_as_id, family, reason, decision,
+                    source_message_id, chat_id, msg_id, reply_to_msg_id, sender_id,
+                    event_type, matched_families_json, matched_text_hash, matched_text,
+                    state_before, state_after, observed_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(payload.get("module_key") or ""),
+                    int(payload.get("send_as_id") or 0),
+                    str(payload.get("family") or ""),
+                    str(payload.get("reason") or ""),
+                    str(payload.get("decision") or ""),
+                    str(payload.get("source_message_id") or ""),
+                    int(payload.get("chat_id") or 0),
+                    int(payload.get("msg_id") or 0),
+                    int(payload.get("reply_to_msg_id") or 0),
+                    int(payload.get("sender_id") or 0),
+                    str(payload.get("event_type") or "message"),
+                    json.dumps(matched_families, ensure_ascii=False),
+                    str(payload.get("matched_text_hash") or ""),
+                    str(payload.get("matched_text") or "")[:240],
+                    str(payload.get("state_before") or ""),
+                    str(payload.get("state_after") or ""),
+                    float(payload.get("observed_at") or now),
+                ),
+            )
+            return int(cur.lastrowid or 0)
+
+    def list_state_observations(
+        self,
+        *,
+        send_as_id: int = 0,
+        module_key: str = "",
+        family: str = "",
+        decision: str = "",
+        limit: int = 50,
+    ) -> list[dict]:
+        where = []
+        params: list = []
+        if send_as_id:
+            where.append("send_as_id=?")
+            params.append(int(send_as_id))
+        if module_key:
+            where.append("module_key=?")
+            params.append(str(module_key))
+        if family:
+            where.append("family=?")
+            params.append(str(family))
+        if decision:
+            where.append("decision=?")
+            params.append(str(decision))
+        try:
+            safe_limit = max(1, min(500, int(limit or 50)))
+        except (TypeError, ValueError):
+            safe_limit = 50
+        sql = """
+            SELECT id, module_key, send_as_id, family, reason, decision,
+                   source_message_id, chat_id, msg_id, reply_to_msg_id, sender_id,
+                   event_type, matched_families_json, matched_text_hash, matched_text,
+                   state_before, state_after, observed_at
+            FROM state_observations
+        """
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY observed_at DESC, id DESC LIMIT ?"
+        params.append(safe_limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [self._state_observation_row_to_api(row) for row in rows]
+
+    def latest_state_observation(self, *, send_as_id: int, module_key: str, decision: str = "updated") -> dict | None:
+        rows = self.list_state_observations(
+            send_as_id=send_as_id,
+            module_key=module_key,
+            decision=decision,
+            limit=1,
+        )
+        return rows[0] if rows else None
+
+    def _state_observation_row_to_api(self, row) -> dict:
+        try:
+            families = json.loads(row[12] or "[]")
+        except (TypeError, ValueError):
+            families = []
+        return {
+            "id": int(row[0] or 0),
+            "module_key": row[1] or "",
+            "send_as_id": int(row[2] or 0),
+            "family": row[3] or "",
+            "reason": row[4] or "",
+            "decision": row[5] or "",
+            "source_message_id": row[6] or "",
+            "chat_id": int(row[7] or 0),
+            "msg_id": int(row[8] or 0),
+            "reply_to_msg_id": int(row[9] or 0),
+            "sender_id": int(row[10] or 0),
+            "event_type": row[11] or "",
+            "matched_families": families if isinstance(families, list) else [],
+            "matched_text_hash": row[13] or "",
+            "matched_text": row[14] or "",
+            "state_before": row[15] or "",
+            "state_after": row[16] or "",
+            "observed_at": float(row[17] or 0),
+        }
+
     def _init_schema(self) -> None:
         with self._connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
@@ -5024,6 +5143,32 @@ class SQLiteStore:
 
                 CREATE INDEX IF NOT EXISTS idx_identity_module_state_updated
                     ON identity_module_state(updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS state_observations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    module_key TEXT NOT NULL DEFAULT '',
+                    send_as_id INTEGER NOT NULL DEFAULT 0,
+                    family TEXT NOT NULL DEFAULT '',
+                    reason TEXT NOT NULL DEFAULT '',
+                    decision TEXT NOT NULL DEFAULT '',
+                    source_message_id TEXT NOT NULL DEFAULT '',
+                    chat_id INTEGER NOT NULL DEFAULT 0,
+                    msg_id INTEGER NOT NULL DEFAULT 0,
+                    reply_to_msg_id INTEGER NOT NULL DEFAULT 0,
+                    sender_id INTEGER NOT NULL DEFAULT 0,
+                    event_type TEXT NOT NULL DEFAULT '',
+                    matched_families_json TEXT NOT NULL DEFAULT '[]',
+                    matched_text_hash TEXT NOT NULL DEFAULT '',
+                    matched_text TEXT NOT NULL DEFAULT '',
+                    state_before TEXT NOT NULL DEFAULT '',
+                    state_after TEXT NOT NULL DEFAULT '',
+                    observed_at REAL NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_state_observations_module
+                    ON state_observations(send_as_id, module_key, decision, observed_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_state_observations_family
+                    ON state_observations(family, observed_at DESC);
 
                 CREATE INDEX IF NOT EXISTS idx_raw_messages_date
                     ON raw_messages(date);

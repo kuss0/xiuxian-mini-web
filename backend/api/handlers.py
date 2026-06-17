@@ -225,6 +225,24 @@ def _get_identity_state(request: MiniWebRequest, query: dict) -> dict:
     return _app(request).identity_state_payload(send_as_id)
 
 
+def _get_state_observations(request: MiniWebRequest, query: dict) -> dict:
+    send_as_id = (query.get("send_as_id") or [""])[0]
+    module_key = (query.get("module_key") or [""])[0]
+    family = (query.get("family") or [""])[0]
+    decision = (query.get("decision") or [""])[0]
+    try:
+        limit = int((query.get("limit") or ["50"])[0])
+    except (TypeError, ValueError):
+        limit = 50
+    return _app(request).state_observations_payload(
+        send_as_id,
+        module_key=module_key,
+        family=family,
+        decision=decision,
+        limit=limit,
+    )
+
+
 def _get_tianjige_status(request: MiniWebRequest, query: dict) -> dict:
     return _app(request).tianjige_status_payload()
 

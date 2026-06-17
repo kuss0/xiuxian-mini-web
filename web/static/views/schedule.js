@@ -22,8 +22,6 @@
     ranch: "ranch",
     concubine_dream: "concubine_dream",
     concubine_tianji: "concubine_tianji",
-    tianti_climb: "tianti_climb",
-    tianti_climb_elder: "tianti_climb",
     tianti_wenxin: "tianti_wenxin",
     tianti_gangfeng: "tianti_gangfeng",
     lingxiao_standard: "tianti_climb",
@@ -677,7 +675,47 @@
   }
 
   function scheduleRenewProfileReady(profile) {
-    return Boolean(profile?.renew_ready || profile?.state_contract?.semiauto_ready);
+    if (Object.prototype.hasOwnProperty.call(profile || {}, "renew_ready")) {
+      return Boolean(profile?.renew_ready);
+    }
+    return Boolean(profile?.state_contract?.semiauto_ready);
+  }
+
+  function scheduleRenewEvidenceFreshSeconds(row = {}, contract = null) {
+    const interval = Number(row?.interval_sec || contract?.suggestion?.interval_sec || 0);
+    if (String(row?.module_key || contract?.module_key || "") === "deep_retreat") {
+      return Math.max(3600, Math.min(48 * 3600, Math.max(interval, interval * 2)));
+    }
+    return Math.max(6 * 3600, Math.min(72 * 3600, Math.max(interval, interval * 2)));
+  }
+
+  function scheduleContractRenewReady(row = {}, contract = null) {
+    if (!contract) return false;
+    const updatedAt = Number(contract.updated_at || 0);
+    const sourceMessageId = String(contract.source_message_id || "");
+    const age = Date.now() / 1000 - updatedAt;
+    const freshSec = scheduleRenewEvidenceFreshSeconds(row, contract);
+    if (!updatedAt || age > freshSec) return false;
+    if (!sourceMessageId || sourceMessageId.startsWith("tianjige:")) return false;
+    if (!Number(contract.next_at || 0)) return false;
+    if ((contract.warnings || []).some((warning) => warning?.severity === "risk")) return false;
+    if (String(row?.module_key || contract.module_key || "") === "deep_retreat") return true;
+    return Boolean(contract.semiauto_ready);
+  }
+
+  function scheduleRenewEvidenceText(contract = null) {
+    if (!contract) return "未观测";
+    const evidence = contract.evidence || {};
+    const moduleContract = contract.module_contract || {};
+    const family = evidence.latest_family || (moduleContract.reply_families || [])[0] || "";
+    const readiness = moduleContract.readiness || "";
+    const sourceKind = String(contract.source_message_id || "").startsWith("tianjige:") ? "API" : "文本";
+    const parts = [];
+    if (family) parts.push(`family ${family}`);
+    if (readiness) parts.push(readiness);
+    parts.push(sourceKind);
+    if (evidence.latest_reason && evidence.latest_reason !== "state_updated") parts.push(evidence.latest_reason);
+    return parts.join("｜");
   }
 
   function scheduleRailRenewProfiles(deps = {}, batch) {
@@ -1539,17 +1577,29 @@
     return `<span class="status-pill ${escapeAttr(tone)}">${escapeHtml(label)}</span>`;
   }
 
+  function scheduleRenewProfileIdentityText(deps = {}, profile = {}) {
+    const identity = scheduleIdentityById(deps, profile.send_as_id);
+    const account = scheduleAccountByLocalId(deps, identity?.account_local_id || profile.account_local_id);
+    const identityText = scheduleIdentityLabel(deps, profile.send_as_id) || `send_as ${profile.send_as_id || ""}`;
+    const accountText = account ? scheduleAccountLabel(account, identity?.account_local_id || profile.account_local_id) : String(identity?.account_local_id || profile.account_local_id || "未绑定账号");
+    return accountText ? `${identityText}｜${accountText}` : identityText;
+  }
+
   function renderScheduleRenewOverview(deps = {}, options = {}) {
     const profiles = options.profiles || [];
     const presetMap = options.presetMap || null;
     const allowedRows = scheduleRenewAllowedPresetRows(options.allowedPresets || [], presetMap);
     const selectedSendAsId = Number(options.selectedSendAsId || 0);
     const scheduleModules = options.scheduleModules || {};
-    const configured = new Set(profiles.map((profile) => scheduleRenewProfileKey(profile.send_as_id, profile.preset_key)));
-    const enabled = profiles.filter((profile) => profile.enabled !== false);
+    const scopedProfiles = selectedSendAsId
+      ? profiles.filter((profile) => Number(profile.send_as_id || 0) === selectedSendAsId)
+      : profiles;
+    const hiddenProfileCount = Math.max(0, profiles.length - scopedProfiles.length);
+    const configured = new Set(scopedProfiles.map((profile) => scheduleRenewProfileKey(profile.send_as_id, profile.preset_key)));
+    const enabled = scopedProfiles.filter((profile) => profile.enabled !== false);
     const automatic = enabled.filter((profile) => scheduleRenewProfileReady(profile) && !profile.last_error);
     const waiting = enabled.filter((profile) => !scheduleRenewProfileReady(profile) || profile.last_error);
-    const disabled = profiles.filter((profile) => profile.enabled === false);
+    const disabled = scopedProfiles.filter((profile) => profile.enabled === false);
     const addable = [];
     const blocked = [];
     if (selectedSendAsId) {
@@ -1562,26 +1612,26 @@
           contract,
           identity: scheduleIdentityLabel(deps, selectedSendAsId) || `send_as ${selectedSendAsId}`,
         };
-        if (contract?.semiauto_ready || row.preset_key === "deep_retreat") addable.push(target);
+        if (scheduleContractRenewReady(row, contract)) addable.push(target);
         else blocked.push(target);
       });
     }
     const profileChip = (profile, tone) => `
-      <label class="schedule-renew-chip schedule-renew-check ${escapeAttr(tone || "")}">
-        <input type="checkbox" data-schedule-renew-overview-action="toggle-profile" data-profile-id="${escapeAttr(String(profile.id || ""))}" ${profile.enabled !== false ? "checked" : ""} />
+      <button type="button" class="schedule-renew-chip schedule-renew-check ${escapeAttr(tone || "")} ${profile.enabled !== false ? "is-checked" : ""}" data-schedule-renew-overview-action="toggle-profile" data-profile-id="${escapeAttr(String(profile.id || ""))}" aria-pressed="${profile.enabled !== false ? "true" : "false"}">
+        <span class="schedule-renew-chip-mark">${profile.enabled !== false ? "开" : "停"}</span>
         <span>
           <strong>${escapeHtml(profile.label || profile.preset_key || "")}</strong>
-          <small>${escapeHtml(scheduleIdentityLabel(deps, profile.send_as_id) || `send_as ${profile.send_as_id || ""}`)}</small>
+          <small>${escapeHtml(scheduleRenewProfileIdentityText(deps, profile))}｜${escapeHtml(scheduleRenewEvidenceText(profile.state_contract || null))}</small>
         </span>
         ${scheduleRenewStatusChip(profile.last_error ? "异常" : profile.enabled === false ? "停用" : scheduleRenewProfileReady(profile) ? "自动" : "待观察", tone)}
-      </label>
+      </button>
     `;
     const presetChip = (row, tone, action = "apply") => `
       <label class="schedule-renew-chip schedule-renew-check ${escapeAttr(tone || "")} ${action === "blocked" ? "disabled" : ""}">
         <input type="checkbox" data-schedule-renew-overview-action="${escapeAttr(action === "blocked" ? "blocked" : "enable")}" data-schedule-renew-preset="${escapeAttr(row.preset_key)}" data-schedule-renew-module="${escapeAttr(row.module_key)}" data-schedule-renew-send-as="${escapeAttr(String(selectedSendAsId))}" ${action === "blocked" ? "disabled" : ""} />
         <span>
           <strong>${escapeHtml(row.label)}</strong>
-          <small>${escapeHtml(row.module_key)}${row.interval_sec ? `｜${escapeHtml(String(Math.round(row.interval_sec / 60)))}min` : ""}</small>
+          <small>${escapeHtml(row.module_key)}${row.interval_sec ? `｜${escapeHtml(String(Math.round(row.interval_sec / 60)))}min` : ""}｜${escapeHtml(scheduleRenewEvidenceText(row.contract || null))}</small>
         </span>
         ${scheduleRenewStatusChip(action === "blocked" ? "需观察" : "可勾选", tone)}
       </label>
@@ -1602,6 +1652,7 @@
       <div class="schedule-renew-overview-top">
         ${scheduleTimeZonePill()}
         <small>${escapeHtml(selectedHint)}</small>
+        ${hiddenProfileCount ? `<small>其它身份 ${escapeHtml(String(hiddenProfileCount))} 条已收起</small>` : ""}
       </div>
       ${group("可新增", addable.map((row) => presetChip(row, "ok", "apply")).join(""), addable.length, selectedSendAsId ? "当前身份暂无可新增预设" : "先选择续期身份")}
       ${group("自动中", automatic.map((profile) => profileChip(profile, "ok")).join(""), automatic.length, "暂无可自动运行策略")}
@@ -1614,14 +1665,41 @@
     if (!profiles.length) {
       return '<p class="empty inline">还没有续期策略。</p>';
     }
-    return profiles.map((profile) => {
+    const groups = [];
+    const byKey = new Map();
+    (profiles || []).forEach((profile) => {
+      const key = String(profile.send_as_id || 0);
+      if (!byKey.has(key)) {
+        const group = {
+          key,
+          send_as_id: Number(profile.send_as_id || 0),
+          title: scheduleRenewProfileIdentityText(deps, profile),
+          profiles: [],
+        };
+        byKey.set(key, group);
+        groups.push(group);
+      }
+      byKey.get(key).profiles.push(profile);
+    });
+    return groups.map((group) => `
+      <section class="schedule-renew-profile-group" data-schedule-renew-profile-send-as="${escapeAttr(String(group.send_as_id || ""))}">
+        <div class="schedule-renew-profile-group-head">
+          <strong>${escapeHtml(group.title)}</strong>
+          <span>${escapeHtml(String(group.profiles.length))} 条策略</span>
+        </div>
+        ${group.profiles.map((profile) => renderScheduleRenewProfileRow(deps, profile)).join("")}
+      </section>
+    `).join("");
+  }
+
+  function renderScheduleRenewProfileRow(deps = {}, profile) {
       const contract = profile.state_contract || {};
       const enabled = profile.enabled !== false;
       const ready = scheduleRenewProfileReady(profile);
       const statusPill = enabled
         ? `<span class="status-pill ${ready ? "ok" : "warn"}">${ready ? "可续期" : "待观察"}</span>`
         : '<span class="status-pill">停用</span>';
-      const identity = scheduleIdentityLabel(deps, profile.send_as_id) || `send_as ${profile.send_as_id || ""}`;
+      const identity = scheduleRenewProfileIdentityText(deps, profile);
       const coverage = profile.covered_until_text || profile.tail_text || "当前无未来项";
       const storedCoverage = profile.stored_covered_until_text || "";
       const storedHint = storedCoverage && storedCoverage !== coverage
@@ -1630,6 +1708,7 @@
       const error = profile.last_error
         ? `<small class="warn">${escapeHtml(profile.last_error)}</small>`
         : "";
+      const evidenceText = scheduleRenewEvidenceText(contract);
       return `
         <article class="account-row" data-schedule-renew-profile-id="${escapeAttr(String(profile.id || ""))}">
           <span class="account-row-dot ${enabled && ready ? "live" : profile.last_error ? "warn" : "idle"}" aria-hidden="true"></span>
@@ -1639,7 +1718,7 @@
               ${statusPill}
               <span class="account-row-meta">${escapeHtml(identity)}｜${escapeHtml(profile.module_key || "")}｜续 ${escapeHtml(String(profile.renew_days || 1))} 天｜余量 ${escapeHtml(String(profile.soft_remaining ?? ""))}</span>
             </div>
-            <p class="muted">当前覆盖到 ${escapeHtml(coverage)}｜${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}｜阈值 ${escapeHtml(String(profile.threshold_hours || 24))}h</p>
+            <p class="muted">当前覆盖到 ${escapeHtml(coverage)}｜${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}｜阈值 ${escapeHtml(String(profile.threshold_hours || 24))}h｜${escapeHtml(evidenceText)}</p>
             ${storedHint}
             ${profile.renew_block_reason && !ready ? `<small class="warn">${escapeHtml(profile.renew_block_reason)}</small>` : ""}
             ${error}
@@ -1652,7 +1731,6 @@
           </div>
         </article>
       `;
-    }).join("");
   }
 
   function renderScheduleBatches(deps = {}, batches) {
@@ -1960,6 +2038,8 @@
     const suggestion = source.suggestion || {};
     const warnings = source.warnings || [];
     const tianjige = source.tianjige || null;
+    const moduleContract = source.module_contract || {};
+    const evidence = source.evidence || {};
     const tianjigeText = tianjige
       ? `天机阁 API ${tianjige.enabled ? (tianjige.mode || "on") : "off"}｜${tianjige.authenticated ? "已认证" : "未认证"}${tianjige.profile_available ? `｜资料已刷新 ${tianjige.profile_updated_at || ""}` : "｜资料未刷新"}${tianjige.message ? `｜${tianjige.message}` : ""}`
       : "";
@@ -1970,6 +2050,13 @@
       ? `<ul class="send-as-result-list">${warnings.map((w) => `<li class="${w.severity === "risk" ? "warn" : "ok"}"><small>${escapeHtml(w.message || w.code || "")}</small></li>`).join("")}</ul>`
       : '<p class="muted">当前没有阻断告警。</p>';
     const command = suggestion.command || suggestion.base_command || "";
+    const familyText = evidence.latest_family || (moduleContract.reply_families || [])[0] || "";
+    const evidenceText = [
+      moduleContract.readiness ? `样本 ${moduleContract.readiness}` : "",
+      moduleContract.send_policy ? `策略 ${moduleContract.send_policy}` : "",
+      familyText ? `family ${familyText}` : "",
+      evidence.latest_reason ? `最近 ${evidence.latest_reason}` : "",
+    ].filter(Boolean).join("｜");
     return `
       <p>
         <strong>${escapeHtml(source.label || source.module_key || "")}</strong>
@@ -1977,6 +2064,7 @@
         <small>${escapeHtml(source.summary?.text || "")}</small>
       </p>
       <p class="muted">起点 ${escapeHtml(source.next_at ? "状态机 next_at" : "未确定")}｜置信 ${escapeHtml(source.confidence || "unknown")}｜建议 <code>${escapeHtml(command)}</code>${suggestion.interval_sec ? `｜间隔 ${escapeHtml(String(suggestion.interval_sec))}s` : ""}</p>
+      ${evidenceText ? `<p class="muted">${escapeHtml(evidenceText)}</p>` : ""}
       ${tianjigeText ? `<p class="muted">${escapeHtml(tianjigeText)} ${tianjigeKeys}</p>` : ""}
       ${warnHtml}
     `;
@@ -2445,13 +2533,15 @@
       renewOverview.querySelectorAll("[data-schedule-renew-action], [data-schedule-renew-overview-action]").forEach((btn) => {
         if (btn.dataset.bound === "1") return;
         btn.dataset.bound = "1";
-        btn.addEventListener("change", async () => {
+        const toggleProfile = async () => {
           const profileId = Number(btn.dataset.profileId || 0);
           const action = btn.dataset.scheduleRenewOverviewAction || "";
           if (profileId && action === "toggle-profile") {
             const profile = renewProfiles.find((item) => Number(item.id || 0) === profileId);
             if (!profile) return;
-            const nextEnabled = Boolean(btn.checked);
+            const nextEnabled = btn.tagName === "BUTTON"
+              ? btn.getAttribute("aria-pressed") !== "true"
+              : Boolean(btn.checked);
             btn.disabled = true;
             try {
               setRenewStatus("info", `${nextEnabled ? "开启" : "关闭"}续期策略 #${profileId}...`);
@@ -2461,16 +2551,22 @@
               if (renewProfileList) renewProfileList.innerHTML = renderScheduleRenewProfiles(deps, renewProfiles);
               updateRenewOverview();
               bindRenewProfileActions();
+              fillRenewForm((renewProfiles || []).find((item) => Number(item.id || 0) === profileId) || profile);
               setRenewStatus("ok", `${nextEnabled ? "已开启" : "已关闭"}续期策略 #${profileId}`);
             } catch (error) {
-              btn.checked = !nextEnabled;
+              if (btn.tagName !== "BUTTON") btn.checked = !nextEnabled;
               setRenewStatus("error", error.message || "切换续期失败");
               window.alert(error.message || "切换续期失败");
             } finally {
               if (btn.isConnected) btn.disabled = false;
             }
-            return;
+            return true;
           }
+          return false;
+        };
+        btn.addEventListener("change", async () => {
+          if (await toggleProfile()) return;
+          const action = btn.dataset.scheduleRenewOverviewAction || "";
           const presetKey = String(btn.dataset.scheduleRenewPreset || "").trim();
           const sendAsId = Number(btn.dataset.scheduleRenewSendAs || renewSendAsSelect?.value || 0);
           if (!presetKey) return;
@@ -2503,7 +2599,11 @@
             return;
           }
         });
-        btn.addEventListener("click", () => {
+        btn.addEventListener("click", async () => {
+          if (btn.dataset.scheduleRenewOverviewAction === "toggle-profile" && btn.tagName === "BUTTON") {
+            await toggleProfile();
+            return;
+          }
           const profileId = Number(btn.dataset.profileId || 0);
           if (profileId) {
             const profile = renewProfiles.find((item) => Number(item.id || 0) === profileId);

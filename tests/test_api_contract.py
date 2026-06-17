@@ -385,7 +385,10 @@ def test_identity_status_view_module_keeps_shared_helpers_and_composer_fill_cont
         "const IDENTITY_STATUS_GROUPS = [",
         "function openIdentityStatusModal(deps = {})",
         "function renderIdentityStatusBody(deps = {})",
+        "function renderIdentityObservationSummary(deps = {}, activeId)",
+        "sid === 0 || sid === Number(activeId || 0)",
         "function identityModuleView(deps = {}, spec, item)",
+        "function renderIdentityObservationLine(deps = {}, spec, item)",
         "function identityStatusFlatSpecs()",
         "function tickIdentityStatusCards(deps = {})",
         '{ key: "wendao", skill: "wendao" }',
@@ -396,7 +399,9 @@ def test_identity_status_view_module_keeps_shared_helpers_and_composer_fill_cont
         "window.MiniwebViews.identityStatus = {",
         "IDENTITY_STATUS_GROUPS,",
         "openIdentityStatusModal,",
+        "renderIdentityObservationSummary,",
         "identityModuleView,",
+        "renderIdentityObservationLine,",
         "identityStatusFlatSpecs,",
         "tickIdentityStatusCards,",
         "deps.fillSkillIntoComposer?.(button.dataset.statusSkill, button)",
@@ -6482,6 +6487,135 @@ def test_schedule_renew_deep_retreat_runs_with_fresh_idle_evidence(tmp_path, mon
     assert messages[1]["command"] == ".深度闭关"
 
 
+def test_state_observation_ledger_records_updates_and_identity_gaps(tmp_path):
+    now = utc_now_iso()
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+    store.ingest_event(
+        RawMessageEvent(
+            id="cmd-wild",
+            chat_id=1,
+            msg_id=10,
+            text=".野外历练",
+            source="me",
+            date=now,
+            sender_id=12345,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="reply-wild",
+            chat_id=1,
+            msg_id=11,
+            text="【野外历练】\n山中灵机未复，请在 1小时8分钟43秒 后再来。",
+            source="bot",
+            date=now,
+            sender_id=7900199668,
+            reply_to_msg_id=10,
+            sender_is_bot=True,
+        )
+    )
+    store.ingest_event(
+        RawMessageEvent(
+            id="orphan-wild",
+            chat_id=1,
+            msg_id=12,
+            text="【野外历练】\n山中灵机未复，请在 1小时 后再来。",
+            source="bot",
+            date=now,
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
+
+    latest = store.latest_state_observation(send_as_id=12345, module_key="wild_training")
+    gaps = store.list_state_observations(decision="skipped", family="wild_training")
+    server = MiniWebServer(store=store)
+    observations = server.state_observations_payload("12345", module_key="wild_training", limit=10)
+    identity_state = server.identity_state_payload("12345")
+    wild_item = next(item for item in identity_state["by_identity"][0]["items"] if item["module_key"] == "wild_training")
+
+    assert latest is not None
+    assert latest["decision"] == "updated"
+    assert latest["reason"] == "state_updated"
+    assert latest["family"] == "wild_training"
+    assert latest["source_message_id"] == "reply-wild"
+    assert gaps[0]["reason"] == "reply_context_no_identity"
+    assert gaps[0]["matched_families"] == ["wild_training"]
+    assert observations["ok"] is True
+    assert observations["filters"]["send_as_id"] == 12345
+    assert observations["summary"]["by_decision"][0]["key"] == "skipped"
+    assert observations["summary"]["recent_gaps"][0]["reason"] == "reply_context_no_identity"
+    assert wild_item["observation"]["source_message_id"] == "reply-wild"
+    assert wild_item["latest_gap"]["source_message_id"] == "orphan-wild"
+    assert identity_state["observation_summary"]["total"] >= 2
+
+
+def test_schedule_contract_exposes_module_contract_and_observation_evidence(tmp_path):
+    now = utc_now_iso()
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+    store.ingest_event(RawMessageEvent(id="cmd-wendao", chat_id=1, msg_id=20, text=".问道", source="me", date=now, sender_id=12345))
+    store.ingest_event(
+        RawMessageEvent(
+            id="reply-wendao",
+            chat_id=1,
+            msg_id=21,
+            text="【问道得宝】\n修为增加了 100 点\n- 【清灵草】 x 1",
+            source="bot",
+            date=now,
+            sender_id=7900199668,
+            reply_to_msg_id=20,
+            sender_is_bot=True,
+        )
+    )
+
+    payload = server.schedule_modules_payload("12345")
+    item = payload["by_identity"][0]["items"][0]
+
+    assert item["module_key"] == "wendao"
+    assert item["module_contract"]["reply_families"] == ["wendao"]
+    assert item["module_contract"]["readiness"] == "sample_complete"
+    assert item["evidence"]["has_state_update_event"] is True
+    assert item["evidence"]["latest_family"] == "wendao"
+
+
+def test_schedule_renew_blocks_stale_normal_evidence(tmp_path):
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+    now = time.time()
+    store.save_module_state(
+        12345,
+        "wild_training",
+        {"cooldown_until": now + 120, "last_observed_at": now - 10 * 3600, "last_status": "cooldown"},
+        source_message_id="raw-wild-old",
+    )
+    with store._connect() as conn:
+        conn.execute(
+            "UPDATE identity_module_state SET updated_at=? WHERE send_as_id=? AND module_key=?",
+            (now - 10 * 3600, 12345, "wild_training"),
+        )
+
+    saved = server.schedule_renew_save_payload({
+        "send_as_id": 12345,
+        "preset_key": "wild_training",
+        "module_key": "wild_training",
+        "renew_days": 1,
+    })
+    run = server.schedule_renew_run_payload({"profile_id": saved["profile"]["id"]})
+
+    assert saved["ok"] is True
+    assert saved["profile"]["renew_ready"] is False
+    assert "不新鲜" in saved["profile"]["renew_block_reason"]
+    assert run["ok"] is False
+    assert run["status"] == "renew_blocked"
+    assert "不新鲜" in run["error"]
+
+
 def test_schedule_renew_allows_safe_package_presets(tmp_path):
     store = SQLiteStore(tmp_path / "miniweb.db")
     server = MiniWebServer(store=store)
@@ -6490,6 +6624,8 @@ def test_schedule_renew_allows_safe_package_presets(tmp_path):
     payload = server.schedule_renew_profiles_payload()
     allowed = {item["preset_key"]: item for item in payload["allowed_presets"]}
 
+    assert "tianti_climb" not in allowed
+    assert "tianti_climb_elder" not in allowed
     assert allowed["daily_essentials"]["module_key"] == "checkin"
     assert allowed["lingxiao_standard"]["module_key"] == "tianti_climb"
     assert allowed["lingxiao_elder"]["module_key"] == "tianti_climb"
@@ -8395,6 +8531,7 @@ def test_identity_state_route_is_wired():
     # The above is a soft check; rely on the imports route table directly:
     from backend.app import GET_ROUTES
     assert "/api/identity-state" in GET_ROUTES
+    assert "/api/state-observations" in GET_ROUTES
 
 
 def test_backfill_module_states_replays_existing_raw_messages(tmp_path):

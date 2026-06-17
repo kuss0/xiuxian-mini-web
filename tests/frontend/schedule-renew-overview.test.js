@@ -67,6 +67,16 @@ describe('Official schedule renewal overview', () => {
   });
 
   test('checking addable renewal preset saves the profile directly', async () => {
+    const now = Date.now() / 1000;
+    const freshContract = {
+      semiauto_ready: true,
+      updated_at: now,
+      next_at: now + 3600,
+      source_message_id: 'raw-checkin',
+      warnings: [],
+      evidence: { latest_family: 'checkin', latest_reason: 'state_updated' },
+      module_contract: { readiness: 'sample_complete', reply_families: ['checkin'] },
+    };
     window.MiniwebApi.fetchJson.mockImplementation((url) => {
       if (url === '/api/schedule/renew') {
         return Promise.resolve({
@@ -89,7 +99,7 @@ describe('Official schedule renewal overview', () => {
         module_key: 'checkin',
         label: '点卯',
         enabled: true,
-        state_contract: { semiauto_ready: true },
+        state_contract: freshContract,
       },
       profiles: [{
         id: 9,
@@ -98,7 +108,7 @@ describe('Official schedule renewal overview', () => {
         module_key: 'checkin',
         label: '点卯',
         enabled: true,
-        state_contract: { semiauto_ready: true },
+        state_contract: freshContract,
       }],
     });
 
@@ -114,7 +124,7 @@ describe('Official schedule renewal overview', () => {
         modules: [{ key: 'checkin', label: '点卯', suggestion: {} }],
         by_identity: [{
           send_as_id: 101,
-          items: [{ module_key: 'checkin', semiauto_ready: true }],
+          items: [{ module_key: 'checkin', ...freshContract }],
         }],
       }
     );
@@ -145,6 +155,93 @@ describe('Official schedule renewal overview', () => {
         enabled: true,
       })
     );
+  });
+
+  test('renew overview scopes profiles to selected identity and toggle button disables profile', async () => {
+    const schedule = window.MiniwebViews.schedule;
+    const dialog = buildDialog();
+    window.MiniwebState.state.identities = [
+      { send_as_id: 101, label: 'Wise', account_local_id: 'main', enabled: true },
+      { send_as_id: 202, label: 'Alt', account_local_id: 'alt', enabled: true },
+    ];
+    window.MiniwebState.state.accounts = [
+      { local_id: 'main', label: 'Main' },
+      { local_id: 'alt', label: 'AltAccount' },
+    ];
+    const profiles = [
+      {
+        id: 11,
+        send_as_id: 101,
+        account_local_id: 'main',
+        preset_key: 'checkin',
+        module_key: 'checkin',
+        label: '点卯',
+        enabled: true,
+        state_contract: { semiauto_ready: true },
+      },
+      {
+        id: 22,
+        send_as_id: 202,
+        account_local_id: 'alt',
+        preset_key: 'wild_training',
+        module_key: 'wild_training',
+        label: '野外历练',
+        enabled: true,
+        state_contract: { semiauto_ready: true },
+      },
+    ];
+    window.MiniwebApi.fetchJson.mockImplementation((url) => {
+      if (url === '/api/schedule/renew') {
+        return Promise.resolve({
+          ok: true,
+          profiles,
+          allowed_presets: [
+            { preset_key: 'checkin', module_key: 'checkin', interval_sec: 86400 },
+            { preset_key: 'lingxiao_elder', module_key: 'tianti_climb', interval_sec: 10800 },
+          ],
+          worker: { running: true, last_result: { ok: true } },
+        });
+      }
+      return Promise.resolve({ ok: true, batches: [] });
+    });
+    window.MiniwebApi.postJson.mockResolvedValue({
+      ok: true,
+      profiles: [{ ...profiles[0], enabled: false }, profiles[1]],
+    });
+
+    schedule.bindScheduleModal(
+      { state: window.MiniwebState.state },
+      dialog,
+      [
+        { key: 'checkin', label: '点卯', description: '每日点卯', fields: [], module_key: 'checkin' },
+        { key: 'lingxiao_elder', label: '凌霄宫·长老', description: '长老包', fields: [], module_key: 'tianti_climb' },
+      ],
+      [],
+      [],
+      { modules: [], by_identity: [] }
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const overview = dialog.querySelector('#scheduleRenewOverview');
+    expect(overview.textContent).toContain('点卯');
+    expect(overview.textContent).not.toContain('野外历练');
+    expect(overview.textContent).toContain('其它身份 1 条已收起');
+    expect(dialog.querySelectorAll('.schedule-renew-profile-group')).toHaveLength(2);
+    expect(dialog.querySelector('.schedule-renew-profile-group').textContent).toContain('Main');
+
+    const toggle = overview.querySelector('[data-schedule-renew-overview-action="toggle-profile"][data-profile-id="11"]');
+    expect(toggle.tagName).toBe('BUTTON');
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    toggle.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(window.MiniwebApi.postJson).toHaveBeenCalledWith(
+      '/api/schedule/renew/save',
+      expect.objectContaining({ id: 11, enabled: false, preset_key: 'checkin' })
+    );
+    expect(dialog.querySelector('#scheduleRenewStatus').textContent).toContain('已关闭续期策略 #11');
   });
 
   test('rail aggregates same identity and tianti module batches', () => {

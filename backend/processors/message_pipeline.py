@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import replace
+from hashlib import sha1
 from typing import Callable, Iterable
 
 from backend.domain.models import ParsedCard, RawMessageEvent
@@ -14,6 +15,19 @@ from backend.processors.message_filter import enrich_filter_channels
 # 老脚本对照:app.py:324 `_claim_runtime_event`。TTL 自己 GC。
 _OBSERVE_CACHE_TTL_SEC = 600.0
 _OBSERVE_CACHE_MAX = 4096
+
+
+def _first_matching_family(module_key: str, families: list[str]) -> str:
+    try:
+        from backend.identity_state.contracts import module_contract
+        contract = module_contract(module_key)
+    except Exception:
+        contract = None
+    known = set((contract.reply_families if contract else ()) or ())
+    for family in families or []:
+        if not known or family in known:
+            return str(family or "")
+    return ""
 
 
 class MessagePipeline:
@@ -38,6 +52,7 @@ class MessagePipeline:
         get_settings_snapshot: Callable[[], dict] | None = None,
         get_module_state: Callable[[int, str], dict | None] | None = None,
         save_module_state: Callable[[int, str, dict, str], None] | None = None,
+        save_state_observation: Callable[[dict], None] | None = None,
     ) -> None:
         self._registry = registry
         # 给 fallback 判定「这条算系统消息还是玩家消息」用。
@@ -54,6 +69,7 @@ class MessagePipeline:
         self._get_settings_snapshot = get_settings_snapshot
         self._get_module_state = get_module_state
         self._save_module_state = save_module_state
+        self._save_state_observation = save_state_observation
         # observe 幂等缓存:{(chat_id, msg_id): (text_hash, expires_at)}
         self._observe_cache: dict[tuple[int, int], tuple[int, float]] = {}
 
@@ -148,6 +164,8 @@ class MessagePipeline:
             self._observe_cache[key] = (text_hash, wall_now + _OBSERVE_CACHE_TTL_SEC)
         try:
             from backend.identity_state import ObserveContext, classify_sender
+            from backend.identity_state.contracts import module_keys_for_families
+            from backend.repo.bot_hints import matched_families
         except Exception:
             return
         my_ids = frozenset(int(x) for x in (self._get_my_identities() if self._get_my_identities else ()))
@@ -174,14 +192,103 @@ class MessagePipeline:
             settings=settings,
             now=float(observed_at or wall_now),
         )
+        families: list[str] = []
         try:
-            self._module_registry.observe_all(
+            families = matched_families(event.text or "")
+        except Exception:
+            families = []
+        parent_identity = ctx.parent_sender() if ctx.parent_is_my_identity() else None
+        try:
+            results = self._module_registry.observe_all(
                 event,
                 ctx,
                 get_state=self._module_state_getter(),
                 save_state=lambda sid, key, state, src: self._save_module_state(
                     sid, key, state, src
                 ),
+            )
+        except Exception:
+            self._record_state_observation(
+                event,
+                module_key="",
+                send_as_id=int(parent_identity or 0),
+                family=families[0] if families else "",
+                reason="observe_exception",
+                decision="error",
+                matched_families=families,
+            )
+            return
+        if results:
+            for item in results:
+                self._record_state_observation(
+                    event,
+                    module_key=item.module_key,
+                    send_as_id=item.send_as_id,
+                    family=_first_matching_family(item.module_key, families),
+                    reason="state_updated",
+                    decision="updated",
+                    state_after=str((item.state or {}).get("phase") or (item.state or {}).get("last_status") or ""),
+                    matched_families=families,
+                )
+            return
+        if not families:
+            return
+        candidate_modules = module_keys_for_families(families)
+        if ctx.sender_kind != "bot":
+            reason = "sender_not_game_bot"
+        elif not parent_identity:
+            reason = "reply_context_no_identity"
+        elif candidate_modules:
+            reason = "module_no_match"
+        else:
+            reason = "unhandled_family"
+        self._record_state_observation(
+            event,
+            module_key=candidate_modules[0] if candidate_modules else "",
+            send_as_id=int(parent_identity or 0),
+            family=families[0] if families else "",
+            reason=reason,
+            decision="skipped",
+            matched_families=families,
+        )
+
+    def _record_state_observation(
+        self,
+        event: RawMessageEvent,
+        *,
+        module_key: str,
+        send_as_id: int,
+        family: str,
+        reason: str,
+        decision: str,
+        state_before: str = "",
+        state_after: str = "",
+        matched_families: list[str] | None = None,
+    ) -> None:
+        if self._save_state_observation is None:
+            return
+        text = str(event.text or "")
+        try:
+            self._save_state_observation(
+                {
+                    "module_key": str(module_key or ""),
+                    "send_as_id": int(send_as_id or 0),
+                    "family": str(family or ""),
+                    "reason": str(reason or ""),
+                    "decision": str(decision or ""),
+                    "source_message_id": str(event.id or ""),
+                    "chat_id": int(event.chat_id or 0),
+                    "msg_id": int(event.msg_id or 0),
+                    "reply_to_msg_id": int(event.reply_to_msg_id or 0),
+                    "sender_id": int(event.sender_id or 0) if event.sender_id is not None else 0,
+                    "event_type": "edit" if event.edited_at else "message",
+                    "matched_families": list(matched_families or []),
+                    "matched_text_hash": sha1(text.encode("utf-8", errors="ignore")).hexdigest()[:16] if text else "",
+                    "matched_text": text[:240],
+                    "state_before": str(state_before or ""),
+                    "state_after": str(state_after or ""),
+                    "observed_at": time.time(),
+                }
             )
         except Exception:
             return

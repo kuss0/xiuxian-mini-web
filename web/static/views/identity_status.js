@@ -145,6 +145,7 @@
         </div>
         ${renderIdentityProfileSources(deps, sourceRows)}
       </div>
+      ${renderIdentityObservationSummary(deps, activeId)}
       <div class="identity-status-groups">
         ${IDENTITY_STATUS_GROUPS.map((group) => renderIdentityStatusGroup(deps, group, byKey)).join("")}
       </div>
@@ -198,6 +199,41 @@
     `;
   }
 
+  function renderIdentityObservationSummary(deps = {}, activeId) {
+    const state = identityStatusState(deps);
+    const summary = state.identityStateObservationSummary || {};
+    const recentGaps = (summary.recent_gaps || [])
+      .filter((item) => {
+        const sid = Number(item.send_as_id || 0);
+        return sid === 0 || sid === Number(activeId || 0);
+      })
+      .slice(0, 5);
+    const reasonRows = (summary.by_reason || []).slice(0, 4);
+    const gapRows = recentGaps.length
+      ? recentGaps.map((item) => `
+        <button type="button" class="identity-observation-gap" data-identity-source-jump="${escapeAttr(item.source_message_id || "")}" ${item.source_message_id ? "" : "disabled"}>
+          <span>${escapeHtml(observationModuleLabel(deps, item.module_key || item.family))}</span>
+          <strong>${escapeHtml(observationReasonLabel(item.reason))}</strong>
+          <em>${escapeHtml(observationTimeLabel(deps, item.observed_at))}</em>
+        </button>
+      `).join("")
+      : '<span class="identity-observation-empty">最近无状态机缺口</span>';
+    return `
+      <section class="identity-observation-panel">
+        <div class="identity-observation-head">
+          <strong>状态机账本</strong>
+          <span>${escapeHtml(String(summary.total || 0))} 条最近观测</span>
+        </div>
+        <div class="identity-observation-reasons">
+          ${reasonRows.map((item) => `
+            <span>${escapeHtml(observationReasonLabel(item.key))}<em>${escapeHtml(String(item.count || 0))}</em></span>
+          `).join("") || '<span>等待监听<em>0</em></span>'}
+        </div>
+        <div class="identity-observation-gaps">${gapRows}</div>
+      </section>
+    `;
+  }
+
   function renderIdentityStatusGroup(deps = {}, group, byKey) {
     const querySkill = group.query ? skillByKey(deps, group.query) : null;
     const queryButton = querySkill && deps.skillIsUnlocked?.(querySkill)
@@ -246,9 +282,65 @@
           <span class="identity-status-bar"><span style="width:${view.pct.toFixed(1)}%"></span></span>
         </div>
         ${excerpt ? `<p>${escapeHtml(clipGraphemes(excerpt.replace(/\s+/g, " "), 82))}</p>` : '<p class="muted">暂无最近文案。</p>'}
+        ${renderIdentityObservationLine(deps, spec, item)}
         ${actionButtons ? `<div class="identity-status-actions">${actionButtons}</div>` : ""}
       </article>
     `;
+  }
+
+  function renderIdentityObservationLine(deps = {}, spec, item) {
+    const observation = item?.observation || null;
+    const gap = item?.latest_gap || null;
+    if (!observation && !gap) {
+      return '<small class="identity-observation-line empty">未见本地文案证据</small>';
+    }
+    const primary = observation || gap;
+    const kind = observation ? "证据" : "缺口";
+    const reason = observation ? observation.family || spec.key : observationReasonLabel(gap.reason);
+    const time = observationTimeLabel(deps, primary.observed_at);
+    const jump = primary.source_message_id
+      ? `<button type="button" data-identity-source-jump="${escapeAttr(primary.source_message_id)}">来源</button>`
+      : "";
+    const gapHint = observation && gap ? `<em>${escapeHtml(observationReasonLabel(gap.reason))}</em>` : "";
+    return `
+      <small class="identity-observation-line ${observation ? "ok" : "warn"}">
+        <span>${escapeHtml(kind)}: ${escapeHtml(reason)}</span>
+        <time>${escapeHtml(time)}</time>
+        ${gapHint}
+        ${jump}
+      </small>
+    `;
+  }
+
+  function observationModuleLabel(deps = {}, moduleKey) {
+    const key = String(moduleKey || "");
+    const spec = identityStatusFlatSpecs().find((item) => item.key === key);
+    if (spec) {
+      const skill = skillByKey(deps, spec.skill);
+      return skill?.label || spec.label || spec.key;
+    }
+    return key || "unknown";
+  }
+
+  function observationReasonLabel(reason) {
+    const key = String(reason || "").trim();
+    const labels = {
+      state_updated: "已更新",
+      reply_context_no_identity: "未绑定身份",
+      module_no_match: "模块未命中",
+      unhandled_family: "未接状态机",
+      sender_not_game_bot: "非游戏 bot",
+      observe_exception: "解析异常",
+    };
+    return labels[key] || key || "未知";
+  }
+
+  function observationTimeLabel(deps = {}, value) {
+    const numeric = Number(value || 0);
+    if (numeric > 0) {
+      return deps.auditTimeLabel?.(new Date(numeric * 1000).toISOString()) || "未知时间";
+    }
+    return deps.auditTimeLabel?.(value) || "未知时间";
   }
 
   function identityModuleView(deps = {}, spec, item) {
@@ -406,8 +498,12 @@
     renderIdentityStatusBody,
     identityProfileSourceRows,
     renderIdentityProfileSources,
+    renderIdentityObservationSummary,
     renderIdentityStatusGroup,
     renderIdentityStatusCard,
+    renderIdentityObservationLine,
+    observationReasonLabel,
+    observationTimeLabel,
     identityModuleView,
     moduleTimingView,
     identityStatusActions,

@@ -30,6 +30,7 @@ from backend.identity_state.scheduling import (
     build_schedule_state_contract,
     schedule_hint,
 )
+from backend.identity_state.contracts import module_contract
 from backend.outbox import OutboxPlanner
 from backend.outbox.schedule import (
     MAX_SCHEDULED_MESSAGES_PER_IDENTITY,
@@ -178,6 +179,7 @@ SCHEDULE_RENEW_ALLOWED_PRESETS: dict[str, tuple[str, int]] = {
     "wendao": ("wendao", 12 * 3600),
     "yindao": ("yindao", 12 * 3600),
 }
+SCHEDULE_RENEW_HIDDEN_PRESETS = {"tianti_climb", "tianti_climb_elder"}
 
 
 def _parse_utc_datetime(value: object) -> datetime | None:
@@ -1823,7 +1825,16 @@ class MiniWebServer:
                 "source_message_id": record.get("source_message_id") or "",
                 "updated_at": float(record.get("updated_at") or 0),
             }
+            if hasattr(self._store, "latest_state_observation"):
+                latest_updated = self._latest_state_observation_for_module(sid, key, decision="updated")
+                latest_gap = self._latest_state_observation_for_module(sid, key, decision="skipped")
+                entry["observation"] = latest_updated or None
+                entry["latest_gap"] = latest_gap or None
             by_identity.setdefault(sid, []).append(entry)
+        observations = self.state_observations_payload(
+            str(target_send_as) if target_send_as else "",
+            limit=80,
+        )
         return {
             "ok": True,
             "modules": [
@@ -1834,6 +1845,157 @@ class MiniWebServer:
                 {"send_as_id": sid, "items": items}
                 for sid, items in sorted(by_identity.items())
             ],
+            "observation_summary": observations.get("summary") or {},
+        }
+
+    def state_observations_payload(
+        self,
+        send_as_id_text: str = "",
+        *,
+        module_key: str = "",
+        family: str = "",
+        decision: str = "",
+        limit: int = 50,
+    ) -> dict:
+        """Return recent state-machine observation ledger entries.
+
+        The ledger is diagnostic only: it explains which bot replies updated a
+        state row and which replies matched a family but were skipped.
+        """
+        if not hasattr(self._store, "list_state_observations"):
+            return {"ok": False, "error": "store does not support state observations", "observations": [], "summary": {}}
+        try:
+            send_as_id = int(send_as_id_text or 0)
+        except (TypeError, ValueError):
+            send_as_id = 0
+        try:
+            safe_limit = max(1, min(500, int(limit or 50)))
+        except (TypeError, ValueError):
+            safe_limit = 50
+        observations = self._list_state_observations_for_filters(
+            send_as_id=send_as_id,
+            module_key=str(module_key or ""),
+            family=str(family or ""),
+            decision=str(decision or ""),
+            limit=safe_limit,
+        )
+        return {
+            "ok": True,
+            "filters": {
+                "send_as_id": send_as_id,
+                "module_key": str(module_key or ""),
+                "family": str(family or ""),
+                "decision": str(decision or ""),
+                "limit": safe_limit,
+            },
+            "observations": observations,
+            "summary": self._state_observation_summary(observations),
+        }
+
+    def _list_state_observations_for_filters(
+        self,
+        *,
+        send_as_id: int = 0,
+        module_key: str = "",
+        family: str = "",
+        decision: str = "",
+        limit: int = 50,
+    ) -> list[dict]:
+        if send_as_id and not module_key and not family:
+            scoped = self._store.list_state_observations(
+                send_as_id=send_as_id,
+                decision=decision,
+                limit=limit,
+            )
+            global_gaps = [
+                item for item in self._store.list_state_observations(decision=decision, limit=limit)
+                if int(item.get("send_as_id") or 0) == 0
+            ]
+            seen: set[int] = set()
+            merged: list[dict] = []
+            for item in [*scoped, *global_gaps]:
+                item_id = int(item.get("id") or 0)
+                if item_id in seen:
+                    continue
+                seen.add(item_id)
+                merged.append(item)
+            merged.sort(key=lambda item: (float(item.get("observed_at") or 0), int(item.get("id") or 0)), reverse=True)
+            return merged[:limit]
+        if not module_key or family:
+            return self._store.list_state_observations(
+                send_as_id=send_as_id,
+                module_key=module_key,
+                family=family,
+                decision=decision,
+                limit=limit,
+            )
+        queries = [
+            {"send_as_id": send_as_id, "module_key": module_key, "family": ""},
+        ]
+        contract = module_contract(module_key)
+        families = list(contract.reply_families if contract else ()) or [module_key]
+        for item_family in families:
+            queries.append({"send_as_id": send_as_id, "module_key": "", "family": item_family})
+            if send_as_id:
+                queries.append({"send_as_id": 0, "module_key": "", "family": item_family})
+        seen: set[int] = set()
+        merged: list[dict] = []
+        for query in queries:
+            for item in self._store.list_state_observations(
+                send_as_id=int(query["send_as_id"] or 0),
+                module_key=str(query["module_key"] or ""),
+                family=str(query["family"] or ""),
+                decision=decision,
+                limit=limit,
+            ):
+                if send_as_id and int(query["send_as_id"] or 0) == 0:
+                    item_sid = int(item.get("send_as_id") or 0)
+                    if item_sid not in {0, send_as_id}:
+                        continue
+                item_id = int(item.get("id") or 0)
+                if item_id in seen:
+                    continue
+                seen.add(item_id)
+                merged.append(item)
+        merged.sort(key=lambda item: (float(item.get("observed_at") or 0), int(item.get("id") or 0)), reverse=True)
+        return merged[:limit]
+
+    def _latest_state_observation_for_module(self, send_as_id: int, module_key: str, *, decision: str) -> dict | None:
+        observations = self._list_state_observations_for_filters(
+            send_as_id=send_as_id,
+            module_key=module_key,
+            decision=decision,
+            limit=1,
+        )
+        return observations[0] if observations else None
+
+    def _state_observation_summary(self, observations: list[dict]) -> dict:
+        def _top(items: list[str], max_items: int = 8) -> list[dict]:
+            counts: dict[str, int] = {}
+            for item in items:
+                key = str(item or "").strip() or "unknown"
+                counts[key] = counts.get(key, 0) + 1
+            return [
+                {"key": key, "count": count}
+                for key, count in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))[:max_items]
+            ]
+
+        recent_gaps = [
+            item for item in observations
+            if str(item.get("decision") or "") == "skipped"
+        ][:12]
+        recent_updates = [
+            item for item in observations
+            if str(item.get("decision") or "") == "updated"
+        ][:12]
+        return {
+            "total": len(observations),
+            "by_decision": _top([item.get("decision") for item in observations]),
+            "by_reason": _top([item.get("reason") for item in observations]),
+            "by_family": _top([item.get("family") for item in observations]),
+            "by_module": _top([item.get("module_key") for item in observations]),
+            "recent_gaps": recent_gaps,
+            "recent_updates": recent_updates,
         }
 
     def save_account_payload(self, payload: dict) -> dict:
@@ -2225,6 +2387,12 @@ class MiniWebServer:
         if module is None:
             return None
         record = self._store.get_module_state(send_as_id, module_key)
+        observation = None
+        if hasattr(self._store, "latest_state_observation"):
+            try:
+                observation = self._store.latest_state_observation(send_as_id=send_as_id, module_key=module_key)
+            except Exception:
+                observation = None
         return build_schedule_state_contract(
             module,
             record,
@@ -2232,6 +2400,7 @@ class MiniWebServer:
             now=time.time(),
             tianjige_status=self._tianjige.status(),
             tianjige_profile=self._tianjige_profile_state(send_as_id),
+            observation=observation,
         )
 
     def _prepare_schedule_payload_with_state(self, payload: dict, *, send_as_id: int = 0) -> tuple[dict, dict | None]:
@@ -2626,6 +2795,11 @@ class MiniWebServer:
                         now=now,
                         tianjige_status=tianjige_status,
                         tianjige_profile=profile_state,
+                        observation=(
+                            self._store.latest_state_observation(send_as_id=sid, module_key=key)
+                            if hasattr(self._store, "latest_state_observation")
+                            else None
+                        ),
                     )
                 )
             by_identity.append({
@@ -2954,20 +3128,29 @@ class MiniWebServer:
         interval = self._schedule_renew_interval_sec(profile, contract)
         return max(3600, min(48 * 3600, max(interval, interval * 2)))
 
-    def _schedule_phaseful_renew_block_payload(self, profile: dict, contract: dict | None) -> dict:
+    def _schedule_renew_evidence_fresh_sec(self, profile: dict, contract: dict | None = None) -> int:
         module_key = str((contract or {}).get("module_key") or profile.get("module_key") or "")
-        label = str((contract or {}).get("label") or profile.get("label") or module_key or "阶段型模块")
-        if module_key not in SCHEDULE_RENEW_PHASEFUL_MODULE_KEYS:
-            msg = f"{label} 未进入阶段型续期白名单"
-            return {"ok": False, "manual_required": True, "status": "phaseful_renew_blocked", "error": msg, "manual_message": msg}
+        if module_key in SCHEDULE_RENEW_PHASEFUL_MODULE_KEYS:
+            return self._schedule_renew_phaseful_fresh_sec(profile, contract)
+        interval = self._schedule_renew_interval_sec(profile, contract)
+        return max(6 * 3600, min(72 * 3600, max(interval, interval * 2)))
+
+    def _schedule_renew_evidence_block_payload(
+        self,
+        profile: dict,
+        contract: dict | None,
+        *,
+        require_semiauto: bool = True,
+    ) -> dict:
+        label = str((contract or {}).get("label") or profile.get("label") or profile.get("module_key") or "状态机")
         if not contract:
             msg = f"{label} 缺少状态机证据,不能自动续期"
             return {"ok": False, "manual_required": True, "status": "stale_evidence", "error": msg, "manual_message": msg}
         updated_at = float((contract or {}).get("updated_at") or 0)
         now = time.time()
-        fresh_sec = self._schedule_renew_phaseful_fresh_sec(profile, contract)
+        fresh_sec = self._schedule_renew_evidence_fresh_sec(profile, contract)
         if updated_at <= 0 or now - updated_at > fresh_sec:
-            msg = f"{label} 状态机证据不新鲜,请先观察一次结算/查询回复"
+            msg = f"{label} 状态机证据不新鲜,请先观察一次真实回复"
             return {
                 "ok": False,
                 "manual_required": True,
@@ -2977,14 +3160,15 @@ class MiniWebServer:
                 "evidence_age_sec": max(0, now - updated_at) if updated_at else 0,
                 "evidence_fresh_sec": fresh_sec,
             }
+        if not str((contract or {}).get("source_message_id") or "").strip():
+            msg = f"{label} 缺少来源消息,不能自动续期"
+            return {"ok": False, "manual_required": True, "status": "missing_source", "error": msg, "manual_message": msg}
+        if str((contract or {}).get("source_message_id") or "").startswith("tianjige:"):
+            msg = f"{label} 只有天机阁 API 辅助证据,不能作为 CD 起点自动续期"
+            return {"ok": False, "manual_required": True, "status": "api_only_evidence", "error": msg, "manual_message": msg}
         if not float((contract or {}).get("next_at") or 0):
             msg = f"{label} 状态机没有给出下次可用时间,不能自动续期"
             return {"ok": False, "manual_required": True, "status": "missing_anchor", "error": msg, "manual_message": msg}
-        summary = dict((contract or {}).get("summary") or {})
-        phase = str(summary.get("phase") or "").strip()
-        if phase in {"running", "waiting_summary"}:
-            msg = f"{label} 仍在运行或等待总结,不能自动续期"
-            return {"ok": False, "manual_required": True, "status": "phaseful_active", "error": msg, "manual_message": msg}
         blocking_warnings = [
             warning for warning in ((contract or {}).get("warnings") or [])
             if str(warning.get("severity") or "") == "risk"
@@ -2992,6 +3176,27 @@ class MiniWebServer:
         if blocking_warnings:
             msg = str(blocking_warnings[0].get("message") or f"{label} 状态机证据不足")
             return {"ok": False, "manual_required": True, "status": "stale_evidence", "error": msg, "manual_message": msg}
+        if require_semiauto and not bool((contract or {}).get("semiauto_ready")):
+            warnings = (contract or {}).get("warnings") or []
+            detail = "；".join(str(w.get("message") or w.get("code") or "") for w in warnings if w) or "状态机尚未满足白名单半自动条件。"
+            msg = f"{label} 不允许自动续期: {detail}"
+            return {"ok": False, "manual_required": True, "status": "semiauto_blocked", "error": msg, "manual_message": msg}
+        return {"ok": True, "evidence_fresh_sec": fresh_sec}
+
+    def _schedule_phaseful_renew_block_payload(self, profile: dict, contract: dict | None) -> dict:
+        module_key = str((contract or {}).get("module_key") or profile.get("module_key") or "")
+        label = str((contract or {}).get("label") or profile.get("label") or module_key or "阶段型模块")
+        if module_key not in SCHEDULE_RENEW_PHASEFUL_MODULE_KEYS:
+            msg = f"{label} 未进入阶段型续期白名单"
+            return {"ok": False, "manual_required": True, "status": "phaseful_renew_blocked", "error": msg, "manual_message": msg}
+        evidence_check = self._schedule_renew_evidence_block_payload(profile, contract, require_semiauto=False)
+        if not evidence_check.get("ok"):
+            return evidence_check
+        summary = dict((contract or {}).get("summary") or {})
+        phase = str(summary.get("phase") or "").strip()
+        if phase in {"running", "waiting_summary"}:
+            msg = f"{label} 仍在运行或等待总结,不能自动续期"
+            return {"ok": False, "manual_required": True, "status": "phaseful_active", "error": msg, "manual_message": msg}
         return {"ok": True}
 
     def _schedule_renew_interval_sec(self, profile: dict, contract: dict | None = None) -> int:
@@ -3052,7 +3257,9 @@ class MiniWebServer:
                     out["renew_ready"] = bool(phaseful_check.get("ok"))
                     out["renew_block_reason"] = "" if phaseful_check.get("ok") else str(phaseful_check.get("error") or "")
                 else:
-                    out["renew_ready"] = bool((out.get("state_contract") or {}).get("semiauto_ready"))
+                    evidence_check = self._schedule_renew_evidence_block_payload(out, out.get("state_contract"))
+                    out["renew_ready"] = bool(evidence_check.get("ok"))
+                    out["renew_block_reason"] = "" if evidence_check.get("ok") else str(evidence_check.get("error") or "")
             except Exception:
                 out["state_contract"] = None
                 out["renew_ready"] = False
@@ -3128,15 +3335,13 @@ class MiniWebServer:
     def schedule_renew_profiles_payload(self) -> dict:
         if not hasattr(self._store, "list_schedule_renew_profiles"):
             return {"ok": False, "error": "store does not support schedule renew profiles", "profiles": []}
+        allowed_presets = self._schedule_renew_allowed_presets_payload()
         raw_profiles = self._store.list_schedule_renew_profiles()
         if not raw_profiles:
             return {
                 "ok": True,
                 "profiles": [],
-                "allowed_presets": [
-                    {"preset_key": preset, "module_key": module, "interval_sec": interval}
-                    for preset, (module, interval) in SCHEDULE_RENEW_ALLOWED_PRESETS.items()
-                ],
+                "allowed_presets": allowed_presets,
                 "defaults": {
                     "renew_days": 1,
                     "threshold_hours": SCHEDULE_RENEW_DEFAULT_THRESHOLD_HOURS,
@@ -3168,10 +3373,7 @@ class MiniWebServer:
         return {
             "ok": True,
             "profiles": profiles,
-            "allowed_presets": [
-                {"preset_key": preset, "module_key": module, "interval_sec": interval}
-                for preset, (module, interval) in SCHEDULE_RENEW_ALLOWED_PRESETS.items()
-            ],
+            "allowed_presets": allowed_presets,
             "defaults": {
                 "renew_days": 1,
                 "threshold_hours": SCHEDULE_RENEW_DEFAULT_THRESHOLD_HOURS,
@@ -3179,6 +3381,13 @@ class MiniWebServer:
             },
             "worker": self.schedule_renew_worker_status_payload(),
         }
+
+    def _schedule_renew_allowed_presets_payload(self) -> list[dict]:
+        return [
+            {"preset_key": preset, "module_key": module, "interval_sec": interval}
+            for preset, (module, interval) in SCHEDULE_RENEW_ALLOWED_PRESETS.items()
+            if preset not in SCHEDULE_RENEW_HIDDEN_PRESETS
+        ]
 
     def schedule_renew_save_payload(self, payload: dict) -> dict:
         if not hasattr(self._store, "save_schedule_renew_profile"):
@@ -3418,9 +3627,9 @@ class MiniWebServer:
             if not phaseful_check.get("ok"):
                 return {**phaseful_check, "status": "renew_blocked", "items": [], "state_contract": contract, "profile": self._schedule_renew_profile_view(profile, include_contract=False)}
         else:
-            semiauto_check = self._schedule_semiauto_block_payload(contract)
-            if not semiauto_check.get("ok"):
-                return {**semiauto_check, "status": "renew_blocked", "items": [], "profile": self._schedule_renew_profile_view(profile, include_contract=False)}
+            evidence_check = self._schedule_renew_evidence_block_payload(profile, contract)
+            if not evidence_check.get("ok"):
+                return {**evidence_check, "status": "renew_blocked", "items": [], "state_contract": contract, "profile": self._schedule_renew_profile_view(profile, include_contract=False)}
 
         soft_limit = max(1, min(MAX_SCHEDULED_MESSAGES_PER_IDENTITY, int(profile.get("soft_limit") or SCHEDULE_RENEW_DEFAULT_SOFT_LIMIT)))
         current_usage = self._official_schedule_identity_usage(send_as_id)
