@@ -220,6 +220,13 @@ describe('Official schedule renewal overview', () => {
 
     const shortcut = dialog.querySelector('[data-schedule-plan-preset="checkin"]');
     expect(shortcut).not.toBeNull();
+    expect(dialog.querySelector('[data-schedule-plan-panel="presets"]').hidden).toBe(false);
+    expect(dialog.querySelector('[data-schedule-plan-panel="state"]').hidden).toBe(true);
+    expect(dialog.querySelector('[data-schedule-plan-panel="custom"]').hidden).toBe(true);
+    dialog.querySelector('[data-schedule-plan-mode="state"]').click();
+    expect(dialog.querySelector('[data-schedule-plan-panel="presets"]').hidden).toBe(true);
+    expect(dialog.querySelector('[data-schedule-plan-panel="state"]').hidden).toBe(false);
+    expect(dialog.querySelector('[data-schedule-plan-panel="custom"]').hidden).toBe(true);
     shortcut.click();
 
     expect(dialog.querySelector('[name="preset_key"]').value).toBe('checkin');
@@ -253,6 +260,11 @@ describe('Official schedule renewal overview', () => {
 
     const example = dialog.querySelector('[data-schedule-custom-example="daily_pair"]');
     expect(example).not.toBeNull();
+    expect(dialog.querySelector('[data-schedule-plan-panel="custom"]').hidden).toBe(true);
+    dialog.querySelector('[data-schedule-plan-mode="custom"]').click();
+    expect(dialog.querySelector('[data-schedule-plan-panel="presets"]').hidden).toBe(true);
+    expect(dialog.querySelector('[data-schedule-plan-panel="state"]').hidden).toBe(true);
+    expect(dialog.querySelector('[data-schedule-plan-panel="custom"]').hidden).toBe(false);
     example.click();
 
     expect(dialog.querySelector('[name="preset_key"]').value).toBe('custom');

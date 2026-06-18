@@ -1373,10 +1373,13 @@
     return Array.from(groups.entries())
       .sort(([a], [b]) => (SCHEDULE_PRESET_CATEGORY_META[a]?.order || 99) - (SCHEDULE_PRESET_CATEGORY_META[b]?.order || 99))
       .map(([category, rows]) => `
-        <section class="schedule-plan-group">
+        <section class="schedule-plan-group" data-schedule-plan-category="${escapeAttr(category)}">
           <div class="schedule-plan-group-head">
-            <strong>${escapeHtml(schedulePresetCategoryLabel(category))}</strong>
-            <span>${escapeHtml(String(rows.length))}</span>
+            <span>
+              <strong>${escapeHtml(schedulePresetCategoryLabel(category))}</strong>
+              <small>${category === "package" ? "联动包" : category === "sect" ? "门派/身份相关" : "常用命令"}</small>
+            </span>
+            <em>${escapeHtml(String(rows.length))}</em>
           </div>
           <div class="schedule-plan-card-list">
             ${rows.slice(0, category === "package" ? 8 : 6).map((preset) => schedulePlanCardHtml({ preset, compact: true })).join("")}
@@ -1400,33 +1403,36 @@
       ? (scheduleIdentityLabel(deps, selectedSendAsId) || `send_as ${selectedSendAsId}`)
       : "未选身份";
     return `
-      <div class="schedule-plan-workbench-grid">
-        <section class="schedule-plan-panel schedule-plan-recommend">
-          <div class="schedule-plan-panel-head">
-            <strong>状态机推荐</strong>
-            <small>${escapeHtml(identity)}｜${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}</small>
-          </div>
-          <p class="schedule-plan-panel-note">先看证据，再决定可排、需接力，还是只做观测。</p>
-          <div class="schedule-plan-card-list">
-            ${scheduleStateRecommendationCards(deps, { presets, scheduleModules, selectedSendAsId })}
-          </div>
-        </section>
-        <section class="schedule-plan-panel schedule-plan-presets">
+      <div class="schedule-plan-workbench-grid" data-schedule-plan-workbench>
+        <div class="schedule-plan-mode-tabs" role="tablist" aria-label="排程入口">
+          <button type="button" class="selected" data-schedule-plan-mode="presets" aria-pressed="true">常用方案</button>
+          <button type="button" data-schedule-plan-mode="state" aria-pressed="false">状态机推荐</button>
+          <button type="button" data-schedule-plan-mode="custom" aria-pressed="false">联动自定义</button>
+        </div>
+        <section class="schedule-plan-panel schedule-plan-presets" data-schedule-plan-panel="presets">
           <div class="schedule-plan-panel-head">
             <strong>常用方案</strong>
-            <small>单项和联动包</small>
+            <small>先选方案，再微调下面表单</small>
           </div>
-          <p class="schedule-plan-panel-note">点方案就能套字段，少翻表单。</p>
           <div class="schedule-plan-groups">
             ${schedulePresetShortcutGroups(presets)}
           </div>
         </section>
-        <section class="schedule-plan-panel schedule-plan-custom">
+        <section class="schedule-plan-panel schedule-plan-recommend" data-schedule-plan-panel="state" hidden>
+          <div class="schedule-plan-panel-head">
+            <strong>状态机推荐</strong>
+            <small>${escapeHtml(identity)}｜${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}</small>
+          </div>
+          <p class="schedule-plan-panel-note">有状态证据的命令优先从这里套用。</p>
+          <div class="schedule-plan-card-list">
+            ${scheduleStateRecommendationCards(deps, { presets, scheduleModules, selectedSendAsId })}
+          </div>
+        </section>
+        <section class="schedule-plan-panel schedule-plan-custom" data-schedule-plan-panel="custom" hidden>
           <div class="schedule-plan-panel-head">
             <strong>联动自定义</strong>
-            <small>每行一条命令,一轮内错峰</small>
+            <small>多条命令 / 错峰 / 临时串联</small>
           </div>
-          <p class="schedule-plan-panel-note">适合点卯 + 闯塔、入梦 + 天机，或者临时串联多条指令。</p>
           <div class="schedule-plan-example-list">${renderScheduleCustomExamples()}</div>
         </section>
       </div>
@@ -2805,6 +2811,21 @@
     };
     function bindSchedulePlanWorkbenchActions() {
       if (!planWorkbench) return;
+      planWorkbench.querySelectorAll("[data-schedule-plan-mode]").forEach((button) => {
+        if (button.dataset.bound === "1") return;
+        button.dataset.bound = "1";
+        button.addEventListener("click", () => {
+          const mode = String(button.dataset.schedulePlanMode || "presets");
+          planWorkbench.querySelectorAll("[data-schedule-plan-mode]").forEach((item) => {
+            const active = String(item.dataset.schedulePlanMode || "") === mode;
+            item.classList.toggle("selected", active);
+            item.setAttribute("aria-pressed", active ? "true" : "false");
+          });
+          planWorkbench.querySelectorAll("[data-schedule-plan-panel]").forEach((panel) => {
+            panel.hidden = String(panel.dataset.schedulePlanPanel || "") !== mode;
+          });
+        });
+      });
       planWorkbench.querySelectorAll("[data-schedule-plan-preset]").forEach((button) => {
         if (button.dataset.bound === "1") return;
         button.dataset.bound = "1";

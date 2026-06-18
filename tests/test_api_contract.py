@@ -7643,11 +7643,17 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert "需接力" in schedule_js
     assert "仅观测" in schedule_js
     assert "data-schedule-plan-preset" in schedule_js
+    assert "data-schedule-plan-mode" in schedule_js
+    assert 'data-schedule-plan-panel="presets"' in schedule_js
+    assert 'data-schedule-plan-panel="state" hidden' in schedule_js
+    assert 'data-schedule-plan-panel="custom" hidden' in schedule_js
     assert "data-schedule-custom-example" in schedule_js
     assert 'id="scheduleCommandGroupEditor"' in schedule_js
     assert "schedule-command-group-editor" in detail_css
     assert "联动命令组" in schedule_js
     assert ".schedule-plan-workbench-grid" in detail_css
+    assert ".schedule-plan-mode-tabs" in detail_css
+    assert ".schedule-plan-panel[hidden]" in detail_css
     assert ".schedule-plan-card.selected" in detail_css
     assert ".schedule-create-section {\n  order: -4;" in detail_css
     assert ".schedule-modal-records {\n    order: 2;" in detail_css
