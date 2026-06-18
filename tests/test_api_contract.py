@@ -5623,11 +5623,12 @@ def test_schedule_presets_payload_lists_known_presets():
     by_key = {p["key"]: p for p in payload["presets"]}
     assert set(by_key) >= {
         "deep_retreat", "yuanying", "pet_touch", "pet_warm", "pet_trial", "custom",
-        "retreat_shallow", "wild_training", "checkin", "tower", "daily_essentials",
-        "ranch", "concubine_dream",
+        "retreat_shallow", "wild_training", "checkin", "tower", "daily_check_core",
+        "daily_essentials", "ranch", "concubine_dream", "concubine_cycle",
         "concubine_tianji", "tianti_climb", "tianti_climb_elder", "tianti_wenxin",
         "tianti_gangfeng", "lingxiao_standard", "lingxiao_elder",
         "stargazer_guide", "stargazer_soothe", "stargazer_collect", "stargazer_care",
+        "stargazer_bamboo_thunder",
         "second_soul", "wendao", "yindao",
         "search_node", "taiyi_cycle", "taiyi_patrol",
     }
@@ -5636,6 +5637,11 @@ def test_schedule_presets_payload_lists_known_presets():
     assert by_key["lingxiao_elder"]["module_key"] == "tianti_climb"
     assert by_key["stargazer_guide"]["module_key"] == "stargazer_guide"
     assert by_key["taiyi_patrol"]["module_key"] == "taiyi_cycle"
+    assert by_key["daily_essentials"]["ui"]["shape"] == "combo_rounds"
+    assert by_key["lingxiao_elder"]["ui"]["category"] == "package"
+    assert by_key["stargazer_bamboo_thunder"]["ui"]["automation"] == "manual"
+    assert by_key["search_node"]["ui"]["automation"] == "manual_followup"
+    assert by_key["custom"]["ui"]["shape"] == "custom"
     assert "count" in by_key["retreat_shallow"]["fields"]
     assert "command_gap_sec" in by_key["daily_essentials"]["fields"]
     assert by_key["custom"]["module_key"] == ""
@@ -5799,6 +5805,17 @@ def test_schedule_preview_combo_presets_emit_expected_commands(tmp_path):
     assert stargazer["preset_label"] == "星宫维护"
     assert [item["command"] for item in stargazer["items"][:3]] == [
         ".牵引星辰", ".安抚星辰", ".收集精华",
+    ]
+
+    thunder = server.schedule_preview_payload({
+        "preset_key": "stargazer_bamboo_thunder",
+        "anchor_at": anchor,
+        "horizon_days": 2,
+    })
+    assert thunder["ok"] is True
+    assert thunder["preset_label"] == "金雷竹·天雷星"
+    assert [item["command"] for item in thunder["items"][:3]] == [
+        ".牵引星辰 天雷星", ".安抚星辰", ".收集精华",
     ]
 
     taiyi = server.schedule_preview_payload({
@@ -6626,6 +6643,7 @@ def test_schedule_renew_allows_safe_package_presets(tmp_path):
 
     assert "tianti_climb" not in allowed
     assert "tianti_climb_elder" not in allowed
+    assert allowed["daily_check_core"]["module_key"] == "checkin"
     assert allowed["daily_essentials"]["module_key"] == "checkin"
     assert allowed["lingxiao_standard"]["module_key"] == "tianti_climb"
     assert allowed["lingxiao_elder"]["module_key"] == "tianti_climb"
@@ -7613,8 +7631,26 @@ def test_schedule_retry_failed_route_and_ui_are_wired():
     assert "schedule-modal-records" in schedule_js
     assert ".modal-dialog.schedule-modal-dialog" in detail_css
     assert "z-index: 260;" in detail_css
-    assert "grid-template-columns: minmax(460px, 1fr) minmax(360px, 0.86fr);" in detail_css
-    assert ".schedule-modal-records {\n    order: -1;" in detail_css
+    assert "grid-template-columns: minmax(520px, 1fr) minmax(360px, 0.74fr);" in detail_css
+    assert 'id="schedulePlanWorkbench"' in schedule_js
+    assert "function renderSchedulePlanWorkbench(deps = {}" in schedule_js
+    assert "function scheduleStateRecommendationCards(deps = {}" in schedule_js
+    assert "schedulePresetAutomationLabel" in schedule_js
+    assert "schedulePresetAutomationTone" in schedule_js
+    assert "SCHEDULE_HIDDEN_SHORTCUT_PRESETS" in schedule_js
+    assert "daily_check_core" in schedule_js
+    assert "stargazer_bamboo_thunder" in schedule_js
+    assert "需接力" in schedule_js
+    assert "仅观测" in schedule_js
+    assert "data-schedule-plan-preset" in schedule_js
+    assert "data-schedule-custom-example" in schedule_js
+    assert 'id="scheduleCommandGroupEditor"' in schedule_js
+    assert "schedule-command-group-editor" in detail_css
+    assert "联动命令组" in schedule_js
+    assert ".schedule-plan-workbench-grid" in detail_css
+    assert ".schedule-plan-card.selected" in detail_css
+    assert ".schedule-create-section {\n  order: -4;" in detail_css
+    assert ".schedule-modal-records {\n    order: 2;" in detail_css
     assert 'name="auto_anchor_module"' in schedule_js
     assert 'name="schedule_semiauto"' in schedule_js
     assert 'name="schedule_use_module_defaults"' in schedule_js

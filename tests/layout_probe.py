@@ -69,6 +69,150 @@ MESSAGES = [
 ]
 
 
+SCHEDULE_BATCHES = [
+    {
+        "id": 1,
+        "send_as_id": 12345,
+        "preset_key": "checkin",
+        "label": "宗门点卯",
+        "status": "completed",
+        "anchor_at": 1781748000,
+        "anchor_text": "06-18 10:00",
+        "created_at": 1781740000,
+        "updated_at": 1781740100,
+        "counts": {"scheduled": 3, "planned": 0, "failed": 0},
+        "items": [
+            {"command": ".宗门点卯", "schedule_at": 1781748000, "schedule_text": "06-18 10:00", "status": "scheduled", "scheduled_msg_id": 1001},
+            {"command": ".宗门点卯", "schedule_at": 1781834400, "schedule_text": "06-19 10:00", "status": "scheduled", "scheduled_msg_id": 1002},
+            {"command": ".宗门点卯", "schedule_at": 1781920800, "schedule_text": "06-20 10:00", "status": "scheduled", "scheduled_msg_id": 1003},
+        ],
+        "options": {"renew_profile_id": 11, "state_contract": {"module_key": "checkin"}},
+    },
+    {
+        "id": 2,
+        "send_as_id": 12345,
+        "preset_key": "tower",
+        "label": "闯塔",
+        "status": "completed",
+        "anchor_at": 1781748300,
+        "anchor_text": "06-18 10:05",
+        "created_at": 1781740010,
+        "updated_at": 1781740110,
+        "counts": {"scheduled": 3, "planned": 0, "failed": 0},
+        "items": [
+            {"command": ".闯塔", "schedule_at": 1781748300, "schedule_text": "06-18 10:05", "status": "scheduled", "scheduled_msg_id": 1011},
+            {"command": ".闯塔", "schedule_at": 1781834700, "schedule_text": "06-19 10:05", "status": "scheduled", "scheduled_msg_id": 1012},
+            {"command": ".闯塔", "schedule_at": 1781921100, "schedule_text": "06-20 10:05", "status": "scheduled", "scheduled_msg_id": 1013},
+        ],
+        "options": {"renew_profile_id": 12, "state_contract": {"module_key": "tower"}},
+    },
+    {
+        "id": 3,
+        "send_as_id": 12345,
+        "preset_key": "lingxiao_elder",
+        "label": "凌霄宫·长老包",
+        "status": "completed",
+        "anchor_at": 1781749200,
+        "anchor_text": "06-18 10:20",
+        "created_at": 1781740020,
+        "updated_at": 1781740120,
+        "counts": {"scheduled": 8, "planned": 0, "failed": 0},
+        "hidden_item_count": 4,
+        "items": [
+            {"command": ".借天门势", "schedule_at": 1781749200, "schedule_text": "06-18 10:20", "status": "scheduled", "scheduled_msg_id": 1021},
+            {"command": ".引九天罡风", "schedule_at": 1781749380, "schedule_text": "06-18 10:23", "status": "scheduled", "scheduled_msg_id": 1022},
+            {"command": ".登天阶", "schedule_at": 1781749560, "schedule_text": "06-18 10:26", "status": "scheduled", "scheduled_msg_id": 1023},
+            {"command": ".登天阶", "schedule_at": 1781760360, "schedule_text": "06-18 13:26", "status": "scheduled", "scheduled_msg_id": 1024},
+        ],
+        "options": {"renew_profile_id": 13, "state_contract": {"module_key": "tianti_climb"}},
+    },
+    {
+        "id": 4,
+        "send_as_id": 12345,
+        "preset_key": "wendao",
+        "label": "问道",
+        "status": "completed",
+        "anchor_at": 1781749500,
+        "anchor_text": "06-18 10:25",
+        "created_at": 1781740030,
+        "updated_at": 1781740130,
+        "counts": {"scheduled": 2, "planned": 0, "failed": 0},
+        "items": [
+            {"command": ".问道", "schedule_at": 1781749500, "schedule_text": "06-18 10:25", "status": "scheduled", "scheduled_msg_id": 1031},
+            {"command": ".问道", "schedule_at": 1781792700, "schedule_text": "06-18 22:25", "status": "scheduled", "scheduled_msg_id": 1032},
+        ],
+        "options": {"renew_profile_id": 14, "state_contract": {"module_key": "wendao"}},
+    },
+    {
+        "id": 5,
+        "send_as_id": 12345,
+        "preset_key": "concubine_cycle",
+        "label": "侍妾图卜",
+        "status": "completed",
+        "anchor_at": 1781750400,
+        "anchor_text": "06-18 10:40",
+        "created_at": 1781740040,
+        "updated_at": 1781740140,
+        "counts": {"scheduled": 4, "planned": 0, "failed": 0},
+        "items": [
+            {"command": ".入梦寻图", "schedule_at": 1781750400, "schedule_text": "06-18 10:40", "status": "scheduled", "scheduled_msg_id": 1041},
+            {"command": ".天机代卜", "schedule_at": 1781750700, "schedule_text": "06-18 10:45", "status": "scheduled", "scheduled_msg_id": 1042},
+            {"command": ".入梦寻图", "schedule_at": 1781779200, "schedule_text": "06-18 18:40", "status": "scheduled", "scheduled_msg_id": 1043},
+            {"command": ".天机代卜", "schedule_at": 1781779500, "schedule_text": "06-18 18:45", "status": "scheduled", "scheduled_msg_id": 1044},
+        ],
+        "options": {"renew_profile_id": 15, "state_contract": {"module_key": "concubine_dream"}},
+    },
+]
+
+
+SCHEDULE_RENEW_PROFILES = [
+    {
+        "id": 11,
+        "send_as_id": 12345,
+        "preset_key": "checkin",
+        "module_key": "checkin",
+        "label": "宗门点卯",
+        "enabled": True,
+        "renew_ready": True,
+        "covered_until_text": "06-20 10:00",
+        "state_contract": {"semiauto_ready": True, "updated_at": 1781740000, "source_message_id": "tg:-1:1001"},
+    },
+    {
+        "id": 12,
+        "send_as_id": 12345,
+        "preset_key": "tower",
+        "module_key": "tower",
+        "label": "闯塔",
+        "enabled": True,
+        "renew_ready": True,
+        "covered_until_text": "06-20 10:05",
+        "state_contract": {"semiauto_ready": True, "updated_at": 1781740000, "source_message_id": "tg:-1:1011"},
+    },
+    {
+        "id": 13,
+        "send_as_id": 12345,
+        "preset_key": "lingxiao_elder",
+        "module_key": "tianti_climb",
+        "label": "凌霄宫·长老",
+        "enabled": True,
+        "renew_ready": False,
+        "covered_until_text": "06-19 19:26",
+        "state_contract": {"semiauto_ready": False, "updated_at": 1781740000, "source_message_id": "tg:-1:1021"},
+    },
+    {
+        "id": 15,
+        "send_as_id": 12345,
+        "preset_key": "concubine_cycle",
+        "module_key": "concubine_dream",
+        "label": "侍妾图卜",
+        "enabled": False,
+        "renew_ready": True,
+        "covered_until_text": "06-18 18:45",
+        "state_contract": {"semiauto_ready": True, "updated_at": 1781740000, "source_message_id": "tg:-1:1041"},
+    },
+]
+
+
 DUNGEON_SUMMARIES = [
     {
         "key": "虚天殿:777",
@@ -229,7 +373,21 @@ def api_payload(path: str, query: dict[str, list[str]]) -> dict:
             ],
         }
     if path == "/api/schedule":
-        return {"ok": True, "batches": []}
+        return {"ok": True, "batches": SCHEDULE_BATCHES}
+    if path == "/api/schedule/renew":
+        return {
+            "ok": True,
+            "profiles": SCHEDULE_RENEW_PROFILES,
+            "allowed_presets": [
+                {"preset_key": "checkin", "module_key": "checkin", "interval_sec": 86400},
+                {"preset_key": "tower", "module_key": "tower", "interval_sec": 86400},
+                {"preset_key": "lingxiao_elder", "module_key": "tianti_climb", "interval_sec": 10800},
+                {"preset_key": "concubine_cycle", "module_key": "concubine_dream", "interval_sec": 28800},
+                {"preset_key": "wild_training", "module_key": "wild_training", "interval_sec": 7380},
+            ],
+            "defaults": {"renew_days": 1, "threshold_hours": 24, "soft_limit": 95},
+            "worker": {"running": True, "last_run_text": "06-18 09:33", "last_result": {"ok": True}},
+        }
     if path == "/api/discovered-bots":
         return {"ok": True, "discovered": [], "marked_count": 0}
     if path == "/api/message-audit":
@@ -362,6 +520,11 @@ PROBE_SCRIPT = """
     shell: rect(".chat-client-shell"),
     rail: rect(".conversation-rail"),
     schedulePanel: rect(".schedule-rail-panel"),
+    scheduleList: rect(".schedule-rail-list"),
+    scheduleSummary: rect(".schedule-rail-summary"),
+    scheduleFirstRow: rect(".schedule-rail-row-main"),
+    scheduleRenewSummary: rect(".schedule-rail-renew-summary"),
+    scheduleRenewSwitch: rect(".schedule-renew-switch"),
     scheduleIdentityDock: rect("#scheduleIdentityDock"),
     scheduleRefresh: rect("#scheduleRailRefreshButton"),
     scheduleNew: rect("#scheduleButton"),
@@ -405,6 +568,23 @@ PROBE_SCRIPT = """
   check("no body horizontal overflow", document.body.scrollWidth <= window.innerWidth + 1,
     document.body.scrollWidth + " <= " + window.innerWidth);
   check("schedule panel visible", visible(boxes.schedulePanel, 220, 160), JSON.stringify(boxes.schedulePanel));
+  var scheduleRows = Array.from(document.querySelectorAll(".schedule-rail-row"));
+  var scheduleSummaryText = document.querySelector(".schedule-rail-summary") ?
+    document.querySelector(".schedule-rail-summary").textContent.trim() : "";
+  var scheduleRenewText = document.querySelector(".schedule-rail-renew-summary") ?
+    document.querySelector(".schedule-rail-renew-summary").textContent.trim() : "";
+  check("schedule populated groups render", scheduleRows.length >= 3,
+    JSON.stringify({ rowCount: scheduleRows.length, summary: scheduleSummaryText }));
+  check("schedule list visible and scroll-contained",
+    visible(boxes.scheduleList, 220, 100) && boxes.scheduleList.bottom <= boxes.schedulePanel.bottom + 1,
+    JSON.stringify({ scheduleList: boxes.scheduleList, schedulePanel: boxes.schedulePanel }));
+  check("schedule first card clickable", visible(boxes.scheduleFirstRow, 120, 48) && centerHit(".schedule-rail-row-main"),
+    hitDetail(".schedule-rail-row-main"));
+  check("schedule renewal summary visible", visible(boxes.scheduleRenewSummary, 160, 28) &&
+      scheduleRenewText.indexOf("自动中") !== -1 && scheduleRenewText.indexOf("待处理") !== -1,
+    JSON.stringify({ scheduleRenewSummary: boxes.scheduleRenewSummary, text: scheduleRenewText }));
+  check("schedule renewal switch clickable", visible(boxes.scheduleRenewSwitch, 42, 20) && centerHit(".schedule-renew-switch"),
+    hitDetail(".schedule-renew-switch"));
   check("schedule identity dock compact", visible(boxes.scheduleIdentityDock, 120, 24) && boxes.scheduleIdentityDock.height <= 42,
     JSON.stringify(boxes.scheduleIdentityDock));
   check("schedule panel stays inside workspace",
@@ -422,6 +602,48 @@ PROBE_SCRIPT = """
     hitDetail("#scheduleRailRefreshButton"));
   check("schedule new clickable", visible(boxes.scheduleNew, 34, 24) && centerHit("#scheduleButton"),
     hitDetail("#scheduleButton"));
+  var scheduleButton = document.querySelector("#scheduleButton");
+  if (scheduleButton) scheduleButton.click();
+  await wait(1000);
+  boxes.scheduleModal = rect(".schedule-modal-dialog");
+  boxes.scheduleModalBody = rect(".schedule-modal-dialog .modal-body");
+  boxes.scheduleModalMain = rect(".schedule-modal-main");
+  boxes.scheduleModalRecords = rect(".schedule-modal-records");
+  boxes.scheduleCreateSection = rect(".schedule-create-section");
+  boxes.scheduleIdentityPicker = rect("#scheduleIdentityPicker");
+  boxes.schedulePlanWorkbench = rect("#schedulePlanWorkbench");
+  boxes.schedulePrimaryActions = rect(".schedule-create-section .schedule-form-actions-top");
+  var scheduleModal = document.querySelector(".schedule-modal-dialog");
+  var scheduleModalBody = document.querySelector(".schedule-modal-dialog .modal-body");
+  var scheduleMain = document.querySelector(".schedule-modal-main");
+  var scheduleRecords = document.querySelector(".schedule-modal-records");
+  var scheduleCreate = document.querySelector(".schedule-create-section");
+  var modalOverflow = scheduleModal ? scheduleModal.scrollWidth - scheduleModal.clientWidth : 0;
+  var modalBodyOverflow = scheduleModalBody ? scheduleModalBody.scrollWidth - scheduleModalBody.clientWidth : 0;
+  check("schedule modal opens inside viewport",
+    visible(boxes.scheduleModal, Math.min(320, window.innerWidth - 20), 260) &&
+      boxes.scheduleModal.left >= -1 && boxes.scheduleModal.right <= window.innerWidth + 1,
+    JSON.stringify({ scheduleModal: boxes.scheduleModal, viewport: { width: window.innerWidth, height: window.innerHeight } }));
+  check("schedule modal has no horizontal overflow",
+    modalOverflow <= 1 && modalBodyOverflow <= 1,
+    JSON.stringify({ modalOverflow: modalOverflow, modalBodyOverflow: modalBodyOverflow }));
+  check("schedule modal primary workbench visible",
+    visible(boxes.scheduleCreateSection, 240, 180) &&
+      visible(boxes.scheduleIdentityPicker, 220, 70) &&
+      visible(boxes.schedulePlanWorkbench, 220, 100),
+    JSON.stringify({ create: boxes.scheduleCreateSection, identity: boxes.scheduleIdentityPicker, workbench: boxes.schedulePlanWorkbench }));
+  check("schedule modal actions reachable",
+    visible(boxes.schedulePrimaryActions, 160, 30) &&
+      boxes.schedulePrimaryActions.top >= boxes.scheduleModal.top - 1 &&
+      boxes.schedulePrimaryActions.left >= boxes.scheduleModal.left - 1 &&
+      boxes.schedulePrimaryActions.right <= boxes.scheduleModal.right + 1,
+    JSON.stringify({ actions: boxes.schedulePrimaryActions, modal: boxes.scheduleModal }));
+  check("schedule modal keeps records after main content on narrow screens",
+    window.innerWidth > 980 || (scheduleMain && scheduleRecords && scheduleCreate && scheduleMain.offsetTop <= scheduleRecords.offsetTop && scheduleCreate.offsetTop <= scheduleRecords.offsetTop),
+    JSON.stringify({ main: boxes.scheduleModalMain, records: boxes.scheduleModalRecords, create: boxes.scheduleCreateSection }));
+  var scheduleClose = document.querySelector(".schedule-modal-dialog [data-modal-close], .schedule-modal-dialog .modal-close");
+  if (scheduleClose) scheduleClose.click();
+  await wait(160);
   check("active identity dock visible", visible(boxes.activeIdentityDock, 160, 42),
     JSON.stringify(boxes.activeIdentityDock));
   check("active identity select clickable", visible(boxes.activeIdentitySelect, 80, 28) && centerHit("#activeIdentityQuickSelect"),
@@ -710,6 +932,21 @@ def run_layout_probe(
         {
             "viewport": item.get("viewport"),
             "failed": [check for check in item.get("checks", []) if not check.get("ok")],
+            "boxes": {
+                key: (item.get("boxes") or {}).get(key)
+                for key in (
+                    "rail",
+                    "workspace",
+                    "schedulePanel",
+                    "commonPanel",
+                    "chatSecondary",
+                    "chatSecondaryToggle",
+                    "accountMenu",
+                    "accountMenuToggle",
+                    "systemMenu",
+                    "systemMenuToggle",
+                )
+            },
             "errors": item.get("errors") or [],
         }
         for item in results

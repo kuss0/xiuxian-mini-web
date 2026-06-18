@@ -18,6 +18,7 @@
     wild_training: "wild_training",
     checkin: "checkin",
     tower: "tower",
+    daily_check_core: "checkin",
     daily_essentials: "checkin",
     ranch: "ranch",
     concubine_dream: "concubine_dream",
@@ -47,6 +48,7 @@
     "stargazer_soothe",
     "stargazer_collect",
     "stargazer_care",
+    "stargazer_bamboo_thunder",
     "tianti_climb",
     "tianti_climb_elder",
     "tianti_wenxin",
@@ -60,6 +62,69 @@
     "yindao",
     "search_node",
   ]);
+  const SCHEDULE_HIDDEN_SHORTCUT_PRESETS = new Set([
+    "tianti_climb_elder",
+  ]);
+  const SCHEDULE_PRESET_CATEGORY_META = {
+    daily: { label: "常用", order: 1 },
+    package: { label: "联动包", order: 2 },
+    sect: { label: "宗门", order: 3 },
+    concubine: { label: "侍妾", order: 4 },
+    fabao: { label: "法宝", order: 5 },
+    phase: { label: "阶段型", order: 6 },
+    custom: { label: "自定义", order: 7 },
+  };
+  const SCHEDULE_AUTOMATION_LABELS = {
+    renewable: { label: "可续", tone: "ok" },
+    semiauto: { label: "可半自动", tone: "ok" },
+    one_click: { label: "可排", tone: "ok" },
+    manual_followup: { label: "需接力", tone: "warn" },
+    state_only: { label: "仅观测", tone: "" },
+    manual: { label: "手动", tone: "" },
+  };
+  const SCHEDULE_PINNED_PRESETS = [
+    "daily_essentials",
+    "daily_check_core",
+    "wild_training",
+    "deep_retreat",
+    "retreat_shallow",
+    "concubine_tianji",
+    "concubine_cycle",
+    "concubine_dream",
+    "lingxiao_elder",
+    "lingxiao_standard",
+    "stargazer_bamboo_thunder",
+    "stargazer_care",
+    "taiyi_patrol",
+    "ranch",
+    "second_soul",
+  ];
+  const SCHEDULE_CUSTOM_EXAMPLES = [
+    {
+      key: "daily_pair",
+      label: "点卯 + 闯塔",
+      command: ".宗门点卯\n.闯塔",
+      interval_sec: 86400,
+      count: 3,
+      command_gap_sec: 180,
+    },
+    {
+      key: "concubine_pair",
+      label: "入梦 + 天机",
+      command: ".入梦寻图\n.天机代卜",
+      interval_sec: 43200,
+      count: 4,
+      command_gap_sec: 240,
+    },
+    {
+      key: "manual_chain",
+      label: "临时多指令",
+      command: ".宗门点卯\n.闯塔\n.野外历练 谨慎",
+      interval_sec: 86400,
+      count: 2,
+      command_gap_sec: 180,
+    },
+  ];
 
   function scheduleTimeZonePill() {
     return `<span class="status-pill schedule-timezone-pill">${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}</span>`;
@@ -270,7 +335,7 @@
           <span><b>${escapeHtml(String(totals.planned))}</b><small>待排</small></span>
           <span class="${totals.failed ? "warn" : ""}"><b>${escapeHtml(String(totals.failed))}</b><small>失败</small></span>
         </div>
-        ${renewSummary}
+        <div class="schedule-tool-renew-line">${renewSummary}</div>
       </div>
       <div class="schedule-rail-list">
         ${visible.map((batch) => renderScheduleRailRow(deps, batch)).join("")}
@@ -919,7 +984,8 @@
     const identity = scheduleIdentityLabel(deps, batch.send_as_id);
     const currentItems = (batch.items || []).filter(scheduleMessageHasCurrentWork);
     const hiddenItemCount = Number(batch.hidden_item_count || 0);
-    const snippetLimit = scheduleRailIsWorkbench(deps) ? 3 : 2;
+    const isWorkbench = scheduleRailIsWorkbench(deps);
+    const snippetLimit = isWorkbench ? 2 : 2;
     const hiddenTotal = Number(hiddenItemCount || 0) + Math.max(0, currentItems.length - snippetLimit);
     const snippets = currentItems.slice(0, snippetLimit).map((item) => `
       <span>
@@ -954,7 +1020,7 @@
           </span>
           <span class="schedule-rail-row-controls">
             ${renewControl}
-            <small class="schedule-rail-preview-hint">查看计划</small>
+            <small class="schedule-rail-preview-hint">${isWorkbench ? "预览" : "查看计划"}</small>
           </span>
         </div>
       </article>
@@ -1153,7 +1219,218 @@
       description: "一条或多条命令 + 间隔 + 轮数,批量排进官方定时",
       fields: ["command", "interval_sec", "count", "command_gap_sec"],
       module_key: "",
+      ui: { category: "custom", shape: "custom", tags: ["联动", "多命令"], automation: "manual" },
     }];
+  }
+
+  function schedulePresetUi(preset = {}) {
+    return preset?.ui || {};
+  }
+
+  function schedulePresetCategory(preset = {}) {
+    return String(schedulePresetUi(preset).category || (preset.key === "custom" ? "custom" : "daily"));
+  }
+
+  function schedulePresetCategoryLabel(categoryKey) {
+    return SCHEDULE_PRESET_CATEGORY_META[categoryKey]?.label || categoryKey || "其它";
+  }
+
+  function schedulePresetShapeLabel(preset = {}) {
+    const shape = String(schedulePresetUi(preset).shape || "");
+    if (shape === "combo_rounds") return "多命令轮次";
+    if (shape === "mixed_periodic") return "混合周期";
+    if (shape === "phase_pair") return "触发配对";
+    if (shape === "counted") return "小批量";
+    if (shape === "daily") return "每日";
+    if (shape === "custom") return "自定义";
+    return "单项";
+  }
+
+  function schedulePresetAutomationLabel(preset = {}) {
+    const automation = String(schedulePresetUi(preset).automation || "").trim();
+    return SCHEDULE_AUTOMATION_LABELS[automation]?.label || "";
+  }
+
+  function schedulePresetAutomationTone(preset = {}) {
+    const automation = String(schedulePresetUi(preset).automation || "").trim();
+    return SCHEDULE_AUTOMATION_LABELS[automation]?.tone || "";
+  }
+
+  function schedulePresetTagsHtml(preset = {}) {
+    const tags = Array.isArray(schedulePresetUi(preset).tags) ? schedulePresetUi(preset).tags : [];
+    return tags.slice(0, 3).map((tag) => `<span class="status-pill">${escapeHtml(tag)}</span>`).join("");
+  }
+
+  function schedulePresetMap(presets = []) {
+    return new Map((presets || []).map((preset) => [String(preset.key || ""), preset]));
+  }
+
+  function schedulePresetShortcutOrder(preset = {}) {
+    const pinned = SCHEDULE_PINNED_PRESETS.indexOf(String(preset.key || ""));
+    if (pinned >= 0) return pinned;
+    const cat = SCHEDULE_PRESET_CATEGORY_META[schedulePresetCategory(preset)]?.order || 99;
+    return 100 + cat * 100;
+  }
+
+  function schedulePlanStatusForContract(contract = null) {
+    if (!contract) return { label: "预设", tone: "", note: "" };
+    const automation = String(contract?.suggestion?.automation_level || "").trim();
+    if (contract.semiauto_ready) return { label: "可半自动", tone: "ok", note: contract.summary?.text || "" };
+    if (automation === "manual_followup") return { label: "需接力", tone: "warn", note: contract.suggestion?.reason || contract.summary?.text || "" };
+    if (automation === "state_only") return { label: "仅观测", tone: "", note: contract.suggestion?.reason || contract.summary?.text || "" };
+    if (contract.one_click_ready) return { label: "可排", tone: "ok", note: contract.summary?.text || "" };
+    if (contract.suggestion?.automation_level === "manual") return { label: "手动", tone: "", note: contract.suggestion?.reason || contract.summary?.text || "" };
+    const risk = (contract.warnings || []).find((item) => item.severity === "risk");
+    const warn = risk || (contract.warnings || [])[0];
+    return { label: risk ? "缺证据" : "需确认", tone: "warn", note: warn?.message || contract.summary?.text || "" };
+  }
+
+  function schedulePlanCardHtml({ preset, contract = null, catalog = null, disabled = false, note = "", compact = false } = {}) {
+    if (!preset) return "";
+    const moduleKey = String(preset.module_key || catalog?.key || "");
+    const automationLabel = schedulePresetAutomationLabel(preset);
+    const automationTone = schedulePresetAutomationTone(preset);
+    const status = contract ? schedulePlanStatusForContract(contract) : {
+      label: automationLabel || schedulePresetCategoryLabel(schedulePresetCategory(preset)),
+      tone: automationTone,
+      note: "",
+    };
+    const tags = schedulePresetTagsHtml(preset);
+    const description = note || preset.description || schedulePresetShapeLabel(preset);
+    return `
+      <button type="button" class="schedule-plan-card ${escapeAttr(status.tone || "")} ${compact ? "compact" : ""} ${disabled ? "disabled" : ""}"
+        data-schedule-plan-preset="${escapeAttr(disabled ? "" : preset.key)}"
+        data-schedule-plan-module="${escapeAttr(moduleKey)}"
+        data-schedule-plan-blocked="${disabled ? "1" : "0"}">
+        <span class="schedule-plan-card-top">
+          <strong>${escapeHtml(preset.label || preset.key || "")}</strong>
+          <small>${escapeHtml(schedulePresetShapeLabel(preset))}</small>
+        </span>
+        <span class="schedule-plan-card-meta">
+          <span class="status-pill ${escapeAttr(status.tone)}">${escapeHtml(status.label)}</span>
+          ${automationLabel && (!contract || status.label !== automationLabel) ? `<span class="status-pill ${escapeAttr(automationTone)}">${escapeHtml(automationLabel)}</span>` : ""}
+          ${tags}
+        </span>
+        <small>${escapeHtml(description)}</small>
+      </button>
+    `;
+  }
+
+  function scheduleStateRecommendationCards(deps = {}, { presets = [], scheduleModules = {}, selectedSendAsId = 0 } = {}) {
+    const presetByKey = schedulePresetMap(presets);
+    const group = (scheduleModules.by_identity || []).find((item) => Number(item.send_as_id || 0) === Number(selectedSendAsId || 0));
+    const contracts = group?.items || [];
+    const cards = contracts
+      .map((contract) => {
+        const suggestion = contract.suggestion || {};
+        const presetKey = String(suggestion.preset_key || contract.module_key || "").trim();
+        const preset = presetByKey.get(presetKey);
+        const catalog = findModuleCatalog(scheduleModules, contract.module_key);
+        const canApply = Boolean(preset && preset.key !== "custom");
+        if (!preset && !catalog) return "";
+        if (!preset) {
+          const automation = String(suggestion.automation_level || "").trim();
+          const tag = automation === "state_only"
+            ? "仅观测"
+            : automation === "manual_followup"
+              ? "需接力"
+              : "需人工";
+          const fakePreset = {
+            key: "custom",
+            label: catalog?.label || contract.label || contract.module_key,
+            description: suggestion.reason || "需要先从状态机确认是否适合官方定时",
+            fields: ["command", "interval_sec", "count", "command_gap_sec"],
+            module_key: contract.module_key,
+            ui: { category: "phase", shape: "custom", tags: [tag], automation: automation || "manual" },
+          };
+          return schedulePlanCardHtml({ preset: fakePreset, contract, catalog, disabled: true, compact: true });
+        }
+        return schedulePlanCardHtml({ preset, contract, catalog, disabled: !canApply, compact: true });
+      })
+      .filter(Boolean)
+      .slice(0, 8);
+    if (!selectedSendAsId) {
+      return '<p class="empty inline">先选择排程身份。</p>';
+    }
+    return cards.join("") || '<p class="empty inline">当前身份还没有可直接套用的状态机建议。</p>';
+  }
+
+  function schedulePresetShortcutGroups(presets = []) {
+    const visible = (presets || [])
+      .filter((preset) => preset.key !== "custom")
+      .filter((preset) => !SCHEDULE_HIDDEN_SHORTCUT_PRESETS.has(String(preset.key || "")))
+      .sort((a, b) => {
+        const rank = schedulePresetShortcutOrder(a) - schedulePresetShortcutOrder(b);
+        if (rank) return rank;
+        return String(a.label || a.key || "").localeCompare(String(b.label || b.key || ""), "zh-Hans-CN");
+      });
+    const groups = new Map();
+    for (const preset of visible) {
+      const category = schedulePresetCategory(preset);
+      if (!groups.has(category)) groups.set(category, []);
+      groups.get(category).push(preset);
+    }
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => (SCHEDULE_PRESET_CATEGORY_META[a]?.order || 99) - (SCHEDULE_PRESET_CATEGORY_META[b]?.order || 99))
+      .map(([category, rows]) => `
+        <section class="schedule-plan-group">
+          <div class="schedule-plan-group-head">
+            <strong>${escapeHtml(schedulePresetCategoryLabel(category))}</strong>
+            <span>${escapeHtml(String(rows.length))}</span>
+          </div>
+          <div class="schedule-plan-card-list">
+            ${rows.slice(0, category === "package" ? 8 : 6).map((preset) => schedulePlanCardHtml({ preset, compact: true })).join("")}
+          </div>
+        </section>
+      `)
+      .join("");
+  }
+
+  function renderScheduleCustomExamples() {
+    return SCHEDULE_CUSTOM_EXAMPLES.map((item) => `
+      <button type="button" class="schedule-plan-example" data-schedule-custom-example="${escapeAttr(item.key)}">
+        <strong>${escapeHtml(item.label)}</strong>
+        <small>${escapeHtml(item.command.split("\n").join(" / "))}</small>
+      </button>
+    `).join("");
+  }
+
+  function renderSchedulePlanWorkbench(deps = {}, { presets = [], scheduleModules = {}, selectedSendAsId = 0 } = {}) {
+    const identity = selectedSendAsId
+      ? (scheduleIdentityLabel(deps, selectedSendAsId) || `send_as ${selectedSendAsId}`)
+      : "未选身份";
+    return `
+      <div class="schedule-plan-workbench-grid">
+        <section class="schedule-plan-panel schedule-plan-recommend">
+          <div class="schedule-plan-panel-head">
+            <strong>状态机推荐</strong>
+            <small>${escapeHtml(identity)}｜${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}</small>
+          </div>
+          <p class="schedule-plan-panel-note">先看证据，再决定可排、需接力，还是只做观测。</p>
+          <div class="schedule-plan-card-list">
+            ${scheduleStateRecommendationCards(deps, { presets, scheduleModules, selectedSendAsId })}
+          </div>
+        </section>
+        <section class="schedule-plan-panel schedule-plan-presets">
+          <div class="schedule-plan-panel-head">
+            <strong>常用方案</strong>
+            <small>单项和联动包</small>
+          </div>
+          <p class="schedule-plan-panel-note">点方案就能套字段，少翻表单。</p>
+          <div class="schedule-plan-groups">
+            ${schedulePresetShortcutGroups(presets)}
+          </div>
+        </section>
+        <section class="schedule-plan-panel schedule-plan-custom">
+          <div class="schedule-plan-panel-head">
+            <strong>联动自定义</strong>
+            <small>每行一条命令,一轮内错峰</small>
+          </div>
+          <p class="schedule-plan-panel-note">适合点卯 + 闯塔、入梦 + 天机，或者临时串联多条指令。</p>
+          <div class="schedule-plan-example-list">${renderScheduleCustomExamples()}</div>
+        </section>
+      </div>
+    `;
   }
 
   async function loadScheduleModalBootstrap(deps = {}) {
@@ -1196,15 +1473,17 @@
   function renderScheduleModalBody(deps = {}, { presets, scheduleModules, batches, templates, defaultSendAsIds }) {
     const identityOptions = renderScheduleIdentityOptions(deps, defaultSendAsIds);
     const presetOptions = presets
+      .filter((preset) => !SCHEDULE_HIDDEN_SHORTCUT_PRESETS.has(String(preset.key || "")))
       .map((p) => `<option value="${escapeAttr(p.key)}">${escapeHtml(p.label)} — ${escapeHtml(p.description)}</option>`)
       .join("");
     const renewPresetOptions = renderScheduleRenewPresetOptions(presets);
     const moduleOptions = renderScheduleModuleOptions(scheduleModules.modules || []);
+    const selectedSendAsId = Number((defaultSendAsIds || [])[0] || 0);
     return `
       <div class="schedule-modal-grid">
         <div class="schedule-modal-main">
           <section class="modal-section schedule-create-section">
-            <h4>新建排班</h4>
+            <h4>排程工作台</h4>
             <form id="scheduleForm" class="settings-form">
               <div class="schedule-native-send-as" aria-hidden="true">
                 <select name="send_as_ids" multiple size="6" id="scheduleSendAsSelect" tabindex="-1">${identityOptions || '<option value="">没有可用身份</option>'}</select>
@@ -1229,6 +1508,9 @@
                     ${renderScheduleIdentityPicker(deps, defaultSendAsIds)}
                   </div>
                 </div>
+              </div>
+              <div id="schedulePlanWorkbench" class="schedule-plan-workbench">
+                ${renderSchedulePlanWorkbench(deps, { presets, scheduleModules, selectedSendAsId })}
               </div>
               <div class="form-actions schedule-form-actions-top">
                 <button type="button" data-schedule-action="preview">预览计划</button>
@@ -1264,11 +1546,36 @@
                 <input type="checkbox" name="schedule_use_module_defaults" checked />
                 <span>套用状态机建议命令/间隔/参数</span>
               </label>
+              <div class="schedule-command-group-editor" id="scheduleCommandGroupEditor">
+                <div class="schedule-command-group-head">
+                  <strong>命令组</strong>
+                  <small>自定义/联动方案会在这里展开</small>
+                </div>
+                <div class="form-grid">
+                  <label class="span-2" data-show-when="command">
+                    <span>联动命令组</span>
+                    <textarea name="command" rows="4" placeholder="每行一条命令 = 同一轮联动；例如&#10;.宗门点卯&#10;.闯塔&#10;.天机代卜"></textarea>
+                    <small class="muted">3 行命令 + 轮数 2 = 排两轮,每轮 3 条,同轮错峰。</small>
+                  </label>
+                  <label data-show-when="interval_sec">
+                    <span>轮间隔 / CD(秒)</span>
+                    <input name="interval_sec" inputmode="numeric" value="3600" placeholder="下一轮和上一轮相隔多久" />
+                  </label>
+                  <label data-show-when="count">
+                    <span>轮数</span>
+                    <input name="count" inputmode="numeric" value="3" placeholder="重复几轮" />
+                  </label>
+                  <label data-show-when="command_gap_sec">
+                    <span>同轮命令间隔(秒)</span>
+                    <input name="command_gap_sec" inputmode="numeric" value="180" placeholder="同一轮内多条命令之间错开" />
+                  </label>
+                </div>
+              </div>
               <details class="schedule-secondary-section schedule-advanced-section">
                 <summary>
                   <span>
                     <strong>高级参数</strong>
-                    <small>自定义命令 / 错峰 / dry-run</small>
+                    <small>错峰 / dry-run / 触发词</small>
                   </span>
                 </summary>
                 <div class="form-grid">
@@ -1287,22 +1594,6 @@
                   <label data-show-when="trigger_command">
                     <span>触发词(可选)</span>
                     <input name="trigger_command" placeholder="深闭默认「查看闭关」,留空走默认;其他 preset 留空 = 不发触发" />
-                  </label>
-                  <label data-show-when="interval_sec">
-                    <span>间隔 / CD(秒)</span>
-                    <input name="interval_sec" inputmode="numeric" value="3600" />
-                  </label>
-                  <label data-show-when="count">
-                    <span>次数 / 轮数</span>
-                    <input name="count" inputmode="numeric" value="3" />
-                  </label>
-                  <label data-show-when="command_gap_sec">
-                    <span>同轮命令间隔(秒)</span>
-                    <input name="command_gap_sec" inputmode="numeric" value="180" placeholder="多条自定义命令之间错开" />
-                  </label>
-                  <label class="span-2" data-show-when="command">
-                    <span>自定义命令</span>
-                    <textarea name="command" rows="4" placeholder="每行一条命令；例如&#10;.宗门点卯&#10;.闯塔&#10;.天机代卜"></textarea>
                   </label>
                 </div>
                 <label class="toggle-row">
@@ -1949,7 +2240,7 @@
       .join("");
     return `
       <div class="schedule-refill-preview">
-        <div class="schedule-refill-summary">
+        <div class="schedule-refill-summary schedule-density-grid">
           ${summary.map(([label, value]) => `
             <span>
               <small>${escapeHtml(label)}</small>
@@ -1958,9 +2249,15 @@
           `).join("")}
         </div>
         ${notes ? `<ul class="send-as-result-list schedule-refill-notes">${notes}</ul>` : ""}
-        <p><strong>拟追加项</strong><small>高水位之后 append-only,不改 TG 现有定时。</small></p>
+        <div class="schedule-refill-subhead">
+          <strong>拟追加项</strong>
+          <small>高水位之后 append-only,不改 TG 现有定时。</small>
+        </div>
         ${timeline}
-        <p><strong>任务核对</strong><small>展示每个命令的高水位、状态机锚点和过滤/阻断原因。</small></p>
+        <div class="schedule-refill-subhead">
+          <strong>任务核对</strong>
+          <small>命令高水位、状态机锚点和过滤/阻断原因。</small>
+        </div>
         <div class="schedule-refill-task-list">${taskRows || '<p class="empty inline">没有可核对任务。</p>'}</div>
         ${blockedTasks.length ? `<p class="muted">被过滤或阻断 ${escapeHtml(String(blockedTasks.length))} 项,未进入拟追加清单。</p>` : ""}
         ${skipped ? `<p><strong>配置跳过</strong></p><ul class="send-as-result-list">${skipped}</ul>` : ""}
@@ -2285,6 +2582,7 @@
     const stateModuleSelect = dialog.querySelector("#scheduleStateModuleSelect");
     const stateHint = dialog.querySelector("#scheduleStateHint");
     const applyStateSuggestionButton = dialog.querySelector("#scheduleApplyStateSuggestion");
+    const planWorkbench = dialog.querySelector("#schedulePlanWorkbench");
     const accountPickerList = dialog.querySelector("#scheduleAccountPickerList");
     const identitySummary = dialog.querySelector("#scheduleIdentitySummary");
     const identityScope = dialog.querySelector("#scheduleIdentityScope");
@@ -2343,6 +2641,10 @@
         const fieldName = label.dataset.showWhen;
         label.style.display = required.has(fieldName) ? "" : "none";
       });
+      const commandGroupEditor = form.querySelector("#scheduleCommandGroupEditor");
+      if (commandGroupEditor) {
+        commandGroupEditor.hidden = !["command", "interval_sec", "count", "command_gap_sec"].some((field) => required.has(field));
+      }
     };
     const presetSelect = form.querySelector('[name="preset_key"]');
     updateFieldVisibility();
@@ -2353,6 +2655,16 @@
     const selectedPrimarySendAs = () => {
       const select = dialog.querySelector("#scheduleSendAsSelect");
       return Number(select?.selectedOptions?.[0]?.value || 0);
+    };
+    const refreshPlanWorkbench = () => {
+      if (!planWorkbench) return;
+      planWorkbench.innerHTML = renderSchedulePlanWorkbench(deps, {
+        presets,
+        scheduleModules,
+        selectedSendAsId: selectedPrimarySendAs(),
+      });
+      bindSchedulePlanWorkbenchActions();
+      setPlanWorkbenchActive(String(presetSelect?.value || ""));
     };
     const updateRenewOverview = () => {
       if (!renewOverview) return;
@@ -2434,11 +2746,90 @@
       stateHint.hidden = false;
       stateHint.innerHTML = scheduleContractHtml(contract, catalogWithStatus);
     };
+    const setPlanWorkbenchActive = (presetKey = "") => {
+      if (!planWorkbench) return;
+      planWorkbench.querySelectorAll("[data-schedule-plan-preset]").forEach((button) => {
+        const active = Boolean(presetKey) && String(button.dataset.schedulePlanPreset || "") === String(presetKey || "");
+        button.classList.toggle("selected", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    };
+    const applyPresetShortcut = (presetKey = "", moduleKey = "") => {
+      const key = String(presetKey || "").trim();
+      if (!key || !presetMap.has(key)) {
+        setStatus("warn", "这个方案还不能直接排官方定时。");
+        return false;
+      }
+      if (presetSelect) presetSelect.value = key;
+      updateFieldVisibility();
+      const explicitModule = String(moduleKey || "").trim();
+      if (stateModuleSelect) {
+        if (explicitModule && Array.from(stateModuleSelect.options).some((option) => option.value === explicitModule)) {
+          stateModuleSelect.value = explicitModule;
+          const autoAnchor = form.querySelector('[name="auto_anchor"]');
+          if (autoAnchor) autoAnchor.checked = true;
+        } else {
+          syncStateModuleToPreset();
+        }
+      }
+      const useDefaults = form.querySelector('[name="schedule_use_module_defaults"]');
+      if (useDefaults) useDefaults.checked = true;
+      setPlanWorkbenchActive(key);
+      renderStateHint();
+      const preset = presetMap.get(key);
+      setStatus("ok", `已套用方案: ${preset?.label || key}`);
+      return true;
+    };
+    const applyCustomExample = (exampleKey = "") => {
+      const example = SCHEDULE_CUSTOM_EXAMPLES.find((item) => item.key === exampleKey);
+      if (!example || !presetMap.has("custom")) return false;
+      if (presetSelect) presetSelect.value = "custom";
+      const setValue = (name, value) => {
+        const field = form.querySelector(`[name="${CSS.escape(name)}"]`);
+        if (field) field.value = String(value ?? "");
+      };
+      setValue("command", example.command);
+      setValue("interval_sec", example.interval_sec);
+      setValue("count", example.count);
+      setValue("command_gap_sec", example.command_gap_sec);
+      const autoAnchor = form.querySelector('[name="auto_anchor"]');
+      if (autoAnchor) autoAnchor.checked = false;
+      const useDefaults = form.querySelector('[name="schedule_use_module_defaults"]');
+      if (useDefaults) useDefaults.checked = false;
+      if (stateModuleSelect) stateModuleSelect.value = "";
+      updateFieldVisibility();
+      setPlanWorkbenchActive("custom");
+      renderStateHint();
+      setStatus("ok", `已套用联动模板: ${example.label}`);
+      return true;
+    };
+    function bindSchedulePlanWorkbenchActions() {
+      if (!planWorkbench) return;
+      planWorkbench.querySelectorAll("[data-schedule-plan-preset]").forEach((button) => {
+        if (button.dataset.bound === "1") return;
+        button.dataset.bound = "1";
+        button.addEventListener("click", () => {
+          if (button.dataset.schedulePlanBlocked === "1") {
+            setStatus("warn", "这个状态机暂时只能作为参考,需要先补观察或手动自定义。");
+            return;
+          }
+          applyPresetShortcut(button.dataset.schedulePlanPreset || "", button.dataset.schedulePlanModule || "");
+        });
+      });
+      planWorkbench.querySelectorAll("[data-schedule-custom-example]").forEach((button) => {
+        if (button.dataset.bound === "1") return;
+        button.dataset.bound = "1";
+        button.addEventListener("click", () => {
+          applyCustomExample(button.dataset.scheduleCustomExample || "");
+        });
+      });
+    }
     if (presetSelect) {
       presetSelect.addEventListener("change", () => {
         updateFieldVisibility();
         syncStateModuleToPreset();
         renderStateHint();
+        setPlanWorkbenchActive(presetSelect.value);
       });
     }
 
@@ -2863,6 +3254,7 @@
       syncStateModuleToPreset({ onlyIfEmpty: true });
       refreshScheduleIdentitySelection();
       renderStateHint();
+      refreshPlanWorkbench();
     };
 
     const saveTemplateFromForm = async () => {
@@ -2943,6 +3335,7 @@
         refillSendAsSelect.value = String(selected[0]);
       }
       renderStateHint();
+      refreshPlanWorkbench();
       updateRenewOverview();
     }
     function setScheduleIdentitySelection(ids) {
@@ -3021,6 +3414,7 @@
         const autoAnchor = form.querySelector('[name="auto_anchor"]');
         if (stateModuleSelect.value && autoAnchor) autoAnchor.checked = true;
         renderStateHint();
+        refreshPlanWorkbench();
       });
     }
     if (applyStateSuggestionButton) {
@@ -3038,11 +3432,13 @@
         }
         updateFieldVisibility();
         renderStateHint();
+        refreshPlanWorkbench();
         setStatus("ok", "已套用状态机建议。");
       });
     }
     syncStateModuleToPreset({ onlyIfEmpty: true });
     renderStateHint();
+    refreshPlanWorkbench();
     if (renewPresetSelect) {
       renewPresetSelect.addEventListener("change", () => {
         syncRenewModuleToPreset();

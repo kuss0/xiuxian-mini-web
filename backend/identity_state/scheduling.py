@@ -66,12 +66,19 @@ MODULE_HINTS: dict[str, dict[str, Any]] = {
         "automation_level": "one_click",
         "reason": "高频闭关只允许小批量人工确认",
     },
+    "concubine_heart": {
+        "preset_key": "custom",
+        "command": ".共历心劫",
+        "interval_sec": 12 * 3600,
+        "automation_level": "manual_followup",
+        "reason": "共历心劫需要回复天尊提示继续选择,只做状态观测和手动接力",
+    },
     "stargazer_guide": {
         "preset_key": "stargazer_guide",
         "command": ".牵引星辰",
         "interval_sec": 6 * 3600,
         "automation_level": "one_click",
-        "reason": "星宫牵引按观测到的 CD 起点排",
+        "reason": "牵引星辰通常需要星名;裸牵引只保留人工确认",
     },
     "stargazer_soothe": {
         "preset_key": "stargazer_soothe",
@@ -106,8 +113,22 @@ MODULE_HINTS: dict[str, dict[str, Any]] = {
         "preset_key": "search_node",
         "command": ".搜寻节点",
         "interval_sec": 12 * 3600,
-        "automation_level": "one_click",
+        "automation_level": "manual_followup",
         "reason": "可能触发虚弱和定星后续,先保留人工确认",
+    },
+    "small_world": {
+        "preset_key": "custom",
+        "command": ".小世界",
+        "interval_sec": 0,
+        "automation_level": "state_only",
+        "reason": "小世界状态用于判断香火/祈愿/显灵窗口,不直接生成官方定时",
+    },
+    "weakness": {
+        "preset_key": "custom",
+        "command": "",
+        "interval_sec": 0,
+        "automation_level": "state_only",
+        "reason": "虚弱/静思是全局风险约束,不应单独排官方定时",
     },
 }
 
@@ -281,14 +302,19 @@ def build_schedule_state_contract(
     if phase in {"running", "waiting_summary", "post_summary_wait"}:
         warn("phaseful", "阶段型状态需要人工确认结算/查询结果", "warn")
 
-    if hint["automation_level"] != "semiauto":
+    automation_level = hint["automation_level"]
+    if automation_level == "state_only":
+        warn("state_only", hint.get("reason") or "该模块只提供状态约束,不生成官方定时", "info")
+    elif automation_level == "manual_followup":
+        warn("manual_followup", hint.get("reason") or "该模块需要人工接力", "warn")
+    elif automation_level != "semiauto":
         reason = hint.get("reason") or "该模块未进入半自动白名单"
         warn("manual_only", reason, "info")
     if hint["interval_sec"] and int(hint["interval_sec"]) < 3600:
         warn("high_frequency", "间隔小于 1 小时,不允许白名单半自动", "warn")
 
     semiauto_ready = (
-        hint["automation_level"] == "semiauto"
+        automation_level == "semiauto"
         and hint["semiauto_whitelisted"]
         and observed
         and next_at > 0
@@ -332,7 +358,13 @@ def build_schedule_state_contract(
         "payload_defaults": dict(hint.get("payload_defaults") or {}),
         "warnings": warnings,
         "semiauto_ready": semiauto_ready,
-        "one_click_ready": observed and next_at > 0 and not stale_state and bool(hint.get("command")),
+        "one_click_ready": (
+            observed
+            and next_at > 0
+            and not stale_state
+            and bool(hint.get("command"))
+            and automation_level not in {"state_only", "manual_followup"}
+        ),
         "tianjige": {
             "enabled": bool(tianjige.get("enabled")),
             "mode": str(tianjige.get("mode") or ""),

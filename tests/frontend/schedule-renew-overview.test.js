@@ -9,7 +9,23 @@ describe('Official schedule renewal overview', () => {
         <span id="scheduleSendAsCount"></span>
         <select name="preset_key">
           <option value="custom">自定义</option>
+          <option value="checkin">点卯</option>
         </select>
+        <div id="schedulePlanWorkbench"></div>
+        <div id="scheduleCommandGroupEditor">
+          <label data-show-when="command">
+            <textarea name="command"></textarea>
+          </label>
+          <label data-show-when="interval_sec">
+            <input name="interval_sec" value="3600" />
+          </label>
+          <label data-show-when="count">
+            <input name="count" value="3" />
+          </label>
+          <label data-show-when="command_gap_sec">
+            <input name="command_gap_sec" value="180" />
+          </label>
+        </div>
         <select id="scheduleStateModuleSelect" name="auto_anchor_module">
           <option value="">跟随预设 / 不使用</option>
           <option value="checkin">点卯</option>
@@ -155,6 +171,98 @@ describe('Official schedule renewal overview', () => {
         enabled: true,
       })
     );
+  });
+
+  test('schedule workbench preset shortcut applies state defaults', () => {
+    const schedule = window.MiniwebViews.schedule;
+    const dialog = buildDialog();
+    schedule.bindScheduleModal(
+      { state: window.MiniwebState.state },
+      dialog,
+      [
+        {
+          key: 'custom',
+          label: '自定义',
+          description: '自定义多命令',
+          fields: ['command', 'interval_sec', 'count', 'command_gap_sec'],
+          module_key: '',
+          ui: { category: 'custom', shape: 'custom', automation: 'manual', tags: ['联动'] },
+        },
+        {
+          key: 'checkin',
+          label: '点卯',
+          description: '每日点卯',
+          fields: ['horizon_days'],
+          module_key: 'checkin',
+          ui: { category: 'daily', shape: 'daily', automation: 'renewable', tags: ['常用'] },
+        },
+      ],
+      [],
+      [],
+      {
+        modules: [{ key: 'checkin', label: '点卯', suggestion: {} }],
+        by_identity: [{
+          send_as_id: 101,
+          items: [{
+            module_key: 'checkin',
+            semiauto_ready: true,
+            summary: { text: '今晚可排' },
+            suggestion: {
+              preset_key: 'checkin',
+              automation_level: 'semiauto',
+              payload_defaults: { preset_key: 'checkin', command: '.宗门点卯', interval_sec: 86400 },
+            },
+            warnings: [],
+          }],
+        }],
+      }
+    );
+
+    const shortcut = dialog.querySelector('[data-schedule-plan-preset="checkin"]');
+    expect(shortcut).not.toBeNull();
+    shortcut.click();
+
+    expect(dialog.querySelector('[name="preset_key"]').value).toBe('checkin');
+    expect(dialog.querySelector('#scheduleStateModuleSelect').value).toBe('checkin');
+    expect(dialog.querySelector('[name="auto_anchor"]').checked).toBe(true);
+    expect(dialog.querySelector('[name="schedule_use_module_defaults"]').checked).toBe(true);
+    expect(dialog.querySelector('#scheduleStatus').textContent).toBe('已套用方案: 点卯');
+    expect(shortcut.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  test('schedule workbench custom examples fill multi-command group', () => {
+    const schedule = window.MiniwebViews.schedule;
+    const dialog = buildDialog();
+    schedule.bindScheduleModal(
+      { state: window.MiniwebState.state },
+      dialog,
+      [
+        {
+          key: 'custom',
+          label: '自定义',
+          description: '自定义多命令',
+          fields: ['command', 'interval_sec', 'count', 'command_gap_sec'],
+          module_key: '',
+          ui: { category: 'custom', shape: 'custom', automation: 'manual', tags: ['联动'] },
+        },
+      ],
+      [],
+      [],
+      { modules: [], by_identity: [] }
+    );
+
+    const example = dialog.querySelector('[data-schedule-custom-example="daily_pair"]');
+    expect(example).not.toBeNull();
+    example.click();
+
+    expect(dialog.querySelector('[name="preset_key"]').value).toBe('custom');
+    expect(dialog.querySelector('[name="command"]').value).toBe('.宗门点卯\n.闯塔');
+    expect(dialog.querySelector('[name="interval_sec"]').value).toBe('86400');
+    expect(dialog.querySelector('[name="count"]').value).toBe('3');
+    expect(dialog.querySelector('[name="command_gap_sec"]').value).toBe('180');
+    expect(dialog.querySelector('[name="auto_anchor"]').checked).toBe(false);
+    expect(dialog.querySelector('[name="schedule_use_module_defaults"]').checked).toBe(false);
+    expect(dialog.querySelector('#scheduleStatus').textContent).toBe('已套用联动模板: 点卯 + 闯塔');
   });
 
   test('renew overview scopes profiles to selected identity and toggle button disables profile', async () => {

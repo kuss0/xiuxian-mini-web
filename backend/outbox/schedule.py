@@ -37,11 +37,13 @@ CMD_YINDAO = ".引道"
 CMD_SEARCH_NODE = ".搜寻节点"
 CMD_RETREAT_SHALLOW = ".闭关修炼"
 CMD_STARGAZER_GUIDE = ".牵引星辰"
+CMD_STARGAZER_GUIDE_THUNDER = ".牵引星辰 天雷星"
 CMD_STARGAZER_SOOTHE = ".安抚星辰"
 CMD_STARGAZER_COLLECT = ".收集精华"
 DEEP_RETREAT_CD = 8 * 3600  # 默认 8h
 RETREAT_SHALLOW_CD = 10 * 60
 RETREAT_SHALLOW_MAX_COUNT = 24
+STARGAZER_THUNDER_CD = 36 * 3600
 
 PRESET_DEEP_RETREAT = "deep_retreat"
 PRESET_PET_TOUCH = "pet_touch"
@@ -427,6 +429,65 @@ class PresetSpec:
     module_key: str = ""
 
 
+SCHEDULE_PRESET_UI_META: dict[str, dict[str, Any]] = {
+    PRESET_CUSTOM: {"category": "custom", "shape": "custom", "tags": ["联动", "多命令"], "automation": "manual"},
+    PRESET_DEEP_RETREAT: {"category": "phase", "shape": "phase_pair", "tags": ["阶段型", "需确认"], "renewable": True, "automation": "renewable"},
+    PRESET_YUANYING: {"category": "phase", "shape": "phase_pair", "tags": ["阶段型", "需确认"], "automation": "manual"},
+    PRESET_PET_TOUCH: {"category": "fabao", "shape": "single", "tags": ["法宝"]},
+    PRESET_PET_WARM: {"category": "fabao", "shape": "single", "tags": ["法宝"]},
+    PRESET_PET_TRIAL: {"category": "fabao", "shape": "single", "tags": ["法宝"]},
+    "retreat_shallow": {"category": "daily", "shape": "counted", "tags": ["小批量", "高频"]},
+    "wild_training": {"category": "daily", "shape": "single", "tags": ["常用"], "renewable": True},
+    "checkin": {"category": "daily", "shape": "daily", "tags": ["每日"], "renewable": True},
+    "tower": {"category": "daily", "shape": "daily", "tags": ["每日"], "renewable": True},
+    "daily_check_core": {"category": "package", "shape": "combo_rounds", "tags": ["联动包", "每日"], "renewable": True},
+    "daily_essentials": {"category": "package", "shape": "combo_rounds", "tags": ["联动包", "每日"], "renewable": True},
+    "ranch": {"category": "sect", "shape": "single", "tags": ["万灵宗"], "renewable": True},
+    "concubine_dream": {"category": "concubine", "shape": "single", "tags": ["侍妾"], "renewable": True},
+    "concubine_tianji": {"category": "concubine", "shape": "single", "tags": ["侍妾"], "renewable": True},
+    "concubine_cycle": {"category": "package", "shape": "mixed_periodic", "tags": ["侍妾", "联动包"], "automation": "manual"},
+    "stargazer_guide": {"category": "sect", "shape": "single", "tags": ["星宫", "需参数"], "automation": "manual"},
+    "stargazer_soothe": {"category": "sect", "shape": "single", "tags": ["星宫", "需状态"], "automation": "manual"},
+    "stargazer_collect": {"category": "sect", "shape": "single", "tags": ["星宫", "需状态"], "automation": "manual"},
+    "stargazer_care": {"category": "package", "shape": "combo_rounds", "tags": ["星宫", "联动包"], "automation": "manual"},
+    "stargazer_bamboo_thunder": {"category": "package", "shape": "mixed_periodic", "tags": ["星宫", "天雷星", "联动包"], "automation": "manual"},
+    "tianti_climb": {"category": "sect", "shape": "single", "tags": ["凌霄宫"]},
+    "tianti_climb_elder": {"category": "sect", "shape": "single", "tags": ["凌霄宫", "长老"]},
+    "tianti_wenxin": {"category": "sect", "shape": "daily", "tags": ["凌霄宫", "每日"], "renewable": True},
+    "tianti_gangfeng": {"category": "sect", "shape": "single", "tags": ["凌霄宫"], "renewable": True},
+    "lingxiao_standard": {"category": "package", "shape": "mixed_periodic", "tags": ["凌霄宫", "联动包"], "renewable": True},
+    "lingxiao_elder": {"category": "package", "shape": "mixed_periodic", "tags": ["凌霄宫", "长老", "联动包"], "renewable": True},
+    "second_soul": {"category": "sect", "shape": "daily", "tags": ["元神"], "renewable": True},
+    PRESET_WENDAO: {"category": "sect", "shape": "single", "tags": ["问道"], "renewable": True},
+    PRESET_YINDAO: {"category": "sect", "shape": "single", "tags": ["引道"], "renewable": True},
+    PRESET_SEARCH_NODE: {"category": "phase", "shape": "single", "tags": ["需接力"], "automation": "manual_followup"},
+    "taiyi_cycle": {"category": "sect", "shape": "single", "tags": ["太一门"], "renewable": True},
+    "taiyi_patrol": {"category": "package", "shape": "combo_rounds", "tags": ["太一门", "联动包", "需接力"], "automation": "manual_followup"},
+}
+
+
+def _preset_ui_meta(preset: PresetSpec) -> dict:
+    meta = dict(SCHEDULE_PRESET_UI_META.get(preset.key) or {})
+    fields = set(preset.fields)
+    if "category" not in meta:
+        meta["category"] = "custom" if preset.key == PRESET_CUSTOM else "daily"
+    if "shape" not in meta:
+        if preset.key == PRESET_CUSTOM:
+            meta["shape"] = "custom"
+        elif "command_gap_sec" in fields:
+            meta["shape"] = "combo_rounds"
+        elif "trigger_command" in fields:
+            meta["shape"] = "phase_pair"
+        elif "count" in fields:
+            meta["shape"] = "counted"
+        else:
+            meta["shape"] = "single"
+    meta.setdefault("tags", [])
+    meta["renewable"] = bool(meta.get("renewable", False))
+    meta.setdefault("automation", "renewable" if meta["renewable"] else "manual")
+    return meta
+
+
 def _fixed_preset(
     *,
     key: str,
@@ -548,6 +609,18 @@ PRESETS: dict[str, PresetSpec] = {
         interval_sec=24 * 3600,
         description="按闯塔状态机/每日窗口,一天一轮",
     ),
+    "daily_check_core": PresetSpec(
+        key="daily_check_core",
+        label="点卯闯塔",
+        description="宗门点卯/闯塔,每天错峰一轮",
+        fields=("horizon_days", "command_gap_sec"),
+        module_key="checkin",
+        builder=lambda **kw: _build_combo_rounds(
+            commands=(".宗门点卯", ".闯塔"),
+            interval_sec=24 * 3600,
+            **{k: v for k, v in kw.items() if k not in {"commands", "interval_sec"}},
+        ),
+    ),
     "daily_essentials": PresetSpec(
         key="daily_essentials",
         label="每日包",
@@ -580,12 +653,26 @@ PRESETS: dict[str, PresetSpec] = {
         interval_sec=12 * 3600,
         description="按天机代卜状态机起点,12h 一轮",
     ),
+    "concubine_cycle": PresetSpec(
+        key="concubine_cycle",
+        label="侍妾图卜",
+        description="入梦寻图 8h / 天机代卜 12h,错峰排",
+        fields=("horizon_days",),
+        module_key="concubine_tianji",
+        builder=lambda **kw: _build_mixed_periodic(
+            streams=(
+                {"command": ".入梦寻图", "interval_sec": 8 * 3600, "offset_sec": 0},
+                {"command": ".天机代卜", "interval_sec": 12 * 3600, "offset_sec": 240},
+            ),
+            **{k: v for k, v in kw.items() if k != "streams"},
+        ),
+    ),
     "stargazer_guide": _fixed_preset(
         key="stargazer_guide",
         label="牵引星辰",
         command=CMD_STARGAZER_GUIDE,
         interval_sec=6 * 3600,
-        description="按牵引星辰状态机起点,6h 一轮",
+        description="裸牵引入口;需要星名时请用自定义或天雷星种竹",
     ),
     "stargazer_soothe": _fixed_preset(
         key="stargazer_soothe",
@@ -610,6 +697,21 @@ PRESETS: dict[str, PresetSpec] = {
             commands=(CMD_STARGAZER_GUIDE, CMD_STARGAZER_SOOTHE, CMD_STARGAZER_COLLECT),
             interval_sec=6 * 3600,
             **{k: v for k, v in kw.items() if k not in {"commands", "interval_sec"}},
+        ),
+    ),
+    "stargazer_bamboo_thunder": PresetSpec(
+        key="stargazer_bamboo_thunder",
+        label="金雷竹·天雷星",
+        description="牵引天雷星/安抚/收集,按天雷星长周期错峰排",
+        fields=("horizon_days",),
+        module_key="stargazer_guide",
+        builder=lambda **kw: _build_mixed_periodic(
+            streams=(
+                {"command": CMD_STARGAZER_GUIDE_THUNDER, "interval_sec": STARGAZER_THUNDER_CD, "offset_sec": 0},
+                {"command": CMD_STARGAZER_SOOTHE, "interval_sec": STARGAZER_THUNDER_CD, "offset_sec": 180},
+                {"command": CMD_STARGAZER_COLLECT, "interval_sec": STARGAZER_THUNDER_CD, "offset_sec": 360},
+            ),
+            **{k: v for k, v in kw.items() if k != "streams"},
         ),
     ),
     "tianti_climb": _fixed_preset(
@@ -729,6 +831,7 @@ def list_presets() -> list[dict]:
             "description": p.description,
             "fields": list(p.fields),
             "module_key": p.module_key,
+            "ui": _preset_ui_meta(p),
         }
         for p in PRESETS.values()
     ]

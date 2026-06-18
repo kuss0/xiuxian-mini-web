@@ -164,6 +164,7 @@ SCHEDULE_RENEW_ALLOWED_PRESETS: dict[str, tuple[str, int]] = {
     "wild_training": ("wild_training", 150 * 60),
     "checkin": ("checkin", 24 * 3600),
     "tower": ("tower", 24 * 3600),
+    "daily_check_core": ("checkin", 24 * 3600),
     "daily_essentials": ("checkin", 24 * 3600),
     "ranch": ("ranch", 4 * 3600 + 20 * 60),
     "concubine_dream": ("concubine_dream", 8 * 3600),
