@@ -178,6 +178,14 @@ class ModuleRegistry:
     def all(self) -> list[GameModule]:
         return list(self._modules.values())
 
+    def _state_from_record(self, record: dict | None, module: GameModule) -> dict:
+        if record is None:
+            return dict(module.default_state)
+        nested = record.get("state") if isinstance(record, dict) else None
+        if isinstance(nested, dict):
+            return dict(nested)
+        return dict(record)
+
     def observe_all(
         self,
         event: RawMessageEvent,
@@ -199,9 +207,7 @@ class ModuleRegistry:
                 continue
             if not target:
                 continue
-            current = get_state(int(target), module.key)
-            if current is None:
-                current = dict(module.default_state)
+            current = self._state_from_record(get_state(int(target), module.key), module)
             try:
                 new_state = module.observe(event, ctx, current)
             except Exception:
@@ -226,9 +232,12 @@ def build_default_registry() -> ModuleRegistry:
     """默认状态模块。复杂玩法独立实现,普通 CD 由 cooldown specs 覆盖。"""
     from backend.identity_state.deep_retreat import DeepRetreatModule
     from backend.identity_state.cooldown import build_cooldown_modules
+    from backend.identity_state.divination import DivinationModule
+    from backend.identity_state.explore_rift import ExploreRiftModule
     from backend.identity_state.pet_touch import PetTouchModule
     from backend.identity_state.pet_warm import PetWarmModule
     from backend.identity_state.search_node import SearchNodeModule
+    from backend.identity_state.sect_teach import SectTeachModule
     from backend.identity_state.small_world import SmallWorldModule
     from backend.identity_state.weakness import WeaknessModule
     from backend.identity_state.wendao import WendaoModule
@@ -245,6 +254,9 @@ def build_default_registry() -> ModuleRegistry:
     reg.register(WendaoModule())
     reg.register(YindaoModule())
     reg.register(SearchNodeModule())
+    reg.register(SectTeachModule())
+    reg.register(ExploreRiftModule())
+    reg.register(DivinationModule())
     for module in build_cooldown_modules():
         reg.register(module)
     return reg

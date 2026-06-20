@@ -35,6 +35,7 @@ CMD_PET_TRIAL = ".器灵试炼"
 CMD_WENDAO = ".问道"
 CMD_YINDAO = ".引道"
 CMD_SEARCH_NODE = ".搜寻节点"
+CMD_EXPLORE_RIFT = ".探寻裂缝"
 CMD_RETREAT_SHALLOW = ".闭关修炼"
 CMD_STARGAZER_GUIDE = ".牵引星辰"
 CMD_STARGAZER_GUIDE_THUNDER = ".牵引星辰 天雷星"
@@ -53,6 +54,7 @@ PRESET_YUANYING = "yuanying"
 PRESET_WENDAO = "wendao"
 PRESET_YINDAO = "yindao"
 PRESET_SEARCH_NODE = "search_node"
+PRESET_EXPLORE_RIFT = "explore_rift"
 PRESET_CUSTOM = "custom"
 
 PRESET_LABELS = {
@@ -64,6 +66,7 @@ PRESET_LABELS = {
     PRESET_WENDAO: "问道",
     PRESET_YINDAO: "引道",
     PRESET_SEARCH_NODE: "搜寻节点",
+    PRESET_EXPLORE_RIFT: "探寻裂缝",
     PRESET_CUSTOM: "自定义",
 }
 
@@ -461,6 +464,7 @@ SCHEDULE_PRESET_UI_META: dict[str, dict[str, Any]] = {
     PRESET_WENDAO: {"category": "sect", "shape": "single", "tags": ["问道"], "renewable": True},
     PRESET_YINDAO: {"category": "sect", "shape": "single", "tags": ["引道"], "renewable": True},
     PRESET_SEARCH_NODE: {"category": "phase", "shape": "single", "tags": ["需接力"], "automation": "manual_followup"},
+    PRESET_EXPLORE_RIFT: {"category": "daily", "shape": "single", "tags": ["裂缝"], "renewable": True},
     "taiyi_cycle": {"category": "sect", "shape": "single", "tags": ["太一门"], "renewable": True},
     "taiyi_patrol": {"category": "package", "shape": "combo_rounds", "tags": ["太一门", "联动包", "需接力"], "automation": "manual_followup"},
 }
@@ -800,6 +804,13 @@ PRESETS: dict[str, PresetSpec] = {
         command=CMD_SEARCH_NODE,
         interval_sec=12 * 3600,
         description="按搜寻节点状态机起点,12h 一轮;定星后续仍需人工确认",
+    ),
+    PRESET_EXPLORE_RIFT: _fixed_preset(
+        key=PRESET_EXPLORE_RIFT,
+        label="探寻裂缝",
+        command=CMD_EXPLORE_RIFT,
+        interval_sec=12 * 3600,
+        description="按探寻裂缝状态机起点,12h 一轮",
     ),
     "taiyi_cycle": _fixed_preset(
         key="taiyi_cycle",

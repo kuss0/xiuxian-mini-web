@@ -7408,6 +7408,7 @@ def test_schedule_refill_preview_filters_sect_tasks_when_identity_sect_unknown(t
 
     result = server.schedule_refill_preview_payload({
         "send_as_id": 12345,
+        "require_fresh_state": False,
         "tasks": [
             {"command": ".探寻裂缝", "cd_seconds": 43380, "sect": "通用", "enabled": True},
             {"command": ".安抚星辰", "cd_seconds": 129780, "sect": "星宫", "enabled": True, "module_key": "stargazer_soothe"},
@@ -7418,7 +7419,8 @@ def test_schedule_refill_preview_filters_sect_tasks_when_identity_sect_unknown(t
     assert result["sect"] == ""
     assert any("缺少宗门资料" in note for note in result["notes"])
     by_command = {task["command"]: task for task in result["tasks"]}
-    assert by_command[".探寻裂缝"]["status"] == "ready"
+    assert by_command[".探寻裂缝"]["status"] == "ready_with_warning"
+    assert by_command[".探寻裂缝"]["module_key"] == "explore_rift"
     assert by_command[".探寻裂缝"]["items"]
     assert by_command[".安抚星辰"]["status"] == "filtered"
     assert "宗门未知" in by_command[".安抚星辰"]["reason"]
@@ -8529,6 +8531,89 @@ def test_wendao_yindao_and_search_node_modules_parse_real_replies():
     assert s_state["cooldown_until"] == now + 12 * 3600
 
 
+def test_sect_teach_explore_rift_and_divination_modules_parse_reference_replies():
+    from backend.identity_state.divination import DivinationModule
+    from backend.identity_state.explore_rift import ExploreRiftModule
+    from backend.identity_state.sect_teach import SectTeachModule
+
+    now = 20_000.0
+
+    teach = SectTeachModule()
+    teach_parent = _evt(id="tp", msg_id=430, text=".宗门传功", sender_id=12345)
+    teach_ctx = _fake_ctx(parent=teach_parent, sender_kind="bot", now=now)
+    teach_state = teach.observe(
+        _evt(
+            id="te",
+            msg_id=431,
+            text="传功玉简已记录！你为宗门贡献了心得，获得了 30 点贡献。今日已传功 1/3 次。",
+            sender_id=-1003983937918,
+            reply_to_msg_id=430,
+        ),
+        teach_ctx,
+        dict(teach.default_state),
+    )
+    assert teach_state["last_status"] == "success"
+    assert teach_state["teach_count"] == 1
+    assert teach_state["daily_limit"] == 3
+    assert teach_state["cooldown_until"] == now + 90
+
+    rift = ExploreRiftModule()
+    rift_parent = _evt(id="rp", msg_id=440, text=".探寻裂缝", sender_id=12345)
+    rift_ctx = _fake_ctx(parent=rift_parent, sender_kind="bot", now=now)
+    rift_state = rift.observe(
+        _evt(
+            id="re",
+            msg_id=441,
+            text="【探寻成功】\n你穿过空间裂缝，修为最终增加了 1,234 点。\n- 【虚空尘埃】x2",
+            sender_id=-1003983937918,
+            reply_to_msg_id=440,
+        ),
+        rift_ctx,
+        dict(rift.default_state),
+    )
+    assert rift_state["last_status"] == "success"
+    assert rift_state["reward_items"]["虚空尘埃"] == 2
+    assert rift_state["cooldown_until"] == now + 12 * 3600
+
+    divination = DivinationModule()
+    div_parent = _evt(id="dp", msg_id=450, text=".卜筮问天", sender_id=12345)
+    div_ctx = _fake_ctx(parent=div_parent, sender_kind="bot", now=now)
+    pending = divination.observe(
+        _evt(
+            id="de1",
+            msg_id=451,
+            text="你消耗了 10 点修为，开始转动天机罗盘... (今日第 1 次)",
+            sender_id=-1003983937918,
+            reply_to_msg_id=450,
+        ),
+        div_ctx,
+        dict(divination.default_state),
+    )
+    assert pending["last_status"] == "pending"
+    assert pending["daily_count"] == 1
+
+    treasure = divination.observe(
+        _evt(
+            id="de2",
+            msg_id=452,
+            text=(
+                "【神物现世】！天机罗盘疯狂转动。\n"
+                "卦象显示，【昆吾通行令】的机缘已降临于你！\n"
+                "你是否愿意消耗 【三级妖丹】x4、【养魂木】x1 来换取它？\n"
+                "请在 5分钟 内回复本消息 .换取 来确认。"
+            ),
+            sender_id=-1003983937918,
+            reply_to_msg_id=450,
+        ),
+        div_ctx,
+        pending,
+    )
+    assert treasure["last_status"] == "success"
+    assert treasure["exchange_target"] == "昆吾通行令"
+    assert treasure["exchange_command"] == ".换取"
+    assert "三级妖丹x4" in treasure["last_result"]
+
+
 def test_module_registry_observe_only_writes_when_state_changes():
     from backend.identity_state import build_default_registry
     reg = build_default_registry()
@@ -8545,6 +8630,9 @@ def test_module_registry_observe_only_writes_when_state_changes():
 
     assert reg.get("weakness") is not None
     assert reg.get("small_world") is not None
+    assert reg.get("sect_teach") is not None
+    assert reg.get("explore_rift") is not None
+    assert reg.get("divination") is not None
     assert storage == {}
 
 
@@ -8834,6 +8922,24 @@ def test_schedule_state_contract_suggests_new_manual_preset_modules(tmp_path):
         {"cooldown_until": now + 3600, "last_observed_at": now, "last_status": "cooldown"},
         source_message_id="raw-star",
     )
+    store.save_module_state(
+        12345,
+        "sect_teach",
+        {"cooldown_until": now + 90, "last_observed_at": now, "last_status": "success", "teach_count": 1, "daily_limit": 3},
+        source_message_id="raw-teach",
+    )
+    store.save_module_state(
+        12345,
+        "divination",
+        {"last_observed_at": now, "last_status": "success", "daily_count": 1, "daily_limit": 6, "last_result": "卦象：平"},
+        source_message_id="raw-divination",
+    )
+    store.save_module_state(
+        12345,
+        "explore_rift",
+        {"cooldown_until": now + 12 * 3600, "last_observed_at": now, "last_status": "success", "last_result": "修为 +1234"},
+        source_message_id="raw-rift",
+    )
     server = MiniWebServer(store=store)
 
     payload = server.schedule_modules_payload("")
@@ -8842,6 +8948,9 @@ def test_schedule_state_contract_suggests_new_manual_preset_modules(tmp_path):
 
     retreat = by_module["retreat_shallow"]
     collect = by_module["stargazer_collect"]
+    sect_teach = by_module["sect_teach"]
+    divination = by_module["divination"]
+    rift = by_module["explore_rift"]
     assert retreat["suggestion"]["preset_key"] == "retreat_shallow"
     assert retreat["suggestion"]["command"] == ".闭关修炼"
     assert retreat["suggestion"]["payload_defaults"]["count"] == 24
@@ -8851,6 +8960,15 @@ def test_schedule_state_contract_suggests_new_manual_preset_modules(tmp_path):
     assert collect["suggestion"]["command"] == ".收集精华"
     assert collect["semiauto_ready"] is False
     assert collect["one_click_ready"] is True
+    assert sect_teach["suggestion"]["command"] == ".宗门传功"
+    assert sect_teach["semiauto_ready"] is False
+    assert any(w["code"] == "manual_followup" for w in sect_teach["warnings"])
+    assert divination["suggestion"]["command"] == ".卜筮问天"
+    assert divination["semiauto_ready"] is False
+    assert any(w["code"] == "missing_anchor" for w in divination["warnings"])
+    assert rift["suggestion"]["preset_key"] == "explore_rift"
+    assert rift["suggestion"]["command"] == ".探寻裂缝"
+    assert rift["semiauto_ready"] is True
 
 
 def test_identity_state_route_is_wired():
@@ -8950,6 +9068,52 @@ def test_backfill_missing_module_states_replays_new_module_candidates(tmp_path):
     assert record["state"]["last_success_at"] == expected_at
     assert record["state"]["cooldown_until"] == expected_at + 12 * 3600
     assert store.backfill_missing_module_states_if_needed()["events"] == 0
+
+
+def test_backfill_missing_module_states_replays_new_mainline_gap_modules(tmp_path):
+    import json as _json
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_settings({"game_bot_ids": [-1003983937918]})
+    store.save_identity({"send_as_id": 12345, "label": "me"})
+    store.save_module_state(12345, "deep_retreat", {"phase": "running"}, source_message_id="sentinel")
+    with store._connect() as conn:
+        for mid, sid, reply_to, text in [
+            (500, 12345, None, ".宗门传功"),
+            (501, -1003983937918, 500, "传功玉简已记录！你为宗门贡献了心得，获得了 30 点贡献。今日已传功 1/3 次。"),
+            (510, 12345, None, ".探寻裂缝"),
+            (511, -1003983937918, 510, "【探寻成功】\n你穿过空间裂缝，修为最终增加了 1,234 点。\n- 【虚空尘埃】x2"),
+            (520, 12345, None, ".卜筮问天"),
+            (521, -1003983937918, 520, "你消耗了 10 点修为，开始转动天机罗盘... (今日第 1 次)"),
+        ]:
+            conn.execute(
+                """
+                INSERT INTO raw_messages(id, chat_id, msg_id, text, source, date,
+                    sender_id, reply_to_msg_id, top_msg_id, mentions_json, sender_is_bot)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"raw-gap-{mid}",
+                    -1001680975844,
+                    mid,
+                    text,
+                    "",
+                    "2026-06-07T00:00:00Z",
+                    sid,
+                    reply_to,
+                    None,
+                    _json.dumps([]),
+                    int(sid < 0),
+                ),
+            )
+
+    result = store.backfill_missing_module_states_if_needed()
+
+    assert result["events"] == 3
+    assert {"sect_teach", "explore_rift", "divination"} <= set(result["modules"])
+    assert store.get_module_state(12345, "sect_teach")["state"]["teach_count"] == 1
+    assert store.get_module_state(12345, "explore_rift")["state"]["reward_items"]["虚空尘埃"] == 2
+    assert store.get_module_state(12345, "divination")["state"]["daily_count"] == 1
 
 
 def test_identity_save_backfill_ignores_legacy_global_module_marker(tmp_path):
@@ -10927,6 +11091,9 @@ def test_skills_payload_exposes_default_layout():
     assert by_key["wendao"]["cd_module"] == "wendao"
     assert by_key["yindao"]["cd_module"] == "yindao"
     assert by_key["node_search"]["cd_module"] == "search_node"
+    assert by_key["sect_teach"]["cd_module"] == "sect_teach"
+    assert by_key["explore_rift"]["cd_module"] == "explore_rift"
+    assert by_key["divination"]["cd_module"] == "divination"
     # 回复类必须显式标记
     assert by_key["quiz_answer"]["reply_mode"] == "required"
     assert by_key["dungeon_join"]["reply_mode"] == "required"

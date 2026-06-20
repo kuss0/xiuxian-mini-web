@@ -32,6 +32,7 @@
     taiyi_cycle: "taiyi_cycle",
     wendao: "wendao",
     yindao: "yindao",
+    explore_rift: "explore_rift",
   };
   const SCHEDULE_RAIL_GROUP_META = {
     daily: { label: "日常", order: 1 },
@@ -87,6 +88,7 @@
     "daily_essentials",
     "daily_check_core",
     "wild_training",
+    "explore_rift",
     "deep_retreat",
     "retreat_shallow",
     "concubine_tianji",

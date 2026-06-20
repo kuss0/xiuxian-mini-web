@@ -63,7 +63,7 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
     # ---------- 日常 ----------
     Skill("wild_training", "日常", "野外历练", ".野外历练", cd_module="wild_training", icon="⚔️"),
     Skill("checkin", "日常", "宗门点卯", ".宗门点卯", cd_module="checkin", icon="📋"),
-    Skill("sect_teach", "日常", "宗门传功", ".宗门传功", icon="📖"),
+    Skill("sect_teach", "日常", "宗门传功", ".宗门传功", cd_module="sect_teach", icon="📖"),
     Skill("tower", "日常", "闯塔", ".闯塔", cd_module="tower", icon="🗼"),
     Skill("deep_retreat", "日常", "深度闭关", ".深度闭关", cd_module="deep_retreat", icon="📿"),
     Skill("retreat_shallow", "日常", "闭关修炼", ".闭关修炼", cd_module="retreat_shallow", icon="🧘"),
@@ -130,6 +130,10 @@ DEFAULT_SKILLS: tuple[Skill, ...] = (
     Skill("taiyi", "玩法", "太一", ".太一", icon="☯️", sect="太一门"),
     Skill("wendao", "玩法", "问道", ".问道", cd_module="wendao", icon="🧭",
           note="观察问道结果或 CD 回复后可作为定时起点"),
+    Skill("explore_rift", "玩法", "探寻裂缝", ".探寻裂缝", cd_module="explore_rift", icon="🕳️",
+          realm_min="元婴初期", note="观察探寻结果或 CD 回复后可作为定时起点"),
+    Skill("divination", "玩法", "卜筮问天", ".卜筮问天", cd_module="divination", icon="🔮",
+          note="只记录每日次数和神物提示;换取仍需人工确认"),
     # 放养 = 万灵宗
     Skill("ranch", "玩法", "一键放养", ".一键放养", cd_module="ranch", icon="🌾", sect="万灵宗"),
     # 小世界 = realm ≥ 化神初期

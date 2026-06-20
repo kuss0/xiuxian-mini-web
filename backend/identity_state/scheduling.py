@@ -73,6 +73,28 @@ MODULE_HINTS: dict[str, dict[str, Any]] = {
         "automation_level": "manual_followup",
         "reason": "共历心劫需要回复天尊提示继续选择,只做状态观测和手动接力",
     },
+    "sect_teach": {
+        "preset_key": "custom",
+        "command": ".宗门传功",
+        "interval_sec": 90,
+        "count": 3,
+        "automation_level": "manual_followup",
+        "reason": "宗门传功有 1/3 链式计数和短间隔,只做状态观测和人工接力",
+    },
+    "explore_rift": {
+        "preset_key": "explore_rift",
+        "command": ".探寻裂缝",
+        "interval_sec": 12 * 3600,
+        "automation_level": "semiauto",
+        "reason": "12 小时 CD,以探寻结果或 CD 回复为起点",
+    },
+    "divination": {
+        "preset_key": "custom",
+        "command": ".卜筮问天",
+        "interval_sec": 24 * 3600,
+        "automation_level": "manual_followup",
+        "reason": "卜筮问天有每日次数和神物换取分支,只做状态观测和人工接力",
+    },
     "stargazer_guide": {
         "preset_key": "stargazer_guide",
         "command": ".牵引星辰",
@@ -148,6 +170,7 @@ SEMIAUTO_MODULE_KEYS = {
     "taiyi_cycle",
     "wendao",
     "yindao",
+    "explore_rift",
 }
 
 PRESET_MODULE_KEYS = {
@@ -160,6 +183,7 @@ PRESET_MODULE_KEYS = {
     "stargazer_guide",
     "stargazer_soothe",
     "stargazer_collect",
+    "explore_rift",
     *SEMIAUTO_MODULE_KEYS,
 }
 

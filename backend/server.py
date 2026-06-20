@@ -179,6 +179,7 @@ SCHEDULE_RENEW_ALLOWED_PRESETS: dict[str, tuple[str, int]] = {
     "taiyi_cycle": ("taiyi_cycle", 12 * 3600),
     "wendao": ("wendao", 12 * 3600),
     "yindao": ("yindao", 12 * 3600),
+    "explore_rift": ("explore_rift", 12 * 3600),
 }
 SCHEDULE_RENEW_HIDDEN_PRESETS = {"tianti_climb", "tianti_climb_elder"}
 SCHEDULE_REFILL_DEFAULT_COVERAGE_DAYS = 2
@@ -198,7 +199,7 @@ SCHEDULE_REFILL_PHASEFUL_COMMANDS = {
     ".引道 水",
 }
 SCHEDULE_REFILL_DEFAULT_TASKS: tuple[dict, ...] = (
-    {"command": ".探寻裂缝", "cd_seconds": 43380, "sect": "通用", "usage": "探索空间裂缝", "enabled": True},
+    {"command": ".探寻裂缝", "cd_seconds": 43380, "sect": "通用", "usage": "探索空间裂缝", "enabled": True, "module_key": "explore_rift"},
     {"command": ".搜寻节点", "cd_seconds": 43380, "sect": "通用", "usage": "搜寻飞升节点", "enabled": False, "module_key": "search_node", "phaseful": True},
     {"command": ".天机代卜", "cd_seconds": 43380, "sect": "通用", "usage": "天机代卜", "enabled": True, "module_key": "concubine_tianji"},
     {"command": ".深度闭关", "cd_seconds": 28980, "sect": "通用", "usage": "长时间自动闭关", "enabled": True, "module_key": "deep_retreat", "phaseful": True},
@@ -206,7 +207,7 @@ SCHEDULE_REFILL_DEFAULT_TASKS: tuple[dict, ...] = (
     {"command": ".元婴出窍", "cd_seconds": 28980, "sect": "通用", "usage": "元婴阶段相关操作", "enabled": True, "module_key": "yuanying", "phaseful": True},
     {"command": ".入梦寻图", "cd_seconds": 28980, "sect": "通用", "usage": "入梦寻图", "enabled": True, "module_key": "concubine_dream"},
     {"command": ".野外历练 谨慎", "cd_seconds": 7380, "sect": "通用", "usage": "野外历练", "enabled": True, "module_key": "wild_training"},
-    {"command": ".宗门传功", "cd_seconds": 90, "sect": "通用", "usage": "宗门传功获取收益", "enabled": True},
+    {"command": ".宗门传功", "cd_seconds": 90, "sect": "通用", "usage": "宗门传功获取收益", "enabled": True, "module_key": "sect_teach"},
     {"command": ".强行出关", "cd_seconds": "-", "sect": "通用", "usage": "提前结束深度闭关", "enabled": True, "module_key": "deep_retreat", "dangerous": True},
     {"command": ".元婴状态", "cd_seconds": "-", "sect": "通用", "usage": "查看元婴状态", "enabled": True, "module_key": "yuanying", "phaseful": True},
     {"command": ".宗门点卯", "cd_seconds": "-", "sect": "通用", "usage": "每日宗门签到", "enabled": True, "module_key": "checkin"},

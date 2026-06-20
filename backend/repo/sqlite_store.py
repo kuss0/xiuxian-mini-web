@@ -68,8 +68,16 @@ ACCOUNT_SECRET_KEYS = {"api_hash", "proxy_password"}
 RESOURCE_STATS_SCHEMA_VERSION = 8
 INVENTORY_SCHEMA_VERSION = 5
 INVENTORY_LEDGER_SCHEMA_VERSION = 2
-MODULE_STATE_BACKFILL_VERSION = 2
-MODULE_STATE_BACKFILL_KEYS = ("small_world", "wendao", "yindao", "search_node")
+MODULE_STATE_BACKFILL_VERSION = 3
+MODULE_STATE_BACKFILL_KEYS = (
+    "small_world",
+    "wendao",
+    "yindao",
+    "search_node",
+    "sect_teach",
+    "explore_rift",
+    "divination",
+)
 DUNGEON_CONTEXT_SCAN_LIMIT = 2500
 RESOURCE_BASIC_NAMES = ("修为", "贡献", "灵石")
 RESOURCE_RARE_NAMES = (
@@ -784,6 +792,10 @@ class SQLiteStore:
                             OR parent.text LIKE '.神识淬炼%'
                             OR parent.text LIKE '.神迹%'
                             OR parent.text LIKE '.显灵%'
+                            OR parent.text LIKE '.宗门传功%'
+                            OR parent.text LIKE '.探寻裂缝%'
+                            OR parent.text LIKE '.卜筮问天%'
+                            OR parent.text LIKE '.换取%'
                           )
                         ORDER BY rm.rowid ASC
                         """,
