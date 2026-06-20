@@ -179,6 +179,16 @@ class SampleStore:
             "login_account_id": "",
             "listener_status": "stopped",
             "listener_message": "",
+            "notify_enabled": False,
+            "notify_tg_bot_token": "",
+            "notify_tg_chat_id": "",
+            "notify_card_titles": [],
+            "log_command_enabled": False,
+            "log_command_chat_id": "",
+            "log_command_admin_ids": [],
+            "log_command_extra_commands": [],
+            "log_command_manual_send_enabled": False,
+            "log_command_schedule_enabled": False,
         }
 
     def list_state_patches(self, scope: str = "", send_as_id: int = 0) -> list[dict]:

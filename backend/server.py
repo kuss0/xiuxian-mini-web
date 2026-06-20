@@ -31,6 +31,7 @@ from backend.identity_state.scheduling import (
     schedule_hint,
 )
 from backend.identity_state.contracts import module_contract
+from backend.log_commands import LogCommandDispatcher, LogCommandSource
 from backend.outbox import OutboxPlanner
 from backend.outbox.schedule import (
     MAX_SCHEDULED_MESSAGES_PER_IDENTITY,
@@ -1051,6 +1052,69 @@ class MiniWebServer:
                 batch_id=batch_id,
             ),
         }
+
+    def log_commands_payload(self) -> dict:
+        return self._log_command_dispatcher().specs_payload()
+
+    def log_command_dispatch_payload(self, payload: dict | None) -> dict:
+        payload = payload or {}
+        text = str(payload.get("text") or payload.get("command") or "").strip()
+        if not text:
+            return {"ok": False, "status": "error", "error": "缺少 text", "actions": []}
+
+        dispatcher = self._log_command_dispatcher()
+        source = LogCommandSource.from_api(payload)
+        result = dispatcher.dispatch(text, source)
+        result["dry_run"] = _log_command_bool(payload.get("dry_run"), default=False)
+        result["applied_actions"] = []
+        if not result.get("ok") or result["dry_run"]:
+            return result
+
+        applied: list[dict] = []
+        for action in result.get("actions") or []:
+            applied.append(self._apply_log_command_action(action))
+        result["applied_actions"] = applied
+        if any(not item.get("ok") for item in applied):
+            result["ok"] = False
+            result["status"] = "partial_failed"
+        return result
+
+    def _log_command_dispatcher(self) -> LogCommandDispatcher:
+        settings = self._store.get_settings()
+        return LogCommandDispatcher(
+            settings=settings,
+            health_getter=lambda: self.health_payload(),
+            identities_getter=lambda: self._store.list_identities(),
+            skills_getter=lambda: self._skill_registry.list(),
+        )
+
+    def _apply_log_command_action(self, action: dict) -> dict:
+        action = action or {}
+        kind = str(action.get("kind") or "").strip()
+        payload = action.get("payload") if isinstance(action.get("payload"), dict) else {}
+        try:
+            if kind == "outbox_draft":
+                created = self.create_outbox_draft_payload(payload)
+                return {"kind": kind, "ok": bool(created.get("ok")), **created}
+            if kind == "manual_send":
+                settings = self._store.get_settings()
+                if not _log_command_bool(settings.get("log_command_manual_send_enabled"), default=False):
+                    return {
+                        "kind": kind,
+                        "ok": False,
+                        "error": "log_command_manual_send_enabled 未开启",
+                    }
+                sent = self.skill_send_payload(payload)
+                return {"kind": kind, "ok": bool(sent.get("ok")), "result": sent}
+            if kind == "official_schedule":
+                return {
+                    "kind": kind,
+                    "ok": False,
+                    "error": "日志群官方定时动作必须走 Web 排班接口",
+                }
+            return {"kind": kind or "unknown", "ok": False, "error": "未知日志群动作"}
+        except Exception as exc:
+            return {"kind": kind or "unknown", "ok": False, "error": str(exc)}
 
     def create_outbox_draft_payload(self, payload: dict) -> dict:
         plan = self._outbox.plan(payload)
@@ -6052,3 +6116,11 @@ def _source_message_id_from_payload(payload: dict) -> str:
         or action.get("message_id")
         or ""
     ).strip()
+
+
+def _log_command_bool(value: object, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}

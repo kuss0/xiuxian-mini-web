@@ -128,6 +128,17 @@ def _get_outbox_logs(request: MiniWebRequest, query: dict) -> dict:
     )
 
 
+def _get_log_commands(request: MiniWebRequest, query: dict) -> dict:
+    return _app(request).log_commands_payload()
+
+
+def _post_log_command_dispatch(request: MiniWebRequest, payload: dict) -> dict:
+    try:
+        return _app(request).log_command_dispatch_payload(payload or {})
+    except Exception as exc:
+        return {"ok": False, "status": "error", "error": str(exc), "actions": []}
+
+
 def _get_settings(request: MiniWebRequest, query: dict) -> dict:
     return _app(request).settings_payload()
 
