@@ -489,7 +489,7 @@
       auto_anchor: true,
       auto_anchor_module: moduleKey || presetKey,
       schedule_use_module_defaults: true,
-      schedule_semiauto: true,
+      schedule_semiauto: scheduleQuickCanCreate(context),
       trigger_command: defaults.trigger_command || suggestion.trigger_command || "",
       offset_minutes: defaults.offset_minutes || 0,
       offset_step_minutes: defaults.offset_step_minutes || 5,
@@ -3200,7 +3200,13 @@
       setPlanWorkbenchActive(key);
       renderStateHint();
       const preset = presetMap.get(key);
-      setStatus("ok", `已套用方案: ${preset?.label || key}`);
+      const contract = explicitModule ? findScheduleContract(scheduleModules, selectedPrimarySendAs(), explicitModule) : null;
+      if (contract && !contract.semiauto_ready) {
+        const statusView = schedulePlanStatusForContract(contract);
+        setStatus("warn", `已套用方案: ${preset?.label || key}｜${statusView.label || "需确认"}${statusView.note ? `: ${statusView.note}` : ""}`);
+      } else {
+        setStatus("ok", `已套用方案: ${preset?.label || key}`);
+      }
       return true;
     };
     const applyCustomExample = (exampleKey = "") => {

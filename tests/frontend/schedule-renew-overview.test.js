@@ -506,6 +506,13 @@ describe('Official schedule renewal overview', () => {
       }
       return Promise.resolve({ ok: true, batches: [] });
     });
+    window.MiniwebApi.postJson.mockResolvedValue({
+      ok: true,
+      preset_label: '深度闭关',
+      first_due_text: '稍后',
+      anchor_text: '状态机时间',
+      items: [{ command: '.深度闭关', schedule_text: '稍后' }],
+    });
     window.MiniwebModal.openModal.mockImplementation(({ title, body, footer }) => {
       const dialog = document.createElement('div');
       dialog.className = 'modal-dialog';
@@ -529,6 +536,21 @@ describe('Official schedule renewal overview', () => {
     expect(dialog.querySelector('[data-schedule-quick-create]')).toBeNull();
     expect(dialog.querySelector('[data-schedule-quick-advanced]')).not.toBeNull();
     expect(dialog.textContent).toContain('需确认');
+
+    dialog.querySelector('[data-schedule-quick-preview]').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(window.MiniwebApi.postJson).toHaveBeenCalledWith(
+      '/api/schedule/preview',
+      expect.objectContaining({
+        send_as_id: 101,
+        preset_key: 'deep_retreat',
+        auto_anchor: true,
+        auto_anchor_module: 'deep_retreat',
+        schedule_use_module_defaults: true,
+        schedule_semiauto: false,
+      })
+    );
   });
 
   test('opening schedule modal from module preselects that module', async () => {
@@ -604,6 +626,83 @@ describe('Official schedule renewal overview', () => {
     expect(dialog.querySelector('[name="auto_anchor"]').checked).toBe(true);
     expect(dialog.querySelector('[data-schedule-plan-panel="state"]').hidden).toBe(false);
     expect(dialog.querySelector('#scheduleStatus').textContent).toBe('已套用方案: 点卯');
+  });
+
+  test('opening full schedule modal from manual module keeps confirmation warning', async () => {
+    const schedule = window.MiniwebViews.schedule;
+    window.MiniwebState.state.identities = [{ send_as_id: 101, label: 'Wise', enabled: true }];
+    window.MiniwebState.state.activeIdentityId = 101;
+    window.MiniwebState.state.scheduleSelectedSendAsIds = [101];
+    const presets = [
+      {
+        key: 'custom',
+        label: '自定义',
+        description: '自定义多命令',
+        fields: ['command', 'interval_sec', 'count', 'command_gap_sec'],
+        module_key: '',
+        ui: { category: 'custom', shape: 'custom', automation: 'manual', tags: ['联动'] },
+      },
+      {
+        key: 'deep_retreat',
+        label: '深度闭关',
+        description: '阶段型闭关',
+        fields: ['horizon_days'],
+        module_key: 'deep_retreat',
+        ui: { category: 'phase', shape: 'state', automation: 'manual_followup', tags: ['阶段'] },
+      },
+    ];
+    const modulesPayload = {
+      modules: [{ key: 'deep_retreat', label: '深度闭关', suggestion: {} }],
+      by_identity: [{
+        send_as_id: 101,
+        items: [{
+          module_key: 'deep_retreat',
+          label: '深度闭关',
+          semiauto_ready: false,
+          one_click_ready: true,
+          summary: { text: '进行中' },
+          suggestion: {
+            preset_key: 'deep_retreat',
+            automation_level: 'manual',
+            payload_defaults: { preset_key: 'deep_retreat', command: '.深度闭关', interval_sec: 28800 },
+          },
+          warnings: [{ code: 'phaseful', message: '阶段型状态需要人工确认', severity: 'warn' }],
+        }],
+      }],
+    };
+    window.MiniwebApi.fetchJson.mockImplementation((url) => {
+      if (String(url).startsWith('/api/schedule/bootstrap')) {
+        return Promise.resolve({ ok: true, presets, templates: [], ...modulesPayload });
+      }
+      if (url === '/api/schedule/renew') {
+        return Promise.resolve({ ok: true, profiles: [], allowed_presets: [], worker: null });
+      }
+      return Promise.resolve({ ok: true, batches: [] });
+    });
+    window.MiniwebModal.openModal.mockImplementation(({ title, body }) => {
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-dialog';
+      dialog.innerHTML = `
+        <div class="modal-head"><h3>${title || ''}</h3></div>
+        <div class="modal-body">${body || ''}</div>
+      `;
+      document.body.appendChild(dialog);
+      return dialog;
+    });
+
+    await schedule.openScheduleModal(
+      { state: window.MiniwebState.state },
+      { sendAsId: 101, moduleKey: 'deep_retreat', mode: 'state' }
+    );
+
+    const dialog = document.querySelector('.schedule-modal-dialog');
+    expect(dialog).not.toBeNull();
+    expect(dialog.querySelector('[name="preset_key"]').value).toBe('deep_retreat');
+    expect(dialog.querySelector('#scheduleStateModuleSelect').value).toBe('deep_retreat');
+    expect(dialog.querySelector('[name="auto_anchor"]').checked).toBe(true);
+    expect(dialog.querySelector('#scheduleStatus').className).toContain('warn');
+    expect(dialog.querySelector('#scheduleStatus').textContent).toContain('需确认');
+    expect(dialog.querySelector('#scheduleStatus').textContent).toContain('阶段型状态需要人工确认');
   });
 
   test('schedule workbench custom examples fill multi-command group', () => {
