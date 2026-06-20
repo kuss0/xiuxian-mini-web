@@ -195,6 +195,7 @@ class LogCommandPolicy:
         return {
             "admin_count": len(self.admin_ids),
             "chat_configured": bool(self.chat_id),
+            "group_members_allowed": bool(self.chat_id),
             "extra_commands": list(self.extra_commands),
             "manual_send_enabled": self.manual_send_enabled,
             "schedule_enabled": self.schedule_enabled,
@@ -288,19 +289,17 @@ class LogCommandDispatcher:
         if source.kind == "local_api":
             return {"kind": "run", "ingress": "local_api", "is_admin": True}
 
-        if not self._policy.admin_ids:
+        is_admin = source.user_id in self._policy.admin_ids
+        in_log_group = bool(self._policy.chat_id) and source.chat_id == self._policy.chat_id
+        admin_dm = is_admin and source.chat_id == source.user_id
+        if not self._policy.chat_id and not self._policy.admin_ids:
             return {
                 "kind": "reject",
-                "text": "日志群命令未配置 log_command_admin_ids,不接受 Telegram 入站。",
-                "reason": "admin_ids_not_configured",
+                "text": "日志群命令未配置 log_command_chat_id,不接受 Telegram 入站。",
+                "reason": "chat_not_configured",
             }
-        if source.user_id not in self._policy.admin_ids:
-            return {"kind": "skip", "reason": "non_admin"}
 
-        chat_allowed = source.chat_id == source.user_id
-        if self._policy.chat_id:
-            chat_allowed = chat_allowed or source.chat_id == self._policy.chat_id
-        if not chat_allowed:
+        if not in_log_group and not admin_dm:
             return {
                 "kind": "reject",
                 "text": "当前 chat 不在日志群命令白名单内。",
@@ -315,7 +314,8 @@ class LogCommandDispatcher:
                 "text": f"命令 {parsed.raw_name} 未允许从日志群触发。",
                 "reason": "command_not_allowed",
             }
-        return {"kind": "run", "ingress": "telegram", "is_admin": True}
+        ingress = "telegram_group" if in_log_group else "telegram_admin_dm"
+        return {"kind": "run", "ingress": ingress, "is_admin": is_admin}
 
     def _run(self, parsed: ParsedLogCommand, source: LogCommandSource) -> dict:
         handlers = {

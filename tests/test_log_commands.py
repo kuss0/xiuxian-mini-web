@@ -21,7 +21,7 @@ def test_parse_dot_and_slash_log_commands():
     assert module_status.module_name == "元婴"
 
 
-def test_telegram_ingress_uses_admin_chat_and_command_allowlist():
+def test_telegram_ingress_allows_any_sender_in_configured_group():
     dispatcher = LogCommandDispatcher(
         settings={
             "log_command_admin_ids": [100],
@@ -31,33 +31,54 @@ def test_telegram_ingress_uses_admin_chat_and_command_allowlist():
         skills_getter=lambda: SkillRegistry().list(),
     )
 
-    non_admin = dispatcher.dispatch(
+    group_member = dispatcher.dispatch(
         ".帮助",
         LogCommandSource(user_id=200, chat_id=-100500, msg_id=1, kind="telegram"),
     )
-    assert non_admin["status"] == "skip"
-    assert non_admin["decision"]["reason"] == "non_admin"
+    assert group_member["ok"] is True
+    assert group_member["status"] == "ok"
+    assert group_member["decision"]["ingress"] == "telegram_group"
+    assert group_member["decision"]["is_admin"] is False
 
     wrong_chat = dispatcher.dispatch(
         ".帮助",
-        LogCommandSource(user_id=100, chat_id=-100700, msg_id=2, kind="telegram"),
+        LogCommandSource(user_id=200, chat_id=-100700, msg_id=2, kind="telegram"),
     )
     assert wrong_chat["status"] == "reject"
     assert wrong_chat["decision"]["reason"] == "chat_not_allowed"
 
-    allowed = dispatcher.dispatch(
+    admin_dm = dispatcher.dispatch(
         ".帮助",
-        LogCommandSource(user_id=100, chat_id=-100500, msg_id=3, kind="telegram"),
+        LogCommandSource(user_id=100, chat_id=100, msg_id=3, kind="telegram"),
     )
-    assert allowed["ok"] is True
-    assert allowed["status"] == "ok"
+    assert admin_dm["ok"] is True
+    assert admin_dm["decision"]["ingress"] == "telegram_admin_dm"
+    assert admin_dm["decision"]["is_admin"] is True
 
     blocked_command = dispatcher.dispatch(
         ".发送 wild_training @123",
-        LogCommandSource(user_id=100, chat_id=-100500, msg_id=4, kind="telegram"),
+        LogCommandSource(user_id=200, chat_id=-100500, msg_id=4, kind="telegram"),
     )
     assert blocked_command["status"] == "reject"
     assert blocked_command["decision"]["reason"] == "command_not_allowed"
+
+
+def test_telegram_ingress_does_not_require_admin_ids_for_group():
+    dispatcher = LogCommandDispatcher(
+        settings={
+            "log_command_chat_id": -100500,
+            "log_command_extra_commands": [],
+        },
+        skills_getter=lambda: SkillRegistry().list(),
+    )
+
+    result = dispatcher.dispatch(
+        ".帮助",
+        LogCommandSource(user_id=300, chat_id=-100500, msg_id=5, kind="telegram"),
+    )
+
+    assert result["ok"] is True
+    assert result["decision"]["ingress"] == "telegram_group"
 
 
 def test_log_command_dispatch_creates_outbox_draft_only():

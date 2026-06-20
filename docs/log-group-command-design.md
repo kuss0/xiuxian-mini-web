@@ -28,7 +28,7 @@ Rust 线的 `notify_bot`/`console`/`sender` 拆分在 mini-web 中对应为:
 | Rust 线 | mini-web 落点 | 说明 |
 | --- | --- | --- |
 | `notify_bot::parse` | `backend/log_commands.parse_log_command` | 只负责 `.cmd`/`/cmd@bot` 解析,不碰 I/O。 |
-| `notify_bot::allowlist` | `LogCommandPolicy` | admin user_id、来源 chat、命令 allowlist 三层分类。 |
+| `notify_bot::allowlist` | `LogCommandPolicy` | 来源 chat、可选 admin DM、命令 allowlist 三层分类。 |
 | `console::CommandSender` | `LogCommandSource` + dispatch result | 命令体只拿来源元数据和 argv,回复/动作由结果携带。 |
 | `sender::PendingSend` | `actions[]` | 命令只生成 `outbox_draft`/`manual_send`/`official_schedule` 动作,由 server 应用。 |
 | send log append | 现有 outbox/send log | 真正实发仍走 `/api/skills/send` 和现有 send log。 |
@@ -80,8 +80,9 @@ client;只能构造 `LogCommandSource(kind="telegram")` 后调用同一 dispatch
 
 ## Safety Rules
 
-- 只允许管理员触发;未配置管理员时不启动命令 listener。
-- Telegram 入站必须同时通过 admin user_id、来源 chat、命令 allowlist。
+- 配置了 `log_command_chat_id` 后,该群内任何 sender 都能触发默认允许的日志群命令。
+- `log_command_admin_ids` 只用于允许管理员私聊 bot 调试,不是群内触发前置条件。
+- Telegram 入站必须通过来源 chat 或 admin DM,并通过命令 allowlist。
 - 本地 Web/API 以 `source_kind=local_api` 进入,可用于预演和创建 draft;Telegram
   listener 必须传 `source_kind=telegram`。
 - `draft` 层级只创建 outbox draft,不实发。
