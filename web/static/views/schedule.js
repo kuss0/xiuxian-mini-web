@@ -11,6 +11,7 @@
     escapeHtml,
   } = window.MiniwebFormat;
   const SCHEDULE_BOOTSTRAP_URL = "/api/schedule/bootstrap?include=presets,modules,templates";
+  const SCHEDULE_BOOTSTRAP_TTL_MS = 90 * 1000;
   const SCHEDULE_TIME_ZONE_LABEL = DISPLAY_TIME_ZONE === "Asia/Shanghai" ? "上海时间" : DISPLAY_TIME_ZONE;
   const SCHEDULE_SHANGHAI_OFFSET_MINUTES = 8 * 60;
   const SCHEDULE_RENEW_ALLOWED_PRESETS = {
@@ -185,6 +186,65 @@
     renderScheduleRail(deps);
   }
 
+  function scheduleBootstrapSnapshot(deps = {}) {
+    const state = scheduleState(deps);
+    return {
+      ok: !state.scheduleBootstrapError,
+      warning: state.scheduleBootstrapError || "",
+      presets: Array.isArray(state.schedulePresets) ? state.schedulePresets : [],
+      modules: state.scheduleModules || { ok: false, modules: [], by_identity: [], tianjige: {} },
+      batches: state.scheduleBatches || [],
+      templates: Array.isArray(state.scheduleTemplates) ? state.scheduleTemplates : [],
+    };
+  }
+
+  function syncScheduleBootstrap(deps = {}, payload = {}, options = {}) {
+    const state = scheduleState(deps);
+    const modules = {
+      ok: payload.ok !== false,
+      modules: Array.isArray(payload.modules) ? payload.modules : [],
+      by_identity: Array.isArray(payload.by_identity) ? payload.by_identity : [],
+      tianjige: payload.tianjige || {},
+    };
+    state.schedulePresets = Array.isArray(payload.presets) ? payload.presets : [];
+    state.scheduleModules = modules;
+    state.scheduleTemplates = Array.isArray(payload.templates) ? payload.templates : [];
+    state.scheduleBootstrapLoadedAt = Date.now();
+    state.scheduleBootstrapError = payload.ok === false
+      ? (payload.error || "官方定时模块资料读取不完整")
+      : "";
+    if ((options || {}).render !== false) renderScheduleRail(deps);
+    return scheduleBootstrapSnapshot(deps);
+  }
+
+  async function loadScheduleBootstrap(deps = {}, options = {}) {
+    const state = scheduleState(deps);
+    const force = Boolean(options.force);
+    const render = options.render !== false;
+    const loadedAt = Number(state.scheduleBootstrapLoadedAt || 0);
+    const hasCached = Array.isArray(state.schedulePresets) && state.scheduleModules;
+    if (!force && hasCached && loadedAt && Date.now() - loadedAt < SCHEDULE_BOOTSTRAP_TTL_MS) {
+      return scheduleBootstrapSnapshot(deps);
+    }
+    if (!force && state.scheduleBootstrapPromise) return state.scheduleBootstrapPromise;
+    state.scheduleBootstrapLoading = true;
+    if (render) renderScheduleRail(deps);
+    const promise = fetchJson(SCHEDULE_BOOTSTRAP_URL)
+      .then((payload) => syncScheduleBootstrap(deps, payload, { render }))
+      .catch((error) => {
+        state.scheduleBootstrapError = error.message || String(error);
+        if (render) renderScheduleRail(deps);
+        throw error;
+      })
+      .finally(() => {
+        state.scheduleBootstrapLoading = false;
+        state.scheduleBootstrapPromise = null;
+        if (render) renderScheduleRail(deps);
+      });
+    state.scheduleBootstrapPromise = promise;
+    return promise;
+  }
+
   async function loadScheduleRail(deps = {}, { silent = false } = {}) {
     const state = scheduleState(deps);
     const scheduleRail = scheduleRailElement(deps);
@@ -197,6 +257,9 @@
     try {
       const payload = await fetchJson("/api/schedule?summary=1&history=0");
       const batches = syncScheduleBatches(deps, payload, { fullPreview: false });
+      loadScheduleBootstrap(deps, { render: true }).catch((error) => {
+        console.warn("[mini-web] schedule module launcher:", error);
+      });
       loadScheduleRenewSummary(deps, { silent: true }).catch((error) => {
         console.warn("[mini-web] schedule renew rail status:", error);
       });
@@ -264,31 +327,355 @@
     return state.scheduleRenewProfiles || [];
   }
 
+  function scheduleModuleGroupForIdentity(scheduleModules = {}, sendAsId = 0) {
+    const sid = Number(sendAsId || 0);
+    if (!sid) return null;
+    return (scheduleModules.by_identity || []).find((item) => Number(item.send_as_id || 0) === sid) || null;
+  }
+
+  function schedulePresetKeyForModule(presets = [], scheduleModules = {}, sendAsId = 0, moduleKey = "") {
+    const key = String(moduleKey || "").trim();
+    if (!key) return "";
+    const presetMap = schedulePresetMap(presets);
+    const contract = findScheduleContract(scheduleModules, sendAsId, key);
+    const suggested = String(contract?.suggestion?.preset_key || contract?.payload_defaults?.preset_key || "").trim();
+    if (suggested && presetMap.has(suggested) && !SCHEDULE_HIDDEN_SHORTCUT_PRESETS.has(suggested)) return suggested;
+    const direct = (presets || []).find((preset) => String(preset.module_key || "") === key && !SCHEDULE_HIDDEN_SHORTCUT_PRESETS.has(String(preset.key || "")));
+    if (direct?.key) return String(direct.key);
+    return presetMap.has("custom") ? "custom" : "";
+  }
+
+  function scheduleModuleLauncherRows(deps = {}, presets = [], scheduleModules = {}, sendAsId = 0) {
+    const group = scheduleModuleGroupForIdentity(scheduleModules, sendAsId);
+    const contractsByKey = new Map((group?.items || []).map((item) => [String(item.module_key || ""), item]));
+    const rows = [];
+    const seen = new Set();
+    for (const catalog of scheduleModules.modules || []) {
+      const key = String(catalog.key || "").trim();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      rows.push({ moduleKey: key, catalog, contract: contractsByKey.get(key) || null });
+    }
+    for (const contract of group?.items || []) {
+      const key = String(contract.module_key || "").trim();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      rows.push({ moduleKey: key, catalog: findModuleCatalog(scheduleModules, key), contract });
+    }
+    return rows
+      .map((row) => ({
+        ...row,
+        presetKey: schedulePresetKeyForModule(presets, scheduleModules, sendAsId, row.moduleKey),
+      }))
+      .sort((a, b) => {
+        const aReady = a.contract?.semiauto_ready ? 0 : a.contract?.one_click_ready ? 1 : 2;
+        const bReady = b.contract?.semiauto_ready ? 0 : b.contract?.one_click_ready ? 1 : 2;
+        if (aReady !== bReady) return aReady - bReady;
+        return String(a.contract?.label || a.catalog?.label || a.moduleKey).localeCompare(String(b.contract?.label || b.catalog?.label || b.moduleKey), "zh-Hans-CN");
+      });
+  }
+
+  function scheduleModuleLauncherCard(deps = {}, row = {}, presets = [], sendAsId = 0) {
+    const { moduleKey, catalog = null, contract = null, presetKey = "" } = row;
+    const preset = schedulePresetMap(presets).get(presetKey) || null;
+    const status = contract ? schedulePlanStatusForContract(contract) : {
+      label: "未观测",
+      tone: "warn",
+      note: "该身份暂无状态机样本",
+    };
+    const canOpen = Boolean(moduleKey);
+    const title = contract?.label || catalog?.label || preset?.label || moduleKey;
+    const presetText = preset && preset.key !== "custom"
+      ? preset.label || preset.key
+      : "自定义";
+    const note = status.note || contract?.summary?.text || catalog?.description || preset?.description || "打开后按该模块预选锚点和方案";
+    return `
+      <button type="button"
+        class="schedule-module-card ${escapeAttr(status.tone || "")} ${canOpen ? "" : "disabled"}"
+        data-schedule-module-open="${canOpen ? "1" : "0"}"
+        data-schedule-send-as="${escapeAttr(String(sendAsId || ""))}"
+        data-schedule-module="${escapeAttr(moduleKey)}"
+        data-schedule-preset="${escapeAttr(presetKey)}"
+        ${canOpen ? "" : "disabled"}>
+        <span class="schedule-module-card-head">
+          <strong>${escapeHtml(title)}</strong>
+          <small>${escapeHtml(presetText)}</small>
+        </span>
+        <span class="schedule-module-card-meta">
+          <span class="status-pill ${escapeAttr(status.tone || "")}">${escapeHtml(status.label)}</span>
+          ${contract?.next_at ? `<small>${escapeHtml(contract.next_text || contract.summary?.text || "")}</small>` : ""}
+        </span>
+        <small title="${escapeAttr(note)}">${escapeHtml(note)}</small>
+      </button>
+    `;
+  }
+
+  function renderScheduleModuleLauncher(deps = {}) {
+    if (!scheduleRailIsWorkbench(deps)) return "";
+    const state = scheduleState(deps);
+    const selectedSendAsId = Number(scheduleRailSelectedSendAsIds(deps)[0] || 0);
+    const presets = state.schedulePresets?.length ? state.schedulePresets : fallbackSchedulePresets();
+    const scheduleModules = state.scheduleModules || { modules: [], by_identity: [], tianjige: {} };
+    const identity = selectedSendAsId ? scheduleIdentityLabel(deps, selectedSendAsId) : "未选身份";
+    if (state.scheduleBootstrapLoading && !(scheduleModules.modules || []).length) {
+      return `
+        <section class="schedule-module-launcher loading" aria-label="模块排班">
+          <div class="schedule-module-launcher-head">
+            <strong>模块排班</strong>
+            <small>正在读取状态机模块</small>
+          </div>
+          <div class="schedule-module-card-list">
+            <span class="schedule-module-skeleton"></span>
+            <span class="schedule-module-skeleton"></span>
+            <span class="schedule-module-skeleton"></span>
+          </div>
+        </section>
+      `;
+    }
+    if (!selectedSendAsId) {
+      return `
+        <section class="schedule-module-launcher" aria-label="模块排班">
+          <div class="schedule-module-launcher-head">
+            <strong>模块排班</strong>
+            <small>先选择排程身份</small>
+          </div>
+          <p class="empty inline">选择身份后，在模块卡片上直接排官方定时。</p>
+        </section>
+      `;
+    }
+    const rows = scheduleModuleLauncherRows(deps, presets, scheduleModules, selectedSendAsId).slice(0, 12);
+    if (!rows.length) {
+      return `
+        <section class="schedule-module-launcher" aria-label="模块排班">
+          <div class="schedule-module-launcher-head">
+            <strong>模块排班</strong>
+            <small>${escapeHtml(identity)}</small>
+          </div>
+          <p class="empty inline">${state.scheduleBootstrapError ? escapeHtml(state.scheduleBootstrapError) : "当前身份还没有可用模块排班建议。"}</p>
+        </section>
+      `;
+    }
+    return `
+      <section class="schedule-module-launcher" aria-label="模块排班">
+        <div class="schedule-module-launcher-head">
+          <strong>模块排班</strong>
+          <small>${escapeHtml(identity)}｜按玩法模块预选排程</small>
+        </div>
+        <div class="schedule-module-card-list">
+          ${rows.map((row) => scheduleModuleLauncherCard(deps, row, presets, selectedSendAsId)).join("")}
+        </div>
+      </section>
+    `;
+  }
+
+  function scheduleQuickPayloadDefaults(contract = null, catalog = null) {
+    const suggestion = contract?.suggestion || catalog?.suggestion || {};
+    return suggestion.payload_defaults || contract?.payload_defaults || {};
+  }
+
+  function collectScheduleQuickPayload(deps = {}, form, context = {}) {
+    const data = new FormData(form);
+    const sendAsId = Number(context.sendAsId || data.get("send_as_id") || 0);
+    const moduleKey = String(context.moduleKey || data.get("module_key") || "").trim();
+    const presetKey = String(context.presetKey || data.get("preset_key") || "custom").trim() || "custom";
+    const defaults = scheduleQuickPayloadDefaults(context.contract, context.catalog);
+    const suggestion = context.contract?.suggestion || context.catalog?.suggestion || {};
+    const payload = {
+      send_as_ids: sendAsId ? [sendAsId] : [],
+      send_as_id: sendAsId,
+      preset_key: presetKey,
+      horizon_days: data.get("horizon_days") || defaults.horizon_days || 3,
+      dry_run: false,
+      auto_anchor: true,
+      auto_anchor_module: moduleKey || presetKey,
+      schedule_use_module_defaults: true,
+      schedule_semiauto: true,
+      trigger_command: defaults.trigger_command || suggestion.trigger_command || "",
+      offset_minutes: defaults.offset_minutes || 0,
+      offset_step_minutes: defaults.offset_step_minutes || 5,
+    };
+    const command = defaults.command || suggestion.command || suggestion.base_command || "";
+    if (command) payload.command = command;
+    if (defaults.interval_sec || suggestion.interval_sec) payload.interval_sec = defaults.interval_sec || suggestion.interval_sec;
+    if (defaults.count || suggestion.count) payload.count = defaults.count || suggestion.count;
+    if (defaults.command_gap_sec || suggestion.command_gap_sec) payload.command_gap_sec = defaults.command_gap_sec || suggestion.command_gap_sec;
+    return payload;
+  }
+
+  function scheduleQuickCanCreate(context = {}) {
+    return Boolean(context.contract?.semiauto_ready);
+  }
+
+  function renderScheduleQuickPreview(result = {}) {
+    const items = Array.isArray(result.items) ? result.items : [];
+    return `
+      <div class="schedule-quick-preview-card">
+        <div class="schedule-quick-preview-head">
+          <strong>${escapeHtml(result.preset_label || "预览")}</strong>
+          <small>${escapeHtml(result.first_due_text || result.anchor_text || SCHEDULE_TIME_ZONE_LABEL)}</small>
+        </div>
+        <ul class="send-as-result-list">
+          ${items.slice(0, 12).map((item) => `<li class="ok"><code>${escapeHtml(item.command || "")}</code><small>${escapeHtml(item.schedule_text || "")}</small></li>`).join("") || "<li>(0 条)</li>"}
+        </ul>
+        ${items.length > 12 ? `<small class="muted">另有 ${escapeHtml(String(items.length - 12))} 条</small>` : ""}
+      </div>
+    `;
+  }
+
+  function renderScheduleQuickModalBody(deps = {}, context = {}) {
+    const { sendAsId, moduleKey, presetKey, preset, contract, catalog } = context;
+    const title = contract?.label || catalog?.label || preset?.label || moduleKey || "模块";
+    const identity = scheduleIdentityLabel(deps, sendAsId);
+    const status = contract ? schedulePlanStatusForContract(contract) : { label: "未观测", tone: "warn", note: "" };
+    const defaults = scheduleQuickPayloadDefaults(contract, catalog);
+    const horizonDays = defaults.horizon_days || 3;
+    const presetText = preset?.label || presetKey || "自定义";
+    const note = status.note || contract?.summary?.text || catalog?.description || preset?.description || "";
+    return `
+      <form id="scheduleQuickForm" class="schedule-quick-form">
+        <input type="hidden" name="send_as_id" value="${escapeAttr(String(sendAsId || ""))}" />
+        <input type="hidden" name="module_key" value="${escapeAttr(moduleKey || "")}" />
+        <input type="hidden" name="preset_key" value="${escapeAttr(presetKey || "custom")}" />
+        <section class="schedule-quick-summary">
+          <div>
+            <strong>${escapeHtml(title)}</strong>
+            <small>${escapeHtml(identity)}｜${escapeHtml(presetText)}</small>
+          </div>
+          <span class="status-pill ${escapeAttr(status.tone || "")}">${escapeHtml(status.label)}</span>
+        </section>
+        ${note ? `<p class="schedule-quick-note">${escapeHtml(note)}</p>` : ""}
+        <div class="schedule-quick-fields">
+          <label>
+            <span>排几天</span>
+            <input name="horizon_days" type="number" min="1" max="7" value="${escapeAttr(String(horizonDays))}" />
+          </label>
+          <div class="schedule-quick-anchor">
+            <span>锚点</span>
+            <strong>状态机时间</strong>
+          </div>
+        </div>
+        <p id="scheduleQuickStatus" class="modal-status-line info" hidden></p>
+        <div id="scheduleQuickPreview" class="schedule-quick-preview" hidden></div>
+      </form>
+    `;
+  }
+
+  async function openScheduleModuleQuickModal(deps = {}, options = {}) {
+    const bootstrap = await loadScheduleBootstrap(deps, { render: false }).catch(() => scheduleBootstrapSnapshot(deps));
+    const state = scheduleState(deps);
+    const presets = bootstrap.presets?.length ? bootstrap.presets : fallbackSchedulePresets();
+    const scheduleModules = bootstrap.modules || state.scheduleModules || { modules: [], by_identity: [], tianjige: {} };
+    const sendAsId = Number(options.sendAsId || scheduleRailSelectedSendAsIds(deps)[0] || defaultScheduleSendAsIds(deps)[0] || 0);
+    const moduleKey = String(options.moduleKey || "").trim();
+    const presetKey = String(options.presetKey || schedulePresetKeyForModule(presets, scheduleModules, sendAsId, moduleKey) || "custom").trim();
+    const preset = schedulePresetMap(presets).get(presetKey) || schedulePresetMap(presets).get("custom") || null;
+    const contract = findScheduleContract(scheduleModules, sendAsId, moduleKey);
+    const catalog = findModuleCatalog(scheduleModules, moduleKey);
+    const context = { sendAsId, moduleKey, presetKey, preset, contract, catalog };
+    const title = `${contract?.label || catalog?.label || preset?.label || moduleKey || "模块"} 定时`;
+    const canCreate = scheduleQuickCanCreate(context);
+    const dialog = openModal({
+      title,
+      body: renderScheduleQuickModalBody(deps, context),
+      footer: `
+        <button type="button" data-schedule-quick-preview>预览</button>
+        ${canCreate ? '<button type="button" class="primary" data-schedule-quick-create>创建官方定时</button>' : ""}
+        <button type="button" data-schedule-quick-advanced>高级设置</button>
+        <button type="button" data-modal-close>关闭</button>
+      `,
+    });
+    if (!dialog) return null;
+    dialog.classList.add("schedule-quick-dialog");
+    const form = dialog.querySelector("#scheduleQuickForm");
+    const status = dialog.querySelector("#scheduleQuickStatus");
+    const preview = dialog.querySelector("#scheduleQuickPreview");
+    const setStatus = (kind, text) => {
+      if (!status) return;
+      status.hidden = !text;
+      status.className = `modal-status-line ${kind}`;
+      status.textContent = text || "";
+    };
+    const showPreview = (html) => {
+      if (!preview) return;
+      preview.hidden = !html;
+      preview.innerHTML = html || "";
+    };
+    const runPreview = async () => {
+      if (!form) return null;
+      setStatus("info", "计算预览...");
+      const result = await postJson("/api/schedule/preview", collectScheduleQuickPayload(deps, form, context));
+      if (!result.ok) throw new Error(result.error || "预览失败");
+      showPreview(renderScheduleQuickPreview(result));
+      setStatus("ok", `共 ${Number(result.items?.length || 0)} 条`);
+      return result;
+    };
+    dialog.querySelector("[data-schedule-quick-preview]")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        await runPreview();
+      } catch (error) {
+        showPreview("");
+        setStatus("error", error.message || "预览失败");
+      } finally {
+        button.disabled = false;
+      }
+    });
+    dialog.querySelector("[data-schedule-quick-create]")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      setStatus("info", "创建中...");
+      try {
+        const result = await postJson("/api/schedule/create", collectScheduleQuickPayload(deps, form, context));
+        const manualMessages = scheduleManualMessages(result);
+        if (!result.ok && !result.batch_count) throw new Error(result.error || "创建失败");
+        if (manualMessages.length) window.alert(manualMessages.join("\n\n"));
+        const estimate = scheduleEstimateText(result.estimate_seconds || result.total_estimate_seconds || 0);
+        setStatus(result.errors?.length || result.failed || manualMessages.length ? "warn" : "ok", `已提交${result.batch_id ? `批次 #${result.batch_id}` : ""}${estimate !== "约 0 秒" ? `｜预估 ${estimate}` : ""}`);
+        await loadScheduleRail(deps, { silent: true }).catch(() => {});
+      } catch (error) {
+        setStatus("error", error.message || "创建失败");
+      } finally {
+        button.disabled = false;
+      }
+    });
+    dialog.querySelector("[data-schedule-quick-advanced]")?.addEventListener("click", async () => {
+      await openScheduleModal(deps, { sendAsId, moduleKey, presetKey, mode: "state" });
+    });
+    return dialog;
+  }
+
   function renderScheduleRail(deps = {}) {
     const state = scheduleState(deps);
     const scheduleRail = scheduleRailElement(deps);
     if (!scheduleRail) return;
     const batches = state.scheduleBatches || [];
+    const moduleLauncher = renderScheduleModuleLauncher(deps);
     if (state.scheduleLoading && !batches.length) {
-      scheduleRail.innerHTML = '<p class="empty inline">正在读取官方定时...</p>';
+      scheduleRail.innerHTML = `${moduleLauncher}<p class="empty inline">正在读取官方定时...</p>`;
+      bindScheduleOpenButtons(deps, scheduleRail);
       return;
     }
     if (state.scheduleError && !batches.length) {
       scheduleRail.innerHTML = `
+        ${moduleLauncher}
         <div class="schedule-rail-empty warn">
           <strong>定时读取失败</strong>
           <span>${escapeHtml(state.scheduleError)}</span>
         </div>
       `;
+      bindScheduleOpenButtons(deps, scheduleRail);
       return;
     }
     if (!batches.length) {
       scheduleRail.innerHTML = `
+        ${moduleLauncher}
         <div class="schedule-rail-empty">
           <strong>还没有排班</strong>
-          <span>点“新建”把深闭、法宝、日常命令排进 Telegram 官方定时。</span>
+          <span>从上方模块卡片直接排，或点“新建”做联动/自定义排班。</span>
         </div>
       `;
+      bindScheduleOpenButtons(deps, scheduleRail);
       return;
     }
     const scopedBatches = scheduleRailScopedBatches(deps, batches);
@@ -302,6 +689,7 @@
           ? "当前身份没有进行中的排班。"
           : "过期历史已收起。";
       scheduleRail.innerHTML = `
+        ${moduleLauncher}
         <div class="schedule-rail-empty">
           <strong>没有进行中的排班</strong>
           <span>${escapeHtml(hiddenText)}</span>
@@ -324,6 +712,7 @@
     const showManageButton = scheduleRailIsWorkbench(deps) || railBatches.length > visible.length || scopedBatches.length > railBatches.length;
     const renewSummary = renderScheduleRailRenewSummary(deps);
     scheduleRail.innerHTML = `
+      ${moduleLauncher}
       <div class="schedule-rail-summary schedule-tool-summary">
         <div class="schedule-tool-summary-title">
           <strong>官方定时</strong>
@@ -435,6 +824,26 @@
             deps.loadIdentities?.() || Promise.resolve(),
           ]).catch(() => {});
           await openScheduleModal(deps);
+        } catch (error) {
+          deps.showError?.(error);
+        }
+      });
+    });
+    root.querySelectorAll("[data-schedule-module-open]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const moduleKey = String(button.dataset.scheduleModule || "").trim();
+        const presetKey = String(button.dataset.schedulePreset || "").trim();
+        const sendAsId = Number(button.dataset.scheduleSendAs || 0);
+        try {
+          Promise.allSettled([
+            deps.loadAccounts?.() || Promise.resolve(),
+            deps.loadIdentities?.() || Promise.resolve(),
+          ]).catch(() => {});
+          await openScheduleModuleQuickModal(deps, {
+            sendAsId,
+            moduleKey,
+            presetKey,
+          });
         } catch (error) {
           deps.showError?.(error);
         }
@@ -1278,7 +1687,11 @@
     if (contract.semiauto_ready) return { label: "可半自动", tone: "ok", note: contract.summary?.text || "" };
     if (automation === "manual_followup") return { label: "需接力", tone: "warn", note: contract.suggestion?.reason || contract.summary?.text || "" };
     if (automation === "state_only") return { label: "仅观测", tone: "", note: contract.suggestion?.reason || contract.summary?.text || "" };
-    if (contract.one_click_ready) return { label: "可排", tone: "ok", note: contract.summary?.text || "" };
+    if (contract.one_click_ready) {
+      const warning = (contract.warnings || []).find((item) => item.severity === "warn")
+        || (contract.warnings || [])[0];
+      return { label: "需确认", tone: "warn", note: warning?.message || contract.summary?.text || "" };
+    }
     if (contract.suggestion?.automation_level === "manual") return { label: "手动", tone: "", note: contract.suggestion?.reason || contract.summary?.text || "" };
     const risk = (contract.warnings || []).find((item) => item.severity === "risk");
     const warn = risk || (contract.warnings || [])[0];
@@ -1442,19 +1855,14 @@
   async function loadScheduleModalBootstrap(deps = {}) {
     const state = scheduleState(deps);
     try {
-      const payload = await fetchJson(SCHEDULE_BOOTSTRAP_URL);
+      const cached = await loadScheduleBootstrap(deps, { render: false });
       return {
-        ok: payload.ok !== false,
-        warning: payload.ok === false ? "官方定时部分资料读取失败,已尽量展示可用数据。" : "",
-        presets: payload.presets || [],
-        modules: {
-          ok: true,
-          modules: payload.modules || [],
-          by_identity: payload.by_identity || [],
-          tianjige: payload.tianjige || {},
-        },
+        ok: cached.ok !== false,
+        warning: cached.warning || "",
+        presets: cached.presets || [],
+        modules: cached.modules || { modules: [], by_identity: [], tianjige: {} },
         batches: state.scheduleBatches || [],
-        templates: payload.templates || [],
+        templates: cached.templates || [],
       };
     } catch (error) {
       return {
@@ -1783,7 +2191,7 @@
     `;
   }
 
-  async function openScheduleModal(deps = {}) {
+  async function openScheduleModal(deps = {}, options = {}) {
     const dialog = openModal({
       title: "官方定时排班",
       body: renderScheduleModalLoading(),
@@ -1797,12 +2205,20 @@
     const scheduleModules = bootstrap.modules || { modules: [], by_identity: [] };
     const batches = syncScheduleBatches(deps, { batches: bootstrap.batches || [] });
     const templates = bootstrap.templates || [];
-    const defaultSendAsIds = defaultScheduleSendAsIds(deps);
+    const requestedSendAsId = Number(options.sendAsId || 0);
+    const defaultSendAsIds = requestedSendAsId ? [requestedSendAsId] : defaultScheduleSendAsIds(deps);
     const modalBody = dialog.querySelector(".modal-body");
     if (modalBody) {
       modalBody.innerHTML = renderScheduleModalBody(deps, { presets, scheduleModules, batches, templates, defaultSendAsIds });
     }
-    const setScheduleStatus = bindScheduleModal(deps, dialog, presets, batches, templates, scheduleModules);
+    const setScheduleStatus = bindScheduleModal(deps, dialog, presets, batches, templates, scheduleModules, {
+      initialSelection: {
+        sendAsId: requestedSendAsId,
+        moduleKey: options.moduleKey || "",
+        presetKey: options.presetKey || "",
+        mode: options.mode || "",
+      },
+    });
     refreshScheduleModalBatches(deps, dialog, setScheduleStatus).catch((error) => {
       const status = dialog.querySelector("#scheduleStatus");
       if (status && !status.textContent) {
@@ -2548,7 +2964,7 @@
     return true;
   }
 
-  function bindScheduleModal(deps = {}, dialog, presets, _initialBatches, initialTemplates, scheduleModules = {}) {
+  function bindScheduleModal(deps = {}, dialog, presets, _initialBatches, initialTemplates, scheduleModules = {}, options = {}) {
     const form = dialog.querySelector("#scheduleForm");
     const status = dialog.querySelector("#scheduleStatus");
     const preview = dialog.querySelector("#schedulePreview");
@@ -2597,6 +3013,7 @@
     const setChatIdentityButton = dialog.querySelector("#scheduleSetChatIdentityButton");
     const clearIdentityButton = dialog.querySelector("#scheduleClearIdentityButton");
     if (!form) return null;
+    const initialSelection = options.initialSelection || {};
     const presetMap = new Map(presets.map((p) => [p.key, p]));
     let templates = Array.isArray(initialTemplates) ? [...initialTemplates] : [];
     let lastRefillPreview = null;
@@ -2809,21 +3226,25 @@
       setStatus("ok", `已套用联动模板: ${example.label}`);
       return true;
     };
+    const activatePlanMode = (mode = "presets") => {
+      if (!planWorkbench) return;
+      const key = String(mode || "presets");
+      planWorkbench.querySelectorAll("[data-schedule-plan-mode]").forEach((item) => {
+        const active = String(item.dataset.schedulePlanMode || "") === key;
+        item.classList.toggle("selected", active);
+        item.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+      planWorkbench.querySelectorAll("[data-schedule-plan-panel]").forEach((panel) => {
+        panel.hidden = String(panel.dataset.schedulePlanPanel || "") !== key;
+      });
+    };
     function bindSchedulePlanWorkbenchActions() {
       if (!planWorkbench) return;
       planWorkbench.querySelectorAll("[data-schedule-plan-mode]").forEach((button) => {
         if (button.dataset.bound === "1") return;
         button.dataset.bound = "1";
         button.addEventListener("click", () => {
-          const mode = String(button.dataset.schedulePlanMode || "presets");
-          planWorkbench.querySelectorAll("[data-schedule-plan-mode]").forEach((item) => {
-            const active = String(item.dataset.schedulePlanMode || "") === mode;
-            item.classList.toggle("selected", active);
-            item.setAttribute("aria-pressed", active ? "true" : "false");
-          });
-          planWorkbench.querySelectorAll("[data-schedule-plan-panel]").forEach((panel) => {
-            panel.hidden = String(panel.dataset.schedulePlanPanel || "") !== mode;
-          });
+          activatePlanMode(button.dataset.schedulePlanMode || "presets");
         });
       });
       planWorkbench.querySelectorAll("[data-schedule-plan-preset]").forEach((button) => {
@@ -2845,6 +3266,42 @@
         });
       });
     }
+    const applyInitialScheduleSelection = () => {
+      const moduleKey = String(initialSelection.moduleKey || "").trim();
+      const requestedSendAsId = Number(initialSelection.sendAsId || 0);
+      if (requestedSendAsId) {
+        setScheduleIdentitySelection([requestedSendAsId]);
+      }
+      if (!moduleKey) {
+        if (initialSelection.mode) activatePlanMode(initialSelection.mode);
+        return;
+      }
+      const presetKey = String(
+        initialSelection.presetKey
+        || schedulePresetKeyForModule(presets, scheduleModules, selectedPrimarySendAs(), moduleKey)
+        || ""
+      ).trim();
+      activatePlanMode(initialSelection.mode || "state");
+      if (presetKey && presetMap.has(presetKey) && presetKey !== "custom") {
+        applyPresetShortcut(presetKey, moduleKey);
+        return;
+      }
+      if (presetSelect && presetMap.has("custom")) {
+        presetSelect.value = "custom";
+      }
+      if (stateModuleSelect && Array.from(stateModuleSelect.options).some((option) => option.value === moduleKey)) {
+        stateModuleSelect.value = moduleKey;
+      }
+      const contract = findScheduleContract(scheduleModules, selectedPrimarySendAs(), moduleKey);
+      const catalog = findModuleCatalog(scheduleModules, moduleKey);
+      applyScheduleSuggestionToForm(form, contract, catalog);
+      updateFieldVisibility();
+      renderStateHint();
+      refreshPlanWorkbench();
+      activatePlanMode(initialSelection.mode || "state");
+      setPlanWorkbenchActive(String(presetSelect?.value || ""));
+      setStatus("ok", `已进入 ${contract?.label || catalog?.label || moduleKey} 模块排班`);
+    };
     if (presetSelect) {
       presetSelect.addEventListener("change", () => {
         updateFieldVisibility();
@@ -3460,6 +3917,7 @@
     syncStateModuleToPreset({ onlyIfEmpty: true });
     renderStateHint();
     refreshPlanWorkbench();
+    applyInitialScheduleSelection();
     if (renewPresetSelect) {
       renewPresetSelect.addEventListener("change", () => {
         syncRenewModuleToPreset();
@@ -3964,6 +4422,7 @@
     scheduleRailStatusClass,
     scheduleIdentityLabel,
     openScheduleModal,
+    openScheduleModuleQuickModal,
     renderScheduleTemplateOptions,
     renderScheduleModuleOptions,
     renderScheduleBatches,

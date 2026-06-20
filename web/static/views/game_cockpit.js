@@ -451,7 +451,7 @@
       const startAt = deps.moduleStartTs?.(st) || 0;
       const label = item?.label || spec.label;
       if (!item) {
-        return cockpitModuleChip({ icon: spec.icon, label, text: "未知", cls: "unknown" });
+        return cockpitModuleChip({ moduleKey: spec.key, sendAsId: activeId, icon: spec.icon, label, text: "未知", cls: "unknown" });
       }
       const phase = String(summary.phase || st.phase || "");
       if (phase === "running") {
@@ -460,6 +460,8 @@
           const total = Math.max(1, nextAt - startAt);
           const pct = Math.min(100, Math.max(0, ((total - remaining) / total) * 100));
           return cockpitModuleChip({
+            moduleKey: spec.key,
+            sendAsId: activeId,
             icon: spec.icon,
             label,
             text: `剩 ${deps.fmtCountdown?.(remaining) || ""}`,
@@ -469,16 +471,18 @@
             pct,
           });
         }
-        return cockpitModuleChip({ icon: spec.icon, label, text: "待结算", cls: "ready" });
+        return cockpitModuleChip({ moduleKey: spec.key, sendAsId: activeId, icon: spec.icon, label, text: "待结算", cls: "ready" });
       }
       const ready = summary.ready === true || nextAt === 0 || (nextAt > 0 && nextAt <= now);
       if (ready) {
-        return cockpitModuleChip({ icon: spec.icon, label, text: "已就绪", cls: "ready" });
+        return cockpitModuleChip({ moduleKey: spec.key, sendAsId: activeId, icon: spec.icon, label, text: "已就绪", cls: "ready" });
       }
       const remaining = Math.max(0, nextAt - now);
       const total = Math.max(1, nextAt - startAt);
       const pct = Math.min(100, Math.max(0, ((total - remaining) / total) * 100));
       return cockpitModuleChip({
+        moduleKey: spec.key,
+        sendAsId: activeId,
         icon: spec.icon,
         label,
         text: `剩 ${deps.fmtCountdown?.(remaining) || ""}`,
@@ -491,20 +495,46 @@
     const html = rows.join("");
     if (cockpitModules) cockpitModules.innerHTML = html;
     if (hudModules) hudModules.innerHTML = html;
+    bindCockpitModuleSchedule(deps, cockpitModules);
+    bindCockpitModuleSchedule(deps, hudModules);
   }
 
-  function cockpitModuleChip({ icon, label, text, cls, nextAt = 0, startAt = 0, pct = 0 }) {
+  function cockpitModuleChip({ moduleKey = "", sendAsId = 0, icon, label, text, cls, nextAt = 0, startAt = 0, pct = 0 }) {
     const liveAttrs = nextAt
       ? ` data-cockpit-timer="1" data-next-at="${nextAt}" data-start-at="${startAt}"`
       : "";
     return `
-      <div class="cockpit-module ${escapeAttr(cls || "")}"${liveAttrs}>
+      <button type="button" class="cockpit-module ${escapeAttr(cls || "")}" data-cockpit-schedule-module="${escapeAttr(moduleKey)}" data-cockpit-send-as="${escapeAttr(String(sendAsId || ""))}" title="打开${escapeAttr(label || moduleKey)}模块排班"${liveAttrs}>
         <span class="cockpit-module-icon">${escapeHtml(icon || "•")}</span>
         <span class="cockpit-module-label">${escapeHtml(label || "")}</span>
         <strong class="cockpit-module-time">${escapeHtml(text || "—")}</strong>
         <span class="cockpit-module-bar"><span style="width:${Number(pct || 0).toFixed(1)}%"></span></span>
-      </div>
+      </button>
     `;
+  }
+
+  function bindCockpitModuleSchedule(deps = {}, root = null) {
+    if (!root) return;
+    root.querySelectorAll("[data-cockpit-schedule-module]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const moduleKey = String(button.dataset.cockpitScheduleModule || "").trim();
+        const sendAsId = Number(button.dataset.cockpitSendAs || deps.state?.activeIdentityId || 0);
+        if (!moduleKey) return;
+        try {
+          await Promise.all([
+            deps.loadAccounts?.() || Promise.resolve(),
+            deps.loadIdentities?.() || Promise.resolve(),
+          ]);
+          if (typeof deps.openScheduleModuleQuickModal === "function") {
+            await deps.openScheduleModuleQuickModal({ sendAsId, moduleKey });
+          } else {
+            await deps.openScheduleModal?.({ sendAsId, moduleKey, mode: "state" });
+          }
+        } catch (error) {
+          deps.showError?.(error);
+        }
+      });
+    });
   }
 
   function renderCockpitInbox(deps = {}) {

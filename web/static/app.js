@@ -621,6 +621,7 @@ function gameCockpitDeps() {
     loadAccounts,
     loadIdentities,
     openScheduleModal,
+    openScheduleModuleQuickModal,
     openLogsModal,
   };
 }
@@ -814,8 +815,12 @@ function identityStatusDeps() {
     fmtCountdown,
     loadIdentityModuleStates,
     loadIdentityPatches,
+    loadAccounts,
+    loadIdentities,
     renderGameCockpit,
     renderSkillViews,
+    openScheduleModal,
+    openScheduleModuleQuickModal,
     fillSkillIntoComposer,
     findOrFetchMessage,
     jumpToMessage,
@@ -2931,8 +2936,12 @@ function scheduleIdentityLabel(sendAsId) {
   return window.MiniwebViews.schedule.scheduleIdentityLabel(scheduleDeps(), sendAsId);
 }
 
-async function openScheduleModal() {
-  return window.MiniwebViews.schedule.openScheduleModal(scheduleDeps());
+async function openScheduleModal(options = {}) {
+  return window.MiniwebViews.schedule.openScheduleModal(scheduleDeps(), options);
+}
+
+async function openScheduleModuleQuickModal(options = {}) {
+  return window.MiniwebViews.schedule.openScheduleModuleQuickModal(scheduleDeps(), options);
 }
 
 function renderScheduleTemplateOptions(templates) {

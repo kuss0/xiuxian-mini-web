@@ -237,6 +237,375 @@ describe('Official schedule renewal overview', () => {
     expect(shortcut.getAttribute('aria-pressed')).toBe('true');
   });
 
+  test('workbench exposes module cards as scheduling entry points', () => {
+    const schedule = window.MiniwebViews.schedule;
+    window.MiniwebState.state.identities = [{ send_as_id: 101, label: 'Wise', enabled: true }];
+    window.MiniwebState.state.activeIdentityId = 101;
+    window.MiniwebState.state.scheduleSelectedSendAsIds = [101];
+    window.MiniwebState.state.scheduleBatches = [];
+    window.MiniwebState.state.schedulePresets = [
+      {
+        key: 'checkin',
+        label: '点卯',
+        description: '每日点卯',
+        fields: ['horizon_days'],
+        module_key: 'checkin',
+        ui: { category: 'daily', shape: 'daily', automation: 'renewable', tags: ['常用'] },
+      },
+    ];
+    window.MiniwebState.state.scheduleModules = {
+      modules: [{ key: 'checkin', label: '点卯', suggestion: {} }],
+      by_identity: [{
+        send_as_id: 101,
+        items: [{
+          module_key: 'checkin',
+          label: '点卯',
+          semiauto_ready: true,
+          one_click_ready: true,
+          summary: { text: '今晚可排' },
+          suggestion: { preset_key: 'checkin', automation_level: 'semiauto' },
+          warnings: [],
+        }],
+      }],
+    };
+
+    const panel = document.createElement('section');
+    panel.className = 'schedule-workbench';
+    const scheduleRail = document.createElement('div');
+    panel.appendChild(scheduleRail);
+    document.body.appendChild(panel);
+
+    schedule.renderScheduleRail({
+      state: window.MiniwebState.state,
+      scheduleRail,
+      showError: jest.fn(),
+    });
+
+    const card = scheduleRail.querySelector('[data-schedule-module-open][data-schedule-module="checkin"]');
+    expect(card).not.toBeNull();
+    expect(card.dataset.schedulePreset).toBe('checkin');
+    expect(card.dataset.scheduleSendAs).toBe('101');
+    expect(scheduleRail.textContent).toContain('模块排班');
+    expect(scheduleRail.textContent).toContain('点卯');
+  });
+
+  test('module cards remain clickable while schedule rail is loading', async () => {
+    const schedule = window.MiniwebViews.schedule;
+    window.MiniwebState.state.identities = [{ send_as_id: 101, label: 'Wise', enabled: true }];
+    window.MiniwebState.state.activeIdentityId = 101;
+    window.MiniwebState.state.scheduleSelectedSendAsIds = [101];
+    window.MiniwebState.state.scheduleLoading = true;
+    window.MiniwebState.state.scheduleBatches = [];
+    window.MiniwebState.state.scheduleBootstrapLoadedAt = Date.now();
+    window.MiniwebState.state.schedulePresets = [{
+      key: 'checkin',
+      label: '点卯',
+      description: '每日点卯',
+      fields: ['horizon_days'],
+      module_key: 'checkin',
+      ui: { category: 'daily', shape: 'daily', automation: 'renewable', tags: ['常用'] },
+    }];
+    window.MiniwebState.state.scheduleModules = {
+      modules: [{ key: 'checkin', label: '点卯', suggestion: {} }],
+      by_identity: [{
+        send_as_id: 101,
+        items: [{
+          module_key: 'checkin',
+          label: '点卯',
+          semiauto_ready: true,
+          one_click_ready: true,
+          summary: { text: '今晚可排' },
+          suggestion: { preset_key: 'checkin', automation_level: 'semiauto' },
+          warnings: [],
+        }],
+      }],
+    };
+    window.MiniwebModal.openModal.mockImplementation(({ title, body, footer }) => {
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-dialog';
+      dialog.innerHTML = `
+        <div class="modal-head"><h3>${title || ''}</h3></div>
+        <div class="modal-body">${body || ''}</div>
+        <div class="modal-foot">${footer || ''}</div>
+      `;
+      document.body.appendChild(dialog);
+      return dialog;
+    });
+
+    const panel = document.createElement('section');
+    panel.className = 'schedule-workbench';
+    const scheduleRail = document.createElement('div');
+    panel.appendChild(scheduleRail);
+    document.body.appendChild(panel);
+
+    schedule.renderScheduleRail({
+      state: window.MiniwebState.state,
+      scheduleRail,
+      showError: jest.fn(),
+    });
+
+    scheduleRail.querySelector('[data-schedule-module-open][data-schedule-module="checkin"]').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(document.querySelector('.schedule-quick-dialog #scheduleQuickForm')).not.toBeNull();
+  });
+
+  test('module card click opens the quick scheduling dialog', async () => {
+    const schedule = window.MiniwebViews.schedule;
+    window.MiniwebState.state.identities = [{ send_as_id: 101, label: 'Wise', enabled: true }];
+    window.MiniwebState.state.activeIdentityId = 101;
+    window.MiniwebState.state.scheduleSelectedSendAsIds = [101];
+    window.MiniwebState.state.scheduleBatches = [];
+    const presets = [
+      {
+        key: 'custom',
+        label: '自定义',
+        description: '自定义多命令',
+        fields: ['command', 'interval_sec', 'count', 'command_gap_sec'],
+        module_key: '',
+        ui: { category: 'custom', shape: 'custom', automation: 'manual', tags: ['联动'] },
+      },
+      {
+        key: 'checkin',
+        label: '点卯',
+        description: '每日点卯',
+        fields: ['horizon_days'],
+        module_key: 'checkin',
+        ui: { category: 'daily', shape: 'daily', automation: 'renewable', tags: ['常用'] },
+      },
+    ];
+    const modulesPayload = {
+      modules: [{ key: 'checkin', label: '点卯', suggestion: {} }],
+      by_identity: [{
+        send_as_id: 101,
+        items: [{
+          module_key: 'checkin',
+          label: '点卯',
+          semiauto_ready: true,
+          summary: { text: '今晚可排' },
+          suggestion: {
+            preset_key: 'checkin',
+            automation_level: 'semiauto',
+            payload_defaults: {
+              preset_key: 'checkin',
+              command: '.宗门点卯',
+              interval_sec: 86400,
+              horizon_days: 3,
+            },
+          },
+          warnings: [],
+        }],
+      }],
+    };
+    window.MiniwebState.state.schedulePresets = presets;
+    window.MiniwebState.state.scheduleModules = modulesPayload;
+    window.MiniwebApi.fetchJson.mockImplementation((url) => {
+      if (String(url).startsWith('/api/schedule/bootstrap')) {
+        return Promise.resolve({ ok: true, presets, templates: [], ...modulesPayload });
+      }
+      return Promise.resolve({ ok: true, batches: [] });
+    });
+    window.MiniwebApi.postJson.mockResolvedValue({
+      ok: true,
+      preset_label: '点卯',
+      first_due_text: '今晚',
+      anchor_text: '状态机时间',
+      items: [{ command: '.宗门点卯', schedule_text: '今晚' }],
+    });
+    window.MiniwebModal.openModal.mockImplementation(({ title, body, footer }) => {
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-dialog';
+      dialog.innerHTML = `
+        <div class="modal-head"><h3>${title || ''}</h3></div>
+        <div class="modal-body">${body || ''}</div>
+        <div class="modal-foot">${footer || ''}</div>
+      `;
+      document.body.appendChild(dialog);
+      return dialog;
+    });
+
+    const panel = document.createElement('section');
+    panel.className = 'schedule-workbench';
+    const scheduleRail = document.createElement('div');
+    panel.appendChild(scheduleRail);
+    document.body.appendChild(panel);
+
+    schedule.renderScheduleRail({
+      state: window.MiniwebState.state,
+      scheduleRail,
+      showError: jest.fn(),
+    });
+
+    scheduleRail.querySelector('[data-schedule-module-open][data-schedule-module="checkin"]').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const dialog = document.querySelector('.schedule-quick-dialog');
+    expect(dialog).not.toBeNull();
+    expect(dialog.querySelector('#scheduleQuickForm')).not.toBeNull();
+    expect(dialog.querySelector('#scheduleForm')).toBeNull();
+    expect(dialog.querySelector('[data-schedule-quick-create]')).not.toBeNull();
+    expect(dialog.textContent).toContain('排几天');
+    expect(dialog.textContent).toContain('状态机时间');
+
+    dialog.querySelector('[data-schedule-quick-preview]').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(window.MiniwebApi.postJson).toHaveBeenCalledWith(
+      '/api/schedule/preview',
+      expect.objectContaining({
+        send_as_id: 101,
+        preset_key: 'checkin',
+        auto_anchor: true,
+        auto_anchor_module: 'checkin',
+        schedule_use_module_defaults: true,
+        schedule_semiauto: true,
+        command: '.宗门点卯',
+        interval_sec: 86400,
+      })
+    );
+    expect(dialog.querySelector('#scheduleQuickPreview').hidden).toBe(false);
+  });
+
+  test('manual-confirm module quick dialog does not expose create action', async () => {
+    const schedule = window.MiniwebViews.schedule;
+    window.MiniwebState.state.identities = [{ send_as_id: 101, label: 'Wise', enabled: true }];
+    window.MiniwebState.state.activeIdentityId = 101;
+    window.MiniwebState.state.scheduleSelectedSendAsIds = [101];
+    const presets = [{
+      key: 'deep_retreat',
+      label: '深度闭关',
+      description: '阶段型闭关',
+      fields: ['horizon_days'],
+      module_key: 'deep_retreat',
+      ui: { category: 'phase', shape: 'state', automation: 'manual_followup', tags: ['阶段'] },
+    }];
+    const modulesPayload = {
+      modules: [{ key: 'deep_retreat', label: '深度闭关', suggestion: {} }],
+      by_identity: [{
+        send_as_id: 101,
+        items: [{
+          module_key: 'deep_retreat',
+          label: '深度闭关',
+          semiauto_ready: false,
+          one_click_ready: true,
+          summary: { text: '进行中' },
+          suggestion: {
+            preset_key: 'deep_retreat',
+            automation_level: 'manual',
+            payload_defaults: { preset_key: 'deep_retreat', command: '.深度闭关', interval_sec: 28800 },
+          },
+          warnings: [{ code: 'phaseful', message: '阶段型状态需要人工确认', severity: 'warn' }],
+        }],
+      }],
+    };
+    window.MiniwebState.state.schedulePresets = presets;
+    window.MiniwebState.state.scheduleModules = modulesPayload;
+    window.MiniwebApi.fetchJson.mockImplementation((url) => {
+      if (String(url).startsWith('/api/schedule/bootstrap')) {
+        return Promise.resolve({ ok: true, presets, templates: [], ...modulesPayload });
+      }
+      return Promise.resolve({ ok: true, batches: [] });
+    });
+    window.MiniwebModal.openModal.mockImplementation(({ title, body, footer }) => {
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-dialog';
+      dialog.innerHTML = `
+        <div class="modal-head"><h3>${title || ''}</h3></div>
+        <div class="modal-body">${body || ''}</div>
+        <div class="modal-foot">${footer || ''}</div>
+      `;
+      document.body.appendChild(dialog);
+      return dialog;
+    });
+
+    await schedule.openScheduleModuleQuickModal(
+      { state: window.MiniwebState.state },
+      { sendAsId: 101, moduleKey: 'deep_retreat', presetKey: 'deep_retreat' }
+    );
+
+    const dialog = document.querySelector('.schedule-quick-dialog');
+    expect(dialog).not.toBeNull();
+    expect(dialog.querySelector('[data-schedule-quick-preview]')).not.toBeNull();
+    expect(dialog.querySelector('[data-schedule-quick-create]')).toBeNull();
+    expect(dialog.querySelector('[data-schedule-quick-advanced]')).not.toBeNull();
+    expect(dialog.textContent).toContain('需确认');
+  });
+
+  test('opening schedule modal from module preselects that module', async () => {
+    const schedule = window.MiniwebViews.schedule;
+    window.MiniwebState.state.identities = [{ send_as_id: 101, label: 'Wise', enabled: true }];
+    window.MiniwebState.state.activeIdentityId = 101;
+    window.MiniwebState.state.scheduleSelectedSendAsIds = [101];
+    const presets = [
+      {
+        key: 'custom',
+        label: '自定义',
+        description: '自定义多命令',
+        fields: ['command', 'interval_sec', 'count', 'command_gap_sec'],
+        module_key: '',
+        ui: { category: 'custom', shape: 'custom', automation: 'manual', tags: ['联动'] },
+      },
+      {
+        key: 'checkin',
+        label: '点卯',
+        description: '每日点卯',
+        fields: ['horizon_days'],
+        module_key: 'checkin',
+        ui: { category: 'daily', shape: 'daily', automation: 'renewable', tags: ['常用'] },
+      },
+    ];
+    const modulesPayload = {
+      modules: [{ key: 'checkin', label: '点卯', suggestion: {} }],
+      by_identity: [{
+        send_as_id: 101,
+        items: [{
+          module_key: 'checkin',
+          label: '点卯',
+          semiauto_ready: true,
+          summary: { text: '今晚可排' },
+          suggestion: {
+            preset_key: 'checkin',
+            automation_level: 'semiauto',
+            payload_defaults: { preset_key: 'checkin', command: '.宗门点卯', interval_sec: 86400 },
+          },
+          warnings: [],
+        }],
+      }],
+    };
+    window.MiniwebApi.fetchJson.mockImplementation((url) => {
+      if (String(url).startsWith('/api/schedule/bootstrap')) {
+        return Promise.resolve({ ok: true, presets, templates: [], ...modulesPayload });
+      }
+      if (url === '/api/schedule/renew') {
+        return Promise.resolve({ ok: true, profiles: [], allowed_presets: [], worker: null });
+      }
+      return Promise.resolve({ ok: true, batches: [] });
+    });
+    window.MiniwebModal.openModal.mockImplementation(({ title, body }) => {
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-dialog';
+      dialog.innerHTML = `
+        <div class="modal-head"><h3>${title || ''}</h3></div>
+        <div class="modal-body">${body || ''}</div>
+      `;
+      document.body.appendChild(dialog);
+      return dialog;
+    });
+
+    await schedule.openScheduleModal(
+      { state: window.MiniwebState.state },
+      { sendAsId: 101, moduleKey: 'checkin', mode: 'state' }
+    );
+
+    const dialog = document.querySelector('.schedule-modal-dialog');
+    expect(dialog).not.toBeNull();
+    expect(dialog.querySelector('[name="preset_key"]').value).toBe('checkin');
+    expect(dialog.querySelector('#scheduleStateModuleSelect').value).toBe('checkin');
+    expect(dialog.querySelector('[name="auto_anchor"]').checked).toBe(true);
+    expect(dialog.querySelector('[data-schedule-plan-panel="state"]').hidden).toBe(false);
+    expect(dialog.querySelector('#scheduleStatus').textContent).toBe('已套用方案: 点卯');
+  });
+
   test('schedule workbench custom examples fill multi-command group', () => {
     const schedule = window.MiniwebViews.schedule;
     const dialog = buildDialog();

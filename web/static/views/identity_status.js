@@ -267,6 +267,11 @@
         `;
       })
       .join("");
+    const scheduleButton = `
+      <button type="button" data-status-schedule-module="${escapeAttr(spec.key)}">
+        定时
+      </button>
+    `;
     const excerpt = String(item?.state?.last_text_excerpt || "").trim();
     return `
       <article class="identity-status-card ${escapeAttr(view.cls)}" data-status-module="${escapeAttr(spec.key)}">
@@ -283,7 +288,7 @@
         </div>
         ${excerpt ? `<p>${escapeHtml(clipGraphemes(excerpt.replace(/\s+/g, " "), 82))}</p>` : '<p class="muted">暂无最近文案。</p>'}
         ${renderIdentityObservationLine(deps, spec, item)}
-        ${actionButtons ? `<div class="identity-status-actions">${actionButtons}</div>` : ""}
+        <div class="identity-status-actions">${scheduleButton}${actionButtons}</div>
       </article>
     `;
   }
@@ -434,6 +439,26 @@
   function bindIdentityStatusBody(deps = {}, dialog) {
     dialog.querySelectorAll("[data-status-skill]").forEach((button) => {
       button.addEventListener("click", () => deps.fillSkillIntoComposer?.(button.dataset.statusSkill, button));
+    });
+    dialog.querySelectorAll("[data-status-schedule-module]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const moduleKey = String(button.dataset.statusScheduleModule || "").trim();
+        const sendAsId = Number(identityStatusState(deps).activeIdentityId || 0);
+        if (!moduleKey) return;
+        try {
+          await Promise.all([
+            deps.loadAccounts?.() || Promise.resolve(),
+            deps.loadIdentities?.() || Promise.resolve(),
+          ]);
+          if (typeof deps.openScheduleModuleQuickModal === "function") {
+            await deps.openScheduleModuleQuickModal({ sendAsId, moduleKey });
+          } else {
+            await deps.openScheduleModal?.({ sendAsId, moduleKey, mode: "state" });
+          }
+        } catch (error) {
+          deps.showSkillToast?.(`打开定时失败: ${error.message || error}`, "err");
+        }
+      });
     });
     dialog.querySelectorAll("[data-identity-source-jump]").forEach((button) => {
       button.addEventListener("click", async () => {
