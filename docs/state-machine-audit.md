@@ -88,7 +88,7 @@ do not prove success.
 | --- | --- |
 | State source | Stored message cards remain in SQLite and summary state, but the live page no longer renders the interactive chat stream. |
 | Trigger | `CHAT_FEATURE_ENABLED = false` prevents chat list initialization, direct message polling, reply jumps, and composer-fill interactions from opening chat UI. |
-| Refresh path | `web/static/app.js` clears local chat state without polling `/api/messages` while `CHAT_FEATURE_ENABLED` is false, and `pollTick` only queues chat refresh work when that flag is enabled. Status boards use their own bounded snapshot loaders. `web/static/views/chat_stream.js` remains dormant compatibility code. The leader intelligence modal is isolated in `web/static/views/leader_intel.js`, with leader-message loading injected from `web/static/app.js`. The message logs modal is isolated in `web/static/views/logs.js`, with message paging/export APIs injected from `web/static/app.js`. |
+| Refresh path | `web/static/app.js` clears local chat state without polling `/api/messages` while `CHAT_FEATURE_ENABLED` is false, and `pollTick` only queues chat refresh work when that flag is enabled. Status boards use their own bounded snapshot loaders. `web/static/views/chat_stream.js` remains dormant compatibility code, but `web/index.html` no longer loads it and `web/static/app.js` no longer binds to `MiniwebViews.chatStream`. The leader intelligence modal is isolated in `web/static/views/leader_intel.js`, with leader-message loading injected from `web/static/app.js`. The message logs modal is isolated in `web/static/views/logs.js`, with message paging/export APIs injected from `web/static/app.js`. |
 | Failure/manual fallback | Chat jumps show a removed-feature notice and the user should use the records modal for raw message inspection. The leader-intel and logs modules are read-only; logs export only triggers a browser download from an injected response. |
 | Current gap | Classification quality still depends on observed bad samples and backend channel tags, so uncertain data should stay available in records rather than being aggressively hidden from storage. |
 | Next action | Keep message-flow fixes in parser/filter fixtures and restore the UI only from `backup/chat-ui-before-removal-20260621` if it is needed again. |
@@ -98,8 +98,8 @@ do not prove success.
 | Field | Current contract |
 | --- | --- |
 | State source | The active identity and skill catalog still feed status panels, but the live page no longer exposes a direct-send composer. |
-| Trigger | Composer DOM entrypoints are absent from `web/index.html`; `web/static/app.js` blocks fill/send helpers while `CHAT_FEATURE_ENABLED` is false. |
-| Refresh path | `web/static/views/direct_composer.js` remains dormant compatibility code for restoration, but it is not bound on the live page. |
+| Trigger | Composer DOM entrypoints are absent from `web/index.html`; `web/static/app.js` blocks fill helpers and no longer keeps direct-send session state. |
+| Refresh path | `web/static/views/direct_composer.js` remains dormant compatibility code for restoration, but `web/index.html` no longer loads or binds it on the live page, and `web/static/app.js` no longer contains the direct composer `/api/skills/send` submission implementation. |
 | Failure/manual fallback | Manual sending through the chat composer is removed. Operators should use outbox drafts, official schedule workflows, or log-command draft intents instead of direct composer sends. |
 | Current gap | Some action buttons still surface historical action labels; clicking them now returns a removed-feature notice rather than filling a composer. |
 | Next action | Convert any still-useful action button into an outbox draft flow before reintroducing direct sending. |
@@ -121,7 +121,7 @@ do not prove success.
 | --- | --- |
 | State source | The selected message card, current detail mode, focus archive settings, and the draft notice map. |
 | Trigger | Live chat selection and overview detail openings are blocked while `CHAT_FEATURE_ENABLED` is false; the old detail panel code is kept only for restoration. |
-| Refresh path | The message detail panel and manual action controls are isolated in `web/static/views/detail_panel.js`; the focus archive rule modal is isolated in `web/static/views/focus_archive.js`, with `/api/focus-exclude/preview` injected from `web/static/app.js`; the filter settings modal is isolated in `web/static/views/filter_settings.js`, with diagnostics and focus-exclude preview APIs injected from `web/static/app.js`. |
+| Refresh path | The old message detail panel and manual action controls remain in `web/static/views/detail_panel.js` as dormant compatibility code, but `web/index.html` no longer loads it and `web/static/app.js` no longer keeps a runtime `detailPanel` view binding. The focus archive rule modal is isolated in `web/static/views/focus_archive.js`, with `/api/focus-exclude/preview` injected from `web/static/app.js`; the filter settings modal is isolated in `web/static/views/filter_settings.js`, with diagnostics and focus-exclude preview APIs injected from `web/static/app.js`. |
 | Failure/manual fallback | Detail panel actions no longer fill a live composer; the detail, focus-archive, and filter-settings modules do not call send APIs or create direct API requests. |
 | Current gap | Some dormant detail action labels still reference historical composer behavior and should be converted to outbox draft flows before any restore. |
 | Next action | Keep new detail actions dependency-injected and restore the panel only from `backup/chat-ui-before-removal-20260621` if the product direction changes. |

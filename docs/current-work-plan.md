@@ -16,9 +16,11 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
    - Current state: `web/static/app.js` disables chat initialization through
      `CHAT_FEATURE_ENABLED = false`; the disabled chat refresh path clears local
      chat state without polling `/api/messages`, and `pollTick` only queues chat
-     refresh work when the feature flag is enabled. The old view modules remain
-     in the tree as dormant compatibility code, but the DOM entrypoints are gone
-     from `web/index.html`.
+     refresh work when the feature flag is enabled. The old chat stream, direct
+     composer, and detail-panel view modules remain in the tree as dormant
+     compatibility code, but their live script tags and DOM entrypoints are gone
+     from `web/index.html`; `web/static/app.js` no longer keeps runtime view
+     bindings or the direct composer send implementation for them.
 
 2. Message classification regression suite
    - Player plain messages that should stay in focus remain visible.
@@ -119,9 +121,13 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      from `web/static/app.js`. The official schedule rail and modal
      live in `web/static/views/schedule.js`. The old chat stream,
      direct composer, and message-detail modules remain in the source tree only
-     as dormant compatibility code while `CHAT_FEATURE_ENABLED` is false; the
-     live UI no longer renders the chat stream, message detail pane, or
-     direct-send composer. Detail rich cards and field formatting remain in
+     as dormant compatibility code while `CHAT_FEATURE_ENABLED` is false, and
+     `web/index.html` no longer loads `web/static/views/chat_stream.js`,
+     `web/static/views/direct_composer.js`, or
+     `web/static/views/detail_panel.js`; the live UI no longer renders the chat
+     stream, message detail pane, or direct-send composer, and `web/static/app.js`
+     no longer keeps runtime bindings to those dormant view modules or a direct
+     composer send implementation. Detail rich cards and field formatting remain in
      `web/static/views/detail_cards.js` for compatibility with a future restore;
      the focus archive rule modal lives in
      `web/static/views/focus_archive.js` with preview API injected from

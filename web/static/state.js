@@ -65,12 +65,6 @@
     skillGroups: [],
     skillBarTab: "日常",
     skillBarBusyKeys: new Set(),
-    directSendIdentityId: null,
-    directSendLastActiveId: null,
-    directSendReply: null,
-    directSendSending: false,
-    directSendLastKey: "",
-    directSendLastAt: 0,
   };
 
   window.MiniwebState = { state };

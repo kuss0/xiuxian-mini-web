@@ -71,17 +71,24 @@ def test_static_modules_are_loaded_and_cache_busted():
     root = Path(__file__).resolve().parents[1]
     html = (root / "web" / "index.html").read_text(encoding="utf-8")
     loaded_assets = re.findall(r'(?:src|href)="/static/([^"?]+)"', html)
+    dormant_view_assets = {
+        "views/chat_stream.js",
+        "views/detail_panel.js",
+        "views/direct_composer.js",
+    }
     view_assets = {
         f"views/{path.name}"
         for path in (root / "web" / "static" / "views").glob("*.js")
     }
+    active_view_assets = view_assets - dormant_view_assets
 
     missing_assets = [
         asset for asset in loaded_assets
         if not (root / "web" / "static" / asset).is_file()
     ]
     assert missing_assets == []
-    assert view_assets <= set(loaded_assets)
+    assert active_view_assets <= set(loaded_assets)
+    assert dormant_view_assets.isdisjoint(set(loaded_assets))
     assert "styles/base/reset.css" in loaded_assets
     assert "chat-layout.css" in loaded_assets
     assert loaded_assets.index("styles/base/reset.css") < loaded_assets.index("chat-layout.css")
@@ -115,13 +122,17 @@ def test_frontend_bootstrap_loads_registered_views_before_app():
     ]:
         assert scripts.index(required) < scripts.index("app.js")
 
-    view_files = sorted((web_dir / "static" / "views").glob("*.js"))
+    dormant_view_names = {"chat_stream.js", "detail_panel.js", "direct_composer.js"}
+    view_files = sorted(
+        path for path in (web_dir / "static" / "views").glob("*.js")
+        if path.name not in dormant_view_names
+    )
     loaded_views = [script for script in scripts if script.startswith("views/")]
     assert sorted(loaded_views) == [f"views/{path.name}" for path in view_files]
     assert all(scripts.index(view) < scripts.index("app.js") for view in loaded_views)
 
     registered_views = set()
-    for path in view_files:
+    for path in (web_dir / "static" / "views").glob("*.js"):
         content = path.read_text(encoding="utf-8")
         registered_views.update(re.findall(r"window\.MiniwebViews\.([A-Za-z0-9_]+)\s*=", content))
     app_view_refs = set(re.findall(r"window\.MiniwebViews\.([A-Za-z0-9_]+)\b", app_js))
@@ -160,6 +171,10 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "CHAT_FEATURE_ENABLED = false" in normalized_work_plan
     assert "disabled chat refresh path clears local chat state without polling `/api/messages`" in normalized_work_plan
     assert "pollTick` only queues chat refresh work when the feature flag is enabled" in normalized_work_plan
+    assert "live script tags and DOM entrypoints are gone from `web/index.html`" in normalized_work_plan
+    assert "`web/static/app.js` no longer keeps runtime view bindings or the direct composer send implementation" in normalized_work_plan
+    assert "`web/index.html` no longer loads `web/static/views/chat_stream.js`, `web/static/views/direct_composer.js`, or `web/static/views/detail_panel.js`" in normalized_work_plan
+    assert "`web/static/app.js` no longer keeps runtime bindings to those dormant view modules or a direct composer send implementation" in normalized_work_plan
     assert "live UI no longer renders the chat stream, message detail pane, or direct-send composer" in normalized_work_plan
     assert "message logs modal lives in `web/static/views/logs.js` with message paging/export APIs injected from `web/static/app.js`" in normalized_work_plan
     assert "notification settings modal lives in `web/static/views/notify.js` with card-title/settings/test APIs injected from `web/static/app.js`" in normalized_work_plan
@@ -191,7 +206,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "CHAT_FEATURE_ENABLED = false" in audit
     assert "clears local chat state without polling `/api/messages`" in audit
     assert "pollTick` only queues chat refresh work when that flag is enabled" in audit
-    assert "web/static/views/chat_stream.js` remains dormant compatibility code" in audit
+    assert "web/static/views/chat_stream.js` remains dormant compatibility code, but `web/index.html` no longer loads it and `web/static/app.js` no longer binds to `MiniwebViews.chatStream`" in audit
     assert "leader intelligence modal is isolated in `web/static/views/leader_intel.js`, with leader-message loading injected from `web/static/app.js`" in audit
     assert "message logs modal is isolated in `web/static/views/logs.js`, with message paging/export APIs injected from `web/static/app.js`" in audit
     assert "Chat jumps show a removed-feature notice" in audit
@@ -201,7 +216,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "Detail rich cards and field formatting are isolated in `web/static/views/detail_cards.js`" in audit
     assert "Detail cards are read-only renderers" in audit
     assert "Detail Panel (Dormant With Chat UI)" in audit
-    assert "message detail panel and manual action controls are isolated in `web/static/views/detail_panel.js`" in audit
+    assert "web/static/app.js` no longer contains the direct composer `/api/skills/send` submission implementation" in audit
+    assert "old message detail panel and manual action controls remain in `web/static/views/detail_panel.js` as dormant compatibility code, but `web/index.html` no longer loads it and `web/static/app.js` no longer keeps a runtime `detailPanel` view binding" in audit
     assert "focus archive rule modal is isolated in `web/static/views/focus_archive.js`, with `/api/focus-exclude/preview` injected from `web/static/app.js`" in audit
     assert "filter settings modal is isolated in `web/static/views/filter_settings.js`, with diagnostics and focus-exclude preview APIs injected from `web/static/app.js`" in audit
     assert "Detail panel actions no longer fill a live composer" in audit
@@ -767,72 +783,28 @@ def test_game_cockpit_view_module_keeps_wrappers_and_panel_action_contract():
         assert fragment not in game_cockpit_js
 
 
-def test_chat_stream_view_module_keeps_wrappers_scroll_and_manual_action_contract():
+def test_chat_stream_view_module_is_dormant_source_only_contract():
     root = Path(__file__).resolve().parents[1]
+    html = (root / "web" / "index.html").read_text(encoding="utf-8")
     app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
     state_js = (root / "web" / "static" / "state.js").read_text(encoding="utf-8")
     chat_stream_js = (root / "web" / "static" / "views" / "chat_stream.js").read_text(encoding="utf-8")
+    scripts = re.findall(r'<script src="/static/([^"?]+)"', html)
 
     required_app_fragments = [
-        "function chatStreamDeps()",
-        "channelFilters,",
-        "quickFilters,",
-        "selectAllChannels,",
-        "applyChannelSelection,",
-        "summarySignalMessages,",
-        "showSkillToast,",
-        "function chatStreamView()",
+        "const CHAT_FEATURE_ENABLED = false;",
         "function visibleMessages()",
-        "return chatStreamView().visibleMessages(chatStreamDeps())",
+        "return [];",
         "function renderChannelFilters()",
-        "return chatStreamView().renderChannelFilters(chatStreamDeps())",
-        "function orderedChannelsForConversationList(latestByChannel = null)",
-        "return chatStreamView().orderedChannelsForConversationList(chatStreamDeps(), latestByChannel)",
-        "function channelTooltip(channel, latest)",
-        "return chatStreamView().channelTooltip(chatStreamDeps(), channel, latest)",
-        "function latestMessagesByChannel()",
-        "return chatStreamView().latestMessagesByChannel(chatStreamDeps())",
-        "function latestMessageForChannel(channelKey)",
-        "return chatStreamView().latestMessageForChannel(chatStreamDeps(), channelKey)",
-        "function channelPreviewText(message, channel)",
-        "return chatStreamView().channelPreviewText(channel, message)",
-        "function channelIcon(key, label)",
-        "return chatStreamView().channelIcon(key, label)",
-        "function quickFilterIsAll()",
-        "return chatStreamView().quickFilterIsAll(chatStreamDeps())",
-        "function quickFilterActiveKey()",
-        "return chatStreamView().quickFilterActiveKey(chatStreamDeps())",
-        "function renderQuickFilters()",
-        "return chatStreamView().renderQuickFilters(chatStreamDeps())",
+        "return;",
         "async function applyQuickFilter(key)",
-        "return chatStreamView().applyQuickFilter(chatStreamDeps(), key)",
-        "function activeQuickFilterKeyForSelection()",
-        "return chatStreamView().activeQuickFilterKeyForSelection(chatStreamDeps())",
-        "function quickFilterKnownChannels(preset)",
-        "return chatStreamView().quickFilterKnownChannels(chatStreamDeps(), preset)",
-        "function quickFilterCount(preset, counts)",
-        "return chatStreamView().quickFilterCount(chatStreamDeps(), preset, counts)",
-        "function channelMessageCounts()",
-        "return chatStreamView().channelMessageCounts(chatStreamDeps())",
+        "void key;",
+        "return { changed: false, count: 0 };",
         "function renderMessages()",
-        "return chatStreamView().renderMessages(chatStreamDeps())",
-        "function captureMessageScrollSnapshot()",
-        "return chatStreamView().captureMessageScrollSnapshot(chatStreamDeps())",
-        "function restoreMessageScrollSnapshot(snapshot)",
-        "return chatStreamView().restoreMessageScrollSnapshot(chatStreamDeps(), snapshot)",
-        "const wasNearLatest = !incremental || isMessageListNearLatest()",
-        "state.chatUnreadCount = wasNearLatest ? 0 : Math.min(999, Number(state.chatUnreadCount || 0) + unseenIncomingCount)",
-        "if (incremental && !wasNearLatest) {",
-        "deferMessageRenderUntilLatest();",
-        "function flushDeferredMessageRender({ toLatest = false, behavior = \"auto\" } = {})",
-        "state.messageRenderDeferred = false;",
+        "function displaySource(source)",
+        "function formatChatTime(value)",
         "function quickActionLabel(action)",
-        "return chatStreamView().quickActionLabel(action)",
-        "async function handleChatQuickAction(message, index, button)",
-        "return chatStreamView().handleChatQuickAction(chatStreamDeps(), message, index, button)",
         "function messageKind(message)",
-        "return chatStreamView().messageKind(chatStreamDeps(), message)",
-        "fillDirectSendComposer,",
     ]
     required_module_fragments = [
         "// MINIWEB-VIEW: chat message stream, channel filters, scroll anchoring, and quick actions",
@@ -896,7 +868,12 @@ def test_chat_stream_view_module_keeps_wrappers_scroll_and_manual_action_contrac
     ]
     forbidden_app_fragments = [
         "const QUICK_FILTER_PRESETS = [",
+        "return chatStreamView().",
+        "chatStreamView()",
+        "chatStreamDeps()",
+        "window.MiniwebViews.chatStream",
     ]
+    assert "views/chat_stream.js" not in scripts
     for fragment in required_app_fragments:
         assert fragment in app_js
     assert "chatUnreadCount: 0," in state_js
@@ -909,7 +886,7 @@ def test_chat_stream_view_module_keeps_wrappers_scroll_and_manual_action_contrac
         assert fragment not in app_js
 
 
-def test_direct_composer_view_module_keeps_wrappers_and_explicit_send_contract():
+def test_direct_composer_view_module_is_dormant_source_only_contract():
     root = Path(__file__).resolve().parents[1]
     html = (root / "web" / "index.html").read_text(encoding="utf-8")
     app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
@@ -917,24 +894,18 @@ def test_direct_composer_view_module_keeps_wrappers_and_explicit_send_contract()
     scripts = re.findall(r'<script src="/static/([^"?]+)"', html)
 
     required_app_fragments = [
-        "function directComposerDeps()",
-        "function directComposerView()",
-        "return window.MiniwebViews.directComposer",
+        "const CHAT_FEATURE_ENABLED = false;",
+        "function manualMessagePreview(message)",
+        "function directReplyContextFromAction(action, fallbackMessage = null)",
         "function fillDirectSendComposer(command, opts = {})",
-        "return directComposerView().fillDirectSendComposer(directComposerDeps(), command, opts)",
+        "void command;",
+        "void opts;",
+        'showSkillToast("聊天发送栏已移除,请改用草稿箱或官方定时。", "warn");',
         "function renderDirectSendComposer()",
-        "return directComposerView().renderDirectSendComposer(directComposerDeps())",
-        "function renderQuickActionHotbar()",
-        "return directComposerView().renderQuickActionHotbar(directComposerDeps())",
-        "function tickSkillBarChips()",
-        "return directComposerView().tickSkillBarChips(directComposerDeps())",
-        "renderSkillViews,",
-        "directComposerView().bindDirectComposer(directComposerDeps());",
-        "async function sendDirectComposerMessage()",
-        "if (state.directSendSending)",
-        "state.directSendSending = true;",
-        "state.directSendLastKey = sendKey;",
-        'postJson("/api/skills/send", payload)',
+        "function fillSkillIntoComposer(skillKey, button = null)",
+        "void skillKey;",
+        "void button;",
+        'showSkillToast("聊天发送栏已移除,快捷指令不再直接填入。", "warn");',
     ]
     required_module_fragments = [
         "// MINIWEB-VIEW: direct composer, emoji palette, and quick command hotbar",
@@ -965,9 +936,20 @@ def test_direct_composer_view_module_keeps_wrappers_and_explicit_send_contract()
         'const chips = document.querySelectorAll(".skill-chip")',
         'chip.classList.contains("hotbar-skill") ? fmtCountdown(remaining)',
         "let anyExpired = false;",
+        "return directComposerView().",
+        "directComposerView()",
+        "directComposerDeps()",
+        "sendDirectComposerMessage",
+        'postJson("/api/skills/send", payload)',
+        "state.directSendSending",
+        "state.directSendLastKey",
+        "directSendIdentityId",
+        "directSendReply",
+        "const HOTBAR_ROWS = directComposerView().HOTBAR_ROWS;",
+        "const HOTBAR_VISIBLE_SLOTS = directComposerView().HOTBAR_VISIBLE_SLOTS;",
     ]
 
-    assert scripts.index("views/direct_composer.js") < scripts.index("app.js")
+    assert "views/direct_composer.js" not in scripts
     for fragment in required_app_fragments:
         assert fragment in app_js
     for fragment in required_module_fragments:
@@ -1645,26 +1627,23 @@ def test_leader_intel_view_module_keeps_message_api_in_app():
         assert fragment not in leader_intel_js
 
 
-def test_detail_panel_view_module_keeps_wrappers_and_manual_action_contract():
+def test_detail_panel_view_module_is_dormant_source_only_contract():
     root = Path(__file__).resolve().parents[1]
+    html = (root / "web" / "index.html").read_text(encoding="utf-8")
     app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
     detail_panel_js = (root / "web" / "static" / "views" / "detail_panel.js").read_text(encoding="utf-8")
+    scripts = re.findall(r'<script src="/static/([^"?]+)"', html)
 
     required_app_fragments = [
-        "function detailPanelDeps()",
-        "function detailPanelView()",
+        "const CHAT_FEATURE_ENABLED = false;",
         "async function renderDetail()",
-        "return detailPanelView().renderDetail(detailPanelDeps())",
+        "return;",
         "function renderFocusInsight(message)",
-        "return detailPanelView().renderFocusInsight(detailPanelDeps(), message)",
+        "return \"\";",
         "function renderDetailActions(message)",
-        "return detailPanelView().renderDetailActions(detailPanelDeps(), message)",
+        "return \"\";",
         "function bindDetailActions(message)",
-        "return detailPanelView().bindDetailActions(detailPanelDeps(), message)",
-        "fillDirectSendComposer,",
-        "createOutboxDraft,",
-        "planOutboxAction,",
-        "renderOutboxPlan,",
+        "return;",
     ]
     required_module_fragments = [
         "// MINIWEB-VIEW: message detail panel and manual action controls",
@@ -1690,6 +1669,10 @@ def test_detail_panel_view_module_keeps_wrappers_and_manual_action_contract():
         "async function renderDetail() {\n  if (state.detailMode === \"overview\")",
         "function renderFocusInsight(message) {\n  const reasons = focusReasonList(message);",
         "function bindDetailActions(message) {\n  const actions = message.actions || [];",
+        "return detailPanelView().",
+        "detailPanelView()",
+        "detailPanelDeps()",
+        "setDirectSendReplyFromMessage",
     ]
     forbidden_module_fragments = [
         "postJson(",
@@ -1699,6 +1682,7 @@ def test_detail_panel_view_module_keeps_wrappers_and_manual_action_contract():
         '"/api/outbox/drafts"',
         '"/api/settings"',
     ]
+    assert "views/detail_panel.js" not in scripts
     for fragment in required_app_fragments:
         assert fragment in app_js
     for fragment in required_module_fragments:
@@ -1961,8 +1945,16 @@ def test_chat_surface_removed_and_schedule_workbench_layout_contract():
     assert "state.channelSummaryMessages = [];" in app_js
     assert "return { changed: false, count: 0 };" in app_js
     assert "if (CHAT_FEATURE_ENABLED) {\n      tasks.push(refreshChatViewport({ incremental: true }).then((result) => {" in app_js
-    assert "if (CHAT_FEATURE_ENABLED) {\n  directComposerView().bindDirectComposer(directComposerDeps());\n}" in app_js
-    assert 'showSkillToast("聊天发送栏已移除。", "warn");' in app_js
+    assert "directSendIdentityId" not in state_js
+    assert "directSendSending" not in state_js
+    scripts = re.findall(r'<script src="/static/([^"?]+)"', html)
+    assert "views/chat_stream.js" not in scripts
+    assert "views/direct_composer.js" not in scripts
+    assert "views/detail_panel.js" not in scripts
+    assert "directComposerView" not in app_js
+    assert "directComposerDeps" not in app_js
+    assert "sendDirectComposerMessage" not in app_js
+    assert 'postJson("/api/skills/send", payload)' not in app_js
     assert 'showSkillToast("聊天视图已移除,请从记录面板检索原消息。", "warn");' in app_js
     assert 'const activeIdentityQuickSelect = document.querySelector("#activeIdentityQuickSelect");' in app_js
     assert "function renderActiveIdentityDock()" in app_js

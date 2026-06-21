@@ -7,7 +7,6 @@ const {
   ACCOUNT_POLL_INTERVAL_MS,
   BOT_DISCOVERY_POLL_INTERVAL_MS,
   CHANNEL_SUMMARY_LIMIT,
-  EMOJI_PALETTE,
   HEALTH_POLL_INTERVAL_MS,
   IDENTITY_STATE_POLL_INTERVAL_MS,
   MESSAGE_PREVIEW_CHAR_LIMIT,
@@ -24,6 +23,9 @@ const {
   escapeAttr,
   escapeHtml,
   firstGrapheme,
+  displayDayIndex,
+  displayTimeParts,
+  formatDisplayClockTime,
   formatDisplayMonthDayTime,
   formatNumber,
 } = window.MiniwebFormat;
@@ -44,20 +46,6 @@ const closeDetailButton = document.querySelector("#closeDetailButton");
 const identitySnapshot = document.querySelector("#identitySnapshot");
 const refreshButton = document.querySelector("#refreshButton");
 const healthButton = document.querySelector("#healthButton");
-const directSendComposer = document.querySelector("#directSendComposer");
-const directSendIdentityLine = document.querySelector("#directSendIdentityLine");
-const directSendIdentitySelect = document.querySelector("#directSendIdentitySelect");
-const directSendInput = document.querySelector("#directSendInput");
-const directSendSubmit = document.querySelector("#directSendSubmit");
-const directSendStatus = document.querySelector("#directSendStatus");
-const directSendReplyContext = document.querySelector("#directSendReplyContext");
-const directSendSelectionContext = document.querySelector("#directSendSelectionContext");
-const directSendActionHints = document.querySelector("#directSendActionHints");
-const emojiPickerButton = document.querySelector("#emojiPickerButton");
-const directSendEmojiPalette = document.querySelector("#directSendEmojiPalette");
-const directSendSkillPanel = document.querySelector("#directSendSkillPanel");
-const openSkillMenuButton = document.querySelector("#openSkillMenuButton");
-const openCultivationButton = document.querySelector("#openCultivationButton");
 const outboxButton = document.querySelector("#outboxButton");
 const scheduleButton = document.querySelector("#scheduleButton");
 const scheduleRail = document.querySelector("#scheduleRail");
@@ -90,7 +78,6 @@ const worldEventStrip = document.querySelector("#worldEventStrip");
 const gameSceneBoard = document.querySelector("#gameSceneBoard");
 const questTracker = document.querySelector("#questTracker");
 const gameActionDock = document.querySelector("#gameActionDock");
-const quickActionHotbar = document.querySelector("#quickActionHotbar");
 const sidebarIdentityList = document.querySelector("#identityList");
 const currentAccountLine = document.querySelector("#currentAccountLine");
 const activeIdentityDock = document.querySelector("#activeIdentityDock");
@@ -910,84 +897,33 @@ function bindIdentityStatusBody(dialog) {
   return identityStatusView().bindIdentityStatusBody(identityStatusDeps(), dialog);
 }
 
-function directComposerDeps() {
-  return {
-    state,
-    elements: {
-      directSendComposer,
-      directSendIdentityLine,
-      directSendIdentitySelect,
-      directSendInput,
-      directSendSubmit,
-      directSendStatus,
-      directSendReplyContext,
-      directSendSelectionContext,
-      directSendActionHints,
-      emojiPickerButton,
-      directSendEmojiPalette,
-      directSendSkillPanel,
-      openSkillMenuButton,
-      openCultivationButton,
-      quickActionHotbar,
-      skillBarTabs,
-      skillBarChips,
-      skillBarIdentity,
-    },
-    modalRoot,
-    selectedVisibleMessage,
-    channelLabel,
-    messageKind,
-    displaySource,
-    formatChatTime,
-    quickActionLabel,
-    quickActionNeedsManualReview,
-    copyCommandToClipboard,
-    setWorkspacePanelOpen,
-    renderMessages,
-    showSkillToast,
-    identityById,
-    identityCanSend,
-    identityOptionLabel,
-    skillIsUnlocked,
-    currentIdentitySect,
-    fmtCountdown,
-    renderSkillViews,
-    openModal,
-    showError,
-    loadAccounts,
-    loadIdentities,
-    loadSkills,
-    openCultivationModal,
-    sendComposerMessage: sendDirectComposerMessage,
-  };
-}
-
-function directComposerView() {
-  return window.MiniwebViews.directComposer;
-}
-
 function manualMessagePreview(message) {
-  return directComposerView().manualMessagePreview(directComposerDeps(), message);
-}
-
-function directReplyContextFromMessage(message) {
-  return directComposerView().directReplyContextFromMessage(directComposerDeps(), message);
+  if (!message) return "";
+  const raw = String(message.raw || message.summary || message.title || "").trim();
+  const compact = clipGraphemes(raw.replace(/\s+/g, " "), 120);
+  const source = displaySource(message.source);
+  const msgId = message.msg_id ? `#${message.msg_id}` : message.id || "";
+  return `${source} ${msgId}${compact ? `: ${compact}` : ""}`;
 }
 
 function directReplyContextFromAction(action, fallbackMessage = null) {
-  return directComposerView().directReplyContextFromAction(directComposerDeps(), action, fallbackMessage);
-}
-
-function setDirectSendReply(replyContext) {
-  return directComposerView().setDirectSendReply(directComposerDeps(), replyContext);
-}
-
-function clearDirectSendReply() {
-  return directComposerView().clearDirectSendReply(directComposerDeps());
-}
-
-function renderDirectSendReplyContext() {
-  return directComposerView().renderDirectSendReplyContext(directComposerDeps());
+  if (!action) return null;
+  const chatId = Number(action.chat_id || fallbackMessage?.chat_id || 0);
+  const replyToMsgId = Number(action.reply_to_msg_id || 0);
+  if (!chatId || !replyToMsgId) return null;
+  const parent =
+    (state.messages || []).find((message) =>
+      Number(message.chat_id || 0) === chatId &&
+      Number(message.msg_id || 0) === replyToMsgId
+    ) || fallbackMessage;
+  return {
+    messageId: parent?.id || `tg:${chatId}:${replyToMsgId}`,
+    chatId,
+    replyToMsgId,
+    topMsgId: Number(action.top_msg_id || parent?.top_msg_id || 0) || null,
+    source: parent ? displaySource(parent.source) : "Telegram 消息",
+    preview: parent ? manualMessagePreview(parent) : `回复消息 #${replyToMsgId}`,
+  };
 }
 
 function setWorkspaceSelectedMessage(message, { rerenderList = true } = {}) {
@@ -1060,32 +996,10 @@ function openOverviewDetailPanel() {
   renderDetail().catch((error) => console.warn("[mini-web] render overview detail failed:", error));
 }
 
-function renderDirectSendSelectionContext() {
-  return directComposerView().renderDirectSendSelectionContext(directComposerDeps());
-}
-
-function renderDirectSendActionHints() {
-  return directComposerView().renderDirectSendActionHints(directComposerDeps());
-}
-
 function fillDirectSendComposer(command, opts = {}) {
-  if (!CHAT_FEATURE_ENABLED) {
-    showSkillToast("聊天发送栏已移除,请改用草稿箱或官方定时。", "warn");
-    return;
-  }
-  return directComposerView().fillDirectSendComposer(directComposerDeps(), command, opts);
-}
-
-function resizeDirectSendInput() {
-  return directComposerView().resizeDirectSendInput(directComposerDeps());
-}
-
-function focusDirectSendInput() {
-  return directComposerView().focusDirectSendInput(directComposerDeps());
-}
-
-function setDirectSendReplyFromMessage(message) {
-  return directComposerView().setDirectSendReplyFromMessage(directComposerDeps(), message);
+  void command;
+  void opts;
+  showSkillToast("聊天发送栏已移除,请改用草稿箱或官方定时。", "warn");
 }
 
 function healthStatusLabel(status) {
@@ -1527,49 +1441,21 @@ async function planOutboxAction(action) {
   return data;
 }
 
-function chatStreamDeps() {
-  return {
-    state,
-    channelFilters,
-    quickFilters,
-    selectAllChannels,
-    messageList,
-    messageCount,
-    activeChannelText,
-    streamActiveChannelText,
-    jumpToLatestButton,
-    collectorLiveStatus,
-    renderLiveSituationBoard,
-    renderWorldEventStrip,
-    renderGameActionDock,
-    emptyMessageHint,
-    formatFieldValue,
-    isPersonalSignal,
-    renderTelegramTextHtml,
-    selectMessageForComposer,
-    setWorkspaceSelectedMessage,
-    setDirectSendReplyFromMessage,
-    fetchMessageById,
-    jumpToMessage,
-    applyChannelSelection,
-    summarySignalMessages,
-    fillDirectSendComposer,
-    directReplyContextFromAction,
-    showSkillToast,
-  };
-}
-
-function chatStreamView() {
-  return window.MiniwebViews.chatStream;
-}
-
 function visibleMessages() {
-  if (!CHAT_FEATURE_ENABLED) return [];
-  return chatStreamView().visibleMessages(chatStreamDeps());
+  return [];
 }
 
 function messageMatchesSearch(message) {
-  return chatStreamView().messageMatchesSearch(chatStreamDeps(), message);
+  const query = String(state.messageSearch || "").trim().toLowerCase();
+  if (!query) return true;
+  const haystack = [
+    message?.title,
+    message?.summary,
+    message?.raw,
+    message?.source,
+    ...(message?.tags || []),
+  ].map((item) => String(item || "").toLowerCase()).join("\n");
+  return haystack.includes(query);
 }
 
 function myIdSet() {
@@ -1667,7 +1553,14 @@ async function applyChannelSelection(nextChannels) {
 }
 
 function parentMessageOf(card) {
-  return chatStreamView().parentMessageOf(chatStreamDeps(), card);
+  if (!card) return null;
+  const replyTo = Number(card.reply_to_msg_id || 0);
+  const chatId = Number(card.chat_id || 0);
+  if (!replyTo || !chatId) return null;
+  return (state.messages || []).find((message) =>
+    Number(message.chat_id || 0) === chatId &&
+    Number(message.msg_id || 0) === replyTo
+  ) || null;
 }
 
 function jumpToMessage(target) {
@@ -1718,7 +1611,9 @@ function jumpToMessage(target) {
 }
 
 function renderReplyContext(message) {
-  return chatStreamView().renderReplyContext(chatStreamDeps(), message);
+  const parent = parentMessageOf(message);
+  if (!parent) return "";
+  return `<div class="reply-context"><span>${escapeHtml(displaySource(parent.source))}</span><small>${escapeHtml(parent.summary || parent.title || "")}</small></div>`;
 }
 
 async function fetchMessageById(id) {
@@ -1744,66 +1639,85 @@ async function ensureFullMessage(message) {
 }
 
 function renderChannelFilters() {
-  if (!CHAT_FEATURE_ENABLED) return;
-  return chatStreamView().renderChannelFilters(chatStreamDeps());
+  return;
 }
 
 function orderedChannelsForConversationList(latestByChannel = null) {
-  return chatStreamView().orderedChannelsForConversationList(chatStreamDeps(), latestByChannel);
+  void latestByChannel;
+  return [...(state.channels || [])];
 }
 
 function channelTooltip(channel, latest) {
-  return chatStreamView().channelTooltip(chatStreamDeps(), channel, latest);
+  const label = channel?.label || channel?.key || "频道";
+  const latestText = latest ? `${formatChatTime(latest.time)} ${displaySource(latest.source)}: ${latest.summary || latest.title || ""}`.trim() : "";
+  return latestText ? `${label}\n${latestText}` : label;
 }
 
 function latestMessagesByChannel() {
-  return chatStreamView().latestMessagesByChannel(chatStreamDeps());
+  const byChannel = new Map();
+  for (const message of summarySignalMessages()) {
+    const channels = message.channels || [message.channel || "all"];
+    for (const channel of channels) {
+      if (!byChannel.has(channel) || compareMessagesByRecency(message, byChannel.get(channel)) < 0) {
+        byChannel.set(channel, message);
+      }
+    }
+  }
+  return byChannel;
 }
 
 function latestMessageForChannel(channelKey) {
-  return chatStreamView().latestMessageForChannel(chatStreamDeps(), channelKey);
+  return latestMessagesByChannel().get(channelKey) || null;
 }
 
 function channelPreviewText(message, channel) {
-  return chatStreamView().channelPreviewText(channel, message);
+  if (!message) return channel?.description || "暂无消息";
+  return `${displaySource(message.source)}: ${clipGraphemes(message.summary || message.title || message.raw || "", 90)}`;
 }
 
 function channelIcon(key, label) {
-  return chatStreamView().channelIcon(key, label);
+  const text = String(label || key || "?").trim();
+  return firstGrapheme(text).toUpperCase() || "?";
 }
 
 function quickFilterIsAll() {
-  return chatStreamView().quickFilterIsAll(chatStreamDeps());
+  return state.selectedChannels.size === state.channels.length;
 }
 
 function quickFilterActiveKey() {
-  return chatStreamView().quickFilterActiveKey(chatStreamDeps());
+  return quickFilterIsAll() ? "all" : [...state.selectedChannels].sort().join(",");
 }
 
 function renderQuickFilters() {
-  if (!CHAT_FEATURE_ENABLED) return;
-  return chatStreamView().renderQuickFilters(chatStreamDeps());
+  return;
 }
 
 async function applyQuickFilter(key) {
-  if (!CHAT_FEATURE_ENABLED) return { changed: false, count: 0 };
-  return chatStreamView().applyQuickFilter(chatStreamDeps(), key);
+  void key;
+  return { changed: false, count: 0 };
 }
 
 function activeQuickFilterKeyForSelection() {
-  return chatStreamView().activeQuickFilterKeyForSelection(chatStreamDeps());
+  return quickFilterActiveKey();
 }
 
 function quickFilterKnownChannels(preset) {
-  return chatStreamView().quickFilterKnownChannels(chatStreamDeps(), preset);
+  const known = new Set((state.channels || []).map((channel) => channel.key));
+  return (preset?.channels || []).filter((key) => known.has(key));
 }
 
 function quickFilterCount(preset, counts) {
-  return chatStreamView().quickFilterCount(chatStreamDeps(), preset, counts);
+  return quickFilterKnownChannels(preset).reduce((total, key) => total + Number(counts?.get?.(key) || counts?.[key] || 0), 0);
 }
 
 function channelMessageCounts() {
-  return chatStreamView().channelMessageCounts(chatStreamDeps());
+  const counts = new Map();
+  for (const message of summarySignalMessages()) {
+    for (const channel of message.channels || [message.channel || "all"]) {
+      counts.set(channel, (counts.get(channel) || 0) + 1);
+    }
+  }
+  return counts;
 }
 
 function renderIdentitySnapshot() {
@@ -1817,26 +1731,12 @@ function copyToClipboardSilent(text) {
   } catch (_e) { /* noop */ }
 }
 
-function emojiPaletteHtml() {
-  return directComposerView().emojiPaletteHtml();
-}
-
-function bindEmojiPalette(container, getTextarea) {
-  return directComposerView().bindEmojiPalette(container, getTextarea);
-}
-
-function insertTextAtCursor(textarea, text) {
-  return directComposerView().insertTextAtCursor(textarea, text);
-}
-
 function renderActiveChannelText() {
-  if (!CHAT_FEATURE_ENABLED) return;
-  return chatStreamView().renderActiveChannelText(chatStreamDeps());
+  return;
 }
 
 function renderMessages() {
-  if (!CHAT_FEATURE_ENABLED) return;
-  return chatStreamView().renderMessages(chatStreamDeps());
+  return;
 }
 
 function deferMessageRenderUntilLatest() {
@@ -1855,23 +1755,28 @@ function flushDeferredMessageRender({ toLatest = false, behavior = "auto" } = {}
 }
 
 function isMessageListNearLatest(threshold = 120) {
-  return chatStreamView().isMessageListNearLatest(chatStreamDeps(), threshold);
+  if (!messageList) return true;
+  return messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight <= threshold;
 }
 
 function updateJumpToLatestVisibility() {
-  return chatStreamView().updateJumpToLatestVisibility(chatStreamDeps());
+  if (!jumpToLatestButton) return;
+  jumpToLatestButton.hidden = true;
 }
 
 function scrollMessageListToLatest({ behavior = "auto" } = {}) {
-  return chatStreamView().scrollMessageListToLatest(chatStreamDeps(), { behavior });
+  if (!messageList) return;
+  messageList.scrollTo({ top: messageList.scrollHeight, behavior });
 }
 
 function captureMessageScrollSnapshot() {
-  return chatStreamView().captureMessageScrollSnapshot(chatStreamDeps());
+  if (!messageList) return null;
+  return { top: messageList.scrollTop, bottom: messageList.scrollHeight - messageList.scrollTop };
 }
 
 function restoreMessageScrollSnapshot(snapshot) {
-  return chatStreamView().restoreMessageScrollSnapshot(chatStreamDeps(), snapshot);
+  if (!messageList || !snapshot) return;
+  messageList.scrollTop = Math.max(0, messageList.scrollHeight - Number(snapshot.bottom || 0));
 }
 
 function liveSituationDeps() {
@@ -2347,130 +2252,157 @@ function collectorLiveStatus() {
 }
 
 function renderChatMessageNode(message) {
-  return chatStreamView().renderChatMessageNode(chatStreamDeps(), message);
+  return "";
 }
 
 function renderChatContextMeta(message) {
-  return chatStreamView().renderChatContextMeta(chatStreamDeps(), message);
+  return "";
 }
 
 function visibleMessageBadges(message) {
-  return chatStreamView().visibleMessageBadges(chatStreamDeps(), message);
+  return [];
 }
 
 function renderChatQuickActions(message) {
-  return chatStreamView().renderChatQuickActions(chatStreamDeps(), message);
+  return "";
 }
 
 function quickActionLabel(action) {
-  return chatStreamView().quickActionLabel(action);
+  const rawLabel = String(action?.label || "").trim();
+  const command = String(action?.command || "").trim();
+  const cleaned = rawLabel
+    .replace(/^复制\s*/, "")
+    .replace(/[（(]回复[）)]/g, "")
+    .trim();
+  if (cleaned && cleaned.length <= 12) return cleaned;
+  return command.replace(/^[.。]/, "").trim() || "动作";
 }
 
 function quickActionNeedsManualReview(action) {
-  return chatStreamView().quickActionNeedsManualReview(action);
+  const command = String(action?.command || "").trim();
+  return command === ".自证" || command === "。自证";
 }
 
 async function handleChatQuickAction(message, index, button) {
-  return chatStreamView().handleChatQuickAction(chatStreamDeps(), message, index, button);
+  showSkillToast("聊天快捷动作已移除,请改用草稿箱或官方定时。", "warn");
 }
 
 function displaySource(source) {
-  return chatStreamView().displaySource(source);
+  const clean = String(source || "").trim();
+  if (!clean) return "未知发送者";
+  return isNumericSource(clean) ? `用户 ${clean}` : clean;
 }
 
 function isNumericSource(source) {
-  return chatStreamView().isNumericSource(source);
+  const clean = String(source || "").trim();
+  return clean !== "" && NUMERIC_SOURCE_RE.test(clean);
 }
 
 function renderChatBodyText(message, isExpanded) {
-  return chatStreamView().renderChatBodyText(chatStreamDeps(), message, isExpanded);
+  const raw = String(message?.raw || "").trim();
+  const fallback = String(message?.summary || message?.title || "").trim();
+  const text = raw || fallback || "（空消息）";
+  const lines = text.split("\n");
+  const tooLong = countGraphemes(text) > MESSAGE_PREVIEW_CHAR_LIMIT || lines.length > MESSAGE_PREVIEW_LINE_LIMIT;
+  if (!tooLong || isExpanded) {
+    return { html: renderTelegramTextHtml(text, message), truncated: tooLong };
+  }
+  let preview = lines.slice(0, MESSAGE_PREVIEW_LINE_LIMIT).join("\n");
+  if (countGraphemes(preview) > MESSAGE_PREVIEW_CHAR_LIMIT) {
+    preview = clipGraphemes(preview, MESSAGE_PREVIEW_CHAR_LIMIT);
+  }
+  return { html: `${renderTelegramTextHtml(preview, message)}<span class="chat-text-ellipsis">…</span>`, truncated: true };
 }
 
 function groupMessagesByDate(messages) {
-  return chatStreamView().groupMessagesByDate(messages);
+  const groups = [];
+  let current = null;
+  for (const message of messages || []) {
+    const label = formatDayLabel(message.time);
+    if (!current || current.label !== label) {
+      current = { label, items: [] };
+      groups.push(current);
+    }
+    current.items.push(message);
+  }
+  return groups;
 }
 
 function formatDayLabel(value) {
-  return chatStreamView().formatDayLabel(value);
+  const text = String(value || "").trim();
+  if (!text) return "时间未知";
+  const parts = displayTimeParts(text);
+  if (!parts) return text;
+  const diffDays = daysBetween(text, new Date());
+  if (diffDays === 0) return "今天";
+  if (diffDays === 1) return "昨天";
+  if (diffDays === 2) return "前天";
+  const nowParts = displayTimeParts(new Date());
+  if (parts.year === nowParts?.year) {
+    return `${Number(parts.month)} 月 ${Number(parts.day)} 日`;
+  }
+  return `${parts.year} 年 ${Number(parts.month)} 月 ${Number(parts.day)} 日`;
 }
 
 function daysBetween(date, now) {
-  return chatStreamView().daysBetween(date, now);
+  const a = displayDayIndex(date);
+  const b = displayDayIndex(now);
+  if (a === null || b === null) return 0;
+  return b - a;
 }
 
 function formatChatTime(value) {
-  return chatStreamView().formatChatTime(value);
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return formatDisplayClockTime(text) || text;
 }
 
 function messageKind(message) {
-  return chatStreamView().messageKind(chatStreamDeps(), message);
+  const channels = message?.channels || [message?.channel];
+  const source = String(message?.source || "");
+  if (message?.severity === "risk" || channels.includes("risk")) return "risk";
+  if (isPersonalSignal(message)) return "mine";
+  if (message?.sender_is_bot || channels.includes("system") || source.includes("韩天尊") || source.includes("天尊")) return "bot";
+  return "player";
 }
 
 function sourceInitial(source, kind) {
-  return chatStreamView().sourceInitial(source, kind);
-}
-
-function detailPanelDeps() {
-  return {
-    state,
-    detailPanel,
-    detailState,
-    visibleMessages,
-    setWorkspacePanelOpen,
-    ensureFullMessage,
-    renderOverviewDetailPanel,
-    bindOverviewDetailPanel,
-    renderEnhancedBlock,
-    renderTelegramTextHtml,
-    displaySource,
-    formatChatTime,
-    messageKind,
-    quickActionLabel,
-    setDirectSendReplyFromMessage,
-    showSkillToast,
-    copyCommandToClipboard,
-    fillDirectSendComposer,
-    openFocusArchiveModal,
-    toggleFocusMuteSender,
-    directReplyContextFromAction,
-    planOutboxAction,
-    renderOutboxPlan,
-    renderOutboxPlanError,
-    createOutboxDraft,
-    renderDetail,
-  };
-}
-
-function detailPanelView() {
-  return window.MiniwebViews.detailPanel;
+  const clean = String(source || "").replace(/^@/, "").trim();
+  if (kind === "risk") return "!";
+  if (clean.includes("韩天尊") || clean.includes("天尊")) return "天";
+  if (!clean) return "?";
+  return firstGrapheme(clean).toUpperCase();
 }
 
 async function renderDetail() {
-  return detailPanelView().renderDetail(detailPanelDeps());
+  return;
 }
 
 function renderFocusInsight(message) {
-  return detailPanelView().renderFocusInsight(detailPanelDeps(), message);
+  return "";
 }
 
 function actionCountLabel(message) {
-  return detailPanelView().actionCountLabel(message);
+  const count = (message?.actions || []).length;
+  return count ? `${count} 个动作` : "无动作";
 }
 
 function renderFocusTools(message) {
-  return detailPanelView().renderFocusTools(detailPanelDeps(), message);
+  return "";
 }
 
 function focusReasonList(message) {
-  return detailPanelView().focusReasonList(detailPanelDeps(), message);
+  return message?.filter_reasons || [];
 }
 
 function canFocusArchiveMessage(message) {
-  return detailPanelView().canFocusArchiveMessage(detailPanelDeps(), message);
+  return false;
 }
 
 function isFocusMutedSenderId(senderId) {
-  return detailPanelView().isFocusMutedSenderId(detailPanelDeps(), senderId);
+  const id = Number(senderId || 0);
+  if (!id) return false;
+  return ((state.settings || {}).focus_muted_sender_ids || []).map(Number).includes(id);
 }
 
 function detailCardsDeps() {
@@ -2513,15 +2445,15 @@ function parseProgressObject(value, implicitMax = 0) {
 }
 
 function renderDetailActions(message) {
-  return detailPanelView().renderDetailActions(detailPanelDeps(), message);
+  return "";
 }
 
 function renderActionContextLine(action) {
-  return detailPanelView().renderActionContextLine(action);
+  return "";
 }
 
 function bindDetailActions(message) {
-  return detailPanelView().bindDetailActions(detailPanelDeps(), message);
+  return;
 }
 
 function openFocusArchiveModal(message, mode) {
@@ -2886,9 +2818,6 @@ function fmtCountdown(secondsLeft) {
 }
 
 function tickIdentityModuleChips() {
-  // 底部快捷指令倒计时不能依赖左侧身份 chip 是否存在;否则刚产生 CD 时
-  // state 已更新但按钮不会重画,用户要再点一次才看见灰态。
-  tickSkillBarChips();
   tickCultivationModules();
   tickCockpitModuleChips();
   tickIdentityStatusCards();
@@ -2922,10 +2851,6 @@ function tickCockpitModuleChips() {
   if (shouldRerender) {
     renderCockpitModules();
   }
-}
-
-function tickSkillBarChips() {
-  return directComposerView().tickSkillBarChips(directComposerDeps());
 }
 
 function updateCurrentAccountLine() {
@@ -3335,8 +3260,6 @@ function ensureActiveIdentity() {
   const next = fallback ? Number(fallback.send_as_id || 0) || null : null;
   if (next !== previous) {
     state.activeIdentityId = next;
-    state.directSendIdentityId = next;
-    state.directSendLastActiveId = next;
     state.identityPatches = [];
     state.identityPatchesOwnerId = next;
     state.identityPatchesLoading = Boolean(next);
@@ -3364,8 +3287,6 @@ async function setActiveIdentity(identityId, options = {}) {
     return resolved;
   }
   state.activeIdentityId = resolved;
-  state.directSendIdentityId = resolved;
-  state.directSendLastActiveId = resolved;
   if (options.syncSchedule !== false) {
     syncScheduleSelectionToActiveIdentity(resolved);
   }
@@ -3397,100 +3318,8 @@ function identityOptionLabel(identity) {
   return `${name}｜账号 ${accountLabel}${suffix}`;
 }
 
-function defaultManualIdentityId() {
-  return directComposerView().defaultManualIdentityId(directComposerDeps());
-}
-
-function manualSendIdentityOptions(selectedId) {
-  return directComposerView().manualSendIdentityOptions(directComposerDeps(), selectedId);
-}
-
-function directSendSelectedIdentityId() {
-  return directComposerView().directSendSelectedIdentityId(directComposerDeps());
-}
-
 function renderDirectSendComposer() {
-  if (!CHAT_FEATURE_ENABLED) return;
-  return directComposerView().renderDirectSendComposer(directComposerDeps());
-}
-
-function setDirectSendStatus(text, kind = "info") {
-  return directComposerView().setDirectSendStatus(directComposerDeps(), text, kind);
-}
-
-async function sendDirectComposerMessage() {
-  if (!CHAT_FEATURE_ENABLED) {
-    showSkillToast("聊天发送栏已移除。", "warn");
-    return;
-  }
-  if (!directSendInput || !directSendIdentitySelect || !directSendSubmit) return;
-  if (state.directSendSending) {
-    setDirectSendStatus("上一条还在发送中,请等结果返回。", "warn");
-    return;
-  }
-  state.directSendSending = true;
-  directSendSubmit.disabled = true;
-  try {
-    if (!state.identities.length || !state.accounts.length) {
-      setDirectSendStatus("正在准备发送身份...", "info");
-      await Promise.all([loadAccounts(), loadIdentities()]);
-    }
-    const command = directSendInput.value.trim();
-    const identityId = Number(directSendIdentitySelect.value || 0);
-    const identity = identityById(identityId);
-    if (!identityId || !identity) {
-      setDirectSendStatus("请选择发送身份。", "error");
-      return;
-    }
-    if (!identityCanSend(identity)) {
-      setDirectSendStatus("该身份绑定账号未完成登录或缺少目标群配置。", "warn");
-      return;
-    }
-    if (!command) {
-      setDirectSendStatus("发送内容不能为空。", "error");
-      focusDirectSendInput();
-      return;
-    }
-
-    const reply = state.directSendReply;
-    const payload = {
-      skill_key: "manual_send",
-      identity_id: identityId,
-      command_override: command,
-    };
-    if (reply?.chatId) payload.chat_id = reply.chatId;
-    if (reply?.replyToMsgId) payload.reply_to_msg_id = reply.replyToMsgId;
-    if (reply?.topMsgId) payload.top_msg_id = reply.topMsgId;
-    const sendKey = JSON.stringify(payload);
-    const now = Date.now();
-    if (state.directSendLastKey === sendKey && now - Number(state.directSendLastAt || 0) < 2500) {
-      setDirectSendStatus("刚刚已经提交过同一条消息,已拦截重复发送。", "warn");
-      return;
-    }
-    state.directSendLastKey = sendKey;
-    state.directSendLastAt = now;
-
-    setDirectSendStatus("正在发送...", "info");
-    const result = await postJson("/api/skills/send", payload);
-    if (result.ok) {
-      setDirectSendStatus(sentStatusText(result, { skillKey: "manual_send", command }), "ok");
-      showSkillToast(sentToastText(result, { skillKey: "manual_send", command }), "ok");
-      directSendInput.value = "";
-      resizeDirectSendInput();
-      clearDirectSendReply();
-      refreshChatViewport().catch((err) => console.warn("[direct-send] refresh failed:", err));
-    } else {
-      setDirectSendStatus(result.error || "发送失败", "error");
-      showSkillToast(`❌ ${result.error || "发送失败"}`, "err");
-    }
-  } catch (error) {
-    const message = error.message || "发送出错";
-    setDirectSendStatus(message, "error");
-    showSkillToast(`❌ ${message}`, "err");
-  } finally {
-    state.directSendSending = false;
-    renderDirectSendComposer();
-  }
+  return;
 }
 
 if (selectAllChannels) {
@@ -3583,7 +3412,7 @@ document.addEventListener("keydown", (event) => {
 document.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
-  document.querySelectorAll(".workspace-tools-shell[open], .stream-filter-drawer[open], .direct-send-more[open]").forEach((node) => {
+  document.querySelectorAll(".workspace-tools-shell[open], .stream-filter-drawer[open]").forEach((node) => {
     if (!node.contains(target)) {
       node.removeAttribute("open");
     }
@@ -3623,10 +3452,6 @@ if (healthButton) {
       showError(error);
     }
   });
-}
-
-if (CHAT_FEATURE_ENABLED) {
-  directComposerView().bindDirectComposer(directComposerDeps());
 }
 
 if (activeIdentityQuickSelect) {
@@ -3928,59 +3753,17 @@ function skillIsUnlocked(skill) {
   return true;
 }
 
-function renderSkillBar() {
-  return directComposerView().renderSkillBar(directComposerDeps());
-}
-
-function renderSkillMenuModal() {
-  return directComposerView().renderSkillMenuModal(directComposerDeps());
-}
-
 function renderSkillViews() {
-  if (CHAT_FEATURE_ENABLED) {
-    renderSkillBar();
-    renderSkillMenuModal();
-    renderQuickActionHotbar();
-  }
   renderQuestTracker();
   renderLiveSituationBoard();
   renderGameSceneBoard();
   renderGameActionDock();
 }
 
-const HOTBAR_ROWS = directComposerView().HOTBAR_ROWS;
-const HOTBAR_VISIBLE_SLOTS = directComposerView().HOTBAR_VISIBLE_SLOTS;
-
-function hotbarSkillGroups() {
-  return directComposerView().hotbarSkillGroups(directComposerDeps());
-}
-
-function hotbarSkillScore(skill) {
-  return directComposerView().hotbarSkillScore(skill);
-}
-
-function quickActionHotbarSkills() {
-  return directComposerView().quickActionHotbarSkills(directComposerDeps());
-}
-
-function renderQuickActionHotbar() {
-  return directComposerView().renderQuickActionHotbar(directComposerDeps());
-}
-
-function openSkillMenuModal() {
-  return directComposerView().openSkillMenuModal(directComposerDeps());
-}
-
-function renderSkillPanel(tabsEl, chipsEl, identityEl, rerender) {
-  return directComposerView().renderSkillPanel(directComposerDeps(), tabsEl, chipsEl, identityEl, rerender);
-}
-
 function fillSkillIntoComposer(skillKey, button = null) {
-  if (!CHAT_FEATURE_ENABLED) {
-    showSkillToast("聊天发送栏已移除,快捷指令不再直接填入。", "warn");
-    return;
-  }
-  return directComposerView().fillSkillIntoComposer(directComposerDeps(), skillKey, button);
+  void skillKey;
+  void button;
+  showSkillToast("聊天发送栏已移除,快捷指令不再直接填入。", "warn");
 }
 
 function showSkillToast(text, kind) {
