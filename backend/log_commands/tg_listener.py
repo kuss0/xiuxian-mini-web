@@ -170,8 +170,8 @@ class LogCommandTelegramListener:
 
     def _handle_update(self, token: str, update: dict) -> None:
         message = update.get("message") if isinstance(update.get("message"), dict) else {}
-        text = str(message.get("text") or "").strip()
-        if not text:
+        text = str(message.get("text") or "")
+        if not text.strip():
             return
         chat = message.get("chat") if isinstance(message.get("chat"), dict) else {}
         sender = message.get("from") if isinstance(message.get("from"), dict) else {}

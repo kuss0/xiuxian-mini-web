@@ -133,6 +133,7 @@ def _normalize_settings(payload: dict) -> dict:
         "notify_card_titles": notify_card_titles,
         "log_command_enabled": bool_value("log_command_enabled"),
         "log_command_chat_id": text("log_command_chat_id"),
+        "log_command_mapping_chat_id": text("log_command_mapping_chat_id"),
         "log_command_admin_ids": int_list("log_command_admin_ids"),
         "log_command_extra_commands": sorted(set(str_list("log_command_extra_commands"))),
         "log_command_manual_send_enabled": bool_value("log_command_manual_send_enabled"),

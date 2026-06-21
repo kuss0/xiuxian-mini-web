@@ -2937,6 +2937,7 @@ class SQLiteStore:
             "notify_card_titles": [],
             "log_command_enabled": False,
             "log_command_chat_id": "",
+            "log_command_mapping_chat_id": "",
             "log_command_admin_ids": [],
             "log_command_extra_commands": [],
             "log_command_manual_send_enabled": False,

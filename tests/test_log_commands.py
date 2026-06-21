@@ -1,6 +1,8 @@
 from backend.log_commands import LogCommandDispatcher, LogCommandSource, parse_log_command
+from backend.domain.models import RawMessageEvent
 from backend.log_commands.tg_listener import LogCommandTelegramListener
 from backend.repo.sample_store import SampleStore
+from backend.repo.sqlite_store import SQLiteStore
 from backend.server import MiniWebServer
 from backend.skills import SkillRegistry
 
@@ -22,7 +24,7 @@ def test_parse_dot_and_slash_log_commands():
     assert module_status.module_name == "元婴"
 
 
-def test_telegram_ingress_allows_any_sender_in_configured_group():
+def test_telegram_ingress_separates_admin_slash_and_group_mapping():
     dispatcher = LogCommandDispatcher(
         settings={
             "log_command_enabled": True,
@@ -34,54 +36,85 @@ def test_telegram_ingress_allows_any_sender_in_configured_group():
     )
 
     group_member = dispatcher.dispatch(
-        ".帮助",
+        "/帮助",
         LogCommandSource(user_id=200, chat_id=-100500, msg_id=1, kind="telegram"),
     )
-    assert group_member["ok"] is True
-    assert group_member["status"] == "ok"
-    assert group_member["decision"]["ingress"] == "telegram_group"
-    assert group_member["decision"]["is_admin"] is False
+    assert group_member["status"] == "skip"
+    assert group_member["decision"]["reason"] == "not_admin"
+
+    admin_group = dispatcher.dispatch(
+        "/帮助",
+        LogCommandSource(user_id=100, chat_id=-100500, msg_id=2, kind="telegram"),
+    )
+    assert admin_group["ok"] is True
+    assert admin_group["status"] == "ok"
+    assert admin_group["decision"]["ingress"] == "telegram_group"
+    assert admin_group["decision"]["is_admin"] is True
 
     wrong_chat = dispatcher.dispatch(
-        ".帮助",
-        LogCommandSource(user_id=200, chat_id=-100700, msg_id=2, kind="telegram"),
+        "/帮助",
+        LogCommandSource(user_id=100, chat_id=-100700, msg_id=3, kind="telegram"),
     )
-    assert wrong_chat["status"] == "reject"
+    assert wrong_chat["status"] == "skip"
     assert wrong_chat["decision"]["reason"] == "chat_not_allowed"
 
     admin_dm = dispatcher.dispatch(
-        ".帮助",
-        LogCommandSource(user_id=100, chat_id=100, msg_id=3, kind="telegram"),
+        "/帮助",
+        LogCommandSource(user_id=100, chat_id=100, msg_id=4, kind="telegram"),
     )
     assert admin_dm["ok"] is True
     assert admin_dm["decision"]["ingress"] == "telegram_admin_dm"
     assert admin_dm["decision"]["is_admin"] is True
 
     blocked_command = dispatcher.dispatch(
-        ".发送 wild_training @123",
-        LogCommandSource(user_id=200, chat_id=-100500, msg_id=4, kind="telegram"),
+        "/发送 wild_training @123",
+        LogCommandSource(user_id=100, chat_id=-100500, msg_id=5, kind="telegram"),
     )
     assert blocked_command["status"] == "reject"
     assert blocked_command["decision"]["reason"] == "command_not_allowed"
 
 
-def test_telegram_ingress_does_not_require_admin_ids_for_group():
+def test_telegram_mapping_uses_group_members_but_admin_only_for_sensitive_mapping():
     dispatcher = LogCommandDispatcher(
         settings={
             "log_command_enabled": True,
             "log_command_chat_id": -100500,
+            "log_command_admin_ids": [100],
             "log_command_extra_commands": [],
         },
         skills_getter=lambda: SkillRegistry().list(),
+        inventory_current_getter=lambda: [
+            {"owner": "alice", "name": "增元丹", "amount": 2},
+            {"owner": "bob", "name": "大增元丹", "amount": 3},
+            {"owner": "bob", "name": "灵石", "amount": 99},
+        ],
     )
 
-    result = dispatcher.dispatch(
-        ".帮助",
+    non_admin = dispatcher.dispatch(
+        ".还有多少 增元丹",
         LogCommandSource(user_id=300, chat_id=-100500, msg_id=5, kind="telegram"),
     )
+    assert non_admin["status"] == "reject"
+    assert non_admin["decision"]["reason"] == "admin_required"
 
-    assert result["ok"] is True
-    assert result["decision"]["ingress"] == "telegram_group"
+    admin = dispatcher.dispatch(
+        ".还有多少 增元丹",
+        LogCommandSource(user_id=100, chat_id=-100500, msg_id=6, kind="telegram"),
+    )
+    assert admin["ok"] is True
+    assert admin["decision"]["ingress"] == "telegram_mapping"
+    assert "合计 5" in admin["reply"]
+    assert "- 增元丹: 2" in admin["reply"]
+    assert "- 大增元丹: 3" in admin["reply"]
+    assert "alice" not in admin["reply"]
+    assert "bob" not in admin["reply"]
+
+    unknown = dispatcher.dispatch(
+        ".帮助",
+        LogCommandSource(user_id=300, chat_id=-100500, msg_id=7, kind="telegram"),
+    )
+    assert unknown["status"] == "skip"
+    assert unknown["decision"]["reason"] == "unknown_group_mapping"
 
 
 def test_telegram_ingress_obeys_log_command_enabled_switch():
@@ -94,7 +127,7 @@ def test_telegram_ingress_obeys_log_command_enabled_switch():
     )
 
     result = dispatcher.dispatch(
-        ".帮助",
+        "/帮助",
         LogCommandSource(user_id=300, chat_id=-100500, msg_id=5, kind="telegram"),
     )
 
@@ -146,6 +179,53 @@ def test_log_command_manual_send_is_blocked_by_default():
     assert result["applied_actions"] == []
 
 
+def test_server_telegram_mapping_queries_inventory_without_owner_details(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    store.save_settings(
+        {
+            "log_command_enabled": True,
+            "log_command_chat_id": "-100500",
+            "log_command_admin_ids": [100],
+        }
+    )
+    store.save_account({"local_id": "main", "account_id": "1", "username": "seller"})
+    store.ingest_event(
+        RawMessageEvent(
+            id="tg:-1:90",
+            chat_id=-1,
+            msg_id=90,
+            text="""@seller 的储物袋
+
+材料:
+- 增元丹 x 4
+- 灵石 x 100""",
+            source="韩天尊",
+            date="2026-05-15T10:00:00+00:00",
+            sender_id=7900199668,
+            sender_is_bot=True,
+        )
+    )
+    server = MiniWebServer(store=store)
+
+    result = server.log_command_dispatch_payload(
+        {
+            "text": ".还有多少 增元丹",
+            "source_kind": "telegram",
+            "chat_id": -100500,
+            "from_user_id": 100,
+            "msg_id": 12,
+            "dry_run": False,
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "ok"
+    assert result["applied_actions"] == []
+    assert "合计 4" in result["reply"]
+    assert "- 增元丹: 4" in result["reply"]
+    assert "seller" not in result["reply"]
+
+
 def test_log_command_telegram_listener_start_stop_does_not_deadlock():
     listener = LogCommandTelegramListener(
         get_settings=lambda: {"log_command_enabled": False},
@@ -191,7 +271,7 @@ def test_log_command_telegram_listener_dispatches_and_replies():
             "update_id": 10,
             "message": {
                 "message_id": 20,
-                "text": ".帮助",
+                "text": " .帮助",
                 "chat": {"id": -100500},
                 "from": {"id": 300},
             },
@@ -200,7 +280,7 @@ def test_log_command_telegram_listener_dispatches_and_replies():
 
     assert calls == [
         {
-            "text": ".帮助",
+            "text": " .帮助",
             "source_kind": "telegram",
             "chat_id": -100500,
             "from_user_id": 300,

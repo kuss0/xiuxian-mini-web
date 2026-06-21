@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import shlex
+from collections.abc import Mapping as MappingABC
 from dataclasses import dataclass
 from typing import Callable, Iterable, Mapping
+
+from backend.log_commands.mapping import classify_group_mapping
 
 
 class CommandLevel:
@@ -174,6 +177,7 @@ class LogCommandPolicy:
     enabled: bool = False
     admin_ids: tuple[int, ...] = ()
     chat_id: int = 0
+    mapping_chat_id: int = 0
     extra_commands: tuple[str, ...] = ()
     manual_send_enabled: bool = False
     schedule_enabled: bool = False
@@ -185,6 +189,7 @@ class LogCommandPolicy:
             enabled=_bool_value(settings.get("log_command_enabled")),
             admin_ids=tuple(_int_items(settings.get("log_command_admin_ids"))),
             chat_id=_safe_int(settings.get("log_command_chat_id")),
+            mapping_chat_id=_safe_int(settings.get("log_command_mapping_chat_id")),
             extra_commands=tuple(
                 item.lower()
                 for item in _str_items(settings.get("log_command_extra_commands"))
@@ -198,11 +203,16 @@ class LogCommandPolicy:
             "enabled": self.enabled,
             "admin_count": len(self.admin_ids),
             "chat_configured": bool(self.chat_id),
-            "group_members_allowed": bool(self.chat_id),
+            "mapping_chat_configured": bool(self.effective_mapping_chat_id),
+            "group_members_allowed": bool(self.effective_mapping_chat_id),
             "extra_commands": list(self.extra_commands),
             "manual_send_enabled": self.manual_send_enabled,
             "schedule_enabled": self.schedule_enabled,
         }
+
+    @property
+    def effective_mapping_chat_id(self) -> int:
+        return self.mapping_chat_id or self.chat_id
 
 
 @dataclass(frozen=True)
@@ -243,12 +253,14 @@ class LogCommandDispatcher:
         health_getter: Callable[[], dict] | None = None,
         identities_getter: Callable[[], Iterable[dict]] | None = None,
         skills_getter: Callable[[], Iterable[object]] | None = None,
+        inventory_current_getter: Callable[[], Iterable[dict]] | None = None,
     ) -> None:
         self._settings = settings or {}
         self._policy = LogCommandPolicy.from_settings(self._settings)
         self._health_getter = health_getter or (lambda: {})
         self._identities_getter = identities_getter or (lambda: ())
         self._skills_getter = skills_getter or (lambda: ())
+        self._inventory_current_getter = inventory_current_getter or (lambda: ())
 
     def specs_payload(self) -> dict:
         return {
@@ -259,6 +271,9 @@ class LogCommandDispatcher:
         }
 
     def dispatch(self, text: str, source: LogCommandSource) -> dict:
+        if source.kind == "telegram":
+            return self._dispatch_telegram(text, source)
+
         parsed = parse_log_command(text)
         if parsed is None:
             return {
@@ -287,6 +302,124 @@ class LogCommandDispatcher:
         result.setdefault("parsed", parsed.to_api())
         result.setdefault("decision", decision)
         return result
+
+    def _dispatch_telegram(self, text: str, source: LogCommandSource) -> dict:
+        raw = str(text or "")
+        if not raw:
+            return _skip(source, reason="not_a_log_command")
+        decision = self._telegram_ingress_kind(raw, source)
+        if decision["kind"] == "skip":
+            return {
+                "ok": False,
+                "status": "skip",
+                "reply": "",
+                "actions": [],
+                "source": source.to_api(),
+                "decision": decision,
+            }
+        if decision["kind"] == "reject":
+            return {
+                "ok": False,
+                "status": "reject",
+                "reply": decision.get("text", ""),
+                "actions": [],
+                "source": source.to_api(),
+                "decision": decision,
+            }
+
+        if decision["ingress"] == "telegram_mapping":
+            return self._run_group_mapping(raw, source, decision)
+
+        parsed = parse_log_command(raw)
+        if parsed is None:
+            return _skip(source, reason="not_a_log_command", decision=decision)
+
+        allowed_names = {parsed.spec.name, parsed.raw_name.lower()}
+        allowed = parsed.spec.default_allowed or bool(allowed_names & set(self._policy.extra_commands))
+        if not allowed:
+            return {
+                "ok": False,
+                "status": "reject",
+                "reply": f"命令 {parsed.raw_name} 未允许从日志群触发。",
+                "actions": [],
+                "source": source.to_api(),
+                "parsed": parsed.to_api(),
+                "decision": {
+                    **decision,
+                    "kind": "reject",
+                    "text": f"命令 {parsed.raw_name} 未允许从日志群触发。",
+                    "reason": "command_not_allowed",
+                },
+            }
+
+        result = self._run(parsed, source)
+        result.setdefault("source", source.to_api())
+        result.setdefault("parsed", parsed.to_api())
+        result.setdefault("decision", decision)
+        return result
+
+    def _telegram_ingress_kind(self, text: str, source: LogCommandSource) -> dict:
+        if not self._policy.enabled:
+            return {
+                "kind": "reject",
+                "text": "日志群命令未启用。",
+                "reason": "command_listener_disabled",
+            }
+
+        is_admin = source.user_id in self._policy.admin_ids
+        in_log_group = bool(self._policy.chat_id) and source.chat_id == self._policy.chat_id
+        admin_dm = is_admin and source.chat_id == source.user_id
+        mapping_chat_id = self._policy.effective_mapping_chat_id
+        in_mapping_group = bool(mapping_chat_id) and source.chat_id == mapping_chat_id
+
+        if text.startswith("/"):
+            if not is_admin:
+                return {"kind": "skip", "reason": "not_admin", "is_admin": False}
+            if not self._policy.chat_id and not self._policy.admin_ids:
+                return {
+                    "kind": "reject",
+                    "text": "日志群命令未配置 log_command_chat_id/log_command_admin_ids,不接受 Telegram 入站。",
+                    "reason": "chat_not_configured",
+                    "is_admin": True,
+                }
+            if not in_log_group and not admin_dm:
+                return {"kind": "skip", "reason": "chat_not_allowed", "is_admin": True}
+            ingress = "telegram_group" if in_log_group else "telegram_admin_dm"
+            return {"kind": "run", "ingress": ingress, "is_admin": True}
+
+        if text.startswith("."):
+            if not in_mapping_group:
+                return {
+                    "kind": "skip",
+                    "reason": "mapping_chat_not_allowed",
+                    "is_admin": is_admin,
+                }
+            return {
+                "kind": "run",
+                "ingress": "telegram_mapping",
+                "mapping": "group",
+                "is_admin": is_admin,
+            }
+
+        return {"kind": "skip", "reason": "not_a_log_command", "is_admin": is_admin}
+
+    def _run_group_mapping(self, text: str, source: LogCommandSource, decision: dict) -> dict:
+        mapped = classify_group_mapping(text, is_admin=bool(decision.get("is_admin")))
+        if mapped.status == "skip":
+            return _skip(source, reason="unknown_group_mapping", decision=decision)
+        if mapped.status == "reject":
+            return {
+                "ok": False,
+                "status": "reject",
+                "reply": mapped.text,
+                "actions": [],
+                "source": source.to_api(),
+                "decision": {**decision, "kind": "reject", "reason": mapped.reason, "text": mapped.text},
+            }
+        if mapped.name == "还有多少":
+            item = mapped.args[0] if mapped.args else ""
+            return self._inventory_find_simple(str(item), source, decision)
+        return _skip(source, reason="unsupported_group_mapping", decision=decision)
 
     def _classify(self, parsed: ParsedLogCommand, source: LogCommandSource) -> dict:
         if source.kind == "local_api":
@@ -347,11 +480,12 @@ class LogCommandDispatcher:
         lines = ["mini-web 日志群命令:"]
         for spec in LOG_COMMAND_SPECS:
             if spec.name == "module_status":
-                lines.append("- .<模块>状态: 读取模块状态摘要")
+                lines.append("- .<模块>状态: 本地 API 读取模块状态摘要")
                 continue
             alias = spec.aliases[0] if spec.aliases else spec.name
-            lines.append(f"- .{alias}: {COMMAND_LEVELS[spec.level]['label']} - {spec.summary}")
-        lines.append("发送动作分层: .草稿 可创建 outbox draft;.发送/.官方定时 默认关闭。")
+            lines.append(f"- /{alias}: {COMMAND_LEVELS[spec.level]['label']} - {spec.summary}")
+        lines.append("群业务映射: .还有多少 <物品名> admin-only,只读脱敏库存合计。未知 .xxx 静默忽略。")
+        lines.append("发送动作分层仅保留本地 API/调试入口;Telegram 点号不创建 draft/send。")
         return _reply(True, "ok", "\n".join(lines), commands=[spec.to_api() for spec in LOG_COMMAND_SPECS])
 
     def _levels(self, parsed: ParsedLogCommand, source: LogCommandSource) -> dict:
@@ -459,6 +593,50 @@ class LogCommandDispatcher:
             "日志群官方定时命令层已建模,但本脚本仍要求走 Web 排班落库和预检。",
             blocked_level=CommandLevel.OFFICIAL_SCHEDULE,
         )
+
+    def _inventory_find_simple(self, item: str, source: LogCommandSource, decision: dict) -> dict:
+        query = str(item or "").strip()
+        if not query:
+            return _reply(False, "reject", "usage: .还有多少 <物品名>")
+        try:
+            rows = list(self._inventory_current_getter() or ())
+        except Exception as exc:
+            return _reply(False, "error", f"库存读取失败: {exc}")
+
+        needle = query.lower()
+        grouped: dict[str, int] = {}
+        for row in rows:
+            if not isinstance(row, MappingABC):
+                continue
+            name = str(row.get("name") or row.get("item_name") or "").strip()
+            if not name or needle not in name.lower():
+                continue
+            amount = _safe_int(row.get("amount"))
+            if amount <= 0:
+                continue
+            grouped[name] = grouped.get(name, 0) + amount
+
+        if not grouped:
+            reply = f"{query} 库存(脱敏): 未找到当前库存记录。"
+        else:
+            total = sum(grouped.values())
+            lines = [f"{query} 库存(脱敏): 合计 {total}"]
+            for name in sorted(grouped):
+                lines.append(f"- {name}: {grouped[name]}")
+            lines.append("不显示账号明细。")
+            reply = "\n".join(lines)
+        return {
+            "ok": True,
+            "status": "ok",
+            "reply": reply,
+            "actions": [],
+            "source": source.to_api(),
+            "decision": decision,
+            "mapping_result": {
+                "name": "还有多少",
+                "argv": ["inventory", "find", "--simple", query],
+            },
+        }
 
     def _send_intent(self, args: Iterable[str]) -> SendIntent:
         tokens = [str(item).strip() for item in args if str(item or "").strip()]
@@ -590,6 +768,22 @@ def _reply(ok: bool, status: str, reply: str, **extra) -> dict:
     }
     payload.update(extra)
     return payload
+
+
+def _skip(source: LogCommandSource, *, reason: str, decision: dict | None = None) -> dict:
+    merged = {"kind": "skip", "reason": reason}
+    if decision:
+        merged.update(decision)
+        merged["kind"] = "skip"
+        merged["reason"] = reason
+    return {
+        "ok": False,
+        "status": "skip",
+        "reply": "",
+        "actions": [],
+        "source": source.to_api(),
+        "decision": merged,
+    }
 
 
 def _resolve_skill(value: str, skills: Iterable[object]) -> object | None:

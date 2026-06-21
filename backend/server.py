@@ -1073,12 +1073,13 @@ class MiniWebServer:
 
     def log_command_dispatch_payload(self, payload: dict | None) -> dict:
         payload = payload or {}
-        text = str(payload.get("text") or payload.get("command") or "").strip()
-        if not text:
+        source = LogCommandSource.from_api(payload)
+        raw_text = str(payload.get("text") or payload.get("command") or "")
+        text = raw_text if source.kind == "telegram" else raw_text.strip()
+        if not text.strip():
             return {"ok": False, "status": "error", "error": "缺少 text", "actions": []}
 
         dispatcher = self._log_command_dispatcher()
-        source = LogCommandSource.from_api(payload)
         result = dispatcher.dispatch(text, source)
         result["dry_run"] = _log_command_bool(payload.get("dry_run"), default=False)
         result["applied_actions"] = []
@@ -1101,6 +1102,7 @@ class MiniWebServer:
             health_getter=lambda: self.health_payload(),
             identities_getter=lambda: self._store.list_identities(),
             skills_getter=lambda: self._skill_registry.list(),
+            inventory_current_getter=lambda: self.inventory_payload(include_items=False, limit=1).get("current", []),
         )
 
     def _apply_log_command_action(self, action: dict) -> dict:
