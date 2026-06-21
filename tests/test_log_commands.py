@@ -1,17 +1,15 @@
 from backend.log_commands import LogCommandDispatcher, LogCommandSource, parse_log_command
 from backend.domain.models import RawMessageEvent
+from backend.log_commands.mapping import GROUP_MAPPING_SPECS, classify_group_mapping
 from backend.log_commands.tg_listener import LogCommandTelegramListener
-from backend.repo.sample_store import SampleStore
 from backend.repo.sqlite_store import SQLiteStore
 from backend.server import MiniWebServer
-from backend.skills import SkillRegistry
 
 
 def test_parse_dot_and_slash_log_commands():
-    draft = parse_log_command(".草稿 wild_training @123")
-    assert draft is not None
-    assert draft.spec.name == "draft"
-    assert draft.args == ("wild_training", "@123")
+    old_draft = parse_log_command(".草稿 wild_training @123")
+    assert old_draft is not None
+    assert old_draft.spec.default_allowed is False
 
     help_cmd = parse_log_command("/help@miniweb_bot")
     assert help_cmd is not None
@@ -20,8 +18,15 @@ def test_parse_dot_and_slash_log_commands():
 
     module_status = parse_log_command(".元婴状态 @123")
     assert module_status is not None
-    assert module_status.spec.name == "module_status"
-    assert module_status.module_name == "元婴"
+    assert module_status.spec.default_allowed is False
+
+
+def test_group_mapping_registry_is_read_only_inventory_only():
+    assert [spec.name for spec in GROUP_MAPPING_SPECS] == ["还有多少"]
+    assert classify_group_mapping(".未知 1", is_admin=True).status == "skip"
+    mapped = classify_group_mapping('.还有多少 "增元 丹"', is_admin=True)
+    assert mapped.status == "run"
+    assert mapped.argv == ("inventory", "find", "--simple", "增元 丹")
 
 
 def test_telegram_ingress_separates_admin_slash_and_group_mapping():
@@ -30,9 +35,7 @@ def test_telegram_ingress_separates_admin_slash_and_group_mapping():
             "log_command_enabled": True,
             "log_command_admin_ids": [100],
             "log_command_chat_id": -100500,
-            "log_command_extra_commands": [],
         },
-        skills_getter=lambda: SkillRegistry().list(),
     )
 
     group_member = dispatcher.dispatch(
@@ -80,9 +83,7 @@ def test_telegram_mapping_uses_group_members_but_admin_only_for_sensitive_mappin
             "log_command_enabled": True,
             "log_command_chat_id": -100500,
             "log_command_admin_ids": [100],
-            "log_command_extra_commands": [],
         },
-        skills_getter=lambda: SkillRegistry().list(),
         inventory_current_getter=lambda: [
             {"owner": "alice", "name": "增元丹", "amount": 2},
             {"owner": "bob", "name": "大增元丹", "amount": 3},
@@ -123,7 +124,6 @@ def test_telegram_ingress_obeys_log_command_enabled_switch():
             "log_command_enabled": False,
             "log_command_chat_id": -100500,
         },
-        skills_getter=lambda: SkillRegistry().list(),
     )
 
     result = dispatcher.dispatch(
@@ -142,7 +142,6 @@ def test_local_api_dispatch_ignores_log_command_enabled_switch():
             "log_command_enabled": False,
             "log_command_chat_id": "",
         },
-        skills_getter=lambda: SkillRegistry().list(),
     )
 
     result = dispatcher.dispatch(".帮助", LogCommandSource(kind="local_api"))
@@ -151,31 +150,15 @@ def test_local_api_dispatch_ignores_log_command_enabled_switch():
     assert result["decision"]["ingress"] == "local_api"
 
 
-def test_log_command_dispatch_creates_outbox_draft_only():
-    server = MiniWebServer(store=SampleStore())
+def test_log_command_local_api_no_longer_creates_send_actions(tmp_path):
+    server = MiniWebServer(store=SQLiteStore(tmp_path / "miniweb.db"))
 
     result = server.log_command_dispatch_payload(
         {"text": ".草稿 wild_training", "dry_run": False}
     )
 
-    assert result["ok"] is True
-    assert result["status"] == "ok"
-    assert result["actions"][0]["kind"] == "outbox_draft"
-    assert result["applied_actions"][0]["ok"] is True
-    assert result["applied_actions"][0]["draft"]["command"] == ".野外历练"
-    assert result["applied_actions"][0]["draft"]["send_mode"] == "copy"
-
-
-def test_log_command_manual_send_is_blocked_by_default():
-    server = MiniWebServer(store=SampleStore())
-
-    result = server.log_command_dispatch_payload(
-        {"text": ".发送 wild_training @123", "dry_run": False}
-    )
-
     assert result["ok"] is False
-    assert result["status"] == "blocked"
-    assert result["blocked_level"] == "manual_send"
+    assert result["status"] == "error"
     assert result["applied_actions"] == []
 
 
@@ -256,7 +239,12 @@ def test_log_command_telegram_listener_dispatches_and_replies():
         }
 
     listener = LogCommandTelegramListener(
-        get_settings=lambda: {"log_command_enabled": True, "notify_tg_bot_token": "token"},
+        get_settings=lambda: {
+            "log_command_enabled": True,
+            "notify_tg_bot_token": "token",
+            "log_command_chat_id": -100500,
+            "log_command_admin_ids": [300],
+        },
         dispatch=dispatch,
     )
 
@@ -271,7 +259,7 @@ def test_log_command_telegram_listener_dispatches_and_replies():
             "update_id": 10,
             "message": {
                 "message_id": 20,
-                "text": " .帮助",
+                "text": "/帮助",
                 "chat": {"id": -100500},
                 "from": {"id": 300},
             },
@@ -280,7 +268,7 @@ def test_log_command_telegram_listener_dispatches_and_replies():
 
     assert calls == [
         {
-            "text": " .帮助",
+            "text": "/帮助",
             "source_kind": "telegram",
             "chat_id": -100500,
             "from_user_id": 300,
@@ -292,3 +280,31 @@ def test_log_command_telegram_listener_dispatches_and_replies():
     assert api_calls[0][2]["chat_id"] == "-100500"
     assert api_calls[0][2]["reply_to_message_id"] == "20"
     assert api_calls[0][2]["text"] == "帮助内容"
+
+
+def test_log_command_telegram_listener_prefilters_unclaimed_text():
+    calls = []
+    listener = LogCommandTelegramListener(
+        get_settings=lambda: {
+            "log_command_enabled": True,
+            "notify_tg_bot_token": "token",
+            "log_command_chat_id": -100500,
+            "log_command_admin_ids": [300],
+        },
+        dispatch=lambda payload: calls.append(payload) or {"ok": True},
+    )
+
+    listener._handle_update(
+        "token",
+        {
+            "update_id": 11,
+            "message": {
+                "message_id": 21,
+                "text": " .帮助",
+                "chat": {"id": -100500},
+                "from": {"id": 300},
+            },
+        },
+    )
+
+    assert calls == []

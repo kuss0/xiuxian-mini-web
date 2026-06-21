@@ -76,11 +76,11 @@ do not prove success.
 | Field | Current contract |
 | --- | --- |
 | State source | `OutboxPlanner` resolves command, identity, account, reply context, and target chat. `backend/outbox/send.py` is the manual-send executor; `backend/outbox/schedule.py` builds official-schedule plans. |
-| Trigger | UI actions and log-command `.草稿` intents can call `/api/outbox/plan` or `/api/outbox/drafts`. No background outbox worker or auto-dispatch adapter is active. |
+| Trigger | UI actions can call `/api/outbox/plan` or `/api/outbox/drafts`. Log-command ingress is read-only and no longer creates outbox drafts. No background outbox worker or auto-dispatch adapter is active. |
 | Refresh path | `web/static/views/outbox.js` renders outbox drafts and send plans. The access settings modal, automation guard form, Telegram dialog/topic option renderers, and read-only Telegram account list are isolated in `web/static/views/settings.js`; the notification settings modal is isolated in `web/static/views/notify.js`, while `web/static/app.js` keeps `/api/settings`, login, notification-test, notification card-title, and outbox draft/plan API wrappers. |
-| Failure/manual fallback | Missing identity/context, unresolved account target, or invalid commands return manual-required plan state instead of sending. Log-command intents can create outbox drafts only; `.发送` and `.官方定时` remain blocked unless a separate policy enables them later. |
+| Failure/manual fallback | Missing identity/context, unresolved account target, or invalid commands return manual-required plan state instead of sending. Log-command ingress only supports read-only slash commands and the `.还有多少` desensitized inventory mapping. |
 | Current gap | Manual draft review is still required before user-session sending or official schedule creation. |
-| Next action | Keep gameplay choices and ambiguous actions behind manual confirmation; expand log-command draft coverage only with fixture-backed routing rules. |
+| Next action | Keep gameplay choices and ambiguous actions behind manual confirmation; expand log-command mappings only for read-only behavior with fixture-backed routing rules. |
 
 ## Chat Stream (Removed From Live UI)
 
@@ -100,7 +100,7 @@ do not prove success.
 | State source | The active identity and skill catalog still feed status panels, but the live page no longer exposes a direct-send composer. |
 | Trigger | Composer DOM entrypoints are absent from `web/index.html`; `web/static/app.js` blocks fill helpers and no longer keeps direct-send session state. |
 | Refresh path | `web/static/views/direct_composer.js` is removed from mainline; restoration must come from `backup/chat-ui-before-removal-20260621`. `web/static/app.js` no longer contains the direct composer `/api/skills/send` submission implementation. |
-| Failure/manual fallback | Manual sending through the chat composer is removed. Operators should use outbox drafts, official schedule workflows, or log-command draft intents instead of direct composer sends. |
+| Failure/manual fallback | Manual sending through the chat composer is removed. Operators should use outbox drafts or official schedule workflows instead of direct composer sends. |
 | Current gap | Some action buttons still surface historical action labels; clicking them now returns a removed-feature notice rather than filling a composer. |
 | Next action | Convert any still-useful action button into an outbox draft flow before reintroducing direct sending. |
 

@@ -240,7 +240,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "Xutian now exposes phase, route" in audit
     assert "## Outbox Drafts And Schedules" in audit
     assert "No background outbox worker or auto-dispatch adapter is active" in audit
-    assert "Log-command intents can create outbox drafts only" in audit
+    assert "Log-command ingress is read-only and no longer creates outbox drafts" in audit
     assert "`web/static/views/outbox.js` renders outbox drafts and send plans" in audit
     assert "access settings modal, automation guard form, Telegram dialog/topic option renderers, and read-only Telegram account list are isolated in `web/static/views/settings.js`" in audit
     assert "notification settings modal is isolated in `web/static/views/notify.js`" in audit

@@ -38,8 +38,9 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      and manual fallback.
    - Automatic refresh reduces manual refresh pressure without removing the
      manual fallback.
-   - Outbox is a manual draft/plan layer. Log-command intents and UI actions can
-     create drafts or plans, but they do not background-dispatch commands.
+   - Outbox is a manual draft/plan layer. UI actions can create drafts or plans,
+     but log-command ingress stays read-only and does not background-dispatch
+     commands.
    - Official schedule creation respects the observed 100 scheduled-message
      per-identity boundary and refuses additional automation with a manual
      handling notice.
@@ -160,8 +161,9 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
   room returns.
 - Treat official schedule Telegram-history sync as reconciliation only; never
   use it to exceed the local 100-message guard.
-- Keep command dispatch layered: log-command `.草稿` creates outbox drafts only;
-  unrecognized commands, dungeon choices, and ambiguous actions stay manual.
+- Keep command dispatch layered: log-command ingress only accepts admin slash
+  observation and read-only group mappings; unrecognized commands, dungeon
+  choices, and ambiguous actions stay manual.
 - Continue CSS/module cleanup opportunistically when a touched surface already
   has focused contract or browser coverage; keep new style entrypoints named by
   live responsibility rather than by removed chat surfaces.

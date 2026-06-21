@@ -8,6 +8,8 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable
 
+from backend.log_commands.allowlist import LogCommandPolicy, classify_telegram_ingress
+
 
 _API_BASE = "https://api.telegram.org"
 _POLL_TIMEOUT_SEC = 20
@@ -17,8 +19,8 @@ _REPLY_LIMIT = 3800
 class LogCommandTelegramListener:
     """Telegram Bot API ingress for log-group commands.
 
-    This layer owns only I/O. Parsing, allowlists, action levels, outbox draft
-    creation, and send guards stay in the log command dispatcher/server.
+    This layer owns Bot API I/O and ingress filtering. Command parsing and
+    read-only handlers stay in the dispatcher/server.
     """
 
     def __init__(
@@ -179,6 +181,16 @@ class LogCommandTelegramListener:
         user_id = _safe_int(sender.get("id"))
         msg_id = _safe_int(message.get("message_id"))
         if not chat_id or not msg_id:
+            return
+        settings = self._settings_snapshot()
+        policy = LogCommandPolicy.from_settings(settings)
+        ingress = classify_telegram_ingress(
+            policy=policy,
+            text=text,
+            user_id=user_id,
+            chat_id=chat_id,
+        )
+        if ingress.kind == "skip":
             return
         result = self._dispatch(
             {

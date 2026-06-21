@@ -215,6 +215,28 @@
           <p id="notifyTestResult" class="muted" style="font-size:12px;"></p>
         </div>
 
+        <div class="detail-block">
+          <h4>日志群指令</h4>
+          <label class="toggle-field">
+            <input type="checkbox" name="log_command_enabled" ${settings.log_command_enabled ? "checked" : ""} />
+            <span>启用 listener</span>
+          </label>
+          <div class="form-grid">
+            <label>
+              <span>控制台 Chat ID</span>
+              <input name="log_command_chat_id" value="${escapeAttr(settings.log_command_chat_id || "")}" placeholder="-100..." />
+            </label>
+            <label>
+              <span>映射群 Chat ID</span>
+              <input name="log_command_mapping_chat_id" value="${escapeAttr(settings.log_command_mapping_chat_id || "")}" placeholder="留空则使用控制台群" />
+            </label>
+          </div>
+          <label>
+            <span>管理员 User ID</span>
+            <textarea name="log_command_admin_ids" rows="2" placeholder="每行一个 user_id">${escapeHtml((settings.log_command_admin_ids || []).join("\n"))}</textarea>
+          </label>
+        </div>
+
         <div class="login-verify">
           <label>
             <span>验证码</span>
@@ -554,6 +576,10 @@
       notify_tg_bot_token: data.get("notify_tg_bot_token"),
       notify_tg_chat_id: data.get("notify_tg_chat_id"),
       notify_card_titles: notifyTitles,
+      log_command_enabled: !!form.querySelector('input[name="log_command_enabled"]:checked'),
+      log_command_chat_id: data.get("log_command_chat_id"),
+      log_command_mapping_chat_id: data.get("log_command_mapping_chat_id"),
+      log_command_admin_ids: splitLines(data.get("log_command_admin_ids")),
       tianjige_mode: data.get("tianjige_mode"),
       tianjige_base_url: data.get("tianjige_base_url"),
       tianjige_api_token: data.get("tianjige_api_token"),
