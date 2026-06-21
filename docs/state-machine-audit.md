@@ -130,5 +130,9 @@ do not prove success.
 
 - Prefer existing state stores and APIs before adding new state tables.
 - Treat bot replies and authoritative snapshots as state transitions; treat user commands as intent only.
+- Keep the live frontend boundary aligned with the Rust-line module style: shell
+  and workbench CSS load through `web/static/styles/pages/app-shell.css` and
+  `web/static/styles/pages/workbench-layout.css`, while removed chat assets stay
+  dormant and are not live stylesheet entrypoints.
 - Keep manual refresh buttons for every state machine that can drift from Telegram or bot-side truth.
 - Add regression tests for boundaries before making UI depend on a state signal.

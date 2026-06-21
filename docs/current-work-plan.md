@@ -94,6 +94,9 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      clear ownership.
    - New fixes land in final contract files or small modules, not as unrelated
      overrides across multiple sections.
+   - Follow the Rust-line module boundary style: live assets are named by the
+     responsibility they serve, while old chat restoration assets stay dormant
+     and cannot be used as the live shell/workbench entrypoint.
    - Current state: inventory lives in `web/static/views/inventory.js`; dungeon Xutian/Cangkun
      playbook cards live in `web/static/views/dungeon_playbook.js`; the dungeon
      status modal shell and refresh flow live in
@@ -127,7 +130,11 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      `web/static/views/detail_panel.js`; the live UI no longer renders the chat
      stream, message detail pane, or direct-send composer, and `web/static/app.js`
      no longer keeps runtime bindings to those dormant view modules or a direct
-     composer send implementation. Detail rich cards and field formatting remain in
+     composer send implementation. The live page shell styles enter through
+     `web/static/styles/pages/app-shell.css`, and the final schedule/tool
+     workbench viewport contract enters through
+     `web/static/styles/pages/workbench-layout.css`; the old `chat.css` and
+     root `chat-layout.css` paths are not live assets. Detail rich cards and field formatting remain in
      `web/static/views/detail_cards.js` for compatibility with a future restore;
      the focus archive rule modal lives in
      `web/static/views/focus_archive.js` with preview API injected from
@@ -161,7 +168,8 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
 - Keep automatic dispatch limited to explicit settings allowlists; unrecognized
   commands, dungeon choices, and ambiguous actions stay manual.
 - Continue CSS/module cleanup opportunistically when a touched surface already
-  has focused contract or browser coverage.
+  has focused contract or browser coverage; keep new style entrypoints named by
+  live responsibility rather than by removed chat surfaces.
 
 ## Verification
 

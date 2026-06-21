@@ -1,6 +1,6 @@
-/* Final chat viewport stability contract.
+/* Final workbench viewport stability contract.
    Keep these rules last-loaded so older visual passes in the base/page styles
-   cannot push the message list or composer out of the viewport. */
+   cannot push the schedule workbench or sidebar controls out of the viewport. */
 .chat-client-shell {
   height: 100dvh;
   max-height: 100dvh;
@@ -2129,7 +2129,7 @@ body {
   }
 }
 
-/* Chat fullscreen overlay: the left-rail chat entry is only the trigger. */
+/* Dormant chat fullscreen overlay: the old left-rail chat entry was only the trigger. */
 .chat-client-shell .conversation-rail .chat-secondary-shell[open] {
   position: fixed;
   inset: 8px;

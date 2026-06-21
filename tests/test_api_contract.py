@@ -90,8 +90,11 @@ def test_static_modules_are_loaded_and_cache_busted():
     assert active_view_assets <= set(loaded_assets)
     assert dormant_view_assets.isdisjoint(set(loaded_assets))
     assert "styles/base/reset.css" in loaded_assets
-    assert "chat-layout.css" in loaded_assets
-    assert loaded_assets.index("styles/base/reset.css") < loaded_assets.index("chat-layout.css")
+    assert "styles/pages/app-shell.css" in loaded_assets
+    assert "styles/pages/workbench-layout.css" in loaded_assets
+    assert "styles/pages/chat.css" not in loaded_assets
+    assert "chat-layout.css" not in loaded_assets
+    assert loaded_assets.index("styles/base/reset.css") < loaded_assets.index("styles/pages/workbench-layout.css")
 
     injected = _inject_build_id(html.encode("utf-8")).decode("utf-8")
     for asset in loaded_assets:
@@ -145,6 +148,7 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     work_plan = (root / "docs" / "current-work-plan.md").read_text(encoding="utf-8")
     audit = (root / "docs" / "state-machine-audit.md").read_text(encoding="utf-8")
     normalized_work_plan = re.sub(r"\s+", " ", work_plan)
+    normalized_audit = re.sub(r"\s+", " ", audit)
 
     assert "dungeon panel" in work_plan and "clickability" in work_plan
     assert "official schedule manual handling" in normalized_work_plan
@@ -164,6 +168,8 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "world event strip and manual event actions live in `web/static/views/world_event.js`" in normalized_work_plan
     assert "live situation board and signal snapshot helpers live in `web/static/views/live_situation.js`" in normalized_work_plan
     assert "game cockpit, primary strip, and action dock live in `web/static/views/game_cockpit.js`" in normalized_work_plan
+    assert "Follow the Rust-line module boundary style" in normalized_work_plan
+    assert "live assets are named by the responsibility they serve" in normalized_work_plan
     assert "leader intelligence modal lives in `web/static/views/leader_intel.js` with leader-message loading injected from `web/static/app.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
     assert "global health/setup banner lives in `web/static/views/global_banner.js`" in normalized_work_plan
@@ -175,6 +181,9 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "`web/static/app.js` no longer keeps runtime view bindings or the direct composer send implementation" in normalized_work_plan
     assert "`web/index.html` no longer loads `web/static/views/chat_stream.js`, `web/static/views/direct_composer.js`, or `web/static/views/detail_panel.js`" in normalized_work_plan
     assert "`web/static/app.js` no longer keeps runtime bindings to those dormant view modules or a direct composer send implementation" in normalized_work_plan
+    assert "live page shell styles enter through `web/static/styles/pages/app-shell.css`" in normalized_work_plan
+    assert "final schedule/tool workbench viewport contract enters through `web/static/styles/pages/workbench-layout.css`" in normalized_work_plan
+    assert "old `chat.css` and root `chat-layout.css` paths are not live assets" in normalized_work_plan
     assert "live UI no longer renders the chat stream, message detail pane, or direct-send composer" in normalized_work_plan
     assert "message logs modal lives in `web/static/views/logs.js` with message paging/export APIs injected from `web/static/app.js`" in normalized_work_plan
     assert "notification settings modal lives in `web/static/views/notify.js` with card-title/settings/test APIs injected from `web/static/app.js`" in normalized_work_plan
@@ -222,6 +231,10 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "filter settings modal is isolated in `web/static/views/filter_settings.js`, with diagnostics and focus-exclude preview APIs injected from `web/static/app.js`" in audit
     assert "Detail panel actions no longer fill a live composer" in audit
     assert "detail, focus-archive, and filter-settings modules do not call send APIs or create direct API requests" in audit
+    assert "live frontend boundary aligned with the Rust-line module style" in normalized_audit
+    assert "web/static/styles/pages/app-shell.css" in normalized_audit
+    assert "web/static/styles/pages/workbench-layout.css" in normalized_audit
+    assert "removed chat assets stay dormant and are not live stylesheet entrypoints" in normalized_audit
     assert "Account login/logout modals, listen-target renderers, account login/listen-target event flow, account status line, and account action guards are isolated in `web/static/views/account_management.js`" in audit
     assert "keeps injected account save/login/dialog/topic/listener API orchestration" in audit
     assert "Sidebar identity list, identity snapshot, sidebar module chips, add-identity modal renderers/event flow, and send_as list/selection/status renderers are isolated in `web/static/views/identity_management.js`" in audit
@@ -1878,15 +1891,19 @@ def test_inventory_modal_keeps_auto_refresh_with_manual_owner_fallback():
 def test_chat_surface_removed_and_schedule_workbench_layout_contract():
     root = Path(__file__).resolve().parents[1]
     html = (root / "web" / "index.html").read_text(encoding="utf-8")
-    css = (root / "web" / "static" / "chat-layout.css").read_text(encoding="utf-8")
+    css = (root / "web" / "static" / "styles" / "pages" / "workbench-layout.css").read_text(encoding="utf-8")
     app_js = (root / "web" / "static" / "app.js").read_text(encoding="utf-8")
     state_js = (root / "web" / "static" / "state.js").read_text(encoding="utf-8")
 
     workspace = html.index('<main class="main chat-workspace">')
     schedule_workbench = html.index('<section class="panel schedule-rail-panel schedule-workbench"')
     styles_link = html.index('<link rel="stylesheet" href="/static/styles/base/reset.css"')
-    layout_link = html.index('<link rel="stylesheet" href="/static/chat-layout.css"')
+    shell_link = html.index('<link rel="stylesheet" href="/static/styles/pages/app-shell.css"')
+    layout_link = html.index('<link rel="stylesheet" href="/static/styles/pages/workbench-layout.css"')
     assert styles_link < layout_link
+    assert shell_link < layout_link
+    assert "/static/styles/pages/chat.css" not in html
+    assert "/static/chat-layout.css" not in html
     assert workspace < schedule_workbench
     assert html.count('name="sidebar-menu"') == 3
     assert '<section id="activeIdentityDock" class="active-identity-dock"' in html
@@ -1914,7 +1931,7 @@ def test_chat_surface_removed_and_schedule_workbench_layout_contract():
     assert "跟随当前身份" in html
 
     dormant_css_fragments = [
-        "Final chat viewport stability contract.",
+        "Final workbench viewport stability contract.",
         ".chat-client-shell {\n  height: 100dvh;\n  max-height: 100dvh;\n  overflow: hidden;",
         ".chat-client-shell .workspace-tools-panel {\n  position: fixed;\n  top: 48px;\n  right: 14px;",
         "max-height: calc(100dvh - 64px);\n  align-content: start;\n  overflow: auto;",
@@ -1930,7 +1947,7 @@ def test_chat_surface_removed_and_schedule_workbench_layout_contract():
         ".chat-client-shell {\n    grid-template-rows: 236px minmax(0, 1fr);",
         ".chat-client-shell .conversation-rail {\n    grid-template-columns: minmax(0, 1fr);\n    grid-template-rows: minmax(0, 1fr) auto;",
         ".chat-client-shell .primary-toolbox {\n    grid-template-columns: repeat(4, minmax(0, 1fr));",
-        "Chat fullscreen overlay: the left-rail chat entry is only the trigger.",
+        "Dormant chat fullscreen overlay: the old left-rail chat entry was only the trigger.",
         ".chat-client-shell .conversation-rail .chat-secondary-shell[open] {\n  position: fixed;\n  inset: 8px;",
         ".chat-client-shell .conversation-rail .chat-secondary-shell[open] .chat-secondary-content {\n  position: static;\n  grid-row: 2;\n  display: grid;\n  grid-template-rows: minmax(0, 1fr) auto;",
         "First-level identity switch: status details stay secondary.",
