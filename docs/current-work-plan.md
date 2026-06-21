@@ -13,14 +13,12 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
    - The restore point is the remote branch
      `backup/chat-ui-before-removal-20260621`, which points at the last commit
      before the chat UI was removed.
-   - Current state: `web/static/app.js` disables chat initialization through
-     `CHAT_FEATURE_ENABLED = false`; the disabled chat refresh path clears local
-     chat state without polling `/api/messages`, and `pollTick` only queues chat
-     refresh work when the feature flag is enabled. The old chat stream, direct
-     composer, and detail-panel view modules remain in the tree as dormant
-     compatibility code, but their live script tags and DOM entrypoints are gone
-     from `web/index.html`; `web/static/app.js` no longer keeps runtime view
-     bindings or the direct composer send implementation for them.
+   - Current state: chat stream, direct composer, and message-detail view files
+     are removed from mainline. Their live script tags and DOM entrypoints are
+     gone from `web/index.html`; `web/static/app.js` keeps only compatibility
+     no-op helpers for older action callers and no longer keeps runtime view
+     bindings or the direct composer send implementation for them. The restore
+     point is `backup/chat-ui-before-removal-20260621`.
 
 2. Message classification regression suite
    - Player plain messages that should stay in focus remain visible.
@@ -40,9 +38,8 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      and manual fallback.
    - Automatic refresh reduces manual refresh pressure without removing the
      manual fallback.
-   - Outbox automation uses a guarded dry-run-first flow before any sender
-     adapter can dispatch; the optional `auto_pending` worker consumes only
-     queued outbox drafts through the same policy guard.
+   - Outbox is a manual draft/plan layer. Log-command intents and UI actions can
+     create drafts or plans, but they do not background-dispatch commands.
    - Official schedule creation respects the observed 100 scheduled-message
      per-identity boundary and refuses additional automation with a manual
      handling notice.
@@ -52,17 +49,16 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      unopened dungeon room return success replies as conservative deltas;
      inventory schema upgrades replay owner-resolvable raw messages so new safe
      delta families also reach historical `inventory_current`; official schedule manual
-     handling details persist in the modal status line. The official schedule rail and modal live in
-     `web/static/views/schedule.js`; the resource stats modal and coverage
-     renderer live in `web/static/views/resource_stats.js`; identity state
-     refresh is part of the normal identity refresh path. Outbox automation
-     guard logic lives in `backend/outbox/automation.py`; sender adapters live
-     in `backend/outbox/adapters.py`; the optional queue worker lives in
-     `backend/outbox/worker.py`. Outbox drafts, send-plan rendering, and
-     automation decision panels live in `web/static/views/outbox.js`, while
-     `web/static/app.js` keeps `/api/outbox/auto-plan`,
-     `/api/outbox/auto-dispatch`, and `/api/outbox/auto-queue` wrappers for
-     guarded dry-run/dispatch/queue checks.
+     handling details persist in the modal status line. The official schedule
+     rail and modal live in `web/static/views/schedule.js`; the resource stats
+     modal and coverage renderer live in `web/static/views/resource_stats.js`;
+     identity state refresh is part of the normal identity refresh path.
+     Outbox planning lives in `backend/outbox/planner.py`; manual send
+     execution lives in `backend/outbox/send.py`; official-schedule plan
+     building lives in `backend/outbox/schedule.py`. Outbox drafts and
+     send-plan rendering live in `web/static/views/outbox.js`, while
+     `web/static/app.js` keeps `/api/outbox/plan` and `/api/outbox/drafts`
+     wrappers for manual draft/plan checks.
 
 4. Tool center cleanup
    - Common workflows remain on the main page.
@@ -122,14 +118,13 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      injected from `web/static/app.js`. The notification settings modal lives in
      `web/static/views/notify.js` with card-title/settings/test APIs injected
      from `web/static/app.js`. The official schedule rail and modal
-     live in `web/static/views/schedule.js`. The old chat stream,
-     direct composer, and message-detail modules remain in the source tree only
-     as dormant compatibility code while `CHAT_FEATURE_ENABLED` is false, and
+     live in `web/static/views/schedule.js`. The chat stream, direct composer,
+     and message-detail modules are removed from mainline, and
      `web/index.html` no longer loads `web/static/views/chat_stream.js`,
      `web/static/views/direct_composer.js`, or
      `web/static/views/detail_panel.js`; the live UI no longer renders the chat
      stream, message detail pane, or direct-send composer, and `web/static/app.js`
-     no longer keeps runtime bindings to those dormant view modules or a direct
+     no longer keeps runtime bindings to those removed view modules or a direct
      composer send implementation. The live page shell styles enter through
      `web/static/styles/pages/app-shell.css`, and the final schedule/tool
      workbench viewport contract enters through
@@ -165,8 +160,8 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
   room returns.
 - Treat official schedule Telegram-history sync as reconciliation only; never
   use it to exceed the local 100-message guard.
-- Keep automatic dispatch limited to explicit settings allowlists; unrecognized
-  commands, dungeon choices, and ambiguous actions stay manual.
+- Keep command dispatch layered: log-command `.草稿` creates outbox drafts only;
+  unrecognized commands, dungeon choices, and ambiguous actions stay manual.
 - Continue CSS/module cleanup opportunistically when a touched surface already
   has focused contract or browser coverage; keep new style entrypoints named by
   live responsibility rather than by removed chat surfaces.

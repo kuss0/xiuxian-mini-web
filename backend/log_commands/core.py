@@ -171,6 +171,7 @@ class LogCommandSource:
 
 @dataclass(frozen=True)
 class LogCommandPolicy:
+    enabled: bool = False
     admin_ids: tuple[int, ...] = ()
     chat_id: int = 0
     extra_commands: tuple[str, ...] = ()
@@ -181,6 +182,7 @@ class LogCommandPolicy:
     def from_settings(cls, settings: Mapping[str, object] | None) -> "LogCommandPolicy":
         settings = settings or {}
         return cls(
+            enabled=_bool_value(settings.get("log_command_enabled")),
             admin_ids=tuple(_int_items(settings.get("log_command_admin_ids"))),
             chat_id=_safe_int(settings.get("log_command_chat_id")),
             extra_commands=tuple(
@@ -193,6 +195,7 @@ class LogCommandPolicy:
 
     def to_api(self) -> dict:
         return {
+            "enabled": self.enabled,
             "admin_count": len(self.admin_ids),
             "chat_configured": bool(self.chat_id),
             "group_members_allowed": bool(self.chat_id),
@@ -288,6 +291,13 @@ class LogCommandDispatcher:
     def _classify(self, parsed: ParsedLogCommand, source: LogCommandSource) -> dict:
         if source.kind == "local_api":
             return {"kind": "run", "ingress": "local_api", "is_admin": True}
+
+        if not self._policy.enabled:
+            return {
+                "kind": "reject",
+                "text": "日志群命令未启用。",
+                "reason": "command_listener_disabled",
+            }
 
         is_admin = source.user_id in self._policy.admin_ids
         in_log_group = bool(self._policy.chat_id) and source.chat_id == self._policy.chat_id

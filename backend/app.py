@@ -400,9 +400,20 @@ def main() -> None:
     else:
         print("[mini-web] 官方定时续期 worker 已禁用")
 
+    log_command_listener_enabled = os.environ.get("MINIWEB_LOG_COMMAND_LISTENER", "1").strip().lower() not in {"0", "false", "no", "off"}
+    if log_command_listener_enabled:
+        app_server.start_log_command_listener()
+        print("[mini-web] 日志群命令 listener 已启用")
+    else:
+        print("[mini-web] 日志群命令 listener 已禁用")
+
     server = create_http_server(args.host, args.port, app_server)
     print(f"Xiuxian Mini Web listening on http://{args.host}:{args.port}")
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        app_server.stop_log_command_listener()
+        app_server.stop_schedule_renew_worker()
 
 
 if __name__ == "__main__":

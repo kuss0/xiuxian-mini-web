@@ -1,31 +1,31 @@
 /* Final workbench viewport stability contract.
    Keep these rules last-loaded so older visual passes in the base/page styles
    cannot push the schedule workbench or sidebar controls out of the viewport. */
-.chat-client-shell {
+.miniweb-shell {
   height: 100dvh;
   max-height: 100dvh;
   overflow: hidden;
 }
 
-.chat-client-shell .conversation-rail,
-.chat-client-shell .chat-workspace {
+.miniweb-shell .tool-rail,
+.miniweb-shell .schedule-workspace {
   height: 100dvh;
   min-height: 0;
   overflow: hidden;
 }
 
-.chat-client-shell .chat-workspace {
+.miniweb-shell .schedule-workspace {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
-.chat-client-shell .global-banner {
+.miniweb-shell .global-banner {
   grid-row: 1;
 }
 
-.chat-client-shell .layout-grid,
-.chat-client-shell .layout-grid.detail-open,
-.chat-client-shell .layout-grid.detail-closed {
+.miniweb-shell .layout-grid,
+.miniweb-shell .layout-grid.detail-open,
+.miniweb-shell .layout-grid.detail-closed {
   grid-row: 2;
   display: grid;
   min-height: 0;
@@ -33,7 +33,7 @@
   overflow: hidden;
 }
 
-.chat-client-shell .chat-pane {
+.miniweb-shell .chat-pane {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
@@ -41,11 +41,11 @@
   overflow: hidden;
 }
 
-.chat-client-shell .chat-pane .section-head {
+.miniweb-shell .chat-pane .section-head {
   grid-row: 1;
 }
 
-.chat-client-shell .game-primary-strip {
+.miniweb-shell .game-primary-strip {
   display: none;
   grid-row: 2;
   min-height: 0;
@@ -53,7 +53,7 @@
   border: 0;
 }
 
-.chat-client-shell .message-list {
+.miniweb-shell .message-list {
   grid-row: 2;
   min-height: 0;
   height: auto;
@@ -61,7 +61,7 @@
   overscroll-behavior: contain;
 }
 
-.chat-client-shell .chat-composer {
+.miniweb-shell .chat-composer {
   grid-row: 3;
   align-self: stretch;
   max-height: min(34dvh, 310px);
@@ -69,7 +69,7 @@
   padding: 6px 9px 7px;
 }
 
-.chat-client-shell .quick-action-hotbar {
+.miniweb-shell .quick-action-hotbar {
   display: grid;
   grid-template-columns: repeat(var(--hotbar-columns, 6), minmax(0, 1fr));
   grid-template-rows: repeat(2, 18px);
@@ -85,7 +85,7 @@
   padding: 0;
 }
 
-.chat-client-shell .quick-action-hotbar .skill-chip {
+.miniweb-shell .quick-action-hotbar .skill-chip {
   width: 100%;
   min-width: 0;
   min-height: 0;
@@ -99,25 +99,25 @@
   line-height: 1.1;
 }
 
-.chat-client-shell .quick-action-hotbar .skill-chip-label {
+.miniweb-shell .quick-action-hotbar .skill-chip-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-client-shell .quick-action-hotbar .skill-chip-icon {
+.miniweb-shell .quick-action-hotbar .skill-chip-icon {
   flex: 0 0 auto;
   font-size: 10px;
 }
 
-.chat-client-shell .quick-action-hotbar .skill-chip-cd {
+.miniweb-shell .quick-action-hotbar .skill-chip-cd {
   flex: 0 0 auto;
   font-size: 9px;
   opacity: 0.86;
 }
 
-.chat-client-shell .direct-send-head {
+.miniweb-shell .direct-send-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -126,69 +126,69 @@
   margin-bottom: 3px;
 }
 
-.chat-client-shell .direct-send-title {
+.miniweb-shell .direct-send-title {
   min-width: 0;
   gap: 6px;
 }
 
-.chat-client-shell .direct-send-title strong {
+.miniweb-shell .direct-send-title strong {
   font-size: 12px;
 }
 
-.chat-client-shell .direct-send-title span {
+.miniweb-shell .direct-send-title span {
   min-width: 0;
   max-width: min(46vw, 520px);
   font-size: 11.5px;
 }
 
-.chat-client-shell .direct-send-actions {
+.miniweb-shell .direct-send-actions {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
 }
 
-.chat-client-shell .direct-send-actions .composer-tool-button {
+.miniweb-shell .direct-send-actions .composer-tool-button {
   min-height: 26px;
   padding: 3px 8px;
   border-radius: 7px;
   font-size: 12px;
 }
 
-.chat-client-shell .direct-send-row textarea {
+.miniweb-shell .direct-send-row textarea {
   overflow-y: auto;
 }
 
-.chat-client-shell .direct-send-row {
+.miniweb-shell .direct-send-row {
   grid-template-columns: clamp(108px, 12vw, 150px) minmax(0, 1fr) 68px;
 }
 
 @media (max-height: 760px) and (min-width: 901px) {
-  .chat-client-shell .chat-composer {
+  .miniweb-shell .chat-composer {
     max-height: min(32dvh, 250px);
     padding: 5px 9px 7px;
   }
 
-  .chat-client-shell .quick-action-hotbar {
+  .miniweb-shell .quick-action-hotbar {
     gap: 2px 4px;
     max-height: 38px;
   }
 
-  .chat-client-shell .quick-action-hotbar .skill-chip {
+  .miniweb-shell .quick-action-hotbar .skill-chip {
     height: 18px;
     padding: 1px 3px;
     font-size: 10px;
   }
 
-  .chat-client-shell .direct-send-row select,
-  .chat-client-shell .direct-send-row textarea,
-  .chat-client-shell #directSendSubmit {
+  .miniweb-shell .direct-send-row select,
+  .miniweb-shell .direct-send-row textarea,
+  .miniweb-shell #directSendSubmit {
     min-height: 40px;
   }
 }
 
 @media (max-width: 900px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: clamp(112px, 20dvh, 170px) minmax(0, 1fr);
     height: 100dvh;
@@ -196,30 +196,30 @@
     overflow: hidden;
   }
 
-  .chat-client-shell .conversation-rail,
-  .chat-client-shell .chat-workspace {
+  .miniweb-shell .tool-rail,
+  .miniweb-shell .schedule-workspace {
     min-height: 0;
     height: 100%;
     overflow: hidden;
   }
 
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     grid-row: 1;
     overflow: auto;
     padding: 8px;
     scrollbar-width: none;
   }
 
-  .chat-client-shell .conversation-rail::-webkit-scrollbar {
+  .miniweb-shell .tool-rail::-webkit-scrollbar {
     display: none;
   }
 
-  .chat-client-shell .chat-workspace {
+  .miniweb-shell .schedule-workspace {
     grid-row: 2;
     min-height: 0;
   }
 
-  .chat-client-shell .chat-composer {
+  .miniweb-shell .chat-composer {
     position: static;
     bottom: auto;
     max-height: min(42dvh, 220px);
@@ -228,15 +228,15 @@
 }
 
 @media (max-width: 720px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-rows: clamp(112px, 19dvh, 160px) minmax(0, 1fr);
   }
 
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     padding: 6px 8px;
   }
 
-  .chat-client-shell .chat-pane .section-head {
+  .miniweb-shell .chat-pane .section-head {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto auto;
@@ -248,15 +248,15 @@
     padding: 5px 8px;
   }
 
-  .chat-client-shell .chat-pane .section-head > .stream-filter-inline,
-  .chat-client-shell .chat-pane .section-head > .stream-channel-tools {
+  .miniweb-shell .chat-pane .section-head > .stream-filter-inline,
+  .miniweb-shell .chat-pane .section-head > .stream-channel-tools {
     width: 100%;
     min-width: 0;
     max-width: none;
   }
 
-  .chat-client-shell .stream-filter-inline .quick-filters,
-  .chat-client-shell .stream-channel-tools {
+  .miniweb-shell .stream-filter-inline .quick-filters,
+  .miniweb-shell .stream-channel-tools {
     flex-wrap: nowrap;
     overflow-x: auto;
     overflow-y: hidden;
@@ -264,97 +264,97 @@
     scrollbar-width: none;
   }
 
-  .chat-client-shell .stream-filter-inline .quick-filters::-webkit-scrollbar,
-  .chat-client-shell .stream-channel-tools::-webkit-scrollbar,
-  .chat-client-shell .quick-action-hotbar::-webkit-scrollbar {
+  .miniweb-shell .stream-filter-inline .quick-filters::-webkit-scrollbar,
+  .miniweb-shell .stream-channel-tools::-webkit-scrollbar,
+  .miniweb-shell .quick-action-hotbar::-webkit-scrollbar {
     display: none;
   }
 
-  .chat-client-shell .stream-filter-inline .quick-filters {
+  .miniweb-shell .stream-filter-inline .quick-filters {
     max-height: 36px;
     padding: 2px;
   }
 
-  .chat-client-shell .stream-filter-inline .quick-filter-chip {
+  .miniweb-shell .stream-filter-inline .quick-filter-chip {
     min-height: 30px;
     padding: 3px 8px 3px 4px;
     font-size: 12.5px;
   }
 
-  .chat-client-shell .stream-filter-inline .quick-filter-icon {
+  .miniweb-shell .stream-filter-inline .quick-filter-icon {
     width: 22px;
     height: 22px;
     font-size: 12px;
   }
 
-  .chat-client-shell .stream-channel-tools {
+  .miniweb-shell .stream-channel-tools {
     justify-content: flex-start;
     gap: 6px;
     padding-bottom: 2px;
   }
 
-  .chat-client-shell .message-search {
+  .miniweb-shell .message-search {
     flex: 0 0 128px;
     min-width: 128px;
     max-width: 128px;
   }
 
-  .chat-client-shell .message-search input,
-  .chat-client-shell .stream-tool-button,
-  .chat-client-shell .workspace-tools-toggle,
-  .chat-client-shell .message-count-pill {
+  .miniweb-shell .message-search input,
+  .miniweb-shell .stream-tool-button,
+  .miniweb-shell .workspace-tools-toggle,
+  .miniweb-shell .message-count-pill {
     min-height: 30px;
     padding: 4px 9px;
     font-size: 12px;
   }
 
-  .chat-client-shell .workspace-tools-toggle small {
+  .miniweb-shell .workspace-tools-toggle small {
     display: none;
   }
 
-  .chat-client-shell .chat-composer {
+  .miniweb-shell .chat-composer {
     max-height: min(36dvh, 180px);
     padding: 6px 8px 8px;
   }
 
-  .chat-client-shell .quick-action-hotbar {
+  .miniweb-shell .quick-action-hotbar {
     gap: 2px 4px;
     max-height: 38px;
     padding-bottom: 0;
     scrollbar-width: none;
   }
 
-  .chat-client-shell .quick-action-hotbar .skill-chip {
+  .miniweb-shell .quick-action-hotbar .skill-chip {
     height: 18px;
     padding: 1px 3px;
     font-size: 10px;
   }
 
-  .chat-client-shell .direct-send-row {
+  .miniweb-shell .direct-send-row {
     grid-template-columns: minmax(96px, 28%) minmax(0, 1fr) 72px;
   }
 
-  .chat-client-shell .direct-send-row select,
-  .chat-client-shell .direct-send-row textarea,
-  .chat-client-shell #directSendSubmit {
+  .miniweb-shell .direct-send-row select,
+  .miniweb-shell .direct-send-row textarea,
+  .miniweb-shell #directSendSubmit {
     min-height: 42px;
     font-size: 13px;
   }
 
-  .chat-client-shell .direct-send-row textarea {
+  .miniweb-shell .direct-send-row textarea {
     max-height: 78px;
     padding-block: 7px;
   }
 }
 
-.chat-client-shell .stream-filter-inline .quick-filters,
-.chat-client-shell .quick-action-hotbar {
+.miniweb-shell .stream-filter-inline .quick-filters,
+.miniweb-shell .quick-action-hotbar {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 
-.chat-client-shell .stream-filter-inline .quick-filters::-webkit-scrollbar,
-.chat-client-shell .quick-action-hotbar::-webkit-scrollbar {
+.miniweb-shell .stream-filter-inline .quick-filters::-webkit-scrollbar,
+.miniweb-shell .quick-action-hotbar::-webkit-scrollbar {
   display: none;
 }
 
@@ -367,21 +367,21 @@ body {
   overflow-x: hidden;
 }
 
-.chat-client-shell,
-.chat-client-shell .chat-workspace,
-.chat-client-shell .layout-grid,
-.chat-client-shell .chat-pane,
-.chat-client-shell .chat-pane .section-head,
-.chat-client-shell .stream-filter-inline,
-.chat-client-shell .stream-channel-tools,
-.chat-client-shell .game-primary-strip,
-.chat-client-shell .chat-composer,
-.chat-client-shell .direct-send-row {
+.miniweb-shell,
+.miniweb-shell .schedule-workspace,
+.miniweb-shell .layout-grid,
+.miniweb-shell .chat-pane,
+.miniweb-shell .chat-pane .section-head,
+.miniweb-shell .stream-filter-inline,
+.miniweb-shell .stream-channel-tools,
+.miniweb-shell .game-primary-strip,
+.miniweb-shell .chat-composer,
+.miniweb-shell .direct-send-row {
   min-width: 0;
   max-width: 100%;
 }
 
-.chat-client-shell {
+.miniweb-shell {
   width: 100vw;
   max-width: 100vw;
   box-sizing: border-box;
@@ -390,37 +390,37 @@ body {
 }
 
 @media (min-width: 1181px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-columns: clamp(360px, 30vw, 480px) minmax(0, 1fr);
   }
 
-  .chat-client-shell .conversation-rail,
-  .chat-client-shell .schedule-rail-panel,
-  .chat-client-shell .common-action-panel {
+  .miniweb-shell .tool-rail,
+  .miniweb-shell .schedule-rail-panel,
+  .miniweb-shell .common-action-panel {
     box-sizing: border-box;
     min-width: 0;
     max-width: 100%;
   }
 
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     justify-self: stretch;
     grid-template-rows: minmax(0, 1fr) auto;
     width: 100%;
   }
 
-  .chat-client-shell .schedule-rail-panel,
-  .chat-client-shell .common-action-panel {
+  .miniweb-shell .schedule-rail-panel,
+  .miniweb-shell .common-action-panel {
     width: 100%;
     overflow: hidden;
   }
 
-  .chat-client-shell .common-action-panel {
+  .miniweb-shell .common-action-panel {
     align-self: end;
     height: auto;
   }
 
-  .chat-client-shell .schedule-rail-panel .panel-head,
-  .chat-client-shell .common-action-panel .panel-head {
+  .miniweb-shell .schedule-rail-panel .panel-head,
+  .miniweb-shell .common-action-panel .panel-head {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
@@ -428,27 +428,27 @@ body {
     min-width: 0;
   }
 
-  .chat-client-shell .schedule-rail-panel .panel-head h2,
-  .chat-client-shell .common-action-panel .panel-head h2 {
+  .miniweb-shell .schedule-rail-panel .panel-head h2,
+  .miniweb-shell .common-action-panel .panel-head h2 {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .chat-client-shell .schedule-rail-panel .panel-head-actions,
-  .chat-client-shell .common-action-panel .panel-head-actions {
+  .miniweb-shell .schedule-rail-panel .panel-head-actions,
+  .miniweb-shell .common-action-panel .panel-head-actions {
     min-width: 0;
     max-width: 100%;
   }
 
-  .chat-client-shell .schedule-rail-panel .panel-head button,
-  .chat-client-shell .common-action-panel .panel-head button {
+  .miniweb-shell .schedule-rail-panel .panel-head button,
+  .miniweb-shell .common-action-panel .panel-head button {
     flex: 0 0 auto;
     white-space: nowrap;
   }
 
-  .chat-client-shell .workspace-tools-panel {
+  .miniweb-shell .workspace-tools-panel {
     left: max(calc(clamp(360px, 30vw, 480px) + 14px), calc(100vw - 934px));
     right: 14px;
     width: auto;
@@ -456,31 +456,31 @@ body {
   }
 }
 
-.chat-client-shell .chat-pane .section-head {
+.miniweb-shell .chat-pane .section-head {
   overflow: visible;
   padding-right: 118px;
 }
 
-.chat-client-shell .stream-filter-inline .quick-filters,
-.chat-client-shell .stream-channel-tools {
+.miniweb-shell .stream-filter-inline .quick-filters,
+.miniweb-shell .stream-channel-tools {
   max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
 }
 
-.chat-client-shell .quick-action-hotbar {
+.miniweb-shell .quick-action-hotbar {
   max-width: 100%;
   overflow-x: hidden;
   overflow-y: hidden;
 }
 
-.chat-client-shell .stream-channel-tools > *,
-.chat-client-shell .stream-filter-inline .quick-filter-chip {
+.miniweb-shell .stream-channel-tools > *,
+.miniweb-shell .stream-filter-inline .quick-filter-chip {
   flex-shrink: 0;
 }
 
-.chat-client-shell .workspace-tools-panel {
+.miniweb-shell .workspace-tools-panel {
   position: fixed;
   top: 48px;
   right: 14px;
@@ -492,21 +492,21 @@ body {
   overflow: auto;
 }
 
-.chat-client-shell .workspace-tools-panel .tool-panel {
+.miniweb-shell .workspace-tools-panel .tool-panel {
   order: -1;
 }
 
-.chat-client-shell .workspace-tools-panel .tool-panel .sidebar-toolbox {
+.miniweb-shell .workspace-tools-panel .tool-panel .sidebar-toolbox {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 /* Keep channel switching as the full-width primary header. Utility controls
    float at the top-right instead of taking layout space from channels. */
-.chat-client-shell .sidebar-title {
+.miniweb-shell .sidebar-title {
   display: none;
 }
 
-.chat-client-shell .stream-channel-tools {
+.miniweb-shell .stream-channel-tools {
   position: fixed;
   top: 9px;
   right: 12px;
@@ -516,11 +516,11 @@ body {
   overflow: visible;
 }
 
-.chat-client-shell:has(.global-banner:not([hidden])) .chat-pane .section-head {
+.miniweb-shell:has(.global-banner:not([hidden])) .chat-pane .section-head {
   padding-right: 14px;
 }
 
-.chat-client-shell:has(.global-banner:not([hidden])) .stream-channel-tools {
+.miniweb-shell:has(.global-banner:not([hidden])) .stream-channel-tools {
   position: static;
   justify-self: end;
   width: auto;
@@ -528,67 +528,67 @@ body {
   flex-wrap: nowrap;
 }
 
-.chat-client-shell .message-search,
-.chat-client-shell .message-count-pill {
+.miniweb-shell .message-search,
+.miniweb-shell .message-count-pill {
   display: none;
 }
 
-.chat-client-shell .workspace-tools-toggle small {
+.miniweb-shell .workspace-tools-toggle small {
   display: none;
 }
 
-.chat-client-shell .workspace-tools-toggle {
+.miniweb-shell .workspace-tools-toggle {
   justify-content: center;
   min-width: 96px;
 }
 
-.chat-client-shell .chat-pane .section-head > .stream-filter-inline {
+.miniweb-shell .chat-pane .section-head > .stream-filter-inline {
   width: 100%;
   max-width: 100%;
 }
 
-.chat-client-shell .stream-filter-inline .quick-filters {
+.miniweb-shell .stream-filter-inline .quick-filters {
   width: 100%;
 }
 
 @media (max-width: 1180px) {
-  .chat-client-shell .chat-pane .section-head {
+  .miniweb-shell .chat-pane .section-head {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto auto;
   }
 
-  .chat-client-shell .chat-pane .section-head > .stream-filter-inline,
-  .chat-client-shell .chat-pane .section-head > .stream-channel-tools {
+  .miniweb-shell .chat-pane .section-head > .stream-filter-inline,
+  .miniweb-shell .chat-pane .section-head > .stream-channel-tools {
     width: 100%;
     max-width: 100%;
   }
 
-  .chat-client-shell .chat-pane .section-head > .stream-channel-tools {
+  .miniweb-shell .chat-pane .section-head > .stream-channel-tools {
     width: auto;
     max-width: calc(100vw - 24px);
   }
 
-  .chat-client-shell .stream-channel-tools {
+  .miniweb-shell .stream-channel-tools {
     position: fixed;
     top: 9px;
     right: 12px;
     flex-wrap: nowrap;
   }
 
-  .chat-client-shell .workspace-tools-panel {
+  .miniweb-shell .workspace-tools-panel {
     grid-template-columns: minmax(0, 1fr);
     max-height: calc(100dvh - 64px);
   }
 }
 
 @media (max-width: 900px) {
-  .chat-client-shell {
+  .miniweb-shell {
     width: 100%;
     max-width: 100%;
     grid-template-rows: clamp(180px, 24dvh, 230px) minmax(0, 1fr);
   }
 
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     grid-column: 1;
     grid-row: 1;
     display: grid;
@@ -613,8 +613,8 @@ body {
     transition: none;
   }
 
-  .chat-client-shell .schedule-rail-panel,
-  .chat-client-shell .common-action-panel {
+  .miniweb-shell .schedule-rail-panel,
+  .miniweb-shell .common-action-panel {
     min-height: 0;
     height: 100%;
     margin: 0;
@@ -622,36 +622,36 @@ body {
     overflow: hidden;
   }
 
-  .chat-client-shell .schedule-rail-panel {
+  .miniweb-shell .schedule-rail-panel {
     grid-template-rows: auto auto minmax(0, 1fr);
   }
 
-  .chat-client-shell .schedule-rail-panel .panel-head,
-  .chat-client-shell .common-action-panel .panel-head {
+  .miniweb-shell .schedule-rail-panel .panel-head,
+  .miniweb-shell .common-action-panel .panel-head {
     min-height: 26px;
     margin-bottom: 6px;
     gap: 6px;
   }
 
-  .chat-client-shell .schedule-rail-panel .panel-head h2,
-  .chat-client-shell .common-action-panel .panel-head h2 {
+  .miniweb-shell .schedule-rail-panel .panel-head h2,
+  .miniweb-shell .common-action-panel .panel-head h2 {
     font-size: 12px;
     line-height: 1.1;
   }
 
-  .chat-client-shell .schedule-rail-panel .panel-head-actions,
-  .chat-client-shell .common-action-panel .panel-head-actions {
+  .miniweb-shell .schedule-rail-panel .panel-head-actions,
+  .miniweb-shell .common-action-panel .panel-head-actions {
     gap: 4px;
   }
 
-  .chat-client-shell .schedule-rail-panel .panel-head button,
-  .chat-client-shell .common-action-panel .panel-head button {
+  .miniweb-shell .schedule-rail-panel .panel-head button,
+  .miniweb-shell .common-action-panel .panel-head button {
     min-height: 26px;
     padding: 4px 7px;
     font-size: 12px;
   }
 
-  .chat-client-shell .schedule-rail {
+  .miniweb-shell .schedule-rail {
     min-height: 0;
     max-height: none;
     overflow: auto;
@@ -659,22 +659,22 @@ body {
     scrollbar-width: thin;
   }
 
-  .chat-client-shell .schedule-rail > .empty.inline,
-  .chat-client-shell .schedule-rail-summary,
-  .chat-client-shell .schedule-rail-empty {
+  .miniweb-shell .schedule-rail > .empty.inline,
+  .miniweb-shell .schedule-rail-summary,
+  .miniweb-shell .schedule-rail-empty {
     margin: 0;
     padding: 6px 7px;
   }
 
-  .chat-client-shell .schedule-rail-summary,
-  .chat-client-shell .schedule-rail-empty {
+  .miniweb-shell .schedule-rail-summary,
+  .miniweb-shell .schedule-rail-empty {
     border: 1px solid rgba(148, 163, 184, 0.10);
     background: rgba(2, 6, 23, 0.26);
   }
 
-  .chat-client-shell .schedule-rail > .empty.inline,
-  .chat-client-shell .schedule-rail-summary span,
-  .chat-client-shell .schedule-rail-empty span {
+  .miniweb-shell .schedule-rail > .empty.inline,
+  .miniweb-shell .schedule-rail-summary span,
+  .miniweb-shell .schedule-rail-empty span {
     display: block;
     overflow: hidden;
     color: #94a3b8;
@@ -684,8 +684,8 @@ body {
     white-space: nowrap;
   }
 
-  .chat-client-shell .schedule-rail-summary strong,
-  .chat-client-shell .schedule-rail-empty strong {
+  .miniweb-shell .schedule-rail-summary strong,
+  .miniweb-shell .schedule-rail-empty strong {
     display: block;
     overflow: hidden;
     color: #f8fafc;
@@ -695,79 +695,79 @@ body {
     white-space: nowrap;
   }
 
-  .chat-client-shell .schedule-rail-list {
+  .miniweb-shell .schedule-rail-list {
     display: grid;
     gap: 5px;
   }
 
-  .chat-client-shell .schedule-rail-row-main {
+  .miniweb-shell .schedule-rail-row-main {
     gap: 3px;
     padding: 6px 7px;
   }
 
-  .chat-client-shell .schedule-rail-row-title {
+  .miniweb-shell .schedule-rail-row-title {
     gap: 6px;
   }
 
-  .chat-client-shell .schedule-rail-row-title strong {
+  .miniweb-shell .schedule-rail-row-title strong {
     font-size: 12px;
   }
 
-  .chat-client-shell .schedule-rail-row-title .status-pill {
+  .miniweb-shell .schedule-rail-row-title .status-pill {
     padding: 1px 5px;
     font-size: 10px;
   }
 
-  .chat-client-shell .schedule-rail-row-meta {
+  .miniweb-shell .schedule-rail-row-meta {
     font-size: 10.5px;
     line-height: 1.2;
   }
 
-  .chat-client-shell .schedule-progress.compact {
+  .miniweb-shell .schedule-progress.compact {
     height: 3px;
   }
 
-  .chat-client-shell .schedule-rail-snippets {
+  .miniweb-shell .schedule-rail-snippets {
     gap: 2px;
   }
 
-  .chat-client-shell .schedule-rail-snippets span:nth-child(n+2) {
+  .miniweb-shell .schedule-rail-snippets span:nth-child(n+2) {
     display: none;
   }
 
-  .chat-client-shell .schedule-rail-snippets code {
+  .miniweb-shell .schedule-rail-snippets code {
     font-size: 10.5px;
   }
 
-  .chat-client-shell .schedule-rail-snippets small {
+  .miniweb-shell .schedule-rail-snippets small {
     font-size: 10px;
   }
 
-  .chat-client-shell .schedule-rail-more {
+  .miniweb-shell .schedule-rail-more {
     display: block;
     min-height: 26px;
     font-size: 12px;
   }
 
-  .chat-client-shell .primary-toolbox {
+  .miniweb-shell .primary-toolbox {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
   }
 
-  .chat-client-shell .primary-toolbox button {
+  .miniweb-shell .primary-toolbox button {
     min-height: 30px;
     padding: 5px 7px;
     font-size: 12px;
   }
 
-  .chat-client-shell .chat-workspace {
+  .miniweb-shell .schedule-workspace {
     grid-column: 1;
     grid-row: 2;
     position: relative;
     z-index: auto;
   }
 
-  .chat-client-shell .chat-pane .section-head {
+  .miniweb-shell .chat-pane .section-head {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-rows: auto;
@@ -777,7 +777,7 @@ body {
     padding-right: 8px;
   }
 
-  .chat-client-shell .stream-channel-tools {
+  .miniweb-shell .stream-channel-tools {
     position: static;
     justify-self: end;
     width: auto;
@@ -785,26 +785,26 @@ body {
     flex-wrap: nowrap;
   }
 
-  .chat-client-shell .workspace-tools-panel .tool-panel .sidebar-toolbox {
+  .miniweb-shell .workspace-tools-panel .tool-panel .sidebar-toolbox {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .chat-client-shell .workspace-tools-panel {
+  .miniweb-shell .workspace-tools-panel {
     top: calc(clamp(180px, 24dvh, 230px) + 50px);
     max-height: calc(100dvh - clamp(180px, 24dvh, 230px) - 64px);
   }
 }
 
 @media (max-width: 720px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-rows: clamp(180px, 24dvh, 230px) minmax(0, 1fr);
   }
 
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   }
 
-  .chat-client-shell .workspace-tools-panel {
+  .miniweb-shell .workspace-tools-panel {
     left: 8px;
     right: 8px;
     width: auto;
@@ -813,46 +813,46 @@ body {
 }
 
 @media (max-width: 460px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-rows: 236px minmax(0, 1fr);
   }
 
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
     height: 236px;
     gap: 6px;
   }
 
-  .chat-client-shell .schedule-rail-panel {
+  .miniweb-shell .schedule-rail-panel {
     grid-template-rows: auto auto minmax(0, 1fr);
     padding: 7px 8px;
   }
 
-  .chat-client-shell .schedule-rail-panel .panel-head,
-  .chat-client-shell .common-action-panel .panel-head {
+  .miniweb-shell .schedule-rail-panel .panel-head,
+  .miniweb-shell .common-action-panel .panel-head {
     min-height: 22px;
     margin-bottom: 4px;
   }
 
-  .chat-client-shell .schedule-rail-panel .panel-head-actions {
+  .miniweb-shell .schedule-rail-panel .panel-head-actions {
     flex: 0 0 auto;
   }
 
-  .chat-client-shell .schedule-rail-panel .panel-head button,
-  .chat-client-shell .common-action-panel .panel-head button {
+  .miniweb-shell .schedule-rail-panel .panel-head button,
+  .miniweb-shell .common-action-panel .panel-head button {
     min-width: 42px;
     min-height: 24px;
     padding: 3px 7px;
   }
 
-  .chat-client-shell .schedule-rail > .empty.inline,
-  .chat-client-shell .schedule-rail-summary span,
-  .chat-client-shell .schedule-rail-empty span {
+  .miniweb-shell .schedule-rail > .empty.inline,
+  .miniweb-shell .schedule-rail-summary span,
+  .miniweb-shell .schedule-rail-empty span {
     line-height: 1.15;
   }
 
-  .chat-client-shell .common-action-panel {
+  .miniweb-shell .common-action-panel {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
@@ -860,27 +860,27 @@ body {
     padding: 7px 8px;
   }
 
-  .chat-client-shell .common-action-panel .panel-head {
+  .miniweb-shell .common-action-panel .panel-head {
     min-height: 0;
     margin-bottom: 0;
   }
 
-  .chat-client-shell .common-action-panel .panel-head h2 {
+  .miniweb-shell .common-action-panel .panel-head h2 {
     display: none;
   }
 
-  .chat-client-shell .primary-toolbox {
+  .miniweb-shell .primary-toolbox {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 5px 6px;
   }
 
-  .chat-client-shell .primary-toolbox button {
+  .miniweb-shell .primary-toolbox button {
     min-height: 28px;
     padding: 4px 5px;
     text-align: center;
   }
 
-  .chat-client-shell .workspace-tools-panel {
+  .miniweb-shell .workspace-tools-panel {
     top: 286px;
     max-height: calc(100dvh - 300px);
   }
@@ -889,134 +889,134 @@ body {
 /* Tool-first schedule workspace pass.
    The schedule rail is the primary surface; chat is a compact supporting pane. */
 @media (min-width: 1181px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-columns: clamp(420px, 34vw, 560px) minmax(0, 1fr);
   }
 
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     grid-template-rows: minmax(0, 1fr) auto;
     gap: 10px;
     padding: 10px;
   }
 
-  .chat-client-shell .workspace-tools-panel {
+  .miniweb-shell .workspace-tools-panel {
     left: max(calc(clamp(420px, 34vw, 560px) + 14px), calc(100vw - 934px));
     right: 14px;
     width: auto;
     max-width: none;
   }
 
-  .chat-client-shell .schedule-rail-panel {
+  .miniweb-shell .schedule-rail-panel {
     padding: 10px;
     border-color: rgba(96, 165, 250, 0.22);
     background: rgba(8, 13, 24, 0.92);
   }
 
-  .chat-client-shell .schedule-rail-panel .panel-head {
+  .miniweb-shell .schedule-rail-panel .panel-head {
     min-height: 30px;
     margin-bottom: 7px;
   }
 
-  .chat-client-shell .schedule-rail-panel .panel-head h2 {
+  .miniweb-shell .schedule-rail-panel .panel-head h2 {
     color: #f8fafc;
     font-size: 13px;
   }
 
-  .chat-client-shell .schedule-rail-panel .panel-head button {
+  .miniweb-shell .schedule-rail-panel .panel-head button {
     min-height: 28px;
     padding: 4px 9px;
     font-size: 12px;
   }
 
-  .chat-client-shell .schedule-identity-dock {
+  .miniweb-shell .schedule-identity-dock {
     grid-template-columns: minmax(0, 1fr) auto;
     margin-bottom: 7px;
     padding: 4px 6px;
   }
 
-  .chat-client-shell .schedule-rail {
+  .miniweb-shell .schedule-rail {
     gap: 6px;
   }
 
-  .chat-client-shell .common-action-panel {
+  .miniweb-shell .common-action-panel {
     padding: 8px;
     background: rgba(15, 23, 42, 0.58);
   }
 
-  .chat-client-shell .common-action-panel .panel-head {
+  .miniweb-shell .common-action-panel .panel-head {
     min-height: 24px;
     margin-bottom: 6px;
   }
 
-  .chat-client-shell .primary-toolbox {
+  .miniweb-shell .primary-toolbox {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 5px;
   }
 
-  .chat-client-shell .primary-toolbox button {
+  .miniweb-shell .primary-toolbox button {
     min-height: 28px;
     padding: 4px 6px;
     font-size: 11.5px;
   }
 
-  .chat-client-shell .chat-pane .section-head {
+  .miniweb-shell .chat-pane .section-head {
     min-height: 42px;
     padding: 6px 108px 6px 10px;
   }
 
-  .chat-client-shell .message-list {
+  .miniweb-shell .message-list {
     padding: 12px clamp(10px, 1.4vw, 22px) 18px;
   }
 
-  .chat-client-shell .chat-body {
+  .miniweb-shell .chat-body {
     max-width: min(760px, 88%);
   }
 
-  .chat-client-shell .chat-message.kind-mine .chat-body {
+  .miniweb-shell .chat-message.kind-mine .chat-body {
     max-width: min(680px, 86%);
   }
 
-  .chat-client-shell .chat-composer {
+  .miniweb-shell .chat-composer {
     max-height: min(22dvh, 150px);
     padding: 4px 8px 5px;
   }
 
-  .chat-client-shell .quick-action-hotbar {
+  .miniweb-shell .quick-action-hotbar {
     grid-template-rows: repeat(2, 18px);
     max-height: 38px;
   }
 
-  .chat-client-shell .direct-send-head {
+  .miniweb-shell .direct-send-head {
     margin-bottom: 2px;
   }
 
-  .chat-client-shell .direct-send-actions .composer-tool-button {
+  .miniweb-shell .direct-send-actions .composer-tool-button {
     min-height: 24px;
     padding: 2px 7px;
   }
 
-  .chat-client-shell .direct-send-row {
+  .miniweb-shell .direct-send-row {
     grid-template-columns: clamp(108px, 11vw, 150px) minmax(0, 1fr) 64px;
     gap: 6px;
   }
 
-  .chat-client-shell .direct-send-row select,
-  .chat-client-shell .direct-send-row textarea,
-  .chat-client-shell #directSendSubmit {
+  .miniweb-shell .direct-send-row select,
+  .miniweb-shell .direct-send-row textarea,
+  .miniweb-shell #directSendSubmit {
     min-height: 38px;
   }
 
-  .chat-client-shell .direct-send-row textarea {
+  .miniweb-shell .direct-send-row textarea {
     max-height: 82px;
   }
 }
 
-.chat-client-shell .schedule-tool-summary {
+.miniweb-shell .schedule-tool-summary {
   gap: 6px;
   padding: 7px;
 }
 
-.chat-client-shell .schedule-tool-summary-title {
+.miniweb-shell .schedule-tool-summary-title {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -1024,21 +1024,21 @@ body {
   min-width: 0;
 }
 
-.chat-client-shell .schedule-tool-summary-title strong,
-.chat-client-shell .schedule-tool-summary-title span {
+.miniweb-shell .schedule-tool-summary-title strong,
+.miniweb-shell .schedule-tool-summary-title span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-client-shell .schedule-tool-metrics {
+.miniweb-shell .schedule-tool-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 5px;
 }
 
-.chat-client-shell .schedule-tool-metrics span {
+.miniweb-shell .schedule-tool-metrics span {
   display: grid;
   min-width: 0;
   border: 1px solid rgba(148, 163, 184, 0.10);
@@ -1047,18 +1047,18 @@ body {
   padding: 4px 6px;
 }
 
-.chat-client-shell .schedule-tool-metrics span.warn {
+.miniweb-shell .schedule-tool-metrics span.warn {
   border-color: rgba(245, 158, 11, 0.42);
   background: rgba(120, 53, 15, 0.22);
 }
 
-.chat-client-shell .schedule-tool-metrics b {
+.miniweb-shell .schedule-tool-metrics b {
   color: #f8fafc;
   font-size: 13px;
   line-height: 1.05;
 }
 
-.chat-client-shell .schedule-tool-metrics small {
+.miniweb-shell .schedule-tool-metrics small {
   overflow: hidden;
   color: #94a3b8;
   font-size: 10px;
@@ -1067,14 +1067,14 @@ body {
   white-space: nowrap;
 }
 
-.chat-client-shell .schedule-tool-meta {
+.miniweb-shell .schedule-tool-meta {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr) auto;
   gap: 4px;
   white-space: normal;
 }
 
-.chat-client-shell .schedule-tool-meta small {
+.miniweb-shell .schedule-tool-meta small {
   min-width: 0;
   overflow: hidden;
   border: 1px solid rgba(148, 163, 184, 0.08);
@@ -1089,58 +1089,58 @@ body {
 }
 
 @media (max-width: 900px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-rows: clamp(162px, 22dvh, 210px) minmax(0, 1fr);
   }
 
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     height: clamp(162px, 22dvh, 210px);
   }
 
-  .chat-client-shell .chat-composer {
+  .miniweb-shell .chat-composer {
     max-height: min(30dvh, 160px);
     padding: 5px 8px;
   }
 
-  .chat-client-shell .quick-action-hotbar {
+  .miniweb-shell .quick-action-hotbar {
     grid-template-rows: repeat(2, 18px);
     max-height: 38px;
   }
 
-  .chat-client-shell .direct-send-row textarea {
+  .miniweb-shell .direct-send-row textarea {
     min-height: 38px;
     max-height: 86px;
   }
 }
 
 @media (max-width: 720px) {
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
   }
 
-  .chat-client-shell .schedule-tool-metrics {
+  .miniweb-shell .schedule-tool-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .chat-client-shell .schedule-tool-meta {
+  .miniweb-shell .schedule-tool-meta {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .chat-client-shell .schedule-tool-meta small:nth-child(2) {
+  .miniweb-shell .schedule-tool-meta small:nth-child(2) {
     display: none;
   }
 }
 
 @media (max-width: 460px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-rows: 218px minmax(0, 1fr);
   }
 
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     height: 218px;
   }
 
-  .chat-client-shell .workspace-tools-panel {
+  .miniweb-shell .workspace-tools-panel {
     top: 268px;
     max-height: calc(100dvh - 282px);
   }
@@ -1149,38 +1149,38 @@ body {
 /* Schedule-first workspace.
    The official scheduler owns the main viewport; chat remains available as a
    compact support surface below it. */
-.chat-client-shell {
+.miniweb-shell {
   grid-template-columns: clamp(220px, 18vw, 300px) minmax(0, 1fr);
 }
 
-.chat-client-shell .command-rail {
+.miniweb-shell .command-rail {
   grid-template-rows: auto auto minmax(0, 1fr);
   align-content: start;
 }
 
-.chat-client-shell .sidebar-title {
+.miniweb-shell .sidebar-title {
   display: grid;
 }
 
-.chat-client-shell .common-action-panel {
+.miniweb-shell .common-action-panel {
   align-self: start;
   height: auto;
 }
 
-.chat-client-shell .primary-toolbox {
+.miniweb-shell .primary-toolbox {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.chat-client-shell .chat-workspace {
+.miniweb-shell .schedule-workspace {
   grid-template-rows: auto minmax(300px, 1.18fr) minmax(170px, 0.58fr) auto;
   gap: 8px;
 }
 
-.chat-client-shell .global-banner {
+.miniweb-shell .global-banner {
   grid-row: 1;
 }
 
-.chat-client-shell .schedule-workbench {
+.miniweb-shell .schedule-workbench {
   grid-row: 2;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
@@ -1194,7 +1194,7 @@ body {
     #07101d;
 }
 
-.chat-client-shell .schedule-workbench .panel-head {
+.miniweb-shell .schedule-workbench .panel-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -1202,17 +1202,17 @@ body {
   margin-bottom: 8px;
 }
 
-.chat-client-shell .schedule-workbench .panel-head > div:first-child {
+.miniweb-shell .schedule-workbench .panel-head > div:first-child {
   min-width: 0;
 }
 
-.chat-client-shell .schedule-workbench .panel-head h2 {
+.miniweb-shell .schedule-workbench .panel-head h2 {
   color: #f8fafc;
   font-size: 15px;
   line-height: 1.2;
 }
 
-.chat-client-shell .schedule-workbench .panel-head p {
+.miniweb-shell .schedule-workbench .panel-head p {
   margin: 2px 0 0;
   overflow: hidden;
   color: #93c5fd;
@@ -1222,23 +1222,23 @@ body {
   white-space: nowrap;
 }
 
-.chat-client-shell .schedule-workbench .panel-head-actions {
+.miniweb-shell .schedule-workbench .panel-head-actions {
   flex-wrap: nowrap;
 }
 
-.chat-client-shell .schedule-workbench .panel-head button {
+.miniweb-shell .schedule-workbench .panel-head button {
   min-height: 30px;
   padding: 5px 11px;
   white-space: nowrap;
 }
 
-.chat-client-shell .schedule-workbench .schedule-identity-dock {
+.miniweb-shell .schedule-workbench .schedule-identity-dock {
   grid-template-columns: minmax(220px, 0.5fr) auto minmax(120px, 0.5fr);
   margin-bottom: 8px;
   padding: 6px 8px;
 }
 
-.chat-client-shell .schedule-workbench .schedule-identity-dock small {
+.miniweb-shell .schedule-workbench .schedule-identity-dock small {
   display: block;
   min-width: 0;
   overflow: hidden;
@@ -1249,7 +1249,7 @@ body {
   white-space: nowrap;
 }
 
-.chat-client-shell .schedule-workbench .schedule-rail {
+.miniweb-shell .schedule-workbench .schedule-rail {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 8px;
@@ -1258,30 +1258,30 @@ body {
   padding: 0;
 }
 
-.chat-client-shell .schedule-workbench .schedule-rail-summary,
-.chat-client-shell .schedule-workbench .schedule-rail-empty {
+.miniweb-shell .schedule-workbench .schedule-rail-summary,
+.miniweb-shell .schedule-workbench .schedule-rail-empty {
   margin: 0;
 }
 
-.chat-client-shell .schedule-workbench .schedule-tool-summary {
+.miniweb-shell .schedule-workbench .schedule-tool-summary {
   display: grid;
   grid-template-columns: minmax(170px, 0.58fr) minmax(260px, 0.82fr) minmax(260px, 1fr);
   align-items: stretch;
 }
 
-.chat-client-shell .schedule-workbench .schedule-tool-metrics {
+.miniweb-shell .schedule-workbench .schedule-tool-metrics {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.chat-client-shell .schedule-workbench .schedule-tool-renew-line {
+.miniweb-shell .schedule-workbench .schedule-tool-renew-line {
   min-width: 0;
 }
 
-.chat-client-shell .schedule-workbench .schedule-rail-renew-summary {
+.miniweb-shell .schedule-workbench .schedule-rail-renew-summary {
   height: 100%;
 }
 
-.chat-client-shell .schedule-workbench .schedule-rail-list {
+.miniweb-shell .schedule-workbench .schedule-rail-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   align-content: start;
@@ -1292,49 +1292,49 @@ body {
   scrollbar-width: thin;
 }
 
-.chat-client-shell .schedule-workbench .schedule-rail-row-main {
+.miniweb-shell .schedule-workbench .schedule-rail-row-main {
   min-height: 84px;
   height: 100%;
   padding: 7px 8px;
 }
 
-.chat-client-shell .schedule-workbench .schedule-rail-row-meta {
+.miniweb-shell .schedule-workbench .schedule-rail-row-meta {
   white-space: normal;
 }
 
-.chat-client-shell .schedule-workbench .schedule-rail-snippets {
+.miniweb-shell .schedule-workbench .schedule-rail-snippets {
   gap: 3px;
 }
 
-.chat-client-shell .schedule-workbench .schedule-rail-snippets span:nth-child(n+2) {
+.miniweb-shell .schedule-workbench .schedule-rail-snippets span:nth-child(n+2) {
   display: none;
 }
 
-.chat-client-shell .schedule-workbench .schedule-rail-row-controls {
+.miniweb-shell .schedule-workbench .schedule-rail-row-controls {
   align-items: center;
 }
 
-.chat-client-shell .schedule-workbench .schedule-renew-switch,
-.chat-client-shell .schedule-workbench .schedule-renew-config {
+.miniweb-shell .schedule-workbench .schedule-renew-switch,
+.miniweb-shell .schedule-workbench .schedule-renew-config {
   min-height: 22px;
   padding-block: 2px;
 }
 
-.chat-client-shell .schedule-workbench .schedule-rail-more {
+.miniweb-shell .schedule-workbench .schedule-rail-more {
   justify-self: end;
   align-self: start;
   height: auto;
   min-width: 128px;
 }
 
-.chat-client-shell .layout-grid,
-.chat-client-shell .layout-grid.detail-open,
-.chat-client-shell .layout-grid.detail-closed {
+.miniweb-shell .layout-grid,
+.miniweb-shell .layout-grid.detail-open,
+.miniweb-shell .layout-grid.detail-closed {
   grid-row: 3;
   grid-template-columns: minmax(0, 1fr) clamp(260px, 20vw, 360px);
 }
 
-.chat-client-shell .chat-pane .section-head {
+.miniweb-shell .chat-pane .section-head {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -1345,27 +1345,27 @@ body {
   padding: 6px 8px;
 }
 
-.chat-client-shell .chat-assist-title {
+.miniweb-shell .chat-assist-title {
   display: grid;
   gap: 1px;
   min-width: 92px;
 }
 
-.chat-client-shell .chat-assist-title strong {
+.miniweb-shell .chat-assist-title strong {
   font-size: 12px;
 }
 
-.chat-client-shell .chat-assist-title span {
+.miniweb-shell .chat-assist-title span {
   color: #94a3b8;
   font-size: 10.5px;
 }
 
-.chat-client-shell .chat-pane .section-head > .stream-filter-inline {
+.miniweb-shell .chat-pane .section-head > .stream-filter-inline {
   width: 100%;
   min-width: 0;
 }
 
-.chat-client-shell .stream-channel-tools {
+.miniweb-shell .stream-channel-tools {
   position: static;
   justify-self: end;
   width: auto;
@@ -1374,64 +1374,64 @@ body {
   overflow: visible;
 }
 
-.chat-client-shell .workspace-tools-panel {
+.miniweb-shell .workspace-tools-panel {
   top: auto;
   bottom: 136px;
   max-height: min(44dvh, 360px);
 }
 
-.chat-client-shell .message-list {
+.miniweb-shell .message-list {
   padding: 8px 12px 12px;
 }
 
-.chat-client-shell .chat-composer {
+.miniweb-shell .chat-composer {
   grid-row: 4;
   max-height: min(19dvh, 128px);
   padding: 4px 8px 5px;
 }
 
-.chat-client-shell .direct-send-head {
+.miniweb-shell .direct-send-head {
   margin-bottom: 2px;
 }
 
-.chat-client-shell .direct-send-row {
+.miniweb-shell .direct-send-row {
   grid-template-columns: clamp(108px, 12vw, 152px) minmax(0, 1fr) 64px;
   gap: 6px;
 }
 
-.chat-client-shell .direct-send-row select,
-.chat-client-shell .direct-send-row textarea,
-.chat-client-shell #directSendSubmit {
+.miniweb-shell .direct-send-row select,
+.miniweb-shell .direct-send-row textarea,
+.miniweb-shell #directSendSubmit {
   min-height: 38px;
 }
 
-.chat-client-shell .direct-send-row textarea {
+.miniweb-shell .direct-send-row textarea {
   max-height: 72px;
 }
 
 @media (max-width: 1180px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-columns: clamp(190px, 18vw, 240px) minmax(0, 1fr);
     gap: 0;
     column-gap: 0;
   }
 
-  .chat-client-shell .chat-assist-title span {
+  .miniweb-shell .chat-assist-title span {
     display: none;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-tool-summary {
+  .miniweb-shell .schedule-workbench .schedule-tool-summary {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
 @media (max-width: 900px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
   }
 
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     grid-row: 1;
     grid-template-columns: auto minmax(0, 1fr);
     grid-template-rows: auto;
@@ -1441,12 +1441,12 @@ body {
     overflow: hidden;
   }
 
-  .chat-client-shell .sidebar-title {
+  .miniweb-shell .sidebar-title {
     align-self: center;
     padding: 0;
   }
 
-  .chat-client-shell .common-action-panel {
+  .miniweb-shell .common-action-panel {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
@@ -1457,73 +1457,73 @@ body {
     padding: 7px;
   }
 
-  .chat-client-shell .common-action-panel .panel-head {
+  .miniweb-shell .common-action-panel .panel-head {
     min-height: 0;
     margin: 0;
   }
 
-  .chat-client-shell .common-action-panel .panel-head h2 {
+  .miniweb-shell .common-action-panel .panel-head h2 {
     display: none;
   }
 
-  .chat-client-shell .primary-toolbox {
+  .miniweb-shell .primary-toolbox {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 5px;
   }
 
-  .chat-client-shell .primary-toolbox button {
+  .miniweb-shell .primary-toolbox button {
     min-height: 28px;
     padding: 4px 5px;
     font-size: 11.5px;
   }
 
-  .chat-client-shell .chat-workspace {
+  .miniweb-shell .schedule-workspace {
     grid-row: 2;
     grid-template-rows: auto minmax(260px, 1fr) minmax(150px, 0.58fr) auto;
   }
 
-  .chat-client-shell .schedule-workbench {
+  .miniweb-shell .schedule-workbench {
     padding: 8px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-tool-summary {
+  .miniweb-shell .schedule-workbench .schedule-tool-summary {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
-  .chat-client-shell .schedule-workbench .schedule-tool-summary-title {
+  .miniweb-shell .schedule-workbench .schedule-tool-summary-title {
     display: none;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail {
+  .miniweb-shell .schedule-workbench .schedule-rail {
     grid-template-rows: auto minmax(96px, 1fr);
   }
 
-  .chat-client-shell .schedule-workbench .schedule-identity-dock {
+  .miniweb-shell .schedule-workbench .schedule-identity-dock {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-identity-dock small {
+  .miniweb-shell .schedule-workbench .schedule-identity-dock small {
     display: none;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-list {
+  .miniweb-shell .schedule-workbench .schedule-rail-list {
     grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-more {
+  .miniweb-shell .schedule-workbench .schedule-rail-more {
     display: none;
   }
 
-  .chat-client-shell .chat-pane .section-head {
+  .miniweb-shell .chat-pane .section-head {
     grid-template-columns: minmax(0, 1fr) auto;
     max-height: 58px;
   }
 
-  .chat-client-shell .chat-assist-title {
+  .miniweb-shell .chat-assist-title {
     display: none;
   }
 
-  .chat-client-shell .workspace-tools-panel {
+  .miniweb-shell .workspace-tools-panel {
     top: auto;
     bottom: 118px;
     max-height: min(45dvh, 340px);
@@ -1531,139 +1531,139 @@ body {
 }
 
 @media (max-width: 560px) {
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     grid-template-columns: minmax(0, 1fr);
     max-height: 132px;
   }
 
-  .chat-client-shell .sidebar-title {
+  .miniweb-shell .sidebar-title {
     display: none;
   }
 
-  .chat-client-shell .common-action-panel {
+  .miniweb-shell .common-action-panel {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .chat-client-shell .chat-workspace {
+  .miniweb-shell .schedule-workspace {
     grid-template-rows: auto minmax(250px, 1fr) minmax(132px, 0.52fr) auto;
     gap: 6px;
     padding: 6px;
   }
 
-  .chat-client-shell .schedule-workbench .panel-head {
+  .miniweb-shell .schedule-workbench .panel-head {
     grid-template-columns: minmax(0, 1fr) auto;
     min-height: 32px;
     margin-bottom: 6px;
   }
 
-  .chat-client-shell .schedule-workbench .panel-head p {
+  .miniweb-shell .schedule-workbench .panel-head p {
     display: none;
   }
 
-  .chat-client-shell .schedule-workbench .panel-head button {
+  .miniweb-shell .schedule-workbench .panel-head button {
     min-height: 28px;
     padding: 4px 8px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-tool-summary {
+  .miniweb-shell .schedule-workbench .schedule-tool-summary {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .chat-client-shell .schedule-workbench .schedule-tool-metrics {
+  .miniweb-shell .schedule-workbench .schedule-tool-metrics {
     display: none;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-list {
+  .miniweb-shell .schedule-workbench .schedule-rail-list {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row-main {
+  .miniweb-shell .schedule-workbench .schedule-rail-row-main {
     min-height: 0;
   }
 
-  .chat-client-shell .schedule-rail-row-controls {
+  .miniweb-shell .schedule-rail-row-controls {
     align-items: flex-start;
     flex-direction: column;
     gap: 4px;
   }
 
-  .chat-client-shell .direct-send-head {
+  .miniweb-shell .direct-send-head {
     display: grid;
     min-height: 22px;
     margin-bottom: 2px;
   }
 
-  .chat-client-shell .direct-send-actions .composer-tool-button {
+  .miniweb-shell .direct-send-actions .composer-tool-button {
     min-height: 24px;
     padding: 2px 6px;
   }
 
-  .chat-client-shell .workspace-tools-panel {
+  .miniweb-shell .workspace-tools-panel {
     top: auto;
     bottom: 108px;
     max-height: min(44dvh, 300px);
   }
 
-  .chat-client-shell .chat-composer {
+  .miniweb-shell .chat-composer {
     max-height: min(22dvh, 118px);
   }
 }
 
 /* Schedule-primary refinement: keep chat behind a secondary drawer, and keep
    settings/status tools reachable from the left rail. */
-.chat-client-shell {
+.miniweb-shell {
   grid-template-columns: clamp(260px, 21vw, 340px) minmax(0, 1fr);
 }
 
-.chat-client-shell .command-rail {
+.miniweb-shell .command-rail {
   grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 8px;
   overflow: auto;
 }
 
-.chat-client-shell .sidebar-primary-tools,
-.chat-client-shell .sidebar-tools-shell,
-.chat-client-shell .common-action-panel {
+.miniweb-shell .sidebar-primary-tools,
+.miniweb-shell .sidebar-tools-shell,
+.miniweb-shell .common-action-panel {
   min-width: 0;
   margin: 0;
 }
 
-.chat-client-shell .sidebar-primary-tools {
+.miniweb-shell .sidebar-primary-tools {
   order: 1;
   grid-row: 2;
 }
 
-.chat-client-shell .common-action-panel {
+.miniweb-shell .common-action-panel {
   order: 2;
   grid-row: 3;
   display: grid;
   grid-template-rows: auto auto;
 }
 
-.chat-client-shell .sidebar-tools-shell {
+.miniweb-shell .sidebar-tools-shell {
   order: 3;
   grid-row: 4;
 }
 
-.chat-client-shell .sidebar-primary-tools .panel-head,
-.chat-client-shell .common-action-panel .panel-head {
+.miniweb-shell .sidebar-primary-tools .panel-head,
+.miniweb-shell .common-action-panel .panel-head {
   min-height: 28px;
   margin-bottom: 7px;
 }
 
-.chat-client-shell .sidebar-primary-tools .sidebar-toolbox,
-.chat-client-shell .common-action-panel .primary-toolbox {
+.miniweb-shell .sidebar-primary-tools .sidebar-toolbox,
+.miniweb-shell .common-action-panel .primary-toolbox {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
-.chat-client-shell .sidebar-primary-tools button,
-.chat-client-shell .common-action-panel button {
+.miniweb-shell .sidebar-primary-tools button,
+.miniweb-shell .common-action-panel button {
   min-height: 32px;
   padding: 5px 7px;
 }
 
-.chat-client-shell .sidebar-tools-shell {
+.miniweb-shell .sidebar-tools-shell {
   display: grid;
   border: 1px solid rgba(148, 163, 184, 0.12);
   border-radius: 8px;
@@ -1671,7 +1671,7 @@ body {
   padding: 8px;
 }
 
-.chat-client-shell .sidebar-tools-shell > summary {
+.miniweb-shell .sidebar-tools-shell > summary {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 2px;
@@ -1681,22 +1681,22 @@ body {
   list-style: none;
 }
 
-.chat-client-shell .sidebar-tools-shell > summary::-webkit-details-marker {
+.miniweb-shell .sidebar-tools-shell > summary::-webkit-details-marker {
   display: none;
 }
 
-.chat-client-shell .sidebar-tools-shell > summary::after {
+.miniweb-shell .sidebar-tools-shell > summary::after {
   content: "展开";
   justify-self: end;
   color: #94a3b8;
   font-size: 11px;
 }
 
-.chat-client-shell .sidebar-tools-shell[open] > summary::after {
+.miniweb-shell .sidebar-tools-shell[open] > summary::after {
   content: "收起";
 }
 
-.chat-client-shell .sidebar-tools-shell .workspace-tools-panel {
+.miniweb-shell .sidebar-tools-shell .workspace-tools-panel {
   position: static;
   top: auto;
   right: auto;
@@ -1713,25 +1713,25 @@ body {
   overflow: auto;
 }
 
-.chat-client-shell .sidebar-tools-shell .workspace-tools-panel .panel {
+.miniweb-shell .sidebar-tools-shell .workspace-tools-panel .panel {
   margin: 0;
 }
 
-.chat-client-shell .sidebar-tools-shell .workspace-tools-panel .tool-panel {
+.miniweb-shell .sidebar-tools-shell .workspace-tools-panel .tool-panel {
   display: none;
 }
 
-.chat-client-shell .chat-workspace {
+.miniweb-shell .schedule-workspace {
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 8px;
   margin-left: 0;
 }
 
-.chat-client-shell .schedule-workbench {
+.miniweb-shell .schedule-workbench {
   grid-row: 2;
 }
 
-.chat-client-shell .chat-secondary-shell {
+.miniweb-shell .chat-secondary-shell {
   grid-row: 3;
   min-width: 0;
   width: 100%;
@@ -1743,7 +1743,7 @@ body {
   overflow: hidden;
 }
 
-.chat-client-shell .chat-secondary-toggle {
+.miniweb-shell .chat-secondary-toggle {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -1754,27 +1754,27 @@ body {
   list-style: none;
 }
 
-.chat-client-shell .chat-secondary-toggle::-webkit-details-marker {
+.miniweb-shell .chat-secondary-toggle::-webkit-details-marker {
   display: none;
 }
 
-.chat-client-shell .chat-secondary-toggle::after {
+.miniweb-shell .chat-secondary-toggle::after {
   content: "展开";
   color: #bfdbfe;
   font-size: 12px;
 }
 
-.chat-client-shell .chat-secondary-shell[open] .chat-secondary-toggle::after {
+.miniweb-shell .chat-secondary-shell[open] .chat-secondary-toggle::after {
   content: "收起";
 }
 
-.chat-client-shell .chat-secondary-toggle span {
+.miniweb-shell .chat-secondary-toggle span {
   color: #f8fafc;
   font-size: 13px;
   font-weight: 700;
 }
 
-.chat-client-shell .chat-secondary-toggle small {
+.miniweb-shell .chat-secondary-toggle small {
   min-width: 0;
   overflow: hidden;
   color: #94a3b8;
@@ -1783,7 +1783,7 @@ body {
   white-space: nowrap;
 }
 
-.chat-client-shell .chat-secondary-content {
+.miniweb-shell .chat-secondary-content {
   display: grid;
   grid-template-rows: minmax(180px, 1fr) auto;
   gap: 8px;
@@ -1794,110 +1794,110 @@ body {
   overflow: hidden;
 }
 
-.chat-client-shell .chat-secondary-shell:not([open]) .chat-secondary-content {
+.miniweb-shell .chat-secondary-shell:not([open]) .chat-secondary-content {
   display: none;
 }
 
-.chat-client-shell .chat-secondary-content .layout-grid,
-.chat-client-shell .chat-secondary-content .layout-grid.detail-open,
-.chat-client-shell .chat-secondary-content .layout-grid.detail-closed {
+.miniweb-shell .chat-secondary-content .layout-grid,
+.miniweb-shell .chat-secondary-content .layout-grid.detail-open,
+.miniweb-shell .chat-secondary-content .layout-grid.detail-closed {
   grid-row: auto;
   width: 100%;
   min-height: 0;
   height: auto;
 }
 
-.chat-client-shell .chat-secondary-content .chat-composer {
+.miniweb-shell .chat-secondary-content .chat-composer {
   grid-row: auto;
   width: 100%;
   max-height: 128px;
 }
 
 @media (max-width: 900px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: clamp(300px, 52dvh, 340px) minmax(0, 1fr);
   }
 
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     grid-column: 1;
     grid-row: 1;
     height: 100%;
     max-height: none;
   }
 
-  .chat-client-shell .chat-workspace {
+  .miniweb-shell .schedule-workspace {
     grid-column: 1;
     grid-row: 2;
   }
 
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     grid-template-columns: minmax(0, 1fr);
     max-height: none;
     overflow: auto;
   }
 
-  .chat-client-shell .sidebar-primary-tools .sidebar-toolbox,
-  .chat-client-shell .common-action-panel .primary-toolbox {
+  .miniweb-shell .sidebar-primary-tools .sidebar-toolbox,
+  .miniweb-shell .common-action-panel .primary-toolbox {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .chat-client-shell .common-action-panel {
+  .miniweb-shell .common-action-panel {
     min-height: 92px;
   }
 
-  .chat-client-shell .chat-workspace {
+  .miniweb-shell .schedule-workspace {
     grid-template-rows: auto minmax(0, 1fr) auto;
   }
 
-  .chat-client-shell .chat-secondary-content {
+  .miniweb-shell .chat-secondary-content {
     grid-template-rows: minmax(92px, 1fr) auto;
     max-height: min(42dvh, 320px);
   }
 
-  .chat-client-shell .chat-secondary-content .chat-composer {
+  .miniweb-shell .chat-secondary-content .chat-composer {
     max-height: 104px;
   }
 }
 
 @media (max-width: 560px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-rows: clamp(320px, 54dvh, 360px) minmax(0, 1fr);
   }
 
-  .chat-client-shell .sidebar-primary-tools .sidebar-toolbox,
-  .chat-client-shell .common-action-panel .primary-toolbox {
+  .miniweb-shell .sidebar-primary-tools .sidebar-toolbox,
+  .miniweb-shell .common-action-panel .primary-toolbox {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .chat-client-shell .common-action-panel {
+  .miniweb-shell .common-action-panel {
     min-height: 118px;
   }
 
-  .chat-client-shell .chat-secondary-toggle {
+  .miniweb-shell .chat-secondary-toggle {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .chat-client-shell .chat-secondary-toggle small {
+  .miniweb-shell .chat-secondary-toggle small {
     display: none;
   }
 
-  .chat-client-shell .chat-secondary-content {
+  .miniweb-shell .chat-secondary-content {
     grid-template-rows: minmax(88px, 1fr) auto;
     max-height: min(42dvh, 280px);
   }
 }
 
 /* Chat as a utility button: do not reserve primary layout space for chat. */
-.chat-client-shell .chat-workspace {
+.miniweb-shell .schedule-workspace {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
-.chat-client-shell .schedule-workbench {
+.miniweb-shell .schedule-workbench {
   grid-row: 2;
 }
 
-.chat-client-shell .chat-secondary-shell {
+.miniweb-shell .chat-secondary-shell {
   position: fixed;
   right: 18px;
   bottom: 18px;
@@ -1911,72 +1911,72 @@ body {
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.46);
 }
 
-.chat-client-shell .chat-secondary-toggle {
+.miniweb-shell .chat-secondary-toggle {
   min-width: 94px;
   min-height: 34px;
   padding: 6px 11px;
 }
 
-.chat-client-shell .chat-secondary-toggle small {
+.miniweb-shell .chat-secondary-toggle small {
   display: none;
 }
 
-.chat-client-shell .chat-secondary-toggle::after {
+.miniweb-shell .chat-secondary-toggle::after {
   content: "";
 }
 
-.chat-client-shell .chat-secondary-toggle span::before {
+.miniweb-shell .chat-secondary-toggle span::before {
   content: "聊天";
 }
 
-.chat-client-shell .chat-secondary-toggle span {
+.miniweb-shell .chat-secondary-toggle span {
   font-size: 0;
 }
 
-.chat-client-shell .chat-secondary-toggle span::before {
+.miniweb-shell .chat-secondary-toggle span::before {
   font-size: 13px;
 }
 
-.chat-client-shell .chat-secondary-shell[open] {
+.miniweb-shell .chat-secondary-shell[open] {
   width: min(920px, calc(100vw - 36px));
 }
 
-.chat-client-shell .chat-secondary-shell[open] .chat-secondary-toggle {
+.miniweb-shell .chat-secondary-shell[open] .chat-secondary-toggle {
   border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 }
 
-.chat-client-shell .chat-secondary-shell[open] .chat-secondary-toggle::after {
+.miniweb-shell .chat-secondary-shell[open] .chat-secondary-toggle::after {
   content: "收起";
 }
 
-.chat-client-shell .chat-secondary-content {
+.miniweb-shell .chat-secondary-content {
   grid-template-rows: minmax(170px, 1fr) auto;
   max-height: min(56dvh, 500px);
 }
 
-.chat-client-shell .chat-secondary-shell:not([open]) .chat-secondary-content {
+.miniweb-shell .chat-secondary-shell:not([open]) .chat-secondary-content {
   display: none;
 }
 
 @media (max-width: 900px) {
-  .chat-client-shell .chat-secondary-shell {
+  .miniweb-shell .chat-secondary-shell {
     right: 10px;
     bottom: 10px;
     max-width: calc(100vw - 20px);
   }
 
-  .chat-client-shell .chat-secondary-shell[open] {
+  .miniweb-shell .chat-secondary-shell[open] {
     width: calc(100vw - 20px);
   }
 
-  .chat-client-shell .chat-secondary-content {
+  .miniweb-shell .chat-secondary-content {
     grid-template-rows: minmax(120px, 1fr) auto;
     max-height: min(52dvh, 420px);
   }
 }
 
 /* Left rail second-level menus. */
-.chat-client-shell .sidebar-menu {
+.miniweb-shell .sidebar-menu {
   display: block;
   min-width: 0;
   margin: 0;
@@ -1986,11 +1986,11 @@ body {
   padding: 8px;
 }
 
-.chat-client-shell .command-rail {
+.miniweb-shell .command-rail {
   grid-template-rows: auto repeat(4, auto) minmax(0, 1fr);
 }
 
-.chat-client-shell .sidebar-menu > summary {
+.miniweb-shell .sidebar-menu > summary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -2000,21 +2000,21 @@ body {
   list-style: none;
 }
 
-.chat-client-shell .sidebar-menu > summary::-webkit-details-marker {
+.miniweb-shell .sidebar-menu > summary::-webkit-details-marker {
   display: none;
 }
 
-.chat-client-shell .sidebar-menu > summary::after {
+.miniweb-shell .sidebar-menu > summary::after {
   content: "展开";
   color: #94a3b8;
   font-size: 11px;
 }
 
-.chat-client-shell .sidebar-menu[open] > summary::after {
+.miniweb-shell .sidebar-menu[open] > summary::after {
   content: "收起";
 }
 
-.chat-client-shell .sidebar-menu > summary span {
+.miniweb-shell .sidebar-menu > summary span {
   min-width: 0;
   overflow: hidden;
   color: #f8fafc;
@@ -2024,7 +2024,7 @@ body {
   white-space: nowrap;
 }
 
-.chat-client-shell .sidebar-menu > summary small {
+.miniweb-shell .sidebar-menu > summary small {
   min-width: 0;
   overflow: hidden;
   color: #94a3b8;
@@ -2034,24 +2034,24 @@ body {
   white-space: nowrap;
 }
 
-.chat-client-shell .sidebar-menu[open] > .sidebar-toolbox,
-.chat-client-shell .sidebar-menu[open] > .workspace-tools-panel {
+.miniweb-shell .sidebar-menu[open] > .sidebar-toolbox,
+.miniweb-shell .sidebar-menu[open] > .workspace-tools-panel {
   margin-top: 8px;
 }
 
-.chat-client-shell .sidebar-primary-tools[open],
-.chat-client-shell .common-action-panel[open] {
+.miniweb-shell .sidebar-primary-tools[open],
+.miniweb-shell .common-action-panel[open] {
   min-height: 150px;
 }
 
-.chat-client-shell .sidebar-tools-shell[open] {
+.miniweb-shell .sidebar-tools-shell[open] {
   min-height: 220px;
 }
 
-.chat-client-shell .sidebar-primary-tools,
-.chat-client-shell .common-action-panel,
-.chat-client-shell .sidebar-tools-shell,
-.chat-client-shell .conversation-rail .chat-secondary-shell {
+.miniweb-shell .sidebar-primary-tools,
+.miniweb-shell .common-action-panel,
+.miniweb-shell .sidebar-tools-shell,
+.miniweb-shell .tool-rail .chat-secondary-shell {
   position: static;
   grid-row: auto;
   width: 100%;
@@ -2059,43 +2059,43 @@ body {
   box-shadow: none;
 }
 
-.chat-client-shell .conversation-rail .chat-secondary-shell {
+.miniweb-shell .tool-rail .chat-secondary-shell {
   order: 4;
   grid-row: 5;
   overflow: visible;
 }
 
-.chat-client-shell .conversation-rail .chat-secondary-toggle {
+.miniweb-shell .tool-rail .chat-secondary-toggle {
   min-width: 0;
   min-height: 32px;
   padding: 0;
 }
 
-.chat-client-shell .conversation-rail .chat-secondary-toggle span {
+.miniweb-shell .tool-rail .chat-secondary-toggle span {
   font-size: 13px;
 }
 
-.chat-client-shell .conversation-rail .chat-secondary-toggle span::before {
+.miniweb-shell .tool-rail .chat-secondary-toggle span::before {
   content: none;
 }
 
-.chat-client-shell .conversation-rail .chat-secondary-toggle::after {
+.miniweb-shell .tool-rail .chat-secondary-toggle::after {
   content: "展开";
 }
 
-.chat-client-shell .conversation-rail .chat-secondary-shell[open] {
+.miniweb-shell .tool-rail .chat-secondary-shell[open] {
   width: 100%;
 }
 
-.chat-client-shell .conversation-rail .chat-secondary-shell[open] .chat-secondary-toggle::after {
+.miniweb-shell .tool-rail .chat-secondary-shell[open] .chat-secondary-toggle::after {
   content: "收起";
 }
 
-.chat-client-shell .conversation-rail .chat-secondary-shell .chat-secondary-content {
+.miniweb-shell .tool-rail .chat-secondary-shell .chat-secondary-content {
   display: none;
 }
 
-.chat-client-shell .conversation-rail .chat-secondary-shell[open] .chat-secondary-content {
+.miniweb-shell .tool-rail .chat-secondary-shell[open] .chat-secondary-content {
   position: fixed;
   right: 18px;
   bottom: 18px;
@@ -2111,26 +2111,26 @@ body {
 }
 
 @media (max-width: 900px) {
-  .chat-client-shell .conversation-rail .chat-secondary-shell[open] .chat-secondary-content {
+  .miniweb-shell .tool-rail .chat-secondary-shell[open] .chat-secondary-content {
     right: 10px;
     bottom: 10px;
     width: calc(100vw - 20px);
     max-height: min(52dvh, 420px);
   }
 
-  .chat-client-shell .common-action-panel[open] {
+  .miniweb-shell .common-action-panel[open] {
     min-height: 154px;
   }
 }
 
 @media (max-width: 560px) {
-  .chat-client-shell .common-action-panel[open] {
+  .miniweb-shell .common-action-panel[open] {
     min-height: 170px;
   }
 }
 
 /* Dormant chat fullscreen overlay: the old left-rail chat entry was only the trigger. */
-.chat-client-shell .conversation-rail .chat-secondary-shell[open] {
+.miniweb-shell .tool-rail .chat-secondary-shell[open] {
   position: fixed;
   inset: 8px;
   z-index: 260;
@@ -2147,18 +2147,18 @@ body {
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.56);
 }
 
-.chat-client-shell .conversation-rail .chat-secondary-shell[open] .chat-secondary-toggle {
+.miniweb-shell .tool-rail .chat-secondary-shell[open] .chat-secondary-toggle {
   grid-row: 1;
   min-height: 34px;
   padding: 6px 10px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 }
 
-.chat-client-shell .conversation-rail .chat-secondary-shell[open] .chat-secondary-toggle small {
+.miniweb-shell .tool-rail .chat-secondary-shell[open] .chat-secondary-toggle small {
   display: block;
 }
 
-.chat-client-shell .conversation-rail .chat-secondary-shell[open] .chat-secondary-content {
+.miniweb-shell .tool-rail .chat-secondary-shell[open] .chat-secondary-content {
   position: static;
   grid-row: 2;
   display: grid;
@@ -2176,36 +2176,36 @@ body {
   box-shadow: none;
 }
 
-.chat-client-shell .conversation-rail .chat-secondary-shell[open] .chat-secondary-content .layout-grid,
-.chat-client-shell .conversation-rail .chat-secondary-shell[open] .chat-secondary-content .layout-grid.detail-open,
-.chat-client-shell .conversation-rail .chat-secondary-shell[open] .chat-secondary-content .layout-grid.detail-closed {
+.miniweb-shell .tool-rail .chat-secondary-shell[open] .chat-secondary-content .layout-grid,
+.miniweb-shell .tool-rail .chat-secondary-shell[open] .chat-secondary-content .layout-grid.detail-open,
+.miniweb-shell .tool-rail .chat-secondary-shell[open] .chat-secondary-content .layout-grid.detail-closed {
   grid-row: 1;
   width: 100%;
   height: 100%;
   min-height: 0;
 }
 
-.chat-client-shell .conversation-rail .chat-secondary-shell[open] .chat-secondary-content .chat-composer {
+.miniweb-shell .tool-rail .chat-secondary-shell[open] .chat-secondary-content .chat-composer {
   grid-row: 2;
   width: 100%;
   max-height: min(22dvh, 156px);
 }
 
 @media (max-width: 700px) {
-  .chat-client-shell .conversation-rail .chat-secondary-shell[open] {
+  .miniweb-shell .tool-rail .chat-secondary-shell[open] {
     inset: 0;
     border-radius: 0;
   }
 
-  .chat-client-shell .conversation-rail .chat-secondary-shell[open] .chat-secondary-toggle small {
+  .miniweb-shell .tool-rail .chat-secondary-shell[open] .chat-secondary-toggle small {
     display: none;
   }
 
-  .chat-client-shell .conversation-rail .chat-secondary-shell[open] .chat-secondary-content {
+  .miniweb-shell .tool-rail .chat-secondary-shell[open] .chat-secondary-content {
     padding-top: 6px;
   }
 
-  .chat-client-shell .conversation-rail .chat-secondary-shell[open] .chat-secondary-content .chat-composer {
+  .miniweb-shell .tool-rail .chat-secondary-shell[open] .chat-secondary-content .chat-composer {
     max-height: min(24dvh, 150px);
   }
 }
@@ -2265,11 +2265,11 @@ body {
 }
 
 /* First-level identity switch: status details stay secondary. */
-.chat-client-shell .command-rail {
+.miniweb-shell .command-rail {
   grid-template-rows: auto auto repeat(4, auto) minmax(0, 1fr);
 }
 
-.chat-client-shell .active-identity-dock {
+.miniweb-shell .active-identity-dock {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
@@ -2281,31 +2281,31 @@ body {
   background: rgba(15, 23, 42, 0.78);
 }
 
-.chat-client-shell .active-identity-dock label {
+.miniweb-shell .active-identity-dock label {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.chat-client-shell .active-identity-dock label span {
+.miniweb-shell .active-identity-dock label span {
   color: #bfdbfe;
   font-size: 11px;
   font-weight: 700;
 }
 
-.chat-client-shell .active-identity-dock select {
+.miniweb-shell .active-identity-dock select {
   width: 100%;
   min-width: 0;
   min-height: 30px;
 }
 
-.chat-client-shell .active-identity-dock button {
+.miniweb-shell .active-identity-dock button {
   min-height: 30px;
   padding: 4px 9px;
   white-space: nowrap;
 }
 
-.chat-client-shell .active-identity-dock small {
+.miniweb-shell .active-identity-dock small {
   grid-column: 1 / -1;
   min-width: 0;
   overflow: hidden;
@@ -2316,176 +2316,176 @@ body {
   white-space: nowrap;
 }
 
-.chat-client-shell .active-identity-dock.is-ready {
+.miniweb-shell .active-identity-dock.is-ready {
   border-color: rgba(34, 197, 94, 0.36);
 }
 
-.chat-client-shell .active-identity-dock.is-warn {
+.miniweb-shell .active-identity-dock.is-warn {
   border-color: rgba(245, 158, 11, 0.42);
 }
 
-.chat-client-shell .sidebar-identity-cache[hidden],
-.chat-client-shell .sidebar-state-cache[hidden] {
+.miniweb-shell .sidebar-identity-cache[hidden],
+.miniweb-shell .sidebar-state-cache[hidden] {
   display: none !important;
 }
 
 @media (max-width: 900px) {
-  .chat-client-shell .active-identity-dock {
+  .miniweb-shell .active-identity-dock {
     padding: 7px;
   }
 
-  .chat-client-shell .active-identity-dock small {
+  .miniweb-shell .active-identity-dock small {
     display: none;
   }
 }
 
 @media (max-width: 560px) {
-  .chat-client-shell .active-identity-dock {
+  .miniweb-shell .active-identity-dock {
     grid-template-columns: minmax(0, 1fr) 52px;
   }
 
-  .chat-client-shell .active-identity-dock label span {
+  .miniweb-shell .active-identity-dock label span {
     display: none;
   }
 }
 
 /* Narrow rail compression after adding the first-level identity switch. */
 @media (max-width: 900px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-rows: clamp(260px, 42dvh, 280px) minmax(0, 1fr);
   }
 
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     gap: 6px;
     overflow: auto;
   }
 
-  .chat-client-shell .sidebar-menu[open],
-  .chat-client-shell .sidebar-primary-tools[open],
-  .chat-client-shell .common-action-panel[open],
-  .chat-client-shell .sidebar-tools-shell[open] {
+  .miniweb-shell .sidebar-menu[open],
+  .miniweb-shell .sidebar-primary-tools[open],
+  .miniweb-shell .common-action-panel[open],
+  .miniweb-shell .sidebar-tools-shell[open] {
     min-height: 0;
   }
 
-  .chat-client-shell .sidebar-menu[open] > .sidebar-toolbox,
-  .chat-client-shell .sidebar-menu[open] > .workspace-tools-panel {
+  .miniweb-shell .sidebar-menu[open] > .sidebar-toolbox,
+  .miniweb-shell .sidebar-menu[open] > .workspace-tools-panel {
     max-height: 92px;
     overflow: auto;
   }
 
-  .chat-client-shell .sidebar-menu > summary {
+  .miniweb-shell .sidebar-menu > summary {
     min-height: 28px;
   }
 
-  .chat-client-shell .sidebar-menu > summary small {
+  .miniweb-shell .sidebar-menu > summary small {
     display: none;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail {
+  .miniweb-shell .schedule-workbench .schedule-rail {
     grid-template-rows: auto minmax(144px, 1fr);
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-list {
+  .miniweb-shell .schedule-workbench .schedule-rail-list {
     min-height: 0;
     height: 100%;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row-main {
+  .miniweb-shell .schedule-workbench .schedule-rail-row-main {
     min-height: 76px;
   }
 
-  .chat-client-shell .sidebar-title {
+  .miniweb-shell .sidebar-title {
     display: none;
   }
 
-  .chat-client-shell .active-identity-dock {
+  .miniweb-shell .active-identity-dock {
     grid-template-columns: minmax(0, 1fr) 50px;
     padding: 6px;
   }
 
-  .chat-client-shell .active-identity-dock label span,
-  .chat-client-shell .active-identity-dock small {
+  .miniweb-shell .active-identity-dock label span,
+  .miniweb-shell .active-identity-dock small {
     display: none;
   }
 
-  .chat-client-shell .active-identity-dock select,
-  .chat-client-shell .active-identity-dock button,
-  .chat-client-shell .sidebar-menu > summary {
+  .miniweb-shell .active-identity-dock select,
+  .miniweb-shell .active-identity-dock button,
+  .miniweb-shell .sidebar-menu > summary {
     min-height: 28px;
   }
 
-  .chat-client-shell .sidebar-menu {
+  .miniweb-shell .sidebar-menu {
     padding: 6px;
   }
 
-  .chat-client-shell .sidebar-menu[open] > .sidebar-toolbox,
-  .chat-client-shell .sidebar-menu[open] > .workspace-tools-panel {
+  .miniweb-shell .sidebar-menu[open] > .sidebar-toolbox,
+  .miniweb-shell .sidebar-menu[open] > .workspace-tools-panel {
     margin-top: 6px;
   }
 
-  .chat-client-shell .sidebar-primary-tools[open],
-  .chat-client-shell .common-action-panel[open],
-  .chat-client-shell .sidebar-tools-shell[open] {
+  .miniweb-shell .sidebar-primary-tools[open],
+  .miniweb-shell .common-action-panel[open],
+  .miniweb-shell .sidebar-tools-shell[open] {
     min-height: 0;
   }
 
-  .chat-client-shell .sidebar-primary-tools button,
-  .chat-client-shell .common-action-panel button {
+  .miniweb-shell .sidebar-primary-tools button,
+  .miniweb-shell .common-action-panel button {
     min-height: 28px;
     padding: 3px 5px;
   }
 }
 
 @media (max-width: 560px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-rows: clamp(260px, 42dvh, 276px) minmax(0, 1fr);
   }
 
-  .chat-client-shell .command-rail {
+  .miniweb-shell .command-rail {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail {
+  .miniweb-shell .schedule-workbench .schedule-rail {
     grid-template-rows: auto minmax(144px, 1fr);
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row-controls {
+  .miniweb-shell .schedule-workbench .schedule-rail-row-controls {
     align-items: center;
     flex-direction: row;
   }
 }
 
-.chat-client-shell .sidebar-title {
+.miniweb-shell .sidebar-title {
   grid-row: 1;
   order: 0;
 }
 
-.chat-client-shell .active-identity-dock {
+.miniweb-shell .active-identity-dock {
   grid-row: 2;
   order: 1;
 }
 
-.chat-client-shell .sidebar-primary-tools {
+.miniweb-shell .sidebar-primary-tools {
   grid-row: 3;
   order: 2;
 }
 
-.chat-client-shell .common-action-panel {
+.miniweb-shell .common-action-panel {
   grid-row: 4;
   order: 3;
 }
 
-.chat-client-shell .sidebar-tools-shell {
+.miniweb-shell .sidebar-tools-shell {
   grid-row: 5;
   order: 4;
 }
 
-.chat-client-shell .conversation-rail .chat-secondary-shell {
+.miniweb-shell .tool-rail .chat-secondary-shell {
   grid-row: 6;
   order: 5;
 }
 
-.chat-client-shell .command-rail {
+.miniweb-shell .command-rail {
   display: flex;
   flex-direction: column;
   align-content: stretch;
@@ -2494,18 +2494,18 @@ body {
   overflow: auto;
 }
 
-.chat-client-shell .command-rail > * {
+.miniweb-shell .command-rail > * {
   flex: 0 0 auto;
 }
 
 @media (max-width: 900px) {
-  .chat-client-shell .command-rail {
+  .miniweb-shell .command-rail {
     gap: 6px;
   }
 }
 
 @media (max-width: 900px) {
-  .chat-client-shell .command-rail {
+  .miniweb-shell .command-rail {
     display: flex;
     flex-direction: column;
     align-content: stretch;
@@ -2514,98 +2514,98 @@ body {
     overflow: auto;
   }
 
-  .chat-client-shell .sidebar-title,
-  .chat-client-shell .active-identity-dock,
-  .chat-client-shell .sidebar-primary-tools,
-  .chat-client-shell .common-action-panel,
-  .chat-client-shell .sidebar-tools-shell,
-  .chat-client-shell .conversation-rail .chat-secondary-shell {
+  .miniweb-shell .sidebar-title,
+  .miniweb-shell .active-identity-dock,
+  .miniweb-shell .sidebar-primary-tools,
+  .miniweb-shell .common-action-panel,
+  .miniweb-shell .sidebar-tools-shell,
+  .miniweb-shell .tool-rail .chat-secondary-shell {
     grid-row: auto;
   }
 
-  .chat-client-shell .sidebar-menu:not([open]) {
+  .miniweb-shell .sidebar-menu:not([open]) {
     min-height: 0;
   }
 
-  .chat-client-shell .schedule-rail-renew-summary {
+  .miniweb-shell .schedule-rail-renew-summary {
     min-height: 28px;
   }
 }
 
 @media (max-width: 640px) {
-  .chat-client-shell .schedule-workbench {
+  .miniweb-shell .schedule-workbench {
     padding: 7px;
   }
 
-  .chat-client-shell .schedule-workbench .panel-head {
+  .miniweb-shell .schedule-workbench .panel-head {
     min-height: 30px;
   }
 
-  .chat-client-shell .schedule-workbench .panel-head h2 {
+  .miniweb-shell .schedule-workbench .panel-head h2 {
     font-size: 14px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-identity-dock {
+  .miniweb-shell .schedule-workbench .schedule-identity-dock {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 6px;
     margin-bottom: 6px;
     padding: 5px 6px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-identity-dock label {
+  .miniweb-shell .schedule-workbench .schedule-identity-dock label {
     grid-template-columns: minmax(54px, auto) minmax(0, 1fr);
     gap: 5px;
     align-items: center;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-identity-dock label span {
+  .miniweb-shell .schedule-workbench .schedule-identity-dock label span {
     font-size: 11px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-identity-dock select,
-  .chat-client-shell .schedule-workbench .schedule-identity-dock button {
+  .miniweb-shell .schedule-workbench .schedule-identity-dock select,
+  .miniweb-shell .schedule-workbench .schedule-identity-dock button {
     min-height: 28px;
     font-size: 12px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail {
+  .miniweb-shell .schedule-workbench .schedule-rail {
     grid-template-rows: auto minmax(0, 1fr);
     gap: 6px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-tool-summary {
+  .miniweb-shell .schedule-workbench .schedule-tool-summary {
     padding: 6px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-renew-summary {
+  .miniweb-shell .schedule-workbench .schedule-rail-renew-summary {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     min-height: 28px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-renew-summary span {
+  .miniweb-shell .schedule-workbench .schedule-rail-renew-summary span {
     padding: 3px 4px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-renew-summary b {
+  .miniweb-shell .schedule-workbench .schedule-rail-renew-summary b {
     font-size: 12px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-renew-summary small {
+  .miniweb-shell .schedule-workbench .schedule-rail-renew-summary small {
     font-size: 9.5px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-list {
+  .miniweb-shell .schedule-workbench .schedule-rail-list {
     gap: 6px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row-main {
+  .miniweb-shell .schedule-workbench .schedule-rail-row-main {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 5px 8px;
     min-height: 0;
     padding: 7px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row-title {
+  .miniweb-shell .schedule-workbench .schedule-rail-row-title {
     grid-column: 1;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -2613,44 +2613,44 @@ body {
     gap: 3px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row-title .status-pill {
+  .miniweb-shell .schedule-workbench .schedule-rail-row-title .status-pill {
     justify-self: start;
     padding: 1px 5px;
     font-size: 10px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-tool-meta {
+  .miniweb-shell .schedule-workbench .schedule-tool-meta {
     grid-column: 1;
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-tool-meta small {
+  .miniweb-shell .schedule-workbench .schedule-tool-meta small {
     max-width: 100%;
     padding: 1px 5px;
     font-size: 10px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-tool-meta small:first-child {
+  .miniweb-shell .schedule-workbench .schedule-tool-meta small:first-child {
     display: none;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-progress.compact {
+  .miniweb-shell .schedule-workbench .schedule-progress.compact {
     grid-column: 1 / -1;
     height: 3px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-snippets {
+  .miniweb-shell .schedule-workbench .schedule-rail-snippets {
     grid-column: 1;
     gap: 2px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-snippets span {
+  .miniweb-shell .schedule-workbench .schedule-rail-snippets span {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row-controls {
+  .miniweb-shell .schedule-workbench .schedule-rail-row-controls {
     grid-column: 2;
     grid-row: 1 / span 4;
     align-self: center;
@@ -2659,17 +2659,17 @@ body {
     gap: 5px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-preview-hint {
+  .miniweb-shell .schedule-workbench .schedule-rail-preview-hint {
     font-size: 10px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-renew-control {
+  .miniweb-shell .schedule-workbench .schedule-rail-renew-control {
     display: grid;
     justify-items: center;
     gap: 3px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-renew-control small {
+  .miniweb-shell .schedule-workbench .schedule-rail-renew-control small {
     max-width: 58px;
     overflow: hidden;
     text-align: center;
@@ -2677,42 +2677,42 @@ body {
     white-space: nowrap;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-renew-switch,
-  .chat-client-shell .schedule-workbench .schedule-renew-config {
+  .miniweb-shell .schedule-workbench .schedule-renew-switch,
+  .miniweb-shell .schedule-workbench .schedule-renew-config {
     min-width: 54px;
     justify-content: center;
     padding: 3px 6px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-renew-switch strong {
+  .miniweb-shell .schedule-workbench .schedule-renew-switch strong {
     display: none;
   }
 }
 
 @media (max-width: 430px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-rows: clamp(232px, 38dvh, 260px) minmax(0, 1fr);
   }
 
-  .chat-client-shell .schedule-workbench .panel-head-actions {
+  .miniweb-shell .schedule-workbench .panel-head-actions {
     gap: 4px;
   }
 
-  .chat-client-shell .schedule-workbench .panel-head button {
+  .miniweb-shell .schedule-workbench .panel-head button {
     min-height: 27px;
     padding: 3px 7px;
     font-size: 12px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-identity-dock label {
+  .miniweb-shell .schedule-workbench .schedule-identity-dock label {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .chat-client-shell .schedule-workbench .schedule-identity-dock label span {
+  .miniweb-shell .schedule-workbench .schedule-identity-dock label span {
     display: none;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-identity-dock button {
+  .miniweb-shell .schedule-workbench .schedule-identity-dock button {
     min-width: 54px;
     padding-inline: 7px;
   }
@@ -2721,61 +2721,61 @@ body {
 /* wxjerry-control-console pass for the official scheduler.
    Keep the main scheduler dense and scan-friendly instead of a decorative card wall. */
 @media (min-width: 1181px) {
-  .chat-client-shell .schedule-workbench {
+  .miniweb-shell .schedule-workbench {
     border-color: rgba(71, 85, 105, 0.72);
     background: #08111f;
     box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
   }
 
-  .chat-client-shell .schedule-workbench .panel-head {
+  .miniweb-shell .schedule-workbench .panel-head {
     min-height: 44px;
     margin: -2px -2px 10px;
     padding: 6px 8px 9px;
     border-bottom: 1px solid rgba(51, 65, 85, 0.8);
   }
 
-  .chat-client-shell .schedule-workbench .panel-head h2 {
+  .miniweb-shell .schedule-workbench .panel-head h2 {
     font-size: 16px;
     letter-spacing: 0;
   }
 
-  .chat-client-shell .schedule-workbench .panel-head p {
+  .miniweb-shell .schedule-workbench .panel-head p {
     color: #94a3b8;
   }
 
-  .chat-client-shell .schedule-workbench .panel-head button,
-  .chat-client-shell .schedule-workbench .schedule-identity-dock button,
-  .chat-client-shell .schedule-workbench .schedule-rail-more {
+  .miniweb-shell .schedule-workbench .panel-head button,
+  .miniweb-shell .schedule-workbench .schedule-identity-dock button,
+  .miniweb-shell .schedule-workbench .schedule-rail-more {
     border-color: rgba(71, 85, 105, 0.9);
     background: #111827;
     color: #dbeafe;
   }
 
-  .chat-client-shell .schedule-workbench .panel-head button:hover,
-  .chat-client-shell .schedule-workbench .schedule-identity-dock button:hover,
-  .chat-client-shell .schedule-workbench .schedule-rail-more:hover {
+  .miniweb-shell .schedule-workbench .panel-head button:hover,
+  .miniweb-shell .schedule-workbench .schedule-identity-dock button:hover,
+  .miniweb-shell .schedule-workbench .schedule-rail-more:hover {
     border-color: rgba(96, 165, 250, 0.85);
     background: #172554;
     color: #eff6ff;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-identity-dock {
+  .miniweb-shell .schedule-workbench .schedule-identity-dock {
     grid-template-columns: minmax(260px, 0.56fr) auto minmax(160px, 0.44fr);
     border: 1px solid rgba(51, 65, 85, 0.88);
     border-radius: 8px;
     background: #020617;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-identity-dock label {
+  .miniweb-shell .schedule-workbench .schedule-identity-dock label {
     min-width: 0;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-identity-dock select {
+  .miniweb-shell .schedule-workbench .schedule-identity-dock select {
     border-color: rgba(71, 85, 105, 0.95);
     background: #0f172a;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-tool-summary {
+  .miniweb-shell .schedule-workbench .schedule-tool-summary {
     grid-template-columns: minmax(210px, 0.58fr) minmax(320px, 0.9fr) minmax(320px, 1fr);
     gap: 8px;
     padding: 8px;
@@ -2784,65 +2784,65 @@ body {
     background: #020617;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-tool-summary-title,
-  .chat-client-shell .schedule-workbench .schedule-tool-metrics,
-  .chat-client-shell .schedule-workbench .schedule-rail-renew-summary {
+  .miniweb-shell .schedule-workbench .schedule-tool-summary-title,
+  .miniweb-shell .schedule-workbench .schedule-tool-metrics,
+  .miniweb-shell .schedule-workbench .schedule-rail-renew-summary {
     border: 0;
     background: transparent;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-tool-metrics {
+  .miniweb-shell .schedule-workbench .schedule-tool-metrics {
     gap: 6px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-tool-metrics span,
-  .chat-client-shell .schedule-workbench .schedule-rail-renew-summary span {
+  .miniweb-shell .schedule-workbench .schedule-tool-metrics span,
+  .miniweb-shell .schedule-workbench .schedule-rail-renew-summary span {
     border: 1px solid rgba(51, 65, 85, 0.92);
     border-radius: 7px;
     background: #0f172a;
     box-shadow: none;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-tool-metrics span.warn,
-  .chat-client-shell .schedule-workbench .schedule-rail-renew-summary span.warn {
+  .miniweb-shell .schedule-workbench .schedule-tool-metrics span.warn,
+  .miniweb-shell .schedule-workbench .schedule-rail-renew-summary span.warn {
     border-color: rgba(245, 158, 11, 0.52);
     background: rgba(69, 26, 3, 0.34);
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-list {
+  .miniweb-shell .schedule-workbench .schedule-rail-list {
     grid-template-columns: minmax(0, 1fr);
     gap: 6px;
     padding: 0 2px 0 0;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row {
+  .miniweb-shell .schedule-workbench .schedule-rail-row {
     border: 1px solid rgba(51, 65, 85, 0.82);
     border-left-width: 3px;
     border-radius: 8px;
     background: #0b1220;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row.live {
+  .miniweb-shell .schedule-workbench .schedule-rail-row.live {
     border-left-color: #22c55e;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row.warn {
+  .miniweb-shell .schedule-workbench .schedule-rail-row.warn {
     border-left-color: #f59e0b;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row.risk {
+  .miniweb-shell .schedule-workbench .schedule-rail-row.risk {
     border-left-color: #ef4444;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row.done {
+  .miniweb-shell .schedule-workbench .schedule-rail-row.done {
     border-left-color: #60a5fa;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row.muted {
+  .miniweb-shell .schedule-workbench .schedule-rail-row.muted {
     border-left-color: #64748b;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row-main {
+  .miniweb-shell .schedule-workbench .schedule-rail-row-main {
     display: grid;
     grid-template-columns: minmax(170px, 0.52fr) minmax(240px, 0.9fr) minmax(220px, 0.92fr) auto;
     grid-template-rows: auto auto;
@@ -2854,11 +2854,11 @@ body {
     background: transparent;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row-main:hover {
+  .miniweb-shell .schedule-workbench .schedule-rail-row-main:hover {
     background: rgba(15, 23, 42, 0.72);
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row-title {
+  .miniweb-shell .schedule-workbench .schedule-rail-row-title {
     grid-column: 1;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
@@ -2866,13 +2866,13 @@ body {
     min-width: 0;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row-title strong {
+  .miniweb-shell .schedule-workbench .schedule-rail-row-title strong {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-tool-meta {
+  .miniweb-shell .schedule-workbench .schedule-tool-meta {
     grid-column: 2;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -2880,7 +2880,7 @@ body {
     min-width: 0;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-tool-meta small {
+  .miniweb-shell .schedule-workbench .schedule-tool-meta small {
     padding: 0;
     border: 0;
     background: transparent;
@@ -2890,11 +2890,11 @@ body {
     white-space: nowrap;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-tool-meta small:nth-child(n+4) {
+  .miniweb-shell .schedule-workbench .schedule-tool-meta small:nth-child(n+4) {
     display: none;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-progress.compact {
+  .miniweb-shell .schedule-workbench .schedule-progress.compact {
     grid-column: 1 / 4;
     grid-row: 2;
     height: 4px;
@@ -2902,54 +2902,54 @@ body {
     background: #020617;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-snippets {
+  .miniweb-shell .schedule-workbench .schedule-rail-snippets {
     grid-column: 3;
     grid-row: 1;
     min-width: 0;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-snippets span {
+  .miniweb-shell .schedule-workbench .schedule-rail-snippets span {
     grid-template-columns: minmax(92px, auto) minmax(0, 1fr);
     border: 0;
     background: transparent;
     padding: 0;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-snippets code {
+  .miniweb-shell .schedule-workbench .schedule-rail-snippets code {
     color: #e5e7eb;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-snippets small {
+  .miniweb-shell .schedule-workbench .schedule-rail-snippets small {
     color: #94a3b8;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-row-controls {
+  .miniweb-shell .schedule-workbench .schedule-rail-row-controls {
     grid-column: 4;
     grid-row: 1 / span 2;
     justify-self: end;
     min-width: 118px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-preview-hint {
+  .miniweb-shell .schedule-workbench .schedule-rail-preview-hint {
     color: #93c5fd;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-renew-control {
+  .miniweb-shell .schedule-workbench .schedule-rail-renew-control {
     align-items: center;
     gap: 5px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-rail-renew-control small {
+  .miniweb-shell .schedule-workbench .schedule-rail-renew-control small {
     max-width: 86px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-renew-switch,
-  .chat-client-shell .schedule-workbench .schedule-renew-config {
+  .miniweb-shell .schedule-workbench .schedule-renew-switch,
+  .miniweb-shell .schedule-workbench .schedule-renew-config {
     min-width: 64px;
     border-radius: 999px;
   }
 
-  .chat-client-shell .schedule-workbench .schedule-renew-switch.is-on {
+  .miniweb-shell .schedule-workbench .schedule-renew-switch.is-on {
     border-color: rgba(34, 197, 94, 0.72);
     background: rgba(20, 83, 45, 0.7);
     color: #dcfce7;
@@ -2957,41 +2957,41 @@ body {
 }
 
 @media (min-width: 1181px) {
-  .chat-client-shell .schedule-workbench .schedule-rail-list {
+  .miniweb-shell .schedule-workbench .schedule-rail-list {
     scrollbar-gutter: stable;
   }
 }
 
 /* Final shell alignment: desktop rail and workspace must share an edge. */
-.chat-client-shell {
+.miniweb-shell {
   gap: 0;
   column-gap: 0;
 }
 
 @media (min-width: 901px) and (max-width: 1180px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-columns: 240px minmax(0, 1fr);
   }
 
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     grid-column: 1;
     justify-self: stretch;
     width: 100%;
     max-width: 100%;
   }
 
-  .chat-client-shell .chat-workspace {
+  .miniweb-shell .schedule-workspace {
     grid-column: 2;
     margin-left: 0;
   }
 }
 
 /* Module-first scheduling: surface official scheduling at the gameplay module card level. */
-.chat-client-shell .schedule-workbench .schedule-rail {
+.miniweb-shell .schedule-workbench .schedule-rail {
   grid-template-rows: auto auto minmax(0, 1fr) auto;
 }
 
-.chat-client-shell .schedule-module-launcher {
+.miniweb-shell .schedule-module-launcher {
   display: grid;
   gap: 7px;
   min-height: 0;
@@ -3001,7 +3001,7 @@ body {
   background: #020817;
 }
 
-.chat-client-shell .schedule-module-launcher-head {
+.miniweb-shell .schedule-module-launcher-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
@@ -3009,12 +3009,12 @@ body {
   min-width: 0;
 }
 
-.chat-client-shell .schedule-module-launcher-head strong {
+.miniweb-shell .schedule-module-launcher-head strong {
   color: #f8fafc;
   font-size: 13px;
 }
 
-.chat-client-shell .schedule-module-launcher-head small {
+.miniweb-shell .schedule-module-launcher-head small {
   min-width: 0;
   overflow: hidden;
   color: #94a3b8;
@@ -3024,7 +3024,7 @@ body {
   white-space: nowrap;
 }
 
-.chat-client-shell .schedule-module-card-list {
+.miniweb-shell .schedule-module-card-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 6px;
@@ -3035,15 +3035,15 @@ body {
   scrollbar-width: thin;
 }
 
-.chat-client-shell .schedule-module-card,
-.chat-client-shell .cockpit-module {
+.miniweb-shell .schedule-module-card,
+.miniweb-shell .cockpit-module {
   appearance: none;
   color: inherit;
   font: inherit;
   text-align: left;
 }
 
-.chat-client-shell .schedule-module-card {
+.miniweb-shell .schedule-module-card {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 5px;
@@ -3057,28 +3057,28 @@ body {
   cursor: pointer;
 }
 
-.chat-client-shell .schedule-module-card:hover,
-.chat-client-shell .schedule-module-card:focus-visible {
+.miniweb-shell .schedule-module-card:hover,
+.miniweb-shell .schedule-module-card:focus-visible {
   border-color: rgba(96, 165, 250, 0.8);
   border-left-color: #60a5fa;
   background: #0f172a;
   outline: none;
 }
 
-.chat-client-shell .schedule-module-card.ok {
+.miniweb-shell .schedule-module-card.ok {
   border-left-color: #22c55e;
 }
 
-.chat-client-shell .schedule-module-card.warn {
+.miniweb-shell .schedule-module-card.warn {
   border-left-color: #f59e0b;
 }
 
-.chat-client-shell .schedule-module-card.disabled {
+.miniweb-shell .schedule-module-card.disabled {
   cursor: default;
   opacity: 0.66;
 }
 
-.chat-client-shell .schedule-module-card-head {
+.miniweb-shell .schedule-module-card-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -3086,33 +3086,33 @@ body {
   min-width: 0;
 }
 
-.chat-client-shell .schedule-module-card-head strong,
-.chat-client-shell .schedule-module-card-head small,
-.chat-client-shell .schedule-module-card > small {
+.miniweb-shell .schedule-module-card-head strong,
+.miniweb-shell .schedule-module-card-head small,
+.miniweb-shell .schedule-module-card > small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-client-shell .schedule-module-card-head strong {
+.miniweb-shell .schedule-module-card-head strong {
   color: #e5e7eb;
   font-size: 13px;
 }
 
-.chat-client-shell .schedule-module-card-head small,
-.chat-client-shell .schedule-module-card > small {
+.miniweb-shell .schedule-module-card-head small,
+.miniweb-shell .schedule-module-card > small {
   color: #94a3b8;
   font-size: 11px;
 }
 
-.chat-client-shell .schedule-module-card-meta {
+.miniweb-shell .schedule-module-card-meta {
   display: flex;
   align-items: center;
   gap: 5px;
   min-width: 0;
 }
 
-.chat-client-shell .schedule-module-card-meta small {
+.miniweb-shell .schedule-module-card-meta small {
   min-width: 0;
   overflow: hidden;
   color: #93c5fd;
@@ -3121,42 +3121,42 @@ body {
   white-space: nowrap;
 }
 
-.chat-client-shell .schedule-module-skeleton {
+.miniweb-shell .schedule-module-skeleton {
   min-height: 62px;
   border: 1px solid rgba(51, 65, 85, 0.72);
   border-radius: 7px;
   background: linear-gradient(90deg, rgba(15, 23, 42, 0.72), rgba(30, 41, 59, 0.72), rgba(15, 23, 42, 0.72));
 }
 
-.chat-client-shell .cockpit-module {
+.miniweb-shell .cockpit-module {
   display: grid;
   cursor: pointer;
 }
 
-.chat-client-shell .cockpit-module:hover,
-.chat-client-shell .cockpit-module:focus-visible {
+.miniweb-shell .cockpit-module:hover,
+.miniweb-shell .cockpit-module:focus-visible {
   border-color: rgba(96, 165, 250, 0.62);
   background: rgba(15, 23, 42, 0.86);
   outline: none;
 }
 
 @media (max-width: 900px) {
-  .chat-client-shell .schedule-workbench .schedule-rail {
+  .miniweb-shell .schedule-workbench .schedule-rail {
     grid-template-rows: auto minmax(0, 1fr) auto;
   }
 
-  .chat-client-shell .schedule-module-launcher {
+  .miniweb-shell .schedule-module-launcher {
     display: none;
   }
 }
 
 @media (max-width: 560px) {
-  .chat-client-shell .schedule-module-launcher-head {
+  .miniweb-shell .schedule-module-launcher-head {
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
   }
 
-  .chat-client-shell .schedule-module-launcher-head small {
+  .miniweb-shell .schedule-module-launcher-head small {
     text-align: left;
   }
 }

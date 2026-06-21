@@ -233,7 +233,9 @@ def _get_identities(request: MiniWebRequest, query: dict) -> dict:
 
 def _get_identity_state(request: MiniWebRequest, query: dict) -> dict:
     send_as_id = (query.get("send_as_id") or [""])[0]
-    return _app(request).identity_state_payload(send_as_id)
+    observations_raw = str((query.get("observations") or query.get("include_observations") or ["0"])[0]).lower()
+    include_observations = observations_raw in {"1", "true", "yes", "on"}
+    return _app(request).identity_state_payload(send_as_id, include_observations=include_observations)
 
 
 def _get_state_observations(request: MiniWebRequest, query: dict) -> dict:

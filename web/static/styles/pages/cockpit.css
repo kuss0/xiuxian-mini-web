@@ -1,7 +1,7 @@
 
-.chat-client-shell .layout-grid,
-.chat-client-shell .layout-grid.detail-open,
-.chat-client-shell .layout-grid.detail-closed {
+.miniweb-shell .layout-grid,
+.miniweb-shell .layout-grid.detail-open,
+.miniweb-shell .layout-grid.detail-closed {
   min-height: 0;
   overflow: hidden;
   border: 0;
@@ -9,7 +9,7 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
-.chat-client-shell .chat-pane {
+.miniweb-shell .chat-pane {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
@@ -18,25 +18,25 @@
   background: #060914;
 }
 
-.chat-client-shell .chat-pane .section-head {
+.miniweb-shell .chat-pane .section-head {
   min-height: 48px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.10);
   background: rgba(10, 16, 32, 0.94);
   padding: 8px 14px;
 }
 
-.chat-client-shell .stream-title strong {
+.miniweb-shell .stream-title strong {
   color: #f8fafc;
   font-size: 14px;
 }
 
-.chat-client-shell .stream-title span {
+.miniweb-shell .stream-title span {
   max-width: 420px;
   color: #94a3b8;
   font-size: 11.5px;
 }
 
-.chat-client-shell .message-list {
+.miniweb-shell .message-list {
   gap: 7px;
   min-height: 0;
   overflow-y: auto;
@@ -46,29 +46,29 @@
   padding: 18px clamp(14px, 2.2vw, 34px) 28px;
 }
 
-.chat-client-shell .chat-day-divider {
+.miniweb-shell .chat-day-divider {
   margin: 13px 0 7px;
 }
 
-.chat-client-shell .chat-day-divider span {
+.miniweb-shell .chat-day-divider span {
   border-color: rgba(148, 163, 184, 0.10);
   background: rgba(15, 23, 42, 0.86);
   color: #94a3b8;
 }
 
-.chat-client-shell .chat-message {
+.miniweb-shell .chat-message {
   grid-template-columns: 32px minmax(0, 1fr);
   gap: 9px;
   width: min(100%, 1200px);
   max-width: none;
 }
 
-.chat-client-shell .chat-message.kind-mine {
+.miniweb-shell .chat-message.kind-mine {
   grid-template-columns: minmax(0, 1fr) 32px;
   margin-left: 0;
 }
 
-.chat-client-shell .chat-avatar {
+.miniweb-shell .chat-avatar {
   width: 32px;
   height: 32px;
   border-radius: 50%;
@@ -78,7 +78,7 @@
   box-shadow: none;
 }
 
-.chat-client-shell .chat-body {
+.miniweb-shell .chat-body {
   max-width: min(940px, 92%);
   border: 1px solid rgba(148, 163, 184, 0.10);
   border-left: 3px solid rgba(100, 116, 139, 0.34);
@@ -88,61 +88,61 @@
   box-shadow: none;
 }
 
-.chat-client-shell .chat-message:hover .chat-body,
-.chat-client-shell .chat-message.active .chat-body {
+.miniweb-shell .chat-message:hover .chat-body,
+.miniweb-shell .chat-message.active .chat-body {
   border-color: rgba(96, 165, 250, 0.22);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
 }
 
-.chat-client-shell .chat-message.kind-player .chat-body {
+.miniweb-shell .chat-message.kind-player .chat-body {
   background: rgba(30, 41, 59, 0.62);
 }
 
-.chat-client-shell .chat-message.kind-bot .chat-body {
+.miniweb-shell .chat-message.kind-bot .chat-body {
   border-left-color: rgba(96, 165, 250, 0.46);
   background: rgba(12, 26, 49, 0.88);
 }
 
-.chat-client-shell .chat-message.kind-risk .chat-body {
+.miniweb-shell .chat-message.kind-risk .chat-body {
   border-left-color: rgba(248, 113, 113, 0.72);
   background: rgba(127, 29, 29, 0.22);
 }
 
-.chat-client-shell .chat-message.kind-mine .chat-body {
+.miniweb-shell .chat-message.kind-mine .chat-body {
   justify-self: end;
   border-left: 1px solid rgba(34, 197, 94, 0.16);
   border-right: 3px solid rgba(34, 197, 94, 0.58);
   background: rgba(20, 83, 45, 0.28);
 }
 
-.chat-client-shell .chat-head-row {
+.miniweb-shell .chat-head-row {
   position: relative;
   align-items: baseline;
   min-width: 0;
   margin: 0 0 5px;
 }
 
-.chat-client-shell .chat-head {
+.miniweb-shell .chat-head {
   gap: 6px 9px;
   cursor: default;
 }
 
-.chat-client-shell .chat-source {
+.miniweb-shell .chat-source {
   color: #e5e7eb;
   font-size: 12px;
   font-weight: 700;
 }
 
-.chat-client-shell .chat-source.numeric {
+.miniweb-shell .chat-source.numeric {
   color: #94a3b8;
 }
 
-.chat-client-shell .chat-time {
+.miniweb-shell .chat-time {
   color: #64748b;
   font-size: 10.5px;
 }
 
-.chat-client-shell .chat-message-actions {
+.miniweb-shell .chat-message-actions {
   position: absolute;
   top: -4px;
   right: -4px;
@@ -153,20 +153,20 @@
   transition: opacity 0.12s ease, transform 0.12s ease;
 }
 
-.chat-client-shell .chat-message.kind-mine .chat-message-actions {
+.miniweb-shell .chat-message.kind-mine .chat-message-actions {
   right: auto;
   left: -4px;
 }
 
-.chat-client-shell .chat-message:hover .chat-message-actions,
-.chat-client-shell .chat-message:focus-within .chat-message-actions,
-.chat-client-shell .chat-message.active .chat-message-actions {
+.miniweb-shell .chat-message:hover .chat-message-actions,
+.miniweb-shell .chat-message:focus-within .chat-message-actions,
+.miniweb-shell .chat-message.active .chat-message-actions {
   opacity: 1;
   transform: translateY(0);
 }
 
-.chat-client-shell .chat-detail-button,
-.chat-client-shell .chat-reply-button {
+.miniweb-shell .chat-detail-button,
+.miniweb-shell .chat-reply-button {
   display: inline-grid;
   place-items: center;
   width: 24px;
@@ -181,13 +181,13 @@
   line-height: 1;
 }
 
-.chat-client-shell .chat-detail-button:hover,
-.chat-client-shell .chat-reply-button:hover:not(:disabled) {
+.miniweb-shell .chat-detail-button:hover,
+.miniweb-shell .chat-reply-button:hover:not(:disabled) {
   border-color: rgba(96, 165, 250, 0.48);
   color: #bfdbfe;
 }
 
-.chat-client-shell .chat-text {
+.miniweb-shell .chat-text {
   min-width: min(300px, 100%);
   margin: 0;
   color: #f1f5f9;
@@ -196,17 +196,17 @@
   cursor: default;
 }
 
-.chat-client-shell .chat-reply-context {
+.miniweb-shell .chat-reply-context {
   margin: 3px 0 7px;
   border-left-color: rgba(96, 165, 250, 0.72);
   background: rgba(37, 99, 235, 0.10);
 }
 
-.chat-client-shell .chat-quick-actions {
+.miniweb-shell .chat-quick-actions {
   margin-top: 8px;
 }
 
-.chat-client-shell .chat-quick-action {
+.miniweb-shell .chat-quick-action {
   border-color: rgba(96, 165, 250, 0.32);
   border-radius: 999px;
   background: rgba(37, 99, 235, 0.14);
@@ -215,19 +215,19 @@
   font-size: 11.5px;
 }
 
-.chat-client-shell .chat-quick-action:hover {
+.miniweb-shell .chat-quick-action:hover {
   background: rgba(37, 99, 235, 0.88);
 }
 
-.chat-client-shell .chat-enhance {
+.miniweb-shell .chat-enhance {
   margin-top: 7px;
   gap: 4px;
   opacity: 0.72;
 }
 
-.chat-client-shell .chat-title-pill,
-.chat-client-shell .chat-tag,
-.chat-client-shell .chat-action-pill {
+.miniweb-shell .chat-title-pill,
+.miniweb-shell .chat-tag,
+.miniweb-shell .chat-action-pill {
   border: 1px solid rgba(148, 163, 184, 0.10);
   background: rgba(2, 6, 23, 0.28);
   color: #94a3b8;
@@ -235,12 +235,12 @@
   font-size: 10.5px;
 }
 
-.chat-client-shell .chat-action-pill {
+.miniweb-shell .chat-action-pill {
   border-color: rgba(34, 197, 94, 0.16);
   color: #86efac;
 }
 
-.chat-client-shell .chat-risk-badge {
+.miniweb-shell .chat-risk-badge {
   border-color: rgba(248, 113, 113, 0.46);
   background: rgba(127, 29, 29, 0.34);
   color: #fecaca;
@@ -248,7 +248,7 @@
   font-size: 10.5px;
 }
 
-.chat-client-shell .chat-composer {
+.miniweb-shell .chat-composer {
   margin: 0;
   border: 0;
   border-top: 1px solid rgba(148, 163, 184, 0.12);
@@ -258,27 +258,27 @@
   padding: 8px 12px 10px;
 }
 
-.chat-client-shell .direct-send-head {
+.miniweb-shell .direct-send-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   margin: 0 0 7px;
 }
 
-.chat-client-shell .direct-send-title {
+.miniweb-shell .direct-send-title {
   min-width: 0;
 }
 
-.chat-client-shell .direct-send-title strong {
+.miniweb-shell .direct-send-title strong {
   display: none;
 }
 
-.chat-client-shell .direct-send-title span {
+.miniweb-shell .direct-send-title span {
   color: #94a3b8;
   font-size: 11.5px;
 }
 
-.chat-client-shell .direct-send-row {
+.miniweb-shell .direct-send-row {
   display: grid;
   grid-template-columns: minmax(136px, 190px) minmax(0, 1fr) 74px;
   gap: 0;
@@ -289,12 +289,12 @@
   overflow: hidden;
 }
 
-.chat-client-shell .direct-send-row label {
+.miniweb-shell .direct-send-row label {
   display: block;
   min-width: 0;
 }
 
-.chat-client-shell .direct-send-row label span {
+.miniweb-shell .direct-send-row label span {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -303,8 +303,8 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .direct-send-row select,
-.chat-client-shell .direct-send-row textarea {
+.miniweb-shell .direct-send-row select,
+.miniweb-shell .direct-send-row textarea {
   width: 100%;
   height: 100%;
   border: 0;
@@ -313,14 +313,14 @@
   color: #e5e7eb;
 }
 
-.chat-client-shell .direct-send-row select {
+.miniweb-shell .direct-send-row select {
   border-right: 1px solid rgba(148, 163, 184, 0.12);
   color: #bfdbfe;
   padding: 0 10px;
   font-size: 12px;
 }
 
-.chat-client-shell .direct-send-row textarea {
+.miniweb-shell .direct-send-row textarea {
   min-height: 44px;
   max-height: 126px;
   padding: 10px 12px;
@@ -329,16 +329,16 @@
   line-height: 1.5;
 }
 
-.chat-client-shell .direct-send-row textarea:focus,
-.chat-client-shell .direct-send-row select:focus {
+.miniweb-shell .direct-send-row textarea:focus,
+.miniweb-shell .direct-send-row select:focus {
   outline: none;
 }
 
-.chat-client-shell .direct-send-row:focus-within {
+.miniweb-shell .direct-send-row:focus-within {
   border-color: rgba(96, 165, 250, 0.50);
 }
 
-.chat-client-shell #directSendSubmit {
+.miniweb-shell #directSendSubmit {
   min-height: 44px;
   border: 0;
   border-left: 1px solid rgba(148, 163, 184, 0.12);
@@ -349,106 +349,106 @@
   font-weight: 700;
 }
 
-.chat-client-shell #directSendSubmit:disabled {
+.miniweb-shell #directSendSubmit:disabled {
   background: #1e293b;
   color: #64748b;
 }
 
-.chat-client-shell .direct-send-selection-context,
-.chat-client-shell .direct-send-reply-context,
-.chat-client-shell .direct-send-action-hints {
+.miniweb-shell .direct-send-selection-context,
+.miniweb-shell .direct-send-reply-context,
+.miniweb-shell .direct-send-action-hints {
   max-height: 86px;
   margin-bottom: 7px;
   border-radius: 8px;
   font-size: 11.5px;
 }
 
-.chat-client-shell .direct-selection-main p {
+.miniweb-shell .direct-selection-main p {
   white-space: nowrap;
 }
 
-.chat-client-shell .detail {
+.miniweb-shell .detail {
   border: 1px solid rgba(96, 165, 250, 0.22);
   border-radius: 10px;
   background: #0a1020;
 }
 
-.chat-client-shell .detail-section-head {
+.miniweb-shell .detail-section-head {
   border-bottom-color: rgba(148, 163, 184, 0.12);
   background: rgba(15, 23, 42, 0.94);
 }
 
-.chat-client-shell .detail-panel {
+.miniweb-shell .detail-panel {
   background: #0a1020;
 }
 
 @media (max-width: 1080px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-columns: minmax(0, 1fr);
     height: auto;
     min-height: 100vh;
     overflow: auto;
   }
 
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     height: auto;
     min-height: 0;
     overflow: visible;
   }
 
-  .chat-client-shell .channel-filters {
+  .miniweb-shell .channel-filters {
     max-height: 44vh;
   }
 
-  .chat-client-shell .sidebar-secondary {
+  .miniweb-shell .sidebar-secondary {
     position: static;
     max-height: 52vh;
   }
 
-  .chat-client-shell .chat-workspace {
+  .miniweb-shell .schedule-workspace {
     min-height: 80vh;
   }
 }
 
 @media (max-width: 720px) {
-  .chat-client-shell .chat-message,
-  .chat-client-shell .chat-message.kind-mine {
+  .miniweb-shell .chat-message,
+  .miniweb-shell .chat-message.kind-mine {
     grid-template-columns: 30px minmax(0, 1fr);
   }
 
-  .chat-client-shell .chat-message.kind-mine .chat-avatar-btn {
+  .miniweb-shell .chat-message.kind-mine .chat-avatar-btn {
     grid-column: 1;
   }
 
-  .chat-client-shell .chat-message.kind-mine .chat-body {
+  .miniweb-shell .chat-message.kind-mine .chat-body {
     grid-column: 2;
     justify-self: stretch;
     max-width: 100%;
   }
 
-  .chat-client-shell .chat-body {
+  .miniweb-shell .chat-body {
     max-width: 100%;
   }
 
-  .chat-client-shell .direct-send-row {
+  .miniweb-shell .direct-send-row {
     grid-template-columns: 1fr;
   }
 
-  .chat-client-shell .direct-send-row select,
-  .chat-client-shell #directSendSubmit {
+  .miniweb-shell .direct-send-row select,
+  .miniweb-shell #directSendSubmit {
     min-height: 38px;
     border-left: 0;
     border-right: 0;
     border-top: 1px solid rgba(148, 163, 184, 0.12);
   }
 
-  .chat-client-shell .direct-send-row select {
+  .miniweb-shell .direct-send-row select {
     border-top: 0;
   }
 }
 
 /* ---------- Final mini-web chat client contract ---------- */
-.chat-client-shell {
+.miniweb-shell {
   grid-template-columns: clamp(310px, 22vw, 380px) minmax(0, 1fr);
   height: 100dvh;
   min-height: 0;
@@ -456,7 +456,7 @@
   background: #050914;
 }
 
-.chat-client-shell .conversation-rail {
+.miniweb-shell .tool-rail {
   height: 100dvh;
   min-height: 0;
   overflow: hidden;
@@ -464,7 +464,7 @@
   background: #0a1020;
 }
 
-.chat-client-shell .chat-workspace {
+.miniweb-shell .schedule-workspace {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   height: 100dvh;
@@ -473,13 +473,13 @@
   padding: 0;
 }
 
-.chat-client-shell .global-banner {
+.miniweb-shell .global-banner {
   margin: 8px 10px 0;
 }
 
-.chat-client-shell .layout-grid,
-.chat-client-shell .layout-grid.detail-open,
-.chat-client-shell .layout-grid.detail-closed {
+.miniweb-shell .layout-grid,
+.miniweb-shell .layout-grid.detail-open,
+.miniweb-shell .layout-grid.detail-closed {
   min-height: 0;
   overflow: hidden;
   border: 0;
@@ -487,7 +487,7 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
-.chat-client-shell .chat-pane {
+.miniweb-shell .chat-pane {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
@@ -497,7 +497,7 @@
   background: #060914;
 }
 
-.chat-client-shell .chat-pane .section-head {
+.miniweb-shell .chat-pane .section-head {
   min-height: 50px;
   gap: 12px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.10);
@@ -505,22 +505,22 @@
   padding: 8px 14px;
 }
 
-.chat-client-shell .stream-title {
+.miniweb-shell .stream-title {
   min-width: 150px;
 }
 
-.chat-client-shell .stream-title strong {
+.miniweb-shell .stream-title strong {
   color: #f8fafc;
   font-size: 14px;
 }
 
-.chat-client-shell .stream-title span {
+.miniweb-shell .stream-title span {
   max-width: min(46vw, 560px);
   color: #94a3b8;
   font-size: 11.5px;
 }
 
-.chat-client-shell .stream-channel-tools {
+.miniweb-shell .stream-channel-tools {
   position: relative;
   display: flex;
   flex: 0 0 auto;
@@ -531,13 +531,13 @@
   overflow: visible;
 }
 
-.chat-client-shell .message-search {
+.miniweb-shell .message-search {
   display: grid;
   min-width: 150px;
   max-width: 240px;
 }
 
-.chat-client-shell .message-search span {
+.miniweb-shell .message-search span {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -546,7 +546,7 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .message-search input {
+.miniweb-shell .message-search input {
   width: 100%;
   min-height: 28px;
   border: 1px solid rgba(148, 163, 184, 0.14);
@@ -557,15 +557,15 @@
   font-size: 12px;
 }
 
-.chat-client-shell .message-search input:focus {
+.miniweb-shell .message-search input:focus {
   outline: none;
   border-color: rgba(96, 165, 250, 0.50);
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
 }
 
-.chat-client-shell .stream-tool-button,
-.chat-client-shell .stream-filter-drawer summary,
-.chat-client-shell .direct-send-more summary {
+.miniweb-shell .stream-tool-button,
+.miniweb-shell .stream-filter-drawer summary,
+.miniweb-shell .direct-send-more summary {
   min-height: 28px;
   border-color: rgba(148, 163, 184, 0.14);
   background: rgba(15, 23, 42, 0.80);
@@ -574,20 +574,20 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .message-count-pill {
+.miniweb-shell .message-count-pill {
   min-height: 28px;
   display: inline-flex;
   align-items: center;
 }
 
-.chat-client-shell .workspace-tools-shell,
-.chat-client-shell .stream-filter-drawer,
-.chat-client-shell .direct-send-more {
+.miniweb-shell .workspace-tools-shell,
+.miniweb-shell .stream-filter-drawer,
+.miniweb-shell .direct-send-more {
   position: relative;
   list-style: none;
 }
 
-.chat-client-shell .workspace-tools-toggle {
+.miniweb-shell .workspace-tools-toggle {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -595,13 +595,13 @@
   list-style: none;
 }
 
-.chat-client-shell .workspace-tools-toggle::-webkit-details-marker,
-.chat-client-shell .stream-filter-drawer summary::-webkit-details-marker,
-.chat-client-shell .direct-send-more summary::-webkit-details-marker {
+.miniweb-shell .workspace-tools-toggle::-webkit-details-marker,
+.miniweb-shell .stream-filter-drawer summary::-webkit-details-marker,
+.miniweb-shell .direct-send-more summary::-webkit-details-marker {
   display: none;
 }
 
-.chat-client-shell .workspace-tools-toggle small {
+.miniweb-shell .workspace-tools-toggle small {
   max-width: 150px;
   overflow: hidden;
   color: #64748b;
@@ -610,18 +610,18 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .workspace-tools-toggle::after {
+.miniweb-shell .workspace-tools-toggle::after {
   content: "▾";
   color: #64748b;
   font-size: 10px;
 }
 
-.chat-client-shell .workspace-tools-shell[open] .workspace-tools-toggle {
+.miniweb-shell .workspace-tools-shell[open] .workspace-tools-toggle {
   border-color: rgba(96, 165, 250, 0.46);
   color: #bfdbfe;
 }
 
-.chat-client-shell .workspace-tools-panel {
+.miniweb-shell .workspace-tools-panel {
   position: absolute;
   top: calc(100% + 9px);
   right: 0;
@@ -639,11 +639,11 @@
   padding: 10px;
 }
 
-.chat-client-shell .workspace-tools-shell[open] .workspace-tools-panel {
+.miniweb-shell .workspace-tools-shell[open] .workspace-tools-panel {
   display: grid;
 }
 
-.chat-client-shell .workspace-tools-panel .panel {
+.miniweb-shell .workspace-tools-panel .panel {
   min-width: 0;
   min-height: 0;
   max-height: calc(min(78vh, 700px) - 22px);
@@ -655,71 +655,71 @@
   padding: 10px;
 }
 
-.chat-client-shell .workspace-tools-panel .drawer-summary {
+.miniweb-shell .workspace-tools-panel .drawer-summary {
   display: grid;
   gap: 2px;
   margin-bottom: 8px;
 }
 
-.chat-client-shell .workspace-tools-panel .drawer-summary span {
+.miniweb-shell .workspace-tools-panel .drawer-summary span {
   color: #f8fafc;
   font-size: 12px;
   font-weight: 700;
 }
 
-.chat-client-shell .workspace-tools-panel .drawer-summary small {
+.miniweb-shell .workspace-tools-panel .drawer-summary small {
   color: #64748b;
   font-size: 10.5px;
 }
 
-.chat-client-shell .identity-drawer-actions,
-.chat-client-shell .identity-panel-actions {
+.miniweb-shell .identity-drawer-actions,
+.miniweb-shell .identity-panel-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 8px;
 }
 
-.chat-client-shell .identity-drawer-actions button,
-.chat-client-shell .identity-panel-actions button,
-.chat-client-shell .sidebar-toolbox button {
+.miniweb-shell .identity-drawer-actions button,
+.miniweb-shell .identity-panel-actions button,
+.miniweb-shell .sidebar-toolbox button {
   min-height: 30px;
   border-radius: 7px;
   font-size: 12px;
 }
 
-.chat-client-shell .workspace-tools-panel .sidebar-identity-list {
+.miniweb-shell .workspace-tools-panel .sidebar-identity-list {
   max-height: 300px;
   overflow: auto;
   padding-right: 2px;
 }
 
-.chat-client-shell .workspace-tools-panel .sidebar-cockpit {
+.miniweb-shell .workspace-tools-panel .sidebar-cockpit {
   display: grid;
   gap: 8px;
 }
 
-.chat-client-shell .workspace-tools-panel .cockpit-strip {
+.miniweb-shell .workspace-tools-panel .cockpit-strip {
   border-color: rgba(148, 163, 184, 0.10);
   background: rgba(2, 6, 23, 0.44);
 }
 
-.chat-client-shell .workspace-tools-panel .cockpit-modules {
+.miniweb-shell .workspace-tools-panel .cockpit-modules {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.chat-client-shell .workspace-tools-panel .sidebar-toolbox {
+.miniweb-shell .workspace-tools-panel .sidebar-toolbox {
   display: grid;
   grid-template-columns: 1fr;
   gap: 7px;
 }
 
-.chat-client-shell .stream-filter-drawer[open] .quick-filters {
+.miniweb-shell .stream-filter-drawer[open] .quick-filters {
   z-index: 72;
   min-width: 260px;
 }
 
-.chat-client-shell .message-list {
+.miniweb-shell .message-list {
   min-height: 0;
   height: 100%;
   overflow-y: auto;
@@ -730,21 +730,21 @@
   padding: 18px clamp(14px, 2.2vw, 34px) 30px;
 }
 
-.chat-client-shell .chat-message {
+.miniweb-shell .chat-message {
   width: min(100%, 1220px);
   max-width: none;
 }
 
-.chat-client-shell .chat-body {
+.miniweb-shell .chat-body {
   max-width: min(960px, 92%);
   border-radius: 8px;
 }
 
-.chat-client-shell .chat-message.kind-mine .chat-body {
+.miniweb-shell .chat-message.kind-mine .chat-body {
   max-width: min(820px, 92%);
 }
 
-.chat-client-shell .detail {
+.miniweb-shell .detail {
   position: fixed;
   top: 10px;
   right: 10px;
@@ -761,14 +761,14 @@
   transition: transform 0.16s ease, opacity 0.16s ease, visibility 0.16s ease;
 }
 
-.chat-client-shell .layout-grid.detail-open .detail {
+.miniweb-shell .layout-grid.detail-open .detail {
   transform: translateX(0);
   opacity: 1;
   pointer-events: auto;
   visibility: visible;
 }
 
-.chat-client-shell .detail-backdrop {
+.miniweb-shell .detail-backdrop {
   position: fixed;
   inset: 0;
   z-index: 80;
@@ -777,16 +777,16 @@
   backdrop-filter: blur(1px);
 }
 
-.chat-client-shell .detail-backdrop[hidden] {
+.miniweb-shell .detail-backdrop[hidden] {
   display: none;
 }
 
-.chat-client-shell .detail-panel {
+.miniweb-shell .detail-panel {
   min-height: 0;
   overflow: auto;
 }
 
-.chat-client-shell .chat-composer {
+.miniweb-shell .chat-composer {
   position: relative;
   z-index: 30;
   border-top: 1px solid rgba(96, 165, 250, 0.22);
@@ -794,23 +794,23 @@
   box-shadow: 0 -10px 34px rgba(0, 0, 0, 0.42);
 }
 
-.chat-client-shell .direct-send-row {
+.miniweb-shell .direct-send-row {
   grid-template-columns: minmax(136px, 190px) minmax(0, 1fr) 82px;
 }
 
-.chat-client-shell .direct-send-row textarea {
+.miniweb-shell .direct-send-row textarea {
   min-height: 48px;
   max-height: 150px;
 }
 
-.chat-client-shell .direct-send-skill-panel,
-.chat-client-shell .direct-send-emoji-palette {
+.miniweb-shell .direct-send-skill-panel,
+.miniweb-shell .direct-send-emoji-palette {
   max-height: min(34vh, 300px);
   overflow: auto;
 }
 
 @media (max-width: 1180px) {
-  .chat-client-shell .workspace-tools-panel {
+  .miniweb-shell .workspace-tools-panel {
     right: -10px;
     grid-template-columns: 1fr;
     width: min(520px, calc(100vw - 28px));
@@ -818,37 +818,37 @@
 }
 
 @media (max-width: 900px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-columns: minmax(0, 1fr);
     height: auto;
     min-height: 100dvh;
     overflow: auto;
   }
 
-  .chat-client-shell .conversation-rail,
-  .chat-client-shell .chat-workspace {
+  .miniweb-shell .tool-rail,
+  .miniweb-shell .schedule-workspace {
     height: auto;
     min-height: 0;
     overflow: visible;
   }
 
-  .chat-client-shell .channel-filters {
+  .miniweb-shell .channel-filters {
     max-height: 42vh;
   }
 
-  .chat-client-shell .chat-workspace {
+  .miniweb-shell .schedule-workspace {
     min-height: 82vh;
   }
 
-  .chat-client-shell .chat-pane {
+  .miniweb-shell .chat-pane {
     min-height: 62vh;
   }
 
-  .chat-client-shell .stream-channel-tools {
+  .miniweb-shell .stream-channel-tools {
     flex-wrap: wrap;
   }
 
-  .chat-client-shell .message-search {
+  .miniweb-shell .message-search {
     order: 5;
     width: min(100%, 280px);
     max-width: none;
@@ -856,15 +856,15 @@
 }
 
 @media (max-width: 720px) {
-  .chat-client-shell .chat-pane .section-head {
+  .miniweb-shell .chat-pane .section-head {
     align-items: start;
   }
 
-  .chat-client-shell .stream-title {
+  .miniweb-shell .stream-title {
     width: 100%;
   }
 
-  .chat-client-shell .workspace-tools-panel {
+  .miniweb-shell .workspace-tools-panel {
     position: fixed;
     left: 8px;
     right: 8px;
@@ -873,24 +873,24 @@
     max-height: calc(100dvh - 76px);
   }
 
-  .chat-client-shell .detail {
+  .miniweb-shell .detail {
     left: 8px;
     right: 8px;
     width: auto;
     max-width: none;
   }
 
-  .chat-client-shell .direct-send-row {
+  .miniweb-shell .direct-send-row {
     grid-template-columns: 1fr;
   }
 }
 
 /* ---------- Game client cockpit pass ---------- */
-.chat-client-shell .chat-pane {
+.miniweb-shell .chat-pane {
   grid-template-rows: auto auto auto auto auto auto auto minmax(0, 1fr);
 }
 
-.chat-client-shell .game-hud {
+.miniweb-shell .game-hud {
   display: grid;
   grid-template-columns: minmax(260px, 1.15fr) minmax(320px, 1.55fr) minmax(250px, 1fr);
   gap: 8px;
@@ -902,7 +902,7 @@
   padding: 8px 12px;
 }
 
-.chat-client-shell .hud-panel {
+.miniweb-shell .hud-panel {
   min-width: 0;
   min-height: 76px;
   border: 1px solid rgba(148, 163, 184, 0.12);
@@ -912,7 +912,7 @@
   overflow: hidden;
 }
 
-.chat-client-shell .hud-panel-head {
+.miniweb-shell .hud-panel-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -924,7 +924,7 @@
   font-weight: 700;
 }
 
-.chat-client-shell .hud-identity-switch {
+.miniweb-shell .hud-identity-switch {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -935,7 +935,7 @@
   font-weight: 700;
 }
 
-.chat-client-shell .hud-identity-select {
+.miniweb-shell .hud-identity-select {
   min-width: 0;
   max-width: 190px;
   border: 1px solid rgba(148, 163, 184, 0.18);
@@ -946,7 +946,7 @@
   font-size: 11.5px;
 }
 
-.chat-client-shell .hud-player-main {
+.miniweb-shell .hud-player-main {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 9px;
@@ -955,7 +955,7 @@
   margin-bottom: 7px;
 }
 
-.chat-client-shell .hud-avatar {
+.miniweb-shell .hud-avatar {
   width: 38px;
   height: 38px;
   border-radius: 50%;
@@ -963,13 +963,13 @@
   color: #dbeafe;
 }
 
-.chat-client-shell .hud-player-title {
+.miniweb-shell .hud-player-title {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.chat-client-shell .hud-player-title strong {
+.miniweb-shell .hud-player-title strong {
   min-width: 0;
   overflow: hidden;
   color: #f8fafc;
@@ -979,7 +979,7 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .hud-player-title span {
+.miniweb-shell .hud-player-title span {
   min-width: 0;
   overflow: hidden;
   color: #94a3b8;
@@ -988,31 +988,31 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .hud-player-metrics {
+.miniweb-shell .hud-player-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 5px;
 }
 
-.chat-client-shell .hud-player-metrics .cockpit-metric,
-.chat-client-shell .hud-inbox .cockpit-metric {
+.miniweb-shell .hud-player-metrics .cockpit-metric,
+.miniweb-shell .hud-inbox .cockpit-metric {
   border-color: rgba(148, 163, 184, 0.10);
   background: rgba(15, 23, 42, 0.50);
 }
 
-.chat-client-shell .hud-player-metrics .cockpit-metric strong,
-.chat-client-shell .hud-inbox .cockpit-metric strong {
+.miniweb-shell .hud-player-metrics .cockpit-metric strong,
+.miniweb-shell .hud-inbox .cockpit-metric strong {
   color: #e5e7eb;
 }
 
-.chat-client-shell .hud-modules {
+.miniweb-shell .hud-modules {
   display: grid;
   grid-template-columns: repeat(5, minmax(92px, 1fr));
   gap: 6px;
   min-width: 0;
 }
 
-.chat-client-shell .hud-modules .cockpit-module {
+.miniweb-shell .hud-modules .cockpit-module {
   min-width: 0;
   width: auto;
   flex-basis: auto;
@@ -1021,48 +1021,48 @@
   padding: 5px 6px;
 }
 
-.chat-client-shell .hud-modules .cockpit-module-label {
+.miniweb-shell .hud-modules .cockpit-module-label {
   font-size: 10.5px;
 }
 
-.chat-client-shell .hud-inbox {
+.miniweb-shell .hud-inbox {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 6px;
 }
 
-.chat-client-shell .hud-inbox .cockpit-inbox-status {
+.miniweb-shell .hud-inbox .cockpit-inbox-status {
   min-height: 30px;
   border-color: rgba(148, 163, 184, 0.10);
   background: rgba(15, 23, 42, 0.44);
   padding: 5px 7px;
 }
 
-.chat-client-shell .hud-inbox .cockpit-inbox-status small {
+.miniweb-shell .hud-inbox .cockpit-inbox-status small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-client-shell .hud-inbox .cockpit-inbox-line {
+.miniweb-shell .hud-inbox .cockpit-inbox-line {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 5px;
 }
 
-.chat-client-shell .hud-empty {
+.miniweb-shell .hud-empty {
   display: grid;
   align-content: center;
   min-height: 58px;
   color: #94a3b8;
 }
 
-.chat-client-shell .hud-empty strong {
+.miniweb-shell .hud-empty strong {
   color: #e5e7eb;
   font-size: 14px;
 }
 
-.chat-client-shell .hud-profile-source {
+.miniweb-shell .hud-profile-source {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 6px;
@@ -1078,19 +1078,19 @@
   text-align: left;
 }
 
-.chat-client-shell .hud-profile-source:hover {
+.miniweb-shell .hud-profile-source:hover {
   border-color: rgba(96, 165, 250, 0.42);
   color: #bfdbfe;
 }
 
-.chat-client-shell .hud-profile-source span {
+.miniweb-shell .hud-profile-source span {
   color: #64748b;
   font-size: 10.5px;
   font-weight: 700;
   white-space: nowrap;
 }
 
-.chat-client-shell .hud-profile-source strong {
+.miniweb-shell .hud-profile-source strong {
   min-width: 0;
   overflow: hidden;
   color: inherit;
@@ -1099,11 +1099,11 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .hud-profile-source.muted {
+.miniweb-shell .hud-profile-source.muted {
   opacity: 0.78;
 }
 
-.chat-client-shell .live-situation-board {
+.miniweb-shell .live-situation-board {
   display: grid;
   grid-template-columns: minmax(280px, 1.1fr) minmax(0, 1.9fr);
   gap: 8px;
@@ -1115,68 +1115,68 @@
   padding: 8px 12px;
 }
 
-.chat-client-shell .live-situation-hero,
-.chat-client-shell .live-situation-tile {
+.miniweb-shell .live-situation-hero,
+.miniweb-shell .live-situation-tile {
   min-width: 0;
   border: 1px solid rgba(148, 163, 184, 0.12);
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.66);
 }
 
-.chat-client-shell .live-situation-hero {
+.miniweb-shell .live-situation-hero {
   display: grid;
   gap: 7px;
   border-left: 3px solid rgba(96, 165, 250, 0.62);
   padding: 9px 10px;
 }
 
-.chat-client-shell .live-situation-hero.risk {
+.miniweb-shell .live-situation-hero.risk {
   border-left-color: #f87171;
   background: rgba(127, 29, 29, 0.20);
 }
 
-.chat-client-shell .live-situation-hero.dungeon {
+.miniweb-shell .live-situation-hero.dungeon {
   border-left-color: #a78bfa;
 }
 
-.chat-client-shell .live-situation-hero.dungeon-live {
+.miniweb-shell .live-situation-hero.dungeon-live {
   border-left-color: #f59e0b;
   background:
     linear-gradient(135deg, rgba(88, 28, 135, 0.20), rgba(15, 23, 42, 0.72)),
     rgba(15, 23, 42, 0.66);
 }
 
-.chat-client-shell .live-situation-hero.dungeon-live.open,
-.chat-client-shell .live-situation-hero.dungeon-live.joined {
+.miniweb-shell .live-situation-hero.dungeon-live.open,
+.miniweb-shell .live-situation-hero.dungeon-live.joined {
   border-left-color: #22c55e;
 }
 
-.chat-client-shell .live-situation-hero.dungeon-live.choice,
-.chat-client-shell .live-situation-hero.dungeon-live.active {
+.miniweb-shell .live-situation-hero.dungeon-live.choice,
+.miniweb-shell .live-situation-hero.dungeon-live.active {
   border-left-color: #f59e0b;
 }
 
-.chat-client-shell .live-situation-hero.dungeon-live.failed,
-.chat-client-shell .live-situation-hero.dungeon-live.closed {
+.miniweb-shell .live-situation-hero.dungeon-live.failed,
+.miniweb-shell .live-situation-hero.dungeon-live.closed {
   border-left-color: #f87171;
 }
 
-.chat-client-shell .live-situation-hero.resource,
-.chat-client-shell .live-situation-hero.training,
-.chat-client-shell .live-situation-hero.home {
+.miniweb-shell .live-situation-hero.resource,
+.miniweb-shell .live-situation-hero.training,
+.miniweb-shell .live-situation-hero.home {
   border-left-color: #14b8a6;
 }
 
-.chat-client-shell .live-situation-title {
+.miniweb-shell .live-situation-title {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.chat-client-shell .live-situation-title span,
-.chat-client-shell .live-situation-title small,
-.chat-client-shell .live-situation-tile span,
-.chat-client-shell .live-situation-tile small {
+.miniweb-shell .live-situation-title span,
+.miniweb-shell .live-situation-title small,
+.miniweb-shell .live-situation-tile span,
+.miniweb-shell .live-situation-tile small {
   overflow: hidden;
   color: #64748b;
   font-size: 10.5px;
@@ -1184,13 +1184,13 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .live-situation-title span,
-.chat-client-shell .live-situation-tile span {
+.miniweb-shell .live-situation-title span,
+.miniweb-shell .live-situation-tile span {
   font-weight: 800;
 }
 
-.chat-client-shell .live-situation-title strong,
-.chat-client-shell .live-situation-tile strong {
+.miniweb-shell .live-situation-title strong,
+.miniweb-shell .live-situation-tile strong {
   min-width: 0;
   overflow: hidden;
   color: #f8fafc;
@@ -1200,8 +1200,8 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .live-situation-hero p,
-.chat-client-shell .live-situation-tile em {
+.miniweb-shell .live-situation-hero p,
+.miniweb-shell .live-situation-tile em {
   display: -webkit-box;
   min-width: 0;
   overflow: hidden;
@@ -1214,20 +1214,20 @@
   -webkit-line-clamp: 2;
 }
 
-.chat-client-shell .live-situation-actions {
+.miniweb-shell .live-situation-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.chat-client-shell .live-situation-metrics {
+.miniweb-shell .live-situation-metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   min-width: 0;
 }
 
-.chat-client-shell .live-situation-metrics span {
+.miniweb-shell .live-situation-metrics span {
   display: grid;
   gap: 1px;
   min-width: 0;
@@ -1239,7 +1239,7 @@
   font-size: 11px;
 }
 
-.chat-client-shell .live-situation-metrics b {
+.miniweb-shell .live-situation-metrics b {
   overflow: hidden;
   color: #64748b;
   font-size: 10px;
@@ -1247,8 +1247,8 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .live-situation-actions button,
-.chat-client-shell .live-situation-badge {
+.miniweb-shell .live-situation-actions button,
+.miniweb-shell .live-situation-badge {
   border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: 999px;
   background: rgba(2, 6, 23, 0.38);
@@ -1258,20 +1258,20 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .live-situation-actions button:hover,
-.chat-client-shell .live-situation-badge:hover {
+.miniweb-shell .live-situation-actions button:hover,
+.miniweb-shell .live-situation-badge:hover {
   border-color: rgba(96, 165, 250, 0.42);
   color: #bfdbfe;
 }
 
-.chat-client-shell .live-situation-grid {
+.miniweb-shell .live-situation-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   min-width: 0;
 }
 
-.chat-client-shell .live-situation-tile {
+.miniweb-shell .live-situation-tile {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
@@ -1280,7 +1280,7 @@
   padding: 8px;
 }
 
-.chat-client-shell .live-situation-tile > button:first-child {
+.miniweb-shell .live-situation-tile > button:first-child {
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -1291,41 +1291,41 @@
   text-align: left;
 }
 
-.chat-client-shell .live-situation-tile.dungeon {
+.miniweb-shell .live-situation-tile.dungeon {
   box-shadow: inset 2px 0 0 rgba(167, 139, 250, 0.72);
 }
 
-.chat-client-shell .live-situation-tile.risk {
+.miniweb-shell .live-situation-tile.risk {
   box-shadow: inset 2px 0 0 rgba(248, 113, 113, 0.72);
 }
 
-.chat-client-shell .live-situation-tile.resource {
+.miniweb-shell .live-situation-tile.resource {
   box-shadow: inset 2px 0 0 rgba(20, 184, 166, 0.72);
 }
 
-.chat-client-shell .live-situation-tile.cooldown.ready {
+.miniweb-shell .live-situation-tile.cooldown.ready {
   box-shadow: inset 2px 0 0 rgba(34, 197, 94, 0.72);
 }
 
-.chat-client-shell .live-situation-tile.cooldown.warn {
+.miniweb-shell .live-situation-tile.cooldown.warn {
   box-shadow: inset 2px 0 0 rgba(245, 158, 11, 0.72);
 }
 
-.chat-client-shell .live-situation-tile.cooldown.running,
-.chat-client-shell .live-situation-tile.cooldown.cooling {
+.miniweb-shell .live-situation-tile.cooldown.running,
+.miniweb-shell .live-situation-tile.cooldown.cooling {
   box-shadow: inset 2px 0 0 rgba(96, 165, 250, 0.72);
 }
 
-.chat-client-shell .live-situation-tile.empty {
+.miniweb-shell .live-situation-tile.empty {
   opacity: 0.76;
 }
 
-.chat-client-shell .live-situation-badge {
+.miniweb-shell .live-situation-badge {
   align-self: start;
   padding-inline: 8px;
 }
 
-.chat-client-shell .world-event-strip {
+.miniweb-shell .world-event-strip {
   display: flex;
   gap: 8px;
   min-width: 0;
@@ -1336,7 +1336,7 @@
   padding: 8px 12px;
 }
 
-.chat-client-shell .game-scene-board {
+.miniweb-shell .game-scene-board {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
@@ -1348,7 +1348,7 @@
   padding: 8px 12px;
 }
 
-.chat-client-shell .game-scene-card {
+.miniweb-shell .game-scene-card {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   gap: 8px;
@@ -1360,27 +1360,27 @@
   padding: 9px;
 }
 
-.chat-client-shell .game-scene-card.home {
+.miniweb-shell .game-scene-card.home {
   border-top: 2px solid #22c55e;
 }
 
-.chat-client-shell .game-scene-card.training {
+.miniweb-shell .game-scene-card.training {
   border-top: 2px solid #14b8a6;
 }
 
-.chat-client-shell .game-scene-card.dungeon {
+.miniweb-shell .game-scene-card.dungeon {
   border-top: 2px solid #a78bfa;
 }
 
-.chat-client-shell .game-scene-card.leader {
+.miniweb-shell .game-scene-card.leader {
   border-top: 2px solid #22d3ee;
 }
 
-.chat-client-shell .game-scene-card.empty {
+.miniweb-shell .game-scene-card.empty {
   opacity: 0.86;
 }
 
-.chat-client-shell .game-scene-main {
+.miniweb-shell .game-scene-main {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   grid-template-rows: auto minmax(0, 1fr);
@@ -1393,11 +1393,11 @@
   text-align: left;
 }
 
-.chat-client-shell .game-scene-main:hover .game-scene-title strong {
+.miniweb-shell .game-scene-main:hover .game-scene-title strong {
   color: #bfdbfe;
 }
 
-.chat-client-shell .game-scene-icon {
+.miniweb-shell .game-scene-icon {
   display: grid;
   place-items: center;
   width: 30px;
@@ -1409,34 +1409,34 @@
   font-weight: 800;
 }
 
-.chat-client-shell .game-scene-title {
+.miniweb-shell .game-scene-title {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.chat-client-shell .game-scene-title strong,
-.chat-client-shell .game-scene-title small,
-.chat-client-shell .game-scene-main em {
+.miniweb-shell .game-scene-title strong,
+.miniweb-shell .game-scene-title small,
+.miniweb-shell .game-scene-main em {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.chat-client-shell .game-scene-title strong {
+.miniweb-shell .game-scene-title strong {
   color: #f8fafc;
   font-size: 14px;
   line-height: 1.15;
   white-space: nowrap;
 }
 
-.chat-client-shell .game-scene-title small {
+.miniweb-shell .game-scene-title small {
   color: #64748b;
   font-size: 10.5px;
   white-space: nowrap;
 }
 
-.chat-client-shell .game-scene-count {
+.miniweb-shell .game-scene-count {
   align-self: start;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.90);
@@ -1446,7 +1446,7 @@
   font-weight: 700;
 }
 
-.chat-client-shell .game-scene-main em {
+.miniweb-shell .game-scene-main em {
   grid-column: 1 / -1;
   display: -webkit-box;
   color: #cbd5e1;
@@ -1458,7 +1458,7 @@
   -webkit-line-clamp: 2;
 }
 
-.chat-client-shell .game-scene-badges {
+.miniweb-shell .game-scene-badges {
   grid-column: 1 / -1;
   display: flex;
   gap: 5px;
@@ -1466,7 +1466,7 @@
   overflow: hidden;
 }
 
-.chat-client-shell .game-scene-badges span {
+.miniweb-shell .game-scene-badges span {
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -1480,43 +1480,43 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .game-scene-badges b {
+.miniweb-shell .game-scene-badges b {
   color: #64748b;
   font-size: 10px;
 }
 
-.chat-client-shell .game-scene-badges .ok {
+.miniweb-shell .game-scene-badges .ok {
   border-color: rgba(34, 197, 94, 0.24);
   background: rgba(20, 83, 45, 0.20);
   color: #bbf7d0;
 }
 
-.chat-client-shell .game-scene-badges .warn {
+.miniweb-shell .game-scene-badges .warn {
   border-color: rgba(245, 158, 11, 0.28);
   background: rgba(120, 53, 15, 0.20);
   color: #fde68a;
 }
 
-.chat-client-shell .game-scene-badges .running,
-.chat-client-shell .game-scene-badges .cooling {
+.miniweb-shell .game-scene-badges .running,
+.miniweb-shell .game-scene-badges .cooling {
   border-color: rgba(96, 165, 250, 0.24);
   background: rgba(30, 64, 175, 0.16);
   color: #bfdbfe;
 }
 
-.chat-client-shell .game-scene-badges .muted {
+.miniweb-shell .game-scene-badges .muted {
   color: #94a3b8;
   opacity: 0.82;
 }
 
-.chat-client-shell .game-scene-skill-actions {
+.miniweb-shell .game-scene-skill-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
   min-width: 0;
 }
 
-.chat-client-shell .game-scene-skill-actions button {
+.miniweb-shell .game-scene-skill-actions button {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 1px 5px;
@@ -1530,61 +1530,61 @@
   text-align: left;
 }
 
-.chat-client-shell .game-scene-skill-actions button:hover:not(:disabled) {
+.miniweb-shell .game-scene-skill-actions button:hover:not(:disabled) {
   border-color: rgba(34, 197, 94, 0.42);
   background: rgba(22, 101, 52, 0.22);
 }
 
-.chat-client-shell .game-scene-skill-actions button:disabled {
+.miniweb-shell .game-scene-skill-actions button:disabled {
   cursor: not-allowed;
   opacity: 0.62;
 }
 
-.chat-client-shell .game-scene-skill-actions button.cooling {
+.miniweb-shell .game-scene-skill-actions button.cooling {
   border-color: rgba(96, 165, 250, 0.20);
   background: rgba(30, 64, 175, 0.12);
 }
 
-.chat-client-shell .game-scene-command-actions button.dungeon {
+.miniweb-shell .game-scene-command-actions button.dungeon {
   border-color: rgba(167, 139, 250, 0.24);
   background: rgba(88, 28, 135, 0.16);
 }
 
-.chat-client-shell .game-scene-command-actions button.dungeon:hover {
+.miniweb-shell .game-scene-command-actions button.dungeon:hover {
   border-color: rgba(167, 139, 250, 0.46);
   background: rgba(109, 40, 217, 0.24);
 }
 
-.chat-client-shell .game-scene-skill-actions button > span {
+.miniweb-shell .game-scene-skill-actions button > span {
   grid-row: 1 / span 2;
   font-size: 12px;
 }
 
-.chat-client-shell .game-scene-skill-actions strong,
-.chat-client-shell .game-scene-skill-actions small {
+.miniweb-shell .game-scene-skill-actions strong,
+.miniweb-shell .game-scene-skill-actions small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-client-shell .game-scene-skill-actions strong {
+.miniweb-shell .game-scene-skill-actions strong {
   color: #f8fafc;
   font-size: 11.5px;
 }
 
-.chat-client-shell .game-scene-skill-actions small {
+.miniweb-shell .game-scene-skill-actions small {
   color: #94a3b8;
   font-size: 10px;
 }
 
-.chat-client-shell .game-scene-actions {
+.miniweb-shell .game-scene-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
-.chat-client-shell .game-scene-actions button {
+.miniweb-shell .game-scene-actions button {
   min-width: 0;
   border: 1px solid rgba(148, 163, 184, 0.12);
   border-radius: 8px;
@@ -1594,12 +1594,12 @@
   font-size: 11.5px;
 }
 
-.chat-client-shell .game-scene-actions button:hover {
+.miniweb-shell .game-scene-actions button:hover {
   border-color: rgba(96, 165, 250, 0.42);
   color: #bfdbfe;
 }
 
-.chat-client-shell .quest-tracker {
+.miniweb-shell .quest-tracker {
   display: grid;
   grid-template-columns: minmax(140px, 190px) minmax(0, 1fr);
   gap: 8px;
@@ -1609,7 +1609,7 @@
   padding: 8px 12px;
 }
 
-.chat-client-shell .quest-tracker-head {
+.miniweb-shell .quest-tracker-head {
   display: grid;
   align-content: center;
   gap: 2px;
@@ -1620,23 +1620,23 @@
   padding: 7px 9px;
 }
 
-.chat-client-shell .quest-tracker-head span {
+.miniweb-shell .quest-tracker-head span {
   color: #64748b;
   font-size: 10.5px;
   font-weight: 700;
 }
 
-.chat-client-shell .quest-tracker-head strong {
+.miniweb-shell .quest-tracker-head strong {
   color: #f8fafc;
   font-size: 13px;
 }
 
-.chat-client-shell .quest-tracker-head small {
+.miniweb-shell .quest-tracker-head small {
   color: #94a3b8;
   font-size: 10.5px;
 }
 
-.chat-client-shell .quest-tracker-head button {
+.miniweb-shell .quest-tracker-head button {
   justify-self: start;
   min-width: 0;
   border: 1px solid rgba(96, 165, 250, 0.20);
@@ -1648,19 +1648,19 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .quest-tracker-head button:hover {
+.miniweb-shell .quest-tracker-head button:hover {
   border-color: rgba(96, 165, 250, 0.44);
   background: rgba(37, 99, 235, 0.22);
 }
 
-.chat-client-shell .quest-tracker-list {
+.miniweb-shell .quest-tracker-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 8px;
   min-width: 0;
 }
 
-.chat-client-shell .quest-card {
+.miniweb-shell .quest-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 7px;
@@ -1672,29 +1672,29 @@
   padding: 8px 9px;
 }
 
-.chat-client-shell .quest-card.risk {
+.miniweb-shell .quest-card.risk {
   border-left-color: #f87171;
   background: rgba(127, 29, 29, 0.20);
 }
 
-.chat-client-shell .quest-card.action {
+.miniweb-shell .quest-card.action {
   border-left-color: #f59e0b;
 }
 
-.chat-client-shell .quest-card.dungeon {
+.miniweb-shell .quest-card.dungeon {
   border-left-color: #a78bfa;
 }
 
-.chat-client-shell .quest-card.module {
+.miniweb-shell .quest-card.module {
   border-left-color: #14b8a6;
   background: rgba(20, 83, 45, 0.16);
 }
 
-.chat-client-shell .quest-card.mine {
+.miniweb-shell .quest-card.mine {
   border-left-color: #22c55e;
 }
 
-.chat-client-shell .quest-card-main {
+.miniweb-shell .quest-card-main {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   grid-template-rows: auto auto auto;
@@ -1707,7 +1707,7 @@
   text-align: left;
 }
 
-.chat-client-shell .quest-kind {
+.miniweb-shell .quest-kind {
   grid-row: 1 / span 3;
   align-self: start;
   border-radius: 999px;
@@ -1719,54 +1719,54 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .quest-card.risk .quest-kind {
+.miniweb-shell .quest-card.risk .quest-kind {
   background: rgba(220, 38, 38, 0.24);
   color: #fecaca;
 }
 
-.chat-client-shell .quest-card.dungeon .quest-kind {
+.miniweb-shell .quest-card.dungeon .quest-kind {
   background: rgba(124, 58, 237, 0.22);
   color: #ddd6fe;
 }
 
-.chat-client-shell .quest-card.module .quest-kind {
+.miniweb-shell .quest-card.module .quest-kind {
   background: rgba(20, 184, 166, 0.18);
   color: #99f6e4;
 }
 
-.chat-client-shell .quest-card-main strong,
-.chat-client-shell .quest-card-main small,
-.chat-client-shell .quest-card-main em {
+.miniweb-shell .quest-card-main strong,
+.miniweb-shell .quest-card-main small,
+.miniweb-shell .quest-card-main em {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-client-shell .quest-card-main strong {
+.miniweb-shell .quest-card-main strong {
   color: #f8fafc;
   font-size: 12px;
 }
 
-.chat-client-shell .quest-card-main small {
+.miniweb-shell .quest-card-main small {
   color: #64748b;
   font-size: 10.5px;
 }
 
-.chat-client-shell .quest-card-main em {
+.miniweb-shell .quest-card-main em {
   color: #cbd5e1;
   font-size: 11.5px;
   font-style: normal;
 }
 
-.chat-client-shell .quest-card-actions {
+.miniweb-shell .quest-card-actions {
   display: flex;
   align-items: flex-end;
   flex-direction: column;
   gap: 5px;
 }
 
-.chat-client-shell .quest-card-actions button {
+.miniweb-shell .quest-card-actions button {
   min-width: 54px;
   border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: 999px;
@@ -1777,12 +1777,12 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .quest-card-actions button:hover {
+.miniweb-shell .quest-card-actions button:hover {
   border-color: rgba(96, 165, 250, 0.42);
   color: #bfdbfe;
 }
 
-.chat-client-shell .game-action-dock {
+.miniweb-shell .game-action-dock {
   display: grid;
   grid-template-columns: minmax(150px, 210px) minmax(0, 1fr);
   gap: 8px;
@@ -1792,7 +1792,7 @@
   padding: 7px 12px;
 }
 
-.chat-client-shell .game-dock-context {
+.miniweb-shell .game-dock-context {
   display: grid;
   align-content: center;
   gap: 2px;
@@ -1803,13 +1803,13 @@
   padding: 7px 9px;
 }
 
-.chat-client-shell .game-dock-context span {
+.miniweb-shell .game-dock-context span {
   color: #64748b;
   font-size: 10.5px;
   font-weight: 700;
 }
 
-.chat-client-shell .game-dock-context strong {
+.miniweb-shell .game-dock-context strong {
   min-width: 0;
   overflow: hidden;
   color: #f8fafc;
@@ -1818,7 +1818,7 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .game-dock-context-metrics {
+.miniweb-shell .game-dock-context-metrics {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -1826,7 +1826,7 @@
   padding-top: 3px;
 }
 
-.chat-client-shell .game-dock-context-metrics span {
+.miniweb-shell .game-dock-context-metrics span {
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -1841,19 +1841,19 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .game-dock-context-metrics b {
+.miniweb-shell .game-dock-context-metrics b {
   color: #64748b;
   font-size: 9.5px;
 }
 
-.chat-client-shell .game-dock-actions {
+.miniweb-shell .game-dock-actions {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
   gap: 7px;
   min-width: 0;
 }
 
-.chat-client-shell .game-dock-actions button {
+.miniweb-shell .game-dock-actions button {
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -1866,12 +1866,12 @@
   text-align: left;
 }
 
-.chat-client-shell .game-dock-actions button:hover {
+.miniweb-shell .game-dock-actions button:hover {
   border-color: rgba(96, 165, 250, 0.42);
   background: rgba(30, 41, 59, 0.78);
 }
 
-.chat-client-shell .game-dock-actions strong {
+.miniweb-shell .game-dock-actions strong {
   overflow: hidden;
   color: #f8fafc;
   font-size: 12.5px;
@@ -1879,7 +1879,7 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .game-dock-actions small {
+.miniweb-shell .game-dock-actions small {
   overflow: hidden;
   color: #94a3b8;
   font-size: 10.5px;
@@ -1887,7 +1887,7 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .world-event-card {
+.miniweb-shell .world-event-card {
   flex: 0 0 clamp(210px, 19vw, 290px);
   position: relative;
   display: grid;
@@ -1904,7 +1904,7 @@
   text-align: left;
 }
 
-.chat-client-shell .world-event-main {
+.miniweb-shell .world-event-main {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   grid-template-rows: auto auto auto;
@@ -1917,12 +1917,12 @@
   text-align: left;
 }
 
-.chat-client-shell .world-event-card:hover {
+.miniweb-shell .world-event-card:hover {
   border-color: rgba(96, 165, 250, 0.34);
   background: rgba(30, 41, 59, 0.78);
 }
 
-.chat-client-shell .world-event-kind {
+.miniweb-shell .world-event-kind {
   grid-row: 1 / span 3;
   align-self: start;
   border-radius: 999px;
@@ -1934,32 +1934,32 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .world-event-card strong,
-.chat-client-shell .world-event-card small,
-.chat-client-shell .world-event-card em {
+.miniweb-shell .world-event-card strong,
+.miniweb-shell .world-event-card small,
+.miniweb-shell .world-event-card em {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-client-shell .world-event-card strong {
+.miniweb-shell .world-event-card strong {
   color: #f8fafc;
   font-size: 12px;
 }
 
-.chat-client-shell .world-event-card small {
+.miniweb-shell .world-event-card small {
   color: #64748b;
   font-size: 10.5px;
 }
 
-.chat-client-shell .world-event-card em {
+.miniweb-shell .world-event-card em {
   color: #cbd5e1;
   font-size: 11.5px;
   font-style: normal;
 }
 
-.chat-client-shell .world-event-action {
+.miniweb-shell .world-event-action {
   align-self: end;
   border: 1px solid rgba(245, 158, 11, 0.28);
   border-radius: 999px;
@@ -1970,31 +1970,31 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .world-event-action:hover {
+.miniweb-shell .world-event-action:hover {
   border-color: rgba(245, 158, 11, 0.50);
   background: rgba(245, 158, 11, 0.20);
 }
 
-.chat-client-shell .world-event-card.risk {
+.miniweb-shell .world-event-card.risk {
   border-left-color: #f87171;
   background: rgba(127, 29, 29, 0.22);
 }
 
-.chat-client-shell .world-event-card.risk .world-event-kind {
+.miniweb-shell .world-event-card.risk .world-event-kind {
   background: rgba(220, 38, 38, 0.24);
   color: #fecaca;
 }
 
-.chat-client-shell .world-event-card.action {
+.miniweb-shell .world-event-card.action {
   border-left-color: #f59e0b;
 }
 
-.chat-client-shell .world-event-card.action .world-event-kind {
+.miniweb-shell .world-event-card.action .world-event-kind {
   background: rgba(245, 158, 11, 0.18);
   color: #fde68a;
 }
 
-.chat-client-shell .world-event-card.dungeon {
+.miniweb-shell .world-event-card.dungeon {
   border-left-color: #a78bfa;
 }
 

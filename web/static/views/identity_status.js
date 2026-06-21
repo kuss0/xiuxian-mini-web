@@ -419,7 +419,7 @@
       button.textContent = "刷新中...";
       try {
         await Promise.all([
-          deps.loadIdentityModuleStates?.(),
+          deps.loadIdentityModuleStates?.({ includeObservations: true }),
           deps.loadIdentityPatches?.({ reset: true }),
         ]);
         const body = dialog.querySelector("#identityStatusBody");

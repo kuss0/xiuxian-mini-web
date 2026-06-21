@@ -1,23 +1,23 @@
-.chat-client-shell .world-event-card.leader {
+.miniweb-shell .world-event-card.leader {
   border-left-color: #22d3ee;
 }
 
-.chat-client-shell .world-event-card.mine {
+.miniweb-shell .world-event-card.mine {
   border-left-color: #22c55e;
 }
 
-.chat-client-shell .world-event-card.resource,
-.chat-client-shell .world-event-card.training,
-.chat-client-shell .world-event-card.home {
+.miniweb-shell .world-event-card.resource,
+.miniweb-shell .world-event-card.training,
+.miniweb-shell .world-event-card.home {
   border-left-color: #14b8a6;
 }
 
-.chat-client-shell .world-event-card.empty {
+.miniweb-shell .world-event-card.empty {
   min-height: 56px;
   opacity: 0.82;
 }
 
-.chat-client-shell .quick-action-hotbar {
+.miniweb-shell .quick-action-hotbar {
   display: flex;
   gap: 7px;
   min-width: 0;
@@ -26,7 +26,7 @@
   padding: 0 0 7px;
 }
 
-.chat-client-shell .quick-action-hotbar .skill-chip {
+.miniweb-shell .quick-action-hotbar .skill-chip {
   flex: 0 0 auto;
   min-height: 30px;
   border-radius: 999px;
@@ -36,17 +36,17 @@
   font-size: 12px;
 }
 
-.chat-client-shell .quick-action-hotbar .skill-chip:hover:not(:disabled) {
+.miniweb-shell .quick-action-hotbar .skill-chip:hover:not(:disabled) {
   border-color: rgba(96, 165, 250, 0.46);
   background: rgba(37, 99, 235, 0.20);
 }
 
-.chat-client-shell .quick-action-hotbar .skill-chip.cooling {
+.miniweb-shell .quick-action-hotbar .skill-chip.cooling {
   border-color: rgba(94, 234, 212, 0.28);
   background: rgba(20, 83, 45, 0.18);
 }
 
-.chat-client-shell .quick-action-hotbar-empty {
+.miniweb-shell .quick-action-hotbar-empty {
   display: inline-flex;
   align-items: center;
   min-height: 30px;
@@ -55,16 +55,16 @@
 }
 
 @media (max-width: 1280px) {
-  .chat-client-shell .game-hud {
+  .miniweb-shell .game-hud {
     grid-template-columns: minmax(240px, 1fr) minmax(0, 1.35fr);
   }
 
-  .chat-client-shell .hud-inbox {
+  .miniweb-shell .hud-inbox {
     grid-column: 1 / -1;
     min-height: 52px;
   }
 
-  .chat-client-shell .hud-inbox .cockpit-inbox-line {
+  .miniweb-shell .hud-inbox .cockpit-inbox-line {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
@@ -83,48 +83,48 @@
     grid-column: auto;
   }
 
-  .chat-client-shell .chat-pane {
+  .miniweb-shell .chat-pane {
     grid-template-rows: auto auto auto auto auto auto auto minmax(48vh, 1fr);
   }
 
-  .chat-client-shell .game-hud {
+  .miniweb-shell .game-hud {
     grid-template-columns: 1fr;
     padding: 8px;
   }
 
-  .chat-client-shell .hud-panel {
+  .miniweb-shell .hud-panel {
     min-height: 0;
   }
 
-  .chat-client-shell .hud-modules {
+  .miniweb-shell .hud-modules {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .chat-client-shell .game-action-dock {
+  .miniweb-shell .game-action-dock {
     grid-template-columns: 1fr;
     padding: 7px 8px;
   }
 
-  .chat-client-shell .live-situation-board {
+  .miniweb-shell .live-situation-board {
     grid-template-columns: 1fr;
     padding: 7px 8px;
   }
 
-  .chat-client-shell .live-situation-grid {
+  .miniweb-shell .live-situation-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .chat-client-shell .game-scene-board {
+  .miniweb-shell .game-scene-board {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     padding: 7px 8px;
   }
 
-  .chat-client-shell .quest-tracker {
+  .miniweb-shell .quest-tracker {
     grid-template-columns: 1fr;
     padding: 7px 8px;
   }
 
-  .chat-client-shell .game-dock-actions {
+  .miniweb-shell .game-dock-actions {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
@@ -151,89 +151,89 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .chat-client-shell .game-hud {
+  .miniweb-shell .game-hud {
     display: none;
   }
 
-  .chat-client-shell .chat-pane {
+  .miniweb-shell .chat-pane {
     grid-template-rows: auto auto auto auto auto auto minmax(52vh, 1fr);
   }
 
-  .chat-client-shell .world-event-strip {
+  .miniweb-shell .world-event-strip {
     padding: 7px 8px;
   }
 
-  .chat-client-shell .live-situation-board {
+  .miniweb-shell .live-situation-board {
     display: flex;
     overflow-x: auto;
     overscroll-behavior-x: contain;
   }
 
-  .chat-client-shell .live-situation-hero,
-  .chat-client-shell .live-situation-grid {
+  .miniweb-shell .live-situation-hero,
+  .miniweb-shell .live-situation-grid {
     flex: 0 0 min(86vw, 340px);
   }
 
-  .chat-client-shell .live-situation-grid {
+  .miniweb-shell .live-situation-grid {
     grid-template-columns: 1fr;
   }
 
-  .chat-client-shell .world-event-card {
+  .miniweb-shell .world-event-card {
     flex-basis: min(82vw, 300px);
   }
 
-  .chat-client-shell .game-scene-board {
+  .miniweb-shell .game-scene-board {
     display: flex;
     overflow-x: auto;
     overscroll-behavior-x: contain;
   }
 
-  .chat-client-shell .game-scene-card {
+  .miniweb-shell .game-scene-card {
     flex: 0 0 min(82vw, 300px);
   }
 
-  .chat-client-shell .quest-tracker-list {
+  .miniweb-shell .quest-tracker-list {
     display: flex;
     overflow-x: auto;
     overscroll-behavior-x: contain;
   }
 
-  .chat-client-shell .quest-card {
+  .miniweb-shell .quest-card {
     flex: 0 0 min(82vw, 310px);
   }
 
-  .chat-client-shell .game-dock-context {
+  .miniweb-shell .game-dock-context {
     display: none;
   }
 
-  .chat-client-shell .game-dock-actions {
+  .miniweb-shell .game-dock-actions {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 /* ---------- Chat-first viewport pass ---------- */
-.chat-client-shell {
+.miniweb-shell {
   grid-template-columns: clamp(360px, 30vw, 480px) minmax(0, 1fr);
   width: 100%;
   max-width: 100vw;
 }
 
-.chat-client-shell .conversation-rail,
-.chat-client-shell .chat-workspace,
-.chat-client-shell .layout-grid,
-.chat-client-shell .chat-pane {
+.miniweb-shell .tool-rail,
+.miniweb-shell .schedule-workspace,
+.miniweb-shell .layout-grid,
+.miniweb-shell .chat-pane {
   min-width: 0;
 }
 
-.chat-client-shell .chat-pane {
+.miniweb-shell .chat-pane {
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
-.chat-client-shell .message-list {
+.miniweb-shell .message-list {
   min-height: 0;
 }
 
-.chat-client-shell .game-primary-strip {
+.miniweb-shell .game-primary-strip {
   display: grid;
   grid-template-columns: minmax(220px, 1.25fr) minmax(220px, 1.15fr) minmax(180px, 0.9fr) auto;
   align-items: stretch;
@@ -245,8 +245,8 @@
   overscroll-behavior-x: contain;
 }
 
-.chat-client-shell .game-primary-item,
-.chat-client-shell .game-primary-more {
+.miniweb-shell .game-primary-item,
+.miniweb-shell .game-primary-more {
   display: grid;
   align-content: center;
   min-width: 0;
@@ -259,12 +259,12 @@
   text-align: left;
 }
 
-.chat-client-shell .game-primary-item:hover,
-.chat-client-shell .game-primary-more:hover {
+.miniweb-shell .game-primary-item:hover,
+.miniweb-shell .game-primary-more:hover {
   background: rgba(30, 41, 59, 0.54);
 }
 
-.chat-client-shell .game-primary-item span {
+.miniweb-shell .game-primary-item span {
   overflow: hidden;
   color: #64748b;
   font-size: 10px;
@@ -273,7 +273,7 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .game-primary-item strong {
+.miniweb-shell .game-primary-item strong {
   overflow: hidden;
   color: #f8fafc;
   font-size: 12px;
@@ -282,7 +282,7 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .game-primary-item small {
+.miniweb-shell .game-primary-item small {
   overflow: hidden;
   color: #94a3b8;
   font-size: 10px;
@@ -291,28 +291,28 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .game-primary-item.warn strong,
-.chat-client-shell .game-primary-item.risk strong,
-.chat-client-shell .game-primary-item.quest strong,
-.chat-client-shell .game-primary-item.choice strong,
-.chat-client-shell .game-primary-item.active strong {
+.miniweb-shell .game-primary-item.warn strong,
+.miniweb-shell .game-primary-item.risk strong,
+.miniweb-shell .game-primary-item.quest strong,
+.miniweb-shell .game-primary-item.choice strong,
+.miniweb-shell .game-primary-item.active strong {
   color: #fde68a;
 }
 
-.chat-client-shell .game-primary-item.dungeon strong,
-.chat-client-shell .game-primary-item.open strong,
-.chat-client-shell .game-primary-item.joined strong {
+.miniweb-shell .game-primary-item.dungeon strong,
+.miniweb-shell .game-primary-item.open strong,
+.miniweb-shell .game-primary-item.joined strong {
   color: #ddd6fe;
 }
 
-.chat-client-shell .game-primary-item.ready strong,
-.chat-client-shell .game-primary-item.mine strong,
-.chat-client-shell .game-primary-item.leader strong,
-.chat-client-shell .game-primary-item.focus strong {
+.miniweb-shell .game-primary-item.ready strong,
+.miniweb-shell .game-primary-item.mine strong,
+.miniweb-shell .game-primary-item.leader strong,
+.miniweb-shell .game-primary-item.focus strong {
   color: #bbf7d0;
 }
 
-.chat-client-shell .game-primary-more {
+.miniweb-shell .game-primary-more {
   min-width: 64px;
   justify-content: center;
   border-right: 0;
@@ -323,7 +323,7 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .game-secondary-shell {
+.miniweb-shell .game-secondary-shell {
   min-width: 0;
   margin-top: 8px;
   border: 1px solid rgba(148, 163, 184, 0.10);
@@ -331,7 +331,7 @@
   background: rgba(2, 6, 23, 0.28);
 }
 
-.chat-client-shell .game-secondary-shell > summary {
+.miniweb-shell .game-secondary-shell > summary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto;
   gap: 8px;
@@ -343,17 +343,17 @@
   list-style: none;
 }
 
-.chat-client-shell .game-secondary-shell > summary::-webkit-details-marker {
+.miniweb-shell .game-secondary-shell > summary::-webkit-details-marker {
   display: none;
 }
 
-.chat-client-shell .game-secondary-shell > summary span {
+.miniweb-shell .game-secondary-shell > summary span {
   color: #f8fafc;
   font-size: 12px;
   font-weight: 800;
 }
 
-.chat-client-shell .game-secondary-shell > summary small {
+.miniweb-shell .game-secondary-shell > summary small {
   min-width: 0;
   overflow: hidden;
   color: #64748b;
@@ -363,7 +363,7 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .game-secondary-shell > summary::after {
+.miniweb-shell .game-secondary-shell > summary::after {
   content: "展开";
   grid-column: 3;
   grid-row: 1;
@@ -377,24 +377,24 @@
   font-weight: 700;
 }
 
-.chat-client-shell .game-secondary-shell > summary small {
+.miniweb-shell .game-secondary-shell > summary small {
   grid-column: 2;
   grid-row: 1;
 }
 
-.chat-client-shell .game-secondary-shell[open] > summary {
+.miniweb-shell .game-secondary-shell[open] > summary {
   border-bottom: 1px solid rgba(148, 163, 184, 0.10);
 }
 
-.chat-client-shell .game-secondary-shell[open] > summary::after {
+.miniweb-shell .game-secondary-shell[open] > summary::after {
   content: "收起";
 }
 
-.chat-client-shell .game-secondary-shell:not([open]) .game-secondary-panels {
+.miniweb-shell .game-secondary-shell:not([open]) .game-secondary-panels {
   display: none;
 }
 
-.chat-client-shell .game-secondary-panels {
+.miniweb-shell .game-secondary-panels {
   display: grid;
   gap: 8px;
   max-height: min(62vh, 620px);
@@ -402,243 +402,243 @@
   padding: 8px;
 }
 
-.chat-client-shell .game-secondary-panels .game-hud,
-.chat-client-shell .game-secondary-panels .live-situation-board,
-.chat-client-shell .game-secondary-panels .game-scene-board,
-.chat-client-shell .game-secondary-panels .quest-tracker,
-.chat-client-shell .game-secondary-panels .game-action-dock {
+.miniweb-shell .game-secondary-panels .game-hud,
+.miniweb-shell .game-secondary-panels .live-situation-board,
+.miniweb-shell .game-secondary-panels .game-scene-board,
+.miniweb-shell .game-secondary-panels .quest-tracker,
+.miniweb-shell .game-secondary-panels .game-action-dock {
   border-bottom: 0;
   background: transparent;
   padding: 0;
 }
 
-.chat-client-shell .game-secondary-panels .game-hud,
-.chat-client-shell .game-secondary-panels .live-situation-board,
-.chat-client-shell .game-secondary-panels .game-scene-board,
-.chat-client-shell .game-secondary-panels .quest-tracker,
-.chat-client-shell .game-secondary-panels .game-action-dock {
+.miniweb-shell .game-secondary-panels .game-hud,
+.miniweb-shell .game-secondary-panels .live-situation-board,
+.miniweb-shell .game-secondary-panels .game-scene-board,
+.miniweb-shell .game-secondary-panels .quest-tracker,
+.miniweb-shell .game-secondary-panels .game-action-dock {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.chat-client-shell .game-secondary-panels .world-event-strip {
+.miniweb-shell .game-secondary-panels .world-event-strip {
   border-bottom: 0;
   background: transparent;
   padding: 0;
 }
 
-.chat-client-shell .game-secondary-panels .hud-panel,
-.chat-client-shell .game-secondary-panels .live-situation-hero,
-.chat-client-shell .game-secondary-panels .live-situation-tile,
-.chat-client-shell .game-secondary-panels .game-scene-card,
-.chat-client-shell .game-secondary-panels .quest-tracker-head,
-.chat-client-shell .game-secondary-panels .quest-card,
-.chat-client-shell .game-secondary-panels .game-dock-context {
+.miniweb-shell .game-secondary-panels .hud-panel,
+.miniweb-shell .game-secondary-panels .live-situation-hero,
+.miniweb-shell .game-secondary-panels .live-situation-tile,
+.miniweb-shell .game-secondary-panels .game-scene-card,
+.miniweb-shell .game-secondary-panels .quest-tracker-head,
+.miniweb-shell .game-secondary-panels .quest-card,
+.miniweb-shell .game-secondary-panels .game-dock-context {
   border-color: rgba(148, 163, 184, 0.10);
   background: rgba(15, 23, 42, 0.58);
 }
 
-.chat-client-shell .game-secondary-panels .hud-modules,
-.chat-client-shell .game-secondary-panels .hud-inbox .cockpit-inbox-line,
-.chat-client-shell .game-secondary-panels .live-situation-grid,
-.chat-client-shell .game-secondary-panels .quest-tracker-list,
-.chat-client-shell .game-secondary-panels .game-dock-actions {
+.miniweb-shell .game-secondary-panels .hud-modules,
+.miniweb-shell .game-secondary-panels .hud-inbox .cockpit-inbox-line,
+.miniweb-shell .game-secondary-panels .live-situation-grid,
+.miniweb-shell .game-secondary-panels .quest-tracker-list,
+.miniweb-shell .game-secondary-panels .game-dock-actions {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.chat-client-shell .game-secondary-panels .game-scene-board {
+.miniweb-shell .game-secondary-panels .game-scene-board {
   gap: 8px;
 }
 
-.chat-client-shell .game-secondary-panels .game-scene-card,
-.chat-client-shell .game-secondary-panels .live-situation-tile {
+.miniweb-shell .game-secondary-panels .game-scene-card,
+.miniweb-shell .game-secondary-panels .live-situation-tile {
   min-height: 0;
 }
 
-.chat-client-shell .game-secondary-panels .world-event-card {
+.miniweb-shell .game-secondary-panels .world-event-card {
   flex-basis: min(100%, 260px);
 }
 
 @media (max-width: 1360px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-columns: clamp(340px, 28vw, 430px) minmax(0, 1fr);
   }
 
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     padding: 10px;
   }
 
-  .chat-client-shell .channel-chip {
+  .miniweb-shell .channel-chip {
     grid-template-columns: 32px minmax(0, 1fr) auto;
     min-height: 58px;
     padding: 6px;
   }
 
-  .chat-client-shell .channel-chip-icon {
+  .miniweb-shell .channel-chip-icon {
     width: 32px;
     height: 32px;
   }
 }
 
 @media (max-width: 1180px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-columns: clamp(300px, 32vw, 360px) minmax(0, 1fr);
     height: 100dvh;
     overflow: hidden;
   }
 
-  .chat-client-shell .conversation-rail,
-  .chat-client-shell .chat-workspace {
+  .miniweb-shell .tool-rail,
+  .miniweb-shell .schedule-workspace {
     height: 100dvh;
     min-height: 0;
     overflow: hidden;
   }
 
-  .chat-client-shell .conversation-rail {
+  .miniweb-shell .tool-rail {
     padding: 10px;
   }
 
-  .chat-client-shell .channel-filters {
+  .miniweb-shell .channel-filters {
     min-height: 0;
   }
 
-  .chat-client-shell .stream-channel-tools {
+  .miniweb-shell .stream-channel-tools {
     flex-wrap: wrap;
   }
 
-  .chat-client-shell .workspace-tools-toggle small {
+  .miniweb-shell .workspace-tools-toggle small {
     display: none;
   }
 }
 
 @media (max-width: 900px) {
-  .chat-client-shell .game-primary-strip {
+  .miniweb-shell .game-primary-strip {
     grid-template-columns: minmax(190px, 1fr) minmax(190px, 1fr) minmax(150px, 0.8fr) auto;
   }
 }
 
 @media (max-width: 720px) {
-  .chat-client-shell {
+  .miniweb-shell {
     grid-template-columns: minmax(0, 1fr);
     height: auto;
     min-height: 100dvh;
     overflow: auto;
   }
 
-  .chat-client-shell .conversation-rail,
-  .chat-client-shell .chat-workspace {
+  .miniweb-shell .tool-rail,
+  .miniweb-shell .schedule-workspace {
     height: auto;
     min-height: 0;
     overflow: visible;
   }
 
-  .chat-client-shell .chat-workspace {
+  .miniweb-shell .schedule-workspace {
     min-height: 82dvh;
   }
 
-  .chat-client-shell .stream-channel-tools {
+  .miniweb-shell .stream-channel-tools {
     flex-wrap: wrap;
   }
 
-  .chat-client-shell .game-primary-strip {
+  .miniweb-shell .game-primary-strip {
     grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(140px, 0.8fr) auto;
   }
 
-  .chat-client-shell .game-secondary-shell > summary {
+  .miniweb-shell .game-secondary-shell > summary {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .chat-client-shell .game-secondary-shell > summary small {
+  .miniweb-shell .game-secondary-shell > summary small {
     display: none;
   }
 
-  .chat-client-shell .game-secondary-panels .hud-modules,
-  .chat-client-shell .game-secondary-panels .hud-inbox .cockpit-inbox-line,
-  .chat-client-shell .game-secondary-panels .live-situation-grid,
-  .chat-client-shell .game-secondary-panels .quest-tracker-list,
-  .chat-client-shell .game-secondary-panels .game-dock-actions {
+  .miniweb-shell .game-secondary-panels .hud-modules,
+  .miniweb-shell .game-secondary-panels .hud-inbox .cockpit-inbox-line,
+  .miniweb-shell .game-secondary-panels .live-situation-grid,
+  .miniweb-shell .game-secondary-panels .quest-tracker-list,
+  .miniweb-shell .game-secondary-panels .game-dock-actions {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
 @media (max-height: 820px) and (min-width: 901px) {
-  .chat-client-shell .chat-pane .section-head {
+  .miniweb-shell .chat-pane .section-head {
     min-height: 44px;
     padding-block: 6px;
   }
 
-  .chat-client-shell .chat-composer {
+  .miniweb-shell .chat-composer {
     padding: 6px 10px 8px;
   }
 
-  .chat-client-shell .quick-action-hotbar {
+  .miniweb-shell .quick-action-hotbar {
     padding-bottom: 5px;
   }
 
-  .chat-client-shell .direct-send-head {
+  .miniweb-shell .direct-send-head {
     margin-bottom: 5px;
   }
 
-  .chat-client-shell .direct-send-row textarea {
+  .miniweb-shell .direct-send-row textarea {
     min-height: 38px;
     max-height: 96px;
     padding-block: 8px;
   }
 
-  .chat-client-shell #directSendSubmit {
+  .miniweb-shell #directSendSubmit {
     min-height: 38px;
   }
 }
 
 /* ---------- Chat usability recovery pass ---------- */
-.chat-client-shell .chat-pane {
+.miniweb-shell .chat-pane {
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
-.chat-client-shell .global-banner {
+.miniweb-shell .global-banner {
   grid-row: 1;
 }
 
-.chat-client-shell .layout-grid {
+.miniweb-shell .layout-grid {
   grid-row: 2;
 }
 
-.chat-client-shell .chat-composer {
+.miniweb-shell .chat-composer {
   grid-row: 3;
   align-self: end;
 }
 
-.chat-client-shell .message-list {
+.miniweb-shell .message-list {
   scroll-behavior: auto;
 }
 
-.chat-client-shell .chat-composer {
+.miniweb-shell .chat-composer {
   max-height: min(42dvh, 360px);
   overflow: visible;
   padding: 7px 10px 9px;
 }
 
-.chat-client-shell .quick-action-hotbar {
+.miniweb-shell .quick-action-hotbar {
   min-height: 0;
   padding-bottom: 5px;
 }
 
-.chat-client-shell .quick-action-hotbar .skill-chip {
+.miniweb-shell .quick-action-hotbar .skill-chip {
   min-height: 28px;
   padding: 4px 9px;
 }
 
-.chat-client-shell .direct-send-head {
+.miniweb-shell .direct-send-head {
   min-height: 0;
   margin-bottom: 5px;
 }
 
-.chat-client-shell .direct-send-title span {
+.miniweb-shell .direct-send-title span {
   max-width: min(62vw, 640px);
 }
 
-.chat-client-shell .direct-send-selection-context,
-.chat-client-shell .direct-send-reply-context,
-.chat-client-shell .direct-send-action-hints {
+.miniweb-shell .direct-send-selection-context,
+.miniweb-shell .direct-send-reply-context,
+.miniweb-shell .direct-send-action-hints {
   max-height: 48px;
   margin-bottom: 5px;
   overflow-x: auto;
@@ -646,11 +646,11 @@
   padding: 5px 8px;
 }
 
-.chat-client-shell .direct-send-selection-context {
+.miniweb-shell .direct-send-selection-context {
   align-items: center;
 }
 
-.chat-client-shell .direct-selection-main {
+.miniweb-shell .direct-selection-main {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: baseline;
@@ -660,171 +660,171 @@
   padding-left: 7px;
 }
 
-.chat-client-shell .direct-selection-main span {
+.miniweb-shell .direct-selection-main span {
   grid-row: 1;
   color: #93c5fd;
   white-space: nowrap;
 }
 
-.chat-client-shell .direct-selection-main strong,
-.chat-client-shell .direct-selection-main small {
+.miniweb-shell .direct-selection-main strong,
+.miniweb-shell .direct-selection-main small {
   grid-column: 2;
 }
 
-.chat-client-shell .direct-selection-main p {
+.miniweb-shell .direct-selection-main p {
   display: none;
 }
 
-.chat-client-shell .direct-selection-actions {
+.miniweb-shell .direct-selection-actions {
   flex-wrap: nowrap;
   overflow-x: auto;
   padding-bottom: 1px;
 }
 
-.chat-client-shell .direct-selection-actions button,
-.chat-client-shell .direct-send-action-hints button {
+.miniweb-shell .direct-selection-actions button,
+.miniweb-shell .direct-send-action-hints button {
   flex: 0 0 auto;
   min-height: 28px;
   padding: 4px 8px;
   white-space: nowrap;
 }
 
-.chat-client-shell .direct-send-action-hints {
+.miniweb-shell .direct-send-action-hints {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.chat-client-shell .direct-send-action-hints[hidden] {
+.miniweb-shell .direct-send-action-hints[hidden] {
   display: none;
 }
 
-.chat-client-shell .direct-action-hints-list {
+.miniweb-shell .direct-action-hints-list {
   flex-wrap: nowrap;
   overflow: visible;
 }
 
-.chat-client-shell .direct-send-action-hints button {
+.miniweb-shell .direct-send-action-hints button {
   display: inline-flex;
   align-items: center;
   max-width: none;
 }
 
-.chat-client-shell .direct-send-action-hints button small,
-.chat-client-shell .direct-send-reply-main small {
+.miniweb-shell .direct-send-action-hints button small,
+.miniweb-shell .direct-send-reply-main small {
   display: none;
 }
 
-.chat-client-shell .direct-send-reply-context {
+.miniweb-shell .direct-send-reply-context {
   align-items: center;
 }
 
-.chat-client-shell .direct-send-reply-main {
+.miniweb-shell .direct-send-reply-main {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: baseline;
   gap: 2px 8px;
 }
 
-.chat-client-shell .direct-send-reply-main span,
-.chat-client-shell .direct-send-reply-main strong {
+.miniweb-shell .direct-send-reply-main span,
+.miniweb-shell .direct-send-reply-main strong {
   min-width: 0;
 }
 
-.chat-client-shell .direct-send-row {
+.miniweb-shell .direct-send-row {
   grid-template-columns: clamp(118px, 14vw, 172px) minmax(0, 1fr) 76px;
   min-height: 42px;
   border-radius: 9px;
 }
 
-.chat-client-shell .direct-send-row select,
-.chat-client-shell .direct-send-row textarea {
+.miniweb-shell .direct-send-row select,
+.miniweb-shell .direct-send-row textarea {
   min-height: 42px;
 }
 
-.chat-client-shell .direct-send-row select {
+.miniweb-shell .direct-send-row select {
   min-width: 0;
   text-overflow: ellipsis;
 }
 
-.chat-client-shell .direct-send-row textarea {
+.miniweb-shell .direct-send-row textarea {
   min-height: 42px;
   max-height: 118px;
   overflow-y: hidden;
   padding-block: 9px;
 }
 
-.chat-client-shell .direct-send-skill-panel,
-.chat-client-shell .direct-send-emoji-palette {
+.miniweb-shell .direct-send-skill-panel,
+.miniweb-shell .direct-send-emoji-palette {
   max-height: min(24dvh, 220px);
   overflow: auto;
 }
 
-.chat-client-shell #directSendSubmit {
+.miniweb-shell #directSendSubmit {
   min-height: 42px;
 }
 
 @media (max-height: 820px) and (min-width: 721px) {
-  .chat-client-shell .chat-composer {
+  .miniweb-shell .chat-composer {
     max-height: min(38dvh, 300px);
     padding: 6px 9px 8px;
   }
 
-  .chat-client-shell .direct-send-selection-context,
-  .chat-client-shell .direct-send-reply-context,
-  .chat-client-shell .direct-send-action-hints {
+  .miniweb-shell .direct-send-selection-context,
+  .miniweb-shell .direct-send-reply-context,
+  .miniweb-shell .direct-send-action-hints {
     max-height: 40px;
   }
 
-  .chat-client-shell .direct-send-row textarea {
+  .miniweb-shell .direct-send-row textarea {
     min-height: 38px;
     max-height: 92px;
     padding-block: 8px;
   }
 
-  .chat-client-shell .direct-send-row select,
-  .chat-client-shell #directSendSubmit {
+  .miniweb-shell .direct-send-row select,
+  .miniweb-shell #directSendSubmit {
     min-height: 38px;
   }
 
-  .chat-client-shell .direct-send-skill-panel,
-  .chat-client-shell .direct-send-emoji-palette {
+  .miniweb-shell .direct-send-skill-panel,
+  .miniweb-shell .direct-send-emoji-palette {
     max-height: min(22dvh, 180px);
   }
 }
 
 @media (max-width: 720px) {
-  .chat-client-shell .chat-composer {
+  .miniweb-shell .chat-composer {
     position: sticky;
     bottom: 0;
     max-height: 56dvh;
   }
 
-  .chat-client-shell .direct-send-row {
+  .miniweb-shell .direct-send-row {
     grid-template-columns: 1fr;
   }
 }
 
 /* ---------- Navigation consolidation pass ---------- */
-.chat-client-shell .command-rail {
+.miniweb-shell .command-rail {
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 12px;
 }
 
-.chat-client-shell .schedule-rail-panel,
-.chat-client-shell .common-action-panel {
+.miniweb-shell .schedule-rail-panel,
+.miniweb-shell .common-action-panel {
   margin: 0;
   border-color: rgba(148, 163, 184, 0.12);
   background: rgba(15, 23, 42, 0.68);
 }
 
-.chat-client-shell .schedule-rail-panel {
+.miniweb-shell .schedule-rail-panel {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
 }
 
-.chat-client-shell .schedule-identity-dock {
+.miniweb-shell .schedule-identity-dock {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
@@ -836,7 +836,7 @@
   padding: 4px 6px;
 }
 
-.chat-client-shell .schedule-identity-dock label {
+.miniweb-shell .schedule-identity-dock label {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
@@ -844,18 +844,18 @@
   min-width: 0;
 }
 
-.chat-client-shell .schedule-identity-dock span {
+.miniweb-shell .schedule-identity-dock span {
   color: #94a3b8;
   font-size: 11px;
   line-height: 1;
   white-space: nowrap;
 }
 
-.chat-client-shell .schedule-identity-dock small {
+.miniweb-shell .schedule-identity-dock small {
   display: none;
 }
 
-.chat-client-shell .schedule-identity-dock select {
+.miniweb-shell .schedule-identity-dock select {
   min-width: 0;
   width: 100%;
   min-height: 28px;
@@ -867,7 +867,7 @@
   font-size: 12px;
 }
 
-.chat-client-shell .schedule-identity-dock button {
+.miniweb-shell .schedule-identity-dock button {
   min-height: 28px;
   border: 1px solid rgba(96, 165, 250, 0.24);
   border-radius: 7px;
@@ -878,26 +878,26 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .schedule-rail-panel .panel-head,
-.chat-client-shell .common-action-panel .panel-head {
+.miniweb-shell .schedule-rail-panel .panel-head,
+.miniweb-shell .common-action-panel .panel-head {
   min-height: 36px;
   margin-bottom: 9px;
 }
 
-.chat-client-shell .schedule-rail-panel .panel-head h2,
-.chat-client-shell .common-action-panel .panel-head h2 {
+.miniweb-shell .schedule-rail-panel .panel-head h2,
+.miniweb-shell .common-action-panel .panel-head h2 {
   color: #e5e7eb;
   font-size: 14px;
 }
 
-.chat-client-shell .schedule-rail-panel .panel-head button,
-.chat-client-shell .common-action-panel .panel-head button {
+.miniweb-shell .schedule-rail-panel .panel-head button,
+.miniweb-shell .common-action-panel .panel-head button {
   min-height: 32px;
   padding: 6px 11px;
   font-size: 13px;
 }
 
-.chat-client-shell .schedule-rail {
+.miniweb-shell .schedule-rail {
   display: grid;
   align-content: start;
   gap: 8px;
@@ -906,8 +906,8 @@
   padding-right: 2px;
 }
 
-.chat-client-shell .schedule-rail-summary,
-.chat-client-shell .schedule-rail-empty {
+.miniweb-shell .schedule-rail-summary,
+.miniweb-shell .schedule-rail-empty {
   display: grid;
   gap: 3px;
   border: 1px solid rgba(148, 163, 184, 0.10);
@@ -916,33 +916,33 @@
   padding: 8px 9px;
 }
 
-.chat-client-shell .schedule-rail-summary strong,
-.chat-client-shell .schedule-rail-empty strong {
+.miniweb-shell .schedule-rail-summary strong,
+.miniweb-shell .schedule-rail-empty strong {
   color: #f8fafc;
   font-size: 13px;
 }
 
-.chat-client-shell .schedule-rail-summary span,
-.chat-client-shell .schedule-rail-empty span {
+.miniweb-shell .schedule-rail-summary span,
+.miniweb-shell .schedule-rail-empty span {
   color: #94a3b8;
   font-size: 12px;
   line-height: 1.35;
 }
 
-.chat-client-shell .schedule-rail-empty.warn strong {
+.miniweb-shell .schedule-rail-empty.warn strong {
   color: #fbbf24;
 }
 
-.chat-client-shell .schedule-rail-list {
+.miniweb-shell .schedule-rail-list {
   display: grid;
   gap: 7px;
 }
 
-.chat-client-shell .schedule-rail-row {
+.miniweb-shell .schedule-rail-row {
   min-width: 0;
 }
 
-.chat-client-shell .schedule-rail-row-main {
+.miniweb-shell .schedule-rail-row-main {
   display: grid;
   width: 100%;
   min-width: 0;
@@ -957,39 +957,39 @@
   cursor: pointer;
 }
 
-.chat-client-shell .schedule-rail-row-main:hover {
+.miniweb-shell .schedule-rail-row-main:hover {
   border-color: rgba(96, 165, 250, 0.36);
   background: rgba(30, 41, 59, 0.70);
 }
 
-.chat-client-shell .schedule-rail-row-main:focus-visible {
+.miniweb-shell .schedule-rail-row-main:focus-visible {
   outline: 2px solid rgba(96, 165, 250, 0.72);
   outline-offset: 2px;
 }
 
-.chat-client-shell .schedule-rail-row.live .schedule-rail-row-main {
+.miniweb-shell .schedule-rail-row.live .schedule-rail-row-main {
   border-left-color: #22d3ee;
 }
 
-.chat-client-shell .schedule-rail-row.done .schedule-rail-row-main,
-.chat-client-shell .schedule-rail-row.active .schedule-rail-row-main {
+.miniweb-shell .schedule-rail-row.done .schedule-rail-row-main,
+.miniweb-shell .schedule-rail-row.active .schedule-rail-row-main {
   border-left-color: #22c55e;
 }
 
-.chat-client-shell .schedule-rail-row.warn .schedule-rail-row-main {
+.miniweb-shell .schedule-rail-row.warn .schedule-rail-row-main {
   border-left-color: #f59e0b;
 }
 
-.chat-client-shell .schedule-rail-row.risk .schedule-rail-row-main {
+.miniweb-shell .schedule-rail-row.risk .schedule-rail-row-main {
   border-left-color: #ef4444;
 }
 
-.chat-client-shell .schedule-rail-row.muted .schedule-rail-row-main {
+.miniweb-shell .schedule-rail-row.muted .schedule-rail-row-main {
   border-left-color: #64748b;
   opacity: 0.82;
 }
 
-.chat-client-shell .schedule-rail-row-title {
+.miniweb-shell .schedule-rail-row-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -997,7 +997,7 @@
   min-width: 0;
 }
 
-.chat-client-shell .schedule-rail-row-title strong {
+.miniweb-shell .schedule-rail-row-title strong {
   min-width: 0;
   overflow: hidden;
   color: #f8fafc;
@@ -1006,13 +1006,13 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .schedule-rail-row-title .status-pill {
+.miniweb-shell .schedule-rail-row-title .status-pill {
   flex: 0 0 auto;
   padding: 2px 7px;
   font-size: 11px;
 }
 
-.chat-client-shell .schedule-rail-row-meta {
+.miniweb-shell .schedule-rail-row-meta {
   min-width: 0;
   overflow: hidden;
   color: #94a3b8;
@@ -1022,44 +1022,44 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .schedule-progress.compact {
+.miniweb-shell .schedule-progress.compact {
   display: block;
   height: 4px;
   margin: 0;
 }
 
-.chat-client-shell .schedule-rail-snippets {
+.miniweb-shell .schedule-rail-snippets {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.chat-client-shell .schedule-rail-snippets span {
+.miniweb-shell .schedule-rail-snippets span {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
   min-width: 0;
 }
 
-.chat-client-shell .schedule-rail-snippets code,
-.chat-client-shell .schedule-rail-snippets small {
+.miniweb-shell .schedule-rail-snippets code,
+.miniweb-shell .schedule-rail-snippets small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-client-shell .schedule-rail-snippets code {
+.miniweb-shell .schedule-rail-snippets code {
   color: #dbeafe;
   font-size: 11.5px;
 }
 
-.chat-client-shell .schedule-rail-snippets small {
+.miniweb-shell .schedule-rail-snippets small {
   color: #64748b;
   font-size: 11px;
 }
 
-.chat-client-shell .schedule-rail-row-controls {
+.miniweb-shell .schedule-rail-row-controls {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1067,14 +1067,14 @@
   min-width: 0;
 }
 
-.chat-client-shell .schedule-rail-renew-summary {
+.miniweb-shell .schedule-rail-renew-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 5px;
   min-width: 0;
 }
 
-.chat-client-shell .schedule-rail-renew-summary span {
+.miniweb-shell .schedule-rail-renew-summary span {
   display: grid;
   min-width: 0;
   border: 1px solid rgba(148, 163, 184, 0.12);
@@ -1083,45 +1083,45 @@
   padding: 4px 6px;
 }
 
-.chat-client-shell .schedule-rail-renew-summary b,
-.chat-client-shell .schedule-rail-renew-summary small {
+.miniweb-shell .schedule-rail-renew-summary b,
+.miniweb-shell .schedule-rail-renew-summary small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-client-shell .schedule-rail-renew-summary b {
+.miniweb-shell .schedule-rail-renew-summary b {
   color: #e2e8f0;
   font-size: 13px;
   line-height: 1.1;
 }
 
-.chat-client-shell .schedule-rail-renew-summary small {
+.miniweb-shell .schedule-rail-renew-summary small {
   color: #64748b;
   font-size: 10px;
 }
 
-.chat-client-shell .schedule-rail-renew-summary .ok b {
+.miniweb-shell .schedule-rail-renew-summary .ok b {
   color: #86efac;
 }
 
-.chat-client-shell .schedule-rail-renew-summary .warn b,
-.chat-client-shell .schedule-rail-renew-summary .warn small {
+.miniweb-shell .schedule-rail-renew-summary .warn b,
+.miniweb-shell .schedule-rail-renew-summary .warn small {
   color: #fbbf24;
 }
 
-.chat-client-shell .schedule-rail-renew-summary .accent b {
+.miniweb-shell .schedule-rail-renew-summary .accent b {
   color: #bfdbfe;
 }
 
-.chat-client-shell .schedule-rail-preview-hint {
+.miniweb-shell .schedule-rail-preview-hint {
   flex: 0 0 auto;
   color: #64748b;
   font-size: 11px;
 }
 
-.chat-client-shell .schedule-rail-renew-control {
+.miniweb-shell .schedule-rail-renew-control {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1130,20 +1130,20 @@
   font-size: 11px;
 }
 
-.chat-client-shell .schedule-rail-renew-control.ok small {
+.miniweb-shell .schedule-rail-renew-control.ok small {
   color: #86efac;
 }
 
-.chat-client-shell .schedule-rail-renew-control.warn small {
+.miniweb-shell .schedule-rail-renew-control.warn small {
   color: #fbbf24;
 }
 
-.chat-client-shell .schedule-rail-renew-control.muted small {
+.miniweb-shell .schedule-rail-renew-control.muted small {
   color: #64748b;
 }
 
-.chat-client-shell .schedule-renew-switch,
-.chat-client-shell .schedule-renew-config {
+.miniweb-shell .schedule-renew-switch,
+.miniweb-shell .schedule-renew-config {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1156,28 +1156,28 @@
   font-size: 11px;
 }
 
-.chat-client-shell .schedule-renew-switch span {
+.miniweb-shell .schedule-renew-switch span {
   width: 12px;
   height: 12px;
   border-radius: 999px;
   background: #64748b;
 }
 
-.chat-client-shell .schedule-renew-switch.is-on {
+.miniweb-shell .schedule-renew-switch.is-on {
   border-color: rgba(34, 197, 94, 0.38);
   background: rgba(20, 83, 45, 0.36);
   color: #dcfce7;
 }
 
-.chat-client-shell .schedule-renew-switch.is-on span {
+.miniweb-shell .schedule-renew-switch.is-on span {
   background: #22c55e;
 }
 
-.chat-client-shell .schedule-renew-config {
+.miniweb-shell .schedule-renew-config {
   padding-left: 8px;
 }
 
-.chat-client-shell .schedule-rail-preview {
+.miniweb-shell .schedule-rail-preview {
   display: grid;
   gap: 7px;
   margin-top: 7px;
@@ -1187,7 +1187,7 @@
   padding: 8px;
 }
 
-.chat-client-shell .schedule-rail-preview-head {
+.miniweb-shell .schedule-rail-preview-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1195,12 +1195,12 @@
   min-width: 0;
 }
 
-.chat-client-shell .schedule-rail-preview-head strong {
+.miniweb-shell .schedule-rail-preview-head strong {
   color: #e2e8f0;
   font-size: 12px;
 }
 
-.chat-client-shell .schedule-rail-preview-head small {
+.miniweb-shell .schedule-rail-preview-head small {
   overflow: hidden;
   color: #94a3b8;
   font-size: 11px;
@@ -1208,14 +1208,14 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .schedule-rail-preview .schedule-item-list {
+.miniweb-shell .schedule-rail-preview .schedule-item-list {
   max-height: min(34vh, 260px);
   overflow: auto;
   padding-right: 2px;
   scrollbar-width: thin;
 }
 
-.chat-client-shell .schedule-rail-more {
+.miniweb-shell .schedule-rail-more {
   min-height: 32px;
   border: 1px solid rgba(96, 165, 250, 0.22);
   border-radius: 8px;
@@ -1224,12 +1224,12 @@
   font-size: 13px;
 }
 
-.chat-client-shell .primary-toolbox {
+.miniweb-shell .primary-toolbox {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
-.chat-client-shell .primary-toolbox button {
+.miniweb-shell .primary-toolbox button {
   min-height: 38px;
   border-color: rgba(148, 163, 184, 0.13);
   background: rgba(2, 6, 23, 0.34);
@@ -1239,19 +1239,19 @@
   font-weight: 650;
 }
 
-.chat-client-shell .stream-channel-tools {
+.miniweb-shell .stream-channel-tools {
   flex: 1 1 auto;
   flex-wrap: nowrap;
 }
 
-.chat-client-shell .stream-filter-inline {
+.miniweb-shell .stream-filter-inline {
   flex: 1 1 320px;
   min-width: min(300px, 32vw);
   max-width: min(520px, 38vw);
   overflow: hidden;
 }
 
-.chat-client-shell .stream-filter-inline .quick-filters {
+.miniweb-shell .stream-filter-inline .quick-filters {
   display: flex;
   flex-wrap: nowrap;
   gap: 4px;
@@ -1263,7 +1263,7 @@
   padding: 3px;
 }
 
-.chat-client-shell .stream-filter-inline .quick-filter-chip {
+.miniweb-shell .stream-filter-inline .quick-filter-chip {
   flex: 0 0 auto;
   min-height: 32px;
   border-color: transparent;
@@ -1275,18 +1275,18 @@
   font-weight: 650;
 }
 
-.chat-client-shell .stream-filter-inline .quick-filter-chip:hover {
+.miniweb-shell .stream-filter-inline .quick-filter-chip:hover {
   background: rgba(30, 41, 59, 0.62);
   color: #e5e7eb;
 }
 
-.chat-client-shell .stream-filter-inline .quick-filter-chip.active {
+.miniweb-shell .stream-filter-inline .quick-filter-chip.active {
   border-color: rgba(96, 165, 250, 0.34);
   background: rgba(37, 99, 235, 0.22);
   color: #f8fafc;
 }
 
-.chat-client-shell .stream-filter-inline .quick-filter-icon {
+.miniweb-shell .stream-filter-inline .quick-filter-icon {
   display: inline-grid;
   place-items: center;
   width: 24px;
@@ -1301,30 +1301,30 @@
   line-height: 1;
 }
 
-.chat-client-shell .stream-filter-inline .quick-filter-label {
+.miniweb-shell .stream-filter-inline .quick-filter-label {
   line-height: 1;
 }
 
-.chat-client-shell .stream-filter-inline .quick-filter-chip.active .quick-filter-icon {
+.miniweb-shell .stream-filter-inline .quick-filter-chip.active .quick-filter-icon {
   border-color: rgba(96, 165, 250, 0.42);
   background: rgba(37, 99, 235, 0.38);
   color: #eff6ff;
 }
 
-.chat-client-shell .stream-filter-inline .quick-filter-chip.risk.active,
-.chat-client-shell .stream-filter-inline .quick-filter-chip.risk:hover {
+.miniweb-shell .stream-filter-inline .quick-filter-chip.risk.active,
+.miniweb-shell .stream-filter-inline .quick-filter-chip.risk:hover {
   border-color: rgba(248, 113, 113, 0.42);
   background: rgba(127, 29, 29, 0.32);
   color: #fecaca;
 }
 
-.chat-client-shell .stream-filter-inline .quick-filter-chip.risk .quick-filter-icon {
+.miniweb-shell .stream-filter-inline .quick-filter-chip.risk .quick-filter-icon {
   border-color: rgba(248, 113, 113, 0.24);
   background: rgba(127, 29, 29, 0.28);
   color: #fecaca;
 }
 
-.chat-client-shell .stream-filter-inline .quick-filter-count {
+.miniweb-shell .stream-filter-inline .quick-filter-count {
   border-radius: 999px;
   background: rgba(148, 163, 184, 0.12);
   color: #94a3b8;
@@ -1333,33 +1333,33 @@
   font-variant-numeric: tabular-nums;
 }
 
-.chat-client-shell .stream-filter-inline .quick-filter-chip.active .quick-filter-count {
+.miniweb-shell .stream-filter-inline .quick-filter-chip.active .quick-filter-count {
   background: rgba(255, 255, 255, 0.16);
   color: #f8fafc;
 }
 
-.chat-client-shell .stream-title strong {
+.miniweb-shell .stream-title strong {
   font-size: 16px;
 }
 
-.chat-client-shell .stream-title span {
+.miniweb-shell .stream-title span {
   font-size: 12.5px;
 }
 
-.chat-client-shell .message-search input,
-.chat-client-shell .stream-tool-button,
-.chat-client-shell .workspace-tools-toggle,
-.chat-client-shell .message-count-pill {
+.miniweb-shell .message-search input,
+.miniweb-shell .stream-tool-button,
+.miniweb-shell .workspace-tools-toggle,
+.miniweb-shell .message-count-pill {
   min-height: 34px;
   padding: 6px 12px;
   font-size: 13px;
 }
 
-.chat-client-shell .workspace-tools-toggle small {
+.miniweb-shell .workspace-tools-toggle small {
   font-size: 11.5px;
 }
 
-.chat-client-shell .composer-tool-button {
+.miniweb-shell .composer-tool-button {
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.82);
@@ -1367,17 +1367,17 @@
   white-space: nowrap;
 }
 
-.chat-client-shell .composer-tool-button:hover {
+.miniweb-shell .composer-tool-button:hover {
   border-color: rgba(96, 165, 250, 0.46);
   color: #bfdbfe;
 }
 
 @media (max-width: 1180px) {
-  .chat-client-shell .stream-channel-tools {
+  .miniweb-shell .stream-channel-tools {
     flex-wrap: wrap;
   }
 
-  .chat-client-shell .stream-filter-inline {
+  .miniweb-shell .stream-filter-inline {
     order: 8;
     flex-basis: 100%;
     min-width: 0;
@@ -1386,43 +1386,43 @@
 }
 
 @media (max-width: 900px) {
-  .chat-client-shell .command-rail {
+  .miniweb-shell .command-rail {
     grid-template-rows: auto auto auto;
   }
 
-  .chat-client-shell .schedule-rail {
+  .miniweb-shell .schedule-rail {
     max-height: 42vh;
   }
 
 }
 
 /* Put channel navigation in the primary header slot. */
-.chat-client-shell .chat-pane .section-head {
+.miniweb-shell .chat-pane .section-head {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.chat-client-shell .chat-pane .section-head > .stream-filter-inline {
+.miniweb-shell .chat-pane .section-head > .stream-filter-inline {
   flex: 1 1 auto;
   min-width: 0;
   max-width: none;
 }
 
-.chat-client-shell .chat-pane .section-head > .stream-channel-tools {
+.miniweb-shell .chat-pane .section-head > .stream-channel-tools {
   flex: 0 0 auto;
 }
 
 @media (max-width: 1180px) {
-  .chat-client-shell .chat-pane .section-head {
+  .miniweb-shell .chat-pane .section-head {
     align-items: stretch;
     flex-wrap: wrap;
   }
 
-  .chat-client-shell .chat-pane .section-head > .stream-filter-inline {
+  .miniweb-shell .chat-pane .section-head > .stream-filter-inline {
     order: 1;
     flex-basis: 100%;
   }
 
-  .chat-client-shell .chat-pane .section-head > .stream-channel-tools {
+  .miniweb-shell .chat-pane .section-head > .stream-channel-tools {
     order: 2;
     width: 100%;
   }

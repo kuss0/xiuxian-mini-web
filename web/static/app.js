@@ -1,4 +1,4 @@
-// MINIWEB-BUILD: chat-client-shell 2026-05-21T04:42
+// MINIWEB-BUILD: miniweb-shell 2026-05-21T04:42
 
 const CHAT_FEATURE_ENABLED = false;
 
@@ -455,9 +455,12 @@ async function loadIdentities() {
   return payload;
 }
 
-async function loadIdentityModuleStates() {
+async function loadIdentityModuleStates(options = {}) {
   try {
-    const payload = await fetchJson("/api/identity-state");
+    const params = new URLSearchParams();
+    if (options.includeObservations) params.set("observations", "1");
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    const payload = await fetchJson(`/api/identity-state${suffix}`);
     const map = new Map();
     for (const entry of payload.by_identity || []) {
       map.set(Number(entry.send_as_id), entry.items || []);
@@ -849,7 +852,8 @@ function identityStatusView() {
 
 const IDENTITY_STATUS_GROUPS = identityStatusView().IDENTITY_STATUS_GROUPS;
 
-function openIdentityStatusModal() {
+async function openIdentityStatusModal() {
+  await loadIdentityModuleStates({ includeObservations: true });
   return identityStatusView().openIdentityStatusModal(identityStatusDeps());
 }
 
@@ -3471,7 +3475,7 @@ if (activeIdentityQuickSelect) {
 if (activeIdentityStatusButton) {
   activeIdentityStatusButton.addEventListener("click", () => {
     try {
-      openIdentityStatusModal();
+      openIdentityStatusModal().catch(showError);
     } catch (error) {
       showError(error);
     }

@@ -17,12 +17,13 @@ describe('Miniweb time formatting', () => {
     expect(fmt.formatDisplayDateTime('2026-06-07T14:36:49+00:00')).toBe('2026-06-07 22:36');
   });
 
-  test('chat stream uses Shanghai clock and day labels', () => {
+  test('display day index uses Shanghai calendar days', () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-06-07T14:00:00+00:00'));
-    require('../../web/static/views/chat_stream.js');
-    const view = window.MiniwebViews.chatStream;
-    expect(view.formatChatTime('2026-06-07T14:36:49+00:00')).toBe('22:36');
-    expect(view.formatDayLabel('2026-06-07T14:36:49+00:00')).toBe('今天');
-    expect(view.formatDayLabel('2026-06-06T15:30:00+00:00')).toBe('昨天');
+    const fmt = window.MiniwebFormat;
+    const today = fmt.displayDayIndex('2026-06-07T14:36:49+00:00');
+    const yesterday = fmt.displayDayIndex('2026-06-06T15:30:00+00:00');
+    expect(fmt.formatDisplayClockTime('2026-06-07T14:36:49+00:00')).toBe('22:36');
+    expect(fmt.displayDayIndex(new Date())).toBe(today);
+    expect(today - yesterday).toBe(1);
   });
 });

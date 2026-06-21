@@ -32,6 +32,7 @@ from backend.identity_state.scheduling import (
 )
 from backend.identity_state.contracts import module_contract
 from backend.log_commands import LogCommandDispatcher, LogCommandSource
+from backend.log_commands.tg_listener import LogCommandTelegramListener
 from backend.outbox import OutboxPlanner
 from backend.outbox.schedule import (
     MAX_SCHEDULED_MESSAGES_PER_IDENTITY,
@@ -470,6 +471,10 @@ class MiniWebServer:
         self._notify = NotificationDispatcher(get_settings=self._store.get_settings)
         if hasattr(self._store, "set_notify_dispatcher"):
             self._store.set_notify_dispatcher(self._notify)
+        self._log_command_listener = LogCommandTelegramListener(
+            get_settings=self._store.get_settings,
+            dispatch=self.log_command_dispatch_payload,
+        )
         # ThreadingHTTPServer 下并发 schedule_create 会撞 dedup 秒级唯一约束。
         # 用锁串行化整个 _create_one_schedule，确保 list/dedup/insert 原子化。
         self._schedule_create_lock = threading.Lock()
@@ -558,6 +563,7 @@ class MiniWebServer:
             "service": "xiuxian-mini-web",
             "time": utc_now_iso(),
             "listener": self._listeners.status(),
+            "log_command_listener": self.log_command_listener_status_payload(),
             "messages": messages,
         }
 
@@ -1055,6 +1061,15 @@ class MiniWebServer:
 
     def log_commands_payload(self) -> dict:
         return self._log_command_dispatcher().specs_payload()
+
+    def start_log_command_listener(self) -> bool:
+        return self._log_command_listener.start()
+
+    def stop_log_command_listener(self) -> None:
+        self._log_command_listener.stop()
+
+    def log_command_listener_status_payload(self) -> dict:
+        return self._log_command_listener.status()
 
     def log_command_dispatch_payload(self, payload: dict | None) -> dict:
         payload = payload or {}
@@ -1903,7 +1918,7 @@ class MiniWebServer:
             "max_identities": MAX_IDENTITIES,
         }
 
-    def identity_state_payload(self, send_as_id_text: str = "") -> dict:
+    def identity_state_payload(self, send_as_id_text: str = "", *, include_observations: bool = False) -> dict:
         """每个 (identity, module) 的当前 state + status_summary。
 
         - 不传 send_as_id:返所有身份的状态(供 UI 一次性渲染侧边栏)
@@ -1934,18 +1949,23 @@ class MiniWebServer:
                 "source_message_id": record.get("source_message_id") or "",
                 "updated_at": float(record.get("updated_at") or 0),
             }
-            if hasattr(self._store, "latest_state_observation"):
+            if include_observations and hasattr(self._store, "latest_state_observation"):
                 latest_updated = self._latest_state_observation_for_module(sid, key, decision="updated")
                 latest_gap = self._latest_state_observation_for_module(sid, key, decision="skipped")
                 entry["observation"] = latest_updated or None
                 entry["latest_gap"] = latest_gap or None
             by_identity.setdefault(sid, []).append(entry)
-        observations = self.state_observations_payload(
-            str(target_send_as) if target_send_as else "",
-            limit=80,
+        observations = (
+            self.state_observations_payload(
+                str(target_send_as) if target_send_as else "",
+                limit=80,
+            )
+            if include_observations
+            else {"summary": {}}
         )
         return {
             "ok": True,
+            "include_observations": bool(include_observations),
             "modules": [
                 {"key": m.key, "label": m.label, "default_state": dict(m.default_state)}
                 for m in modules

@@ -517,8 +517,8 @@ PROBE_SCRIPT = """
   });
   await wait(120);
   var boxes = {
-    shell: rect(".chat-client-shell"),
-    rail: rect(".conversation-rail"),
+    shell: rect(".miniweb-shell"),
+    rail: rect(".tool-rail"),
     schedulePanel: rect(".schedule-rail-panel"),
     scheduleList: rect(".schedule-rail-list"),
     scheduleSummary: rect(".schedule-rail-summary"),
@@ -545,7 +545,7 @@ PROBE_SCRIPT = """
     chatSecondaryToggle: rect(".chat-secondary-toggle"),
     accountMenu: rect(".sidebar-tools-shell"),
     accountMenuToggle: rect(".sidebar-tools-shell > summary"),
-    workspace: rect(".chat-workspace"),
+    workspace: rect(".schedule-workspace"),
     header: rect(".chat-pane .section-head"),
     toolsToggle: rect(".workspace-tools-toggle"),
     toolsPanel: rect(".workspace-tools-panel"),
