@@ -36,7 +36,7 @@
             </select>
           </label>
           <button id="activeIdentityStatusButton" type="button" title="查看当前角色详情">详情</button>
-          <small id="activeIdentityQuickMeta">切换会同步聊天和定时默认身份</small>
+          <small id="activeIdentityQuickMeta">切换会同步定时默认身份</small>
         </section>
 
         <details class="sidebar-menu sidebar-primary-tools" name="sidebar-menu">
@@ -141,85 +141,6 @@
           </div>
         </details>
 
-        <details class="sidebar-menu chat-secondary-shell" name="sidebar-menu">
-          <summary class="chat-secondary-toggle">
-            <span>聊天</span>
-            <small>频道消息 / 手动发送</small>
-          </summary>
-          <div class="chat-secondary-content">
-            <section class="layout-grid detail-closed">
-              <section class="stream chat-pane">
-                <div class="section-head">
-                  <div class="stream-title chat-assist-title">
-                    <strong>聊天辅助</strong>
-                    <span>频道 / 消息 / 手动发送</span>
-                  </div>
-                  <div class="stream-filter-inline" aria-label="频道筛选">
-                    <div id="quickFilters" class="quick-filters"></div>
-                  </div>
-                  <div class="stream-channel-tools">
-                    <label class="message-search" title="只搜索当前已选频道中的消息">
-                      <span>搜索</span>
-                      <input id="messageSearchInput" type="search" placeholder="当前频道" autocomplete="off" />
-                    </label>
-                    <span id="messageCount" class="message-count-pill">0 条</span>
-                  </div>
-                </div>
-                <section id="gamePrimaryStrip" class="game-primary-strip" aria-label="当前操作状态"></section>
-                <div id="messageList" class="message-list"></div>
-                <button id="jumpToLatest" class="jump-to-latest" type="button" hidden>↓ 回到最新</button>
-              </section>
-
-              <button id="detailBackdrop" class="detail-backdrop" type="button" aria-label="关闭消息详情" hidden></button>
-              <aside class="detail">
-                <div class="section-head detail-section-head">
-                  <div>
-                    <h3>消息详情</h3>
-                    <p>原文 / 回复 / 候选</p>
-                  </div>
-                  <div class="detail-head-actions">
-                    <span id="detailState">未选择</span>
-                    <button id="closeDetailButton" type="button" title="关闭消息详情">关闭</button>
-                  </div>
-                </div>
-                <div id="detailPanel" class="detail-panel">
-                  <p class="empty">选择一条消息。</p>
-                </div>
-              </aside>
-            </section>
-
-            <footer id="directSendComposer" class="direct-send-composer chat-composer" aria-label="发送栏">
-              <div id="quickActionHotbar" class="quick-action-hotbar" aria-label="常用操作"></div>
-              <div class="direct-send-head">
-                <div class="direct-send-title">
-                  <strong>聊天</strong>
-                  <span id="directSendIdentityLine">未选身份</span>
-                </div>
-                <div class="direct-send-actions">
-                  <button id="emojiPickerButton" type="button" class="composer-tool-button" aria-controls="directSendEmojiPalette" aria-expanded="false">表情</button>
-                  <button id="openCultivationButton" type="button" class="composer-tool-button">修炼状态</button>
-                </div>
-              </div>
-              <div id="directSendReplyContext" class="direct-send-reply-context" hidden></div>
-              <div id="directSendSelectionContext" class="direct-send-selection-context" hidden></div>
-              <div id="directSendActionHints" class="direct-send-action-hints" hidden></div>
-              <div class="direct-send-row">
-                <label class="direct-send-identity">
-                  <span>发送身份</span>
-                  <select id="directSendIdentitySelect"></select>
-                </label>
-                <label class="direct-send-command">
-                  <span>发送内容</span>
-                  <textarea id="directSendInput" rows="1" placeholder="输入消息或命令。Enter 发送，Shift+Enter 换行"></textarea>
-                </label>
-                <button id="directSendSubmit" type="button">发送</button>
-              </div>
-              <div id="directSendEmojiPalette" class="emoji-palette direct-send-emoji-palette" hidden></div>
-              <p id="directSendStatus" class="direct-send-status" hidden></p>
-            </footer>
-          </div>
-        </details>
-
         <!-- 隐藏面板(功能未完成):当前角色 -->
         <div id="identitySnapshot" hidden></div>
       </aside>
@@ -244,7 +165,7 @@
                 <option value="">读取中</option>
               </select>
             </label>
-            <button id="scheduleIdentityFollowChatButton" type="button" title="使用聊天当前身份作为定时默认">跟随聊天</button>
+            <button id="scheduleIdentityFollowChatButton" type="button" title="使用当前身份作为定时默认">跟随当前身份</button>
             <small id="scheduleIdentityQuickMeta">定时默认身份</small>
           </div>
           <div id="scheduleRail" class="schedule-rail" aria-live="polite">

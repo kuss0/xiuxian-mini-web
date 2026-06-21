@@ -82,49 +82,49 @@ do not prove success.
 | Current gap | The active adapter is the existing user-session sender; AyuGram GUI/IPC are represented as configuration targets but remain unsupported until a real adapter implementation is added behind the same policy guard and audit log. |
 | Next action | Promote only low-risk query commands after observed use, keeping gameplay choices behind manual confirmation unless a separate fixture-backed policy exists. |
 
-## Chat Stream
+## Chat Stream (Removed From Live UI)
 
 | Field | Current contract |
 | --- | --- |
-| State source | Stored message cards in the active frontend state. |
-| Trigger | Channel selection, search, new message polling, reply jumps, and explicit user clicks rebuild or anchor the visible stream. |
-| Refresh path | The chat message stream, channel chips, quick filters, scroll anchoring, unread new-message counter, and quick-action renderer are isolated in `web/static/views/chat_stream.js`, with `web/static/app.js` keeping compatibility wrappers for existing panels. Incremental polling preserves the user's historical scroll position and turns the bottom jump button into a new-message counter until the user returns to latest. The leader intelligence modal is isolated in `web/static/views/leader_intel.js`, with leader-message loading injected from `web/static/app.js`. The message logs modal is isolated in `web/static/views/logs.js`, with message paging/export APIs injected from `web/static/app.js`. |
-| Failure/manual fallback | Chat stream quick actions fill the composer only; they do not call send APIs or bypass the bottom composer confirmation path. The leader-intel and logs modules are read-only; logs export only triggers a browser download from an injected response. |
-| Current gap | Classification quality still depends on observed bad samples and backend channel tags, so uncertain messages should stay visible rather than being aggressively archived. |
-| Next action | Keep message-flow UI fixes in the chat stream module and add fixtures only from real misclassified messages. |
+| State source | Stored message cards remain in SQLite and summary state, but the live page no longer renders the interactive chat stream. |
+| Trigger | `CHAT_FEATURE_ENABLED = false` prevents chat list initialization, direct message polling, reply jumps, and composer-fill interactions from opening chat UI. |
+| Refresh path | `web/static/app.js` clears local chat state without polling `/api/messages` while `CHAT_FEATURE_ENABLED` is false, and `pollTick` only queues chat refresh work when that flag is enabled. Status boards use their own bounded snapshot loaders. `web/static/views/chat_stream.js` remains dormant compatibility code. The leader intelligence modal is isolated in `web/static/views/leader_intel.js`, with leader-message loading injected from `web/static/app.js`. The message logs modal is isolated in `web/static/views/logs.js`, with message paging/export APIs injected from `web/static/app.js`. |
+| Failure/manual fallback | Chat jumps show a removed-feature notice and the user should use the records modal for raw message inspection. The leader-intel and logs modules are read-only; logs export only triggers a browser download from an injected response. |
+| Current gap | Classification quality still depends on observed bad samples and backend channel tags, so uncertain data should stay available in records rather than being aggressively hidden from storage. |
+| Next action | Keep message-flow fixes in parser/filter fixtures and restore the UI only from `backup/chat-ui-before-removal-20260621` if it is needed again. |
 
-## Direct Composer
+## Direct Composer (Removed From Live UI)
 
 | Field | Current contract |
 | --- | --- |
-| State source | The active identity, selected message, reply context, quick-command catalog, and identity cooldown state in the frontend store. |
-| Trigger | Composer input events, emoji insertion, selected-message actions, quick-command hotbar clicks, identity changes, and explicit submit clicks update or submit the composer. |
-| Refresh path | The direct composer, emoji palette, and quick command hotbar are isolated in `web/static/views/direct_composer.js`, with `web/static/app.js` keeping API send and global-state wrappers. |
-| Failure/manual fallback | Direct composer sends only through the injected explicit composer-submit callback. The view module fills or updates the composer and does not call `/api/skills/send` directly. |
-| Current gap | Quick-command ranking still follows static priority words and unlocked-state projections, so new shortcuts should be promoted only after repeated observed use. |
-| Next action | Keep send APIs out of the view module and move future composer UI refinements behind dependency-injected callbacks. |
+| State source | The active identity and skill catalog still feed status panels, but the live page no longer exposes a direct-send composer. |
+| Trigger | Composer DOM entrypoints are absent from `web/index.html`; `web/static/app.js` blocks fill/send helpers while `CHAT_FEATURE_ENABLED` is false. |
+| Refresh path | `web/static/views/direct_composer.js` remains dormant compatibility code for restoration, but it is not bound on the live page. |
+| Failure/manual fallback | Manual sending through the chat composer is removed. Operators should use outbox drafts, official schedule workflows, or log-command draft intents instead of direct composer sends. |
+| Current gap | Some action buttons still surface historical action labels; clicking them now returns a removed-feature notice rather than filling a composer. |
+| Next action | Convert any still-useful action button into an outbox draft flow before reintroducing direct sending. |
 
 ## Detail Cards
 
 | Field | Current contract |
 | --- | --- |
 | State source | The selected message card and its parsed `fields`, `title`, `summary`, `tags`, and channels. |
-| Trigger | Opening a message detail panel renders a rich card or falls back to the structured field grid. |
+| Trigger | Dormant compatibility callers can render a rich card or fall back to the structured field grid, but the live chat detail pane is no longer mounted. |
 | Refresh path | Detail rich cards and field formatting are isolated in `web/static/views/detail_cards.js`, with `web/static/app.js` keeping compatibility wrappers for callers that need `formatFieldValue` or detail rendering. |
-| Failure/manual fallback | Detail cards are read-only renderers. They do not call APIs, enqueue drafts, or send commands; action buttons remain in the detail action stage and bottom composer path. |
+| Failure/manual fallback | Detail cards are read-only renderers. They do not call APIs, enqueue drafts, or send commands. |
 | Current gap | Rich card coverage still follows known titles and channel families; unknown gameplay cards fall back to generic rendering or the field grid. |
 | Next action | Add card renderers only for stable parsed fields, keeping send/copy/draft behavior outside this module. |
 
-## Detail Panel
+## Detail Panel (Dormant With Chat UI)
 
 | Field | Current contract |
 | --- | --- |
 | State source | The selected message card, current detail mode, focus archive settings, and the draft notice map. |
-| Trigger | Selecting a message or opening overview renders the detail panel; action buttons can fill the composer, copy, generate a send plan, enqueue a draft, or open focus archive tools. |
+| Trigger | Live chat selection and overview detail openings are blocked while `CHAT_FEATURE_ENABLED` is false; the old detail panel code is kept only for restoration. |
 | Refresh path | The message detail panel and manual action controls are isolated in `web/static/views/detail_panel.js`; the focus archive rule modal is isolated in `web/static/views/focus_archive.js`, with `/api/focus-exclude/preview` injected from `web/static/app.js`; the filter settings modal is isolated in `web/static/views/filter_settings.js`, with diagnostics and focus-exclude preview APIs injected from `web/static/app.js`. |
-| Failure/manual fallback | Detail panel actions fill the composer or create manual plans/drafts only. The detail, focus-archive, and filter-settings modules do not call send APIs or create direct API requests; `/api/skills/send` remains reachable only through the bottom composer confirmation path. |
-| Current gap | Detail action behavior still depends on the parsed action suggestions attached to each message, so ambiguous game replies should remain visible for manual review. |
-| Next action | Keep new detail actions dependency-injected and test that no direct send or API call enters the detail panel module. |
+| Failure/manual fallback | Detail panel actions no longer fill a live composer; the detail, focus-archive, and filter-settings modules do not call send APIs or create direct API requests. |
+| Current gap | Some dormant detail action labels still reference historical composer behavior and should be converted to outbox draft flows before any restore. |
+| Next action | Keep new detail actions dependency-injected and restore the panel only from `backup/chat-ui-before-removal-20260621` if the product direction changes. |
 
 ## Maintenance Rules
 

@@ -656,10 +656,19 @@ PROBE_SCRIPT = """
     hitDetail(".common-action-panel > summary"));
   check("account management menu visible", visible(boxes.accountMenuToggle, 120, 28) && centerHit(".sidebar-tools-shell > summary"),
     hitDetail(".sidebar-tools-shell > summary"));
-  check("chat menu visible", visible(boxes.chatSecondaryToggle, 80, 28) && centerHit(".chat-secondary-toggle"),
-    hitDetail(".chat-secondary-toggle"));
-  check("chat secondary defaults collapsed", chatSecondary && !chatSecondary.open,
+  check("chat secondary menu removed", !chatSecondary && boxes.chatSecondary.missing,
     JSON.stringify(boxes.chatSecondary));
+  check("chat message DOM removed",
+    !document.querySelector("#messageList") &&
+      !document.querySelector("#detailPanel") &&
+      !document.querySelector("#directSendComposer") &&
+      !document.querySelector("#quickActionHotbar"),
+    JSON.stringify({
+      messageList: boxes.messageList,
+      detailPanel: rect("#detailPanel"),
+      composer: boxes.composer,
+      hotbar: boxes.hotbar
+    }));
   if (systemMenu) systemMenu.open = true;
   await wait(160);
   boxes.settings = rect("#settingsButton");
@@ -689,87 +698,13 @@ PROBE_SCRIPT = """
   await wait(120);
   boxes.toolsPanel = rect(".workspace-tools-panel");
   check("account management menu opens", visible(boxes.toolsPanel, 160, 80), JSON.stringify(boxes.toolsPanel));
-  if (chatSecondary) chatSecondary.open = true;
-  await wait(160);
-  boxes.chatSecondary = rect(".chat-secondary-shell");
-  boxes.chatSecondaryContent = rect(".chat-secondary-content");
-  boxes.chatSecondaryToggle = rect(".chat-secondary-toggle");
-  boxes.header = rect(".chat-pane .section-head");
-  boxes.messageList = rect("#messageList");
-  boxes.composer = rect("#directSendComposer");
-  boxes.composerHead = rect("#directSendComposer .direct-send-head");
-  boxes.input = rect("#directSendInput");
-  boxes.hotbar = rect("#quickActionHotbar");
-  check("chat opens as fullscreen overlay",
-    boxes.chatSecondary.left <= 10 && boxes.chatSecondary.top <= 10 &&
-      boxes.chatSecondary.right >= window.innerWidth - 10 &&
-      boxes.chatSecondary.bottom >= window.innerHeight - 10,
-    JSON.stringify({ chatSecondary: boxes.chatSecondary, viewport: { width: window.innerWidth, height: window.innerHeight } }));
-  check("chat overlay close summary remains visible", visible(boxes.chatSecondaryToggle, 80, 28) && centerHit(".chat-secondary-toggle"),
-    hitDetail(".chat-secondary-toggle"));
-  check("chat overlay content fills available body", visible(boxes.chatSecondaryContent, 220, 160),
-    JSON.stringify(boxes.chatSecondaryContent));
-  check("message list visible as support pane", visible(boxes.messageList, 180, 60), JSON.stringify(boxes.messageList));
-  check("composer visible", visible(boxes.composer, 180, 68), JSON.stringify(boxes.composer));
-  check("composer within viewport", boxes.composer.bottom <= window.innerHeight + 1 && boxes.composer.top >= -1,
-    JSON.stringify(boxes.composer));
-  check("composer stays compact", boxes.composer.height <= 170,
-    JSON.stringify(boxes.composer));
-  check("composer tool row stays compact", visible(boxes.composerHead, 160, 20) && boxes.composerHead.height <= 32,
-    JSON.stringify(boxes.composerHead));
-  check("input visible", visible(boxes.input, 80, 38), JSON.stringify(boxes.input));
-  check("hotbar does not cover composer", boxes.hotbar.bottom <= boxes.composer.bottom + 1,
-    JSON.stringify({ hotbar: boxes.hotbar, composer: boxes.composer }));
-  var hotbarChips = Array.from(document.querySelectorAll("#quickActionHotbar .skill-chip"));
-  var hotbarRowTops = Array.from(new Set(hotbarChips.map(function(chip) {
-    return Math.round(chip.getBoundingClientRect().top);
-  }))).sort(function(a, b) { return a - b; });
-  var hotbarOversized = hotbarChips.filter(function(chip) {
-    var box = chip.getBoundingClientRect();
-    return box.height > 21;
-  }).map(function(chip) {
-    var box = chip.getBoundingClientRect();
-    return { text: chip.textContent.trim(), width: box.width, height: box.height };
-  });
-  var firstHotbarChip = hotbarChips[0] && hotbarChips[0].getBoundingClientRect();
-  var firstRowChips = hotbarChips.filter(function(chip) {
-    return Math.round(chip.getBoundingClientRect().top) === hotbarRowTops[0];
-  });
-  var lastFirstRowHotbarChip = firstRowChips[firstRowChips.length - 1] && firstRowChips[firstRowChips.length - 1].getBoundingClientRect();
-  var hotbarMore = document.querySelector("#quickActionHotbar [data-hotbar-more]");
-  var hotbarClipped = hotbarChips.filter(function(chip) {
-    var box = chip.getBoundingClientRect();
-    return box.left < boxes.hotbar.left - 1 || box.right > boxes.hotbar.right + 1 ||
-      box.top < boxes.hotbar.top - 1 || box.bottom > boxes.hotbar.bottom + 1;
-  }).map(function(chip) {
-    var box = chip.getBoundingClientRect();
-    return { text: chip.textContent.trim(), left: box.left, right: box.right, top: box.top, bottom: box.bottom };
-  });
-  var hotbarTexts = hotbarChips.map(function(chip) { return chip.textContent.trim(); });
-  check("hotbar renders compact shortcuts", hotbarChips.length === 12, String(hotbarChips.length));
-  check("hotbar keeps common query shortcuts visible",
-    hotbarTexts.some(function(text) { return text.indexOf("储物袋") !== -1; }) &&
-    hotbarTexts.some(function(text) { return text.indexOf("战力") !== -1; }) &&
-    hotbarTexts.some(function(text) { return text.indexOf("我的") !== -1; }),
-    JSON.stringify(hotbarTexts));
-  check("hotbar exposes full shortcut menu", Boolean(hotbarMore), hotbarMore ? hotbarMore.textContent.trim() : "");
-  check("hotbar uses two compact rows", hotbarRowTops.length === 2 && boxes.hotbar.height <= 40,
-    JSON.stringify({ rows: hotbarRowTops, hotbar: boxes.hotbar }));
-  check("hotbar uses available width", firstHotbarChip && lastFirstRowHotbarChip &&
-      firstHotbarChip.left <= boxes.hotbar.left + 1 && lastFirstRowHotbarChip.right >= boxes.hotbar.right - 2,
-    JSON.stringify({ hotbar: boxes.hotbar, first: firstHotbarChip, lastFirstRow: lastFirstRowHotbarChip }));
-  check("hotbar chips stay compact", hotbarOversized.length === 0, JSON.stringify(hotbarOversized));
-  check("hotbar shows all chips without clipping", hotbarClipped.length === 0,
-    JSON.stringify({ clipped: hotbarClipped, hotbar: boxes.hotbar }));
   if (shell) shell.open = false;
   await wait(120);
   boxes.emojiButton = rect("#emojiPickerButton");
   boxes.cultivationButton = rect("#openCultivationButton");
-  check("emoji button clickable", visible(boxes.emojiButton, 36, 24) && centerHit("#emojiPickerButton"),
-    JSON.stringify(boxes.emojiButton));
-  check("cultivation button clickable", visible(boxes.cultivationButton, 54, 24) && centerHit("#openCultivationButton"),
-    JSON.stringify(boxes.cultivationButton));
-  if (chatSecondary) chatSecondary.open = false;
+  check("chat composer auxiliary buttons removed",
+    boxes.emojiButton.missing && boxes.cultivationButton.missing,
+    JSON.stringify({ emoji: boxes.emojiButton, cultivation: boxes.cultivationButton }));
   if (commonMenu) commonMenu.open = true;
   await wait(120);
   boxes.dungeonTrigger = rect("#dungeonStatusButton");

@@ -5,18 +5,20 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
 
 ## Scope
 
-1. Chat UI stabilization
-   - Channel switching owns the primary header width.
-   - Tool center is reachable from the top-right and does not clip or overlap
-     the message stream.
-   - Message list and composer remain visible at desktop, tablet, and narrow
-     mobile widths.
-   - Width guards prevent page-level horizontal overflow.
-   - Current state: implemented in the final chat layout contract and covered by
-     `tests/layout_probe.py`, including composer visibility, tool-center
-     reachability, two-row quick-command hotbar visibility, dungeon panel
-     clickability, page-level overflow guards, and bottom new-message counters
-     that preserve the user's historical scroll position.
+1. Chat UI removal
+   - The interactive chat stream, message detail pane, direct composer, emoji
+     palette, and quick-command hotbar are removed from the live page.
+   - Message ingestion, parsed cards, logs, and summary snapshots remain as data
+     sources for status boards, records, audits, and state projection.
+   - The restore point is the remote branch
+     `backup/chat-ui-before-removal-20260621`, which points at the last commit
+     before the chat UI was removed.
+   - Current state: `web/static/app.js` disables chat initialization through
+     `CHAT_FEATURE_ENABLED = false`; the disabled chat refresh path clears local
+     chat state without polling `/api/messages`, and `pollTick` only queues chat
+     refresh work when the feature flag is enabled. The old view modules remain
+     in the tree as dormant compatibility code, but the DOM entrypoints are gone
+     from `web/index.html`.
 
 2. Message classification regression suite
    - Player plain messages that should stay in focus remain visible.
@@ -64,7 +66,8 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
    - Common workflows remain on the main page.
    - Settings, health, refresh, identity, and notification controls live in the
      tool center without duplicating controls already present elsewhere.
-   - Secondary panels are grouped by usage frequency and do not hide chat input.
+   - Secondary panels are grouped by usage frequency and do not depend on a chat
+     input.
    - Current state: common workflows stay on the main page, and the top-right
      tool center is covered by layout probe checks. Future work should avoid
      adding new always-visible header controls unless they pass the same width
@@ -78,18 +81,18 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
    - Current state: Cangkun and Xutian playbook cards are in the dungeon modal.
      Cangkun uses the conservative route guide; Xutian shows stage, route,
      advice, 后殿 boundary notes, and curated negative examples while keeping
-     command buttons as composer-fill actions only. The dungeon status modal and
+     command buttons as manual actions only. The dungeon status modal and
      standalone Xutian/Cangkun guide modals live in
      `web/static/views/dungeon_status.js`, `web/static/views/xutian_guide.js`,
      and `web/static/views/cangkun_guide.js` with status/guide loading injected
      from `web/static/app.js`.
 
 6. Frontend CSS/module debt cleanup
-   - Chat shell, composer, tool center, and dungeon panels have clear ownership.
+   - Tool center, schedule workspace, status panels, and dungeon panels have
+     clear ownership.
    - New fixes land in final contract files or small modules, not as unrelated
      overrides across multiple sections.
-   - Current state: chat viewport stability lives in `web/static/chat-layout.css`;
-     inventory lives in `web/static/views/inventory.js`; dungeon Xutian/Cangkun
+   - Current state: inventory lives in `web/static/views/inventory.js`; dungeon Xutian/Cangkun
      playbook cards live in `web/static/views/dungeon_playbook.js`; the dungeon
      status modal shell and refresh flow live in
      `web/static/views/dungeon_status.js`, along with reusable status render
@@ -114,13 +117,13 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
      injected from `web/static/app.js`. The notification settings modal lives in
      `web/static/views/notify.js` with card-title/settings/test APIs injected
      from `web/static/app.js`. The official schedule rail and modal
-     live in `web/static/views/schedule.js`. The chat
-     message stream, channel chips, quick filters, scroll anchoring, unread new-message counter, and quick actions live in
-     `web/static/views/chat_stream.js`; the direct composer, emoji palette, and
-     quick command hotbar live in `web/static/views/direct_composer.js`; detail
-     rich cards and field formatting live in `web/static/views/detail_cards.js`;
-     the message detail panel and manual action controls live in
-     `web/static/views/detail_panel.js`; the focus archive rule modal lives in
+     live in `web/static/views/schedule.js`. The old chat stream,
+     direct composer, and message-detail modules remain in the source tree only
+     as dormant compatibility code while `CHAT_FEATURE_ENABLED` is false; the
+     live UI no longer renders the chat stream, message detail pane, or
+     direct-send composer. Detail rich cards and field formatting remain in
+     `web/static/views/detail_cards.js` for compatibility with a future restore;
+     the focus archive rule modal lives in
      `web/static/views/focus_archive.js` with preview API injected from
      `web/static/app.js`; the filter settings modal lives in
      `web/static/views/filter_settings.js` with diagnostics and preview APIs
@@ -152,7 +155,7 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
 - Keep automatic dispatch limited to explicit settings allowlists; unrecognized
   commands, dungeon choices, and ambiguous actions stay manual.
 - Continue CSS/module cleanup opportunistically when a touched surface already
-  has tests or layout-probe coverage.
+  has focused contract or browser coverage.
 
 ## Verification
 
@@ -161,9 +164,9 @@ This document tracks the current multi-hour cleanup goal. It turns the broad
 - Frontend syntax: `node --check web/static/app.js` plus any changed view
   modules.
 - Layout changes: browser checks at 1280, 1024, 800, and 390 px, including
-  `documentElement.scrollWidth <= innerWidth`, tool center open state, message
-  list, and composer visibility.
-- Runtime changes: restart `xiuxian-mini-web.service`, then verify
+  `documentElement.scrollWidth <= innerWidth`, tool center open state, schedule
+  workbench, and status panels.
+- Runtime changes: restart the live `xiuxian-web` container, then verify
   `/api/health` returns `ok` and listener status settles to `running`.
 - Repository changes: each coherent milestone is committed and pushed to the
   SSH remote.

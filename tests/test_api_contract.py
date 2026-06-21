@@ -135,8 +135,6 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     audit = (root / "docs" / "state-machine-audit.md").read_text(encoding="utf-8")
     normalized_work_plan = re.sub(r"\s+", " ", work_plan)
 
-    assert "tests/layout_probe.py" in work_plan
-    assert "two-row quick-command hotbar visibility" in work_plan
     assert "dungeon panel" in work_plan and "clickability" in work_plan
     assert "official schedule manual handling" in normalized_work_plan
     assert "details persist in the modal status line" in normalized_work_plan
@@ -158,13 +156,14 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "leader intelligence modal lives in `web/static/views/leader_intel.js` with leader-message loading injected from `web/static/app.js`" in normalized_work_plan
     assert "official schedule rail and modal live in `web/static/views/schedule.js`" in normalized_work_plan
     assert "global health/setup banner lives in `web/static/views/global_banner.js`" in normalized_work_plan
-    assert "bottom new-message counters that preserve the user's historical scroll position" in normalized_work_plan
-    assert "chat message stream, channel chips, quick filters, scroll anchoring, unread new-message counter, and quick actions live in `web/static/views/chat_stream.js`" in normalized_work_plan
+    assert "backup/chat-ui-before-removal-20260621" in normalized_work_plan
+    assert "CHAT_FEATURE_ENABLED = false" in normalized_work_plan
+    assert "disabled chat refresh path clears local chat state without polling `/api/messages`" in normalized_work_plan
+    assert "pollTick` only queues chat refresh work when the feature flag is enabled" in normalized_work_plan
+    assert "live UI no longer renders the chat stream, message detail pane, or direct-send composer" in normalized_work_plan
     assert "message logs modal lives in `web/static/views/logs.js` with message paging/export APIs injected from `web/static/app.js`" in normalized_work_plan
     assert "notification settings modal lives in `web/static/views/notify.js` with card-title/settings/test APIs injected from `web/static/app.js`" in normalized_work_plan
-    assert "direct composer, emoji palette, and quick command hotbar live in `web/static/views/direct_composer.js`" in normalized_work_plan
-    assert "detail rich cards and field formatting live in `web/static/views/detail_cards.js`" in normalized_work_plan
-    assert "message detail panel and manual action controls live in `web/static/views/detail_panel.js`" in normalized_work_plan
+    assert "Detail rich cards and field formatting remain in `web/static/views/detail_cards.js` for compatibility with a future restore" in normalized_work_plan
     assert "focus archive rule modal lives in `web/static/views/focus_archive.js` with preview API injected from `web/static/app.js`" in normalized_work_plan
     assert "filter settings modal lives in `web/static/views/filter_settings.js` with diagnostics and preview APIs injected from `web/static/app.js`" in normalized_work_plan
     assert "access settings modal, automation guard form, Telegram dialog/topic option renderers, and read-only Telegram account list live in `web/static/views/settings.js`" in normalized_work_plan
@@ -189,20 +188,23 @@ def test_current_work_docs_match_implemented_state_machine_contracts():
     assert "world report modal is isolated in `web/static/views/world_report.js`, with composite health/dungeon/resource/intel/priority loading injected from `web/static/app.js`" in audit
     assert "Global health/setup banner is isolated in `web/static/views/global_banner.js`" in audit
     assert "official schedule rail and modal are isolated in `web/static/views/schedule.js`" in audit
-    assert "chat message stream, channel chips, quick filters, scroll anchoring, unread new-message counter, and quick-action renderer are isolated in `web/static/views/chat_stream.js`" in audit
-    assert "Incremental polling preserves the user's historical scroll position and turns the bottom jump button into a new-message counter until the user returns to latest." in audit
+    assert "CHAT_FEATURE_ENABLED = false" in audit
+    assert "clears local chat state without polling `/api/messages`" in audit
+    assert "pollTick` only queues chat refresh work when that flag is enabled" in audit
+    assert "web/static/views/chat_stream.js` remains dormant compatibility code" in audit
     assert "leader intelligence modal is isolated in `web/static/views/leader_intel.js`, with leader-message loading injected from `web/static/app.js`" in audit
     assert "message logs modal is isolated in `web/static/views/logs.js`, with message paging/export APIs injected from `web/static/app.js`" in audit
-    assert "Chat stream quick actions fill the composer only" in audit
+    assert "Chat jumps show a removed-feature notice" in audit
     assert "leader-intel and logs modules are read-only; logs export only triggers a browser download from an injected response" in audit
-    assert "direct composer, emoji palette, and quick command hotbar are isolated in `web/static/views/direct_composer.js`" in audit
-    assert "Direct composer sends only through the injected explicit composer-submit callback" in audit
+    assert "Direct Composer (Removed From Live UI)" in audit
+    assert "Manual sending through the chat composer is removed" in audit
     assert "Detail rich cards and field formatting are isolated in `web/static/views/detail_cards.js`" in audit
     assert "Detail cards are read-only renderers" in audit
+    assert "Detail Panel (Dormant With Chat UI)" in audit
     assert "message detail panel and manual action controls are isolated in `web/static/views/detail_panel.js`" in audit
     assert "focus archive rule modal is isolated in `web/static/views/focus_archive.js`, with `/api/focus-exclude/preview` injected from `web/static/app.js`" in audit
     assert "filter settings modal is isolated in `web/static/views/filter_settings.js`, with diagnostics and focus-exclude preview APIs injected from `web/static/app.js`" in audit
-    assert "Detail panel actions fill the composer or create manual plans/drafts only" in audit
+    assert "Detail panel actions no longer fill a live composer" in audit
     assert "detail, focus-archive, and filter-settings modules do not call send APIs or create direct API requests" in audit
     assert "Account login/logout modals, listen-target renderers, account login/listen-target event flow, account status line, and account action guards are isolated in `web/static/views/account_management.js`" in audit
     assert "keeps injected account save/login/dialog/topic/listener API orchestration" in audit
@@ -1889,7 +1891,7 @@ def test_inventory_modal_keeps_auto_refresh_with_manual_owner_fallback():
     assert "${formatNumber(estimated)} 类估算项,关键转移前建议 .储物袋" in inventory_js
 
 
-def test_sidebar_chat_menu_and_schedule_workbench_layout_contract():
+def test_chat_surface_removed_and_schedule_workbench_layout_contract():
     root = Path(__file__).resolve().parents[1]
     html = (root / "web" / "index.html").read_text(encoding="utf-8")
     css = (root / "web" / "static" / "chat-layout.css").read_text(encoding="utf-8")
@@ -1897,18 +1899,16 @@ def test_sidebar_chat_menu_and_schedule_workbench_layout_contract():
     state_js = (root / "web" / "static" / "state.js").read_text(encoding="utf-8")
 
     workspace = html.index('<main class="main chat-workspace">')
-    chat_menu = html.index('<details class="sidebar-menu chat-secondary-shell" name="sidebar-menu">')
-    layout = html.index('<section class="layout-grid detail-closed">')
-    composer = html.index('<footer id="directSendComposer" class="direct-send-composer chat-composer"')
     schedule_workbench = html.index('<section class="panel schedule-rail-panel schedule-workbench"')
     styles_link = html.index('<link rel="stylesheet" href="/static/styles/base/reset.css"')
     layout_link = html.index('<link rel="stylesheet" href="/static/chat-layout.css"')
     assert styles_link < layout_link
-    assert chat_menu < layout < composer < workspace < schedule_workbench
-    assert html.count('name="sidebar-menu"') == 4
+    assert workspace < schedule_workbench
+    assert html.count('name="sidebar-menu"') == 3
     assert '<section id="activeIdentityDock" class="active-identity-dock"' in html
     assert '<select id="activeIdentityQuickSelect">' in html
     assert '<button id="activeIdentityStatusButton" type="button" title="查看当前角色详情">详情</button>' in html
+    assert "切换会同步定时默认身份" in html
     assert '<details class="sidebar-menu sidebar-primary-tools" name="sidebar-menu">' in html
     assert '<details class="workspace-tools-shell sidebar-tools-shell sidebar-menu" name="sidebar-menu" aria-label="账号管理">' in html
     assert '<span>账号管理</span>' in html
@@ -1918,50 +1918,29 @@ def test_sidebar_chat_menu_and_schedule_workbench_layout_contract():
     assert '<span>角色详情</span>' in html
     assert '<span>更多面板</span>' in html
     assert '<details class="sidebar-menu common-action-panel" name="sidebar-menu">' in html
-    assert '<section id="gamePrimaryStrip" class="game-primary-strip"' in html
-    assert '<div id="messageList" class="message-list"></div>' in html
-    assert '<div id="quickActionHotbar" class="quick-action-hotbar"' in html
-    assert '<textarea id="directSendInput"' in html
+    assert '<details class="sidebar-menu chat-secondary-shell" name="sidebar-menu">' not in html
+    assert '<section id="gamePrimaryStrip" class="game-primary-strip"' not in html
+    assert '<div id="messageList" class="message-list"></div>' not in html
+    assert '<button id="jumpToLatest"' not in html
+    assert '<div id="detailPanel" class="detail-panel">' not in html
+    assert '<footer id="directSendComposer" class="direct-send-composer chat-composer"' not in html
+    assert '<div id="quickActionHotbar" class="quick-action-hotbar"' not in html
+    assert '<textarea id="directSendInput"' not in html
     assert '<h2>官方定时工作台</h2>' in html
+    assert "跟随当前身份" in html
 
-    final_contract = css
-    required_fragments = [
+    dormant_css_fragments = [
         "Final chat viewport stability contract.",
         ".chat-client-shell {\n  height: 100dvh;\n  max-height: 100dvh;\n  overflow: hidden;",
-        ".chat-client-shell .chat-workspace {\n  display: grid;\n  grid-template-rows: auto minmax(0, 1fr) auto;",
-        ".chat-client-shell .layout-grid,\n.chat-client-shell .layout-grid.detail-open,\n.chat-client-shell .layout-grid.detail-closed {\n  grid-row: 2;\n  display: grid;\n  min-height: 0;\n  height: 100%;\n  overflow: hidden;",
-        ".chat-client-shell .chat-pane {\n  display: grid;\n  grid-template-rows: auto minmax(0, 1fr);\n  min-height: 0;\n  height: 100%;\n  overflow: hidden;",
-        ".chat-client-shell .game-primary-strip {\n  display: none;\n  grid-row: 2;\n  min-height: 0;\n  max-height: 0;\n  border: 0;",
-        ".chat-client-shell .message-list {\n  grid-row: 2;\n  min-height: 0;\n  height: auto;\n  overflow-y: auto;",
-        ".chat-client-shell .chat-composer {\n  grid-row: 3;\n  align-self: stretch;\n  max-height: min(34dvh, 310px);",
-        ".chat-client-shell .quick-action-hotbar {\n  display: grid;\n  grid-template-columns: repeat(var(--hotbar-columns, 6), minmax(0, 1fr));\n  grid-template-rows: repeat(2, 18px);",
-        "justify-content: start;",
-        "max-height: 38px;",
-        "overflow-x: hidden;",
-        ".chat-client-shell .quick-action-hotbar .skill-chip {\n  width: 100%;\n  min-width: 0;\n  min-height: 0;\n  height: 18px;",
-        ".chat-client-shell .direct-send-head {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr) auto;",
-        ".chat-client-shell .direct-send-actions .composer-tool-button {\n  min-height: 26px;",
-        ".chat-client-shell .direct-send-row {\n  grid-template-columns: clamp(108px, 12vw, 150px) minmax(0, 1fr) 68px;",
-        "@media (max-width: 900px)",
-        "grid-template-rows: clamp(112px, 20dvh, 170px) minmax(0, 1fr);",
-        ".chat-client-shell .conversation-rail {\n    grid-row: 1;\n    overflow: auto;",
-        ".chat-client-shell .chat-workspace {\n    grid-row: 2;\n    min-height: 0;",
-        ".chat-client-shell .chat-composer {\n    position: static;\n    bottom: auto;\n    max-height: min(42dvh, 220px);",
-        ".chat-client-shell .chat-pane .section-head {\n    display: grid;\n    grid-template-columns: minmax(0, 1fr);\n    grid-template-rows: auto auto;",
-        ".chat-client-shell .stream-channel-tools {\n    justify-content: flex-start;",
-        "scrollbar-width: none;",
-        ".chat-client-shell .direct-send-row {\n    grid-template-columns: minmax(96px, 28%) minmax(0, 1fr) 72px;",
         ".chat-client-shell .workspace-tools-panel {\n  position: fixed;\n  top: 48px;\n  right: 14px;",
         "max-height: calc(100dvh - 64px);\n  align-content: start;\n  overflow: auto;",
         ".chat-client-shell .workspace-tools-panel .tool-panel {\n  order: -1;",
         ".chat-client-shell .workspace-tools-panel .tool-panel .sidebar-toolbox {\n  grid-template-columns: repeat(3, minmax(0, 1fr));",
         ".chat-client-shell .workspace-tools-toggle {\n  justify-content: center;\n  min-width: 96px;",
-        ".chat-client-shell:has(.global-banner:not([hidden])) .stream-channel-tools {\n  position: static;",
         ".chat-client-shell {\n    width: 100%;\n    max-width: 100%;\n    grid-template-rows: clamp(180px, 24dvh, 230px) minmax(0, 1fr);",
         ".chat-client-shell .conversation-rail {\n    grid-column: 1;\n    grid-row: 1;\n    display: grid;\n    grid-template-columns: minmax(0, 1.15fr) minmax(184px, 0.85fr);",
         ".chat-client-shell .schedule-rail {\n    min-height: 0;\n    max-height: none;\n    overflow: auto;",
         ".chat-client-shell .schedule-rail-list {\n    display: grid;\n    gap: 5px;",
-        ".chat-client-shell .stream-channel-tools {\n    position: static;\n    justify-self: end;",
         ".chat-client-shell .workspace-tools-panel {\n    top: calc(clamp(180px, 24dvh, 230px) + 50px);\n    max-height: calc(100dvh - clamp(180px, 24dvh, 230px) - 64px);",
         "@media (max-width: 460px)",
         ".chat-client-shell {\n    grid-template-rows: 236px minmax(0, 1fr);",
@@ -1973,11 +1952,18 @@ def test_sidebar_chat_menu_and_schedule_workbench_layout_contract():
         "First-level identity switch: status details stay secondary.",
         ".chat-client-shell .active-identity-dock {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr) auto;",
     ]
-    for fragment in required_fragments:
-        assert fragment in final_contract
+    for fragment in dormant_css_fragments:
+        assert fragment in css
 
     assert "messageLoading: false" in state_js
     assert "messageError: \"\"" in state_js
+    assert "const CHAT_FEATURE_ENABLED = false;" in app_js
+    assert "state.channelSummaryMessages = [];" in app_js
+    assert "return { changed: false, count: 0 };" in app_js
+    assert "if (CHAT_FEATURE_ENABLED) {\n      tasks.push(refreshChatViewport({ incremental: true }).then((result) => {" in app_js
+    assert "if (CHAT_FEATURE_ENABLED) {\n  directComposerView().bindDirectComposer(directComposerDeps());\n}" in app_js
+    assert 'showSkillToast("聊天发送栏已移除。", "warn");' in app_js
+    assert 'showSkillToast("聊天视图已移除,请从记录面板检索原消息。", "warn");' in app_js
     assert 'const activeIdentityQuickSelect = document.querySelector("#activeIdentityQuickSelect");' in app_js
     assert "function renderActiveIdentityDock()" in app_js
     assert 'await setActiveIdentity(id, { loadPatches: true });' in app_js

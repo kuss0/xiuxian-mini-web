@@ -1,5 +1,7 @@
 // MINIWEB-BUILD: chat-client-shell 2026-05-21T04:42
 
+const CHAT_FEATURE_ENABLED = false;
+
 const { state } = window.MiniwebState;
 const {
   ACCOUNT_POLL_INTERVAL_MS,
@@ -264,6 +266,21 @@ async function loadChannelSummary({ incremental = false } = {}) {
 }
 
 async function refreshChatViewport({ incremental = false } = {}) {
+  if (!CHAT_FEATURE_ENABLED) {
+    if (!incremental) {
+      state.messageLoading = false;
+      state.messageError = "";
+      state.lastMessageSeq = 0;
+      state.messages = [];
+      state.channelSummaryMessages = [];
+      state.channelSummarySeq = 0;
+      state.selectedMessageId = null;
+      state.detailMode = "message";
+      state.chatUnreadCount = 0;
+      state.messageRenderDeferred = false;
+    }
+    return { changed: false, count: 0 };
+  }
   const [summaryResult, messageResult] = await Promise.all([
     loadChannelSummary({ incremental }).catch((err) => {
       console.warn("[mini-web] channel summary refresh failed:", err);
@@ -278,6 +295,17 @@ async function refreshChatViewport({ incremental = false } = {}) {
 }
 
 async function loadMessages({ incremental = false } = {}) {
+  if (!CHAT_FEATURE_ENABLED) {
+    if (!incremental) {
+      state.messageLoading = false;
+      state.messageError = "";
+      state.lastMessageSeq = Math.max(0, Number(state.channelSummarySeq || 0));
+      state.messages = [];
+      state.selectedMessageId = null;
+      state.detailMode = "message";
+    }
+    return { changed: false, count: 0 };
+  }
   // 增量:轮询用,只拉 rowid > lastSeq 的新卡片(可能 0 条)
   // 初始化:首次/手动刷新用,拉最近 200 条
   // channel/channels:默认 focus(重点流);多频道组合由后端 OR 过滤;日志按钮单独走全量 modal
@@ -963,6 +991,10 @@ function renderDirectSendReplyContext() {
 }
 
 function setWorkspaceSelectedMessage(message, { rerenderList = true } = {}) {
+  if (!CHAT_FEATURE_ENABLED) {
+    showSkillToast("聊天视图已移除,请从记录面板查看原消息。", "warn");
+    return;
+  }
   if (!message) return;
   state.detailMode = "message";
   state.selectedMessageId = message.id;
@@ -973,6 +1005,10 @@ function setWorkspaceSelectedMessage(message, { rerenderList = true } = {}) {
 }
 
 function selectMessageForComposer(message, { rerenderList = true } = {}) {
+  if (!CHAT_FEATURE_ENABLED) {
+    showSkillToast("聊天发送栏已移除。", "warn");
+    return;
+  }
   if (!message) return;
   state.detailMode = "message";
   state.selectedMessageId = message.id;
@@ -1012,6 +1048,10 @@ function closeWorkspacePanel({ rerenderList = true, clearSelection = true } = {}
 }
 
 function openOverviewDetailPanel() {
+  if (!CHAT_FEATURE_ENABLED) {
+    showSkillToast("聊天详情面板已移除。", "warn");
+    return;
+  }
   state.detailMode = "overview";
   state.selectedMessageId = null;
   setWorkspacePanelOpen(true);
@@ -1029,6 +1069,10 @@ function renderDirectSendActionHints() {
 }
 
 function fillDirectSendComposer(command, opts = {}) {
+  if (!CHAT_FEATURE_ENABLED) {
+    showSkillToast("聊天发送栏已移除,请改用草稿箱或官方定时。", "warn");
+    return;
+  }
   return directComposerView().fillDirectSendComposer(directComposerDeps(), command, opts);
 }
 
@@ -1520,6 +1564,7 @@ function chatStreamView() {
 }
 
 function visibleMessages() {
+  if (!CHAT_FEATURE_ENABLED) return [];
   return chatStreamView().visibleMessages(chatStreamDeps());
 }
 
@@ -1593,6 +1638,15 @@ function sentToastText(result, { skillKey = "", command = "" } = {}) {
 }
 
 async function applyChannelSelection(nextChannels) {
+  if (!CHAT_FEATURE_ENABLED) {
+    const known = new Set(state.channels.map((channel) => channel.key));
+    const filtered = [...(nextChannels || [])].filter((key) => known.has(key));
+    state.selectedChannels = new Set(filtered);
+    state.lastMessageSeq = 0;
+    state.messages = [];
+    state.selectedMessageId = null;
+    return refreshChatViewport({ incremental: false });
+  }
   const known = new Set(state.channels.map((channel) => channel.key));
   const filtered = [...(nextChannels || [])].filter((key) => known.has(key));
   state.selectedChannels = new Set(filtered);
@@ -1617,6 +1671,10 @@ function parentMessageOf(card) {
 }
 
 function jumpToMessage(target) {
+  if (!CHAT_FEATURE_ENABLED) {
+    showSkillToast("聊天视图已移除,请从记录面板检索原消息。", "warn");
+    return;
+  }
   if (!target) return;
   state.detailMode = "message";
   state.selectedMessageId = target.id;
@@ -1686,6 +1744,7 @@ async function ensureFullMessage(message) {
 }
 
 function renderChannelFilters() {
+  if (!CHAT_FEATURE_ENABLED) return;
   return chatStreamView().renderChannelFilters(chatStreamDeps());
 }
 
@@ -1722,10 +1781,12 @@ function quickFilterActiveKey() {
 }
 
 function renderQuickFilters() {
+  if (!CHAT_FEATURE_ENABLED) return;
   return chatStreamView().renderQuickFilters(chatStreamDeps());
 }
 
 async function applyQuickFilter(key) {
+  if (!CHAT_FEATURE_ENABLED) return { changed: false, count: 0 };
   return chatStreamView().applyQuickFilter(chatStreamDeps(), key);
 }
 
@@ -1769,10 +1830,12 @@ function insertTextAtCursor(textarea, text) {
 }
 
 function renderActiveChannelText() {
+  if (!CHAT_FEATURE_ENABLED) return;
   return chatStreamView().renderActiveChannelText(chatStreamDeps());
 }
 
 function renderMessages() {
+  if (!CHAT_FEATURE_ENABLED) return;
   return chatStreamView().renderMessages(chatStreamDeps());
 }
 
@@ -3347,6 +3410,7 @@ function directSendSelectedIdentityId() {
 }
 
 function renderDirectSendComposer() {
+  if (!CHAT_FEATURE_ENABLED) return;
   return directComposerView().renderDirectSendComposer(directComposerDeps());
 }
 
@@ -3355,6 +3419,10 @@ function setDirectSendStatus(text, kind = "info") {
 }
 
 async function sendDirectComposerMessage() {
+  if (!CHAT_FEATURE_ENABLED) {
+    showSkillToast("聊天发送栏已移除。", "warn");
+    return;
+  }
   if (!directSendInput || !directSendIdentitySelect || !directSendSubmit) return;
   if (state.directSendSending) {
     setDirectSendStatus("上一条还在发送中,请等结果返回。", "warn");
@@ -3557,7 +3625,9 @@ if (healthButton) {
   });
 }
 
-directComposerView().bindDirectComposer(directComposerDeps());
+if (CHAT_FEATURE_ENABLED) {
+  directComposerView().bindDirectComposer(directComposerDeps());
+}
 
 if (activeIdentityQuickSelect) {
   activeIdentityQuickSelect.addEventListener("change", async () => {
@@ -3867,9 +3937,11 @@ function renderSkillMenuModal() {
 }
 
 function renderSkillViews() {
-  renderSkillBar();
-  renderSkillMenuModal();
-  renderQuickActionHotbar();
+  if (CHAT_FEATURE_ENABLED) {
+    renderSkillBar();
+    renderSkillMenuModal();
+    renderQuickActionHotbar();
+  }
   renderQuestTracker();
   renderLiveSituationBoard();
   renderGameSceneBoard();
@@ -3904,6 +3976,10 @@ function renderSkillPanel(tabsEl, chipsEl, identityEl, rerender) {
 }
 
 function fillSkillIntoComposer(skillKey, button = null) {
+  if (!CHAT_FEATURE_ENABLED) {
+    showSkillToast("聊天发送栏已移除,快捷指令不再直接填入。", "warn");
+    return;
+  }
   return directComposerView().fillSkillIntoComposer(directComposerDeps(), skillKey, button);
 }
 
@@ -3911,8 +3987,7 @@ function showSkillToast(text, kind) {
   window.MiniwebToast.showToast(text, kind);
 }
 
-// 自动轮询消息流(只在 chat 视图 + 页面可见时拉,避免 tab 切走还在打)。
-// listener 持续 ingest 新消息进 SQLite,这里负责把它们端到 UI。
+// 轻量前端轮询。聊天视图关闭时不再拉消息流,只保留账号/健康/世界快照等低频刷新。
 let pollTimer = null;
 let pollInflight = false;
 let nextAccountsPollAt = 0;
@@ -3928,10 +4003,15 @@ async function pollTick() {
   if (state.refreshState === "loading") return;
   pollInflight = true;
   try {
-    // 即使用户切到草稿箱/官方定时视图,后台也继续把新消息 merge 进 state,
-    // 这样切回 chat 时立刻看见最新的。listener 写得很快,前端再不跟就脱节。
     const now = Date.now();
-    const tasks = [refreshChatViewport({ incremental: true })];
+    let messageResult = null;
+    const tasks = [];
+    if (CHAT_FEATURE_ENABLED) {
+      tasks.push(refreshChatViewport({ incremental: true }).then((result) => {
+        messageResult = result;
+        return result;
+      }));
+    }
     if (now >= nextAccountsPollAt) {
       nextAccountsPollAt = now + ACCOUNT_POLL_INTERVAL_MS;
       tasks.push(loadAccounts().catch((err) => console.warn("[mini-web] accounts poll failed:", err)));
@@ -3952,7 +4032,7 @@ async function pollTick() {
       nextSchedulePollAt = now + ACCOUNT_POLL_INTERVAL_MS;
       tasks.push(loadScheduleRail({ silent: true }).catch((err) => console.warn("[mini-web] schedule rail poll failed:", err)));
     }
-    const [messageResult] = await Promise.all(tasks);
+    await Promise.all(tasks);
     if ((messageResult && messageResult.changed) || now >= nextIdentityStatePollAt) {
       nextIdentityStatePollAt = now + IDENTITY_STATE_POLL_INTERVAL_MS;
       await loadIdentityModuleStates().catch(() => {});

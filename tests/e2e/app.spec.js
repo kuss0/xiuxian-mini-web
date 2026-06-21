@@ -11,10 +11,14 @@ test.describe('Xiuxian Mini Web E2E Tests', () => {
   test('should load homepage successfully', async ({ page }) => {
     await expect(page).toHaveTitle(/(修仙|Xiuxian) Mini Web/i);
 
-    // Check main elements are present
-    await expect(page.locator('#messageList')).toBeVisible();
-    await expect(page.locator('#quickFilters')).toBeVisible();
-    await expect(page.locator('#directSendComposer')).toBeVisible();
+    await expect(page.locator('#activeIdentityDock')).toBeVisible();
+    await expect(page.locator('.schedule-workbench')).toBeVisible();
+    await expect(page.locator('#scheduleRail')).toBeVisible();
+    await expect(page.locator('.common-action-panel > summary')).toBeVisible();
+    await expect(page.locator('#logsButton')).toHaveCount(1);
+    await expect(page.locator('#messageList')).toHaveCount(0);
+    await expect(page.locator('#quickFilters')).toHaveCount(0);
+    await expect(page.locator('#directSendComposer')).toHaveCount(0);
   });
 
   test('should have all modules loaded', async ({ page }) => {
@@ -63,31 +67,28 @@ test.describe('Xiuxian Mini Web E2E Tests', () => {
     expect(statuses.filter((status) => status === 200).length).toBeLessThanOrEqual(60);
   });
 
-  test('should load messages', async ({ page }) => {
-    // Wait for initial load
+  test('should keep chat stream removed from the live page', async ({ page }) => {
     await page.waitForTimeout(2000);
 
-    // Check if message list is populated or shows empty state
-    const messageList = page.locator('#messageList');
-    await expect(messageList).toBeVisible();
+    await expect(page.locator('.chat-secondary-shell')).toHaveCount(0);
+    await expect(page.locator('#messageList')).toHaveCount(0);
+    await expect(page.locator('#detailPanel')).toHaveCount(0);
+    await expect(page.locator('#jumpToLatest')).toHaveCount(0);
   });
 
-  test('should have working channel filters', async ({ page }) => {
+  test('should keep schedule workbench as the primary surface', async ({ page }) => {
     await page.waitForTimeout(1000);
 
-    const channelFilters = page.locator('#quickFilters');
-    await expect(channelFilters).toBeVisible();
+    await expect(page.locator('.schedule-workbench')).toBeVisible();
+    await expect(page.locator('#scheduleIdentityDock')).toBeVisible();
+    await expect(page.locator('#scheduleIdentityFollowChatButton')).toHaveText('跟随当前身份');
   });
 
-  test('should have working direct send composer', async ({ page }) => {
-    const composer = page.locator('#directSendComposer');
-    await expect(composer).toBeVisible();
-
-    const input = page.locator('#directSendInput');
-    await expect(input).toBeVisible();
-
-    const submit = page.locator('#directSendSubmit');
-    await expect(submit).toBeVisible();
+  test('should keep direct send composer removed', async ({ page }) => {
+    await expect(page.locator('#directSendComposer')).toHaveCount(0);
+    await expect(page.locator('#directSendInput')).toHaveCount(0);
+    await expect(page.locator('#directSendSubmit')).toHaveCount(0);
+    await expect(page.locator('#quickActionHotbar')).toHaveCount(0);
   });
 
   test('should have no console errors', async ({ page }) => {
@@ -112,7 +113,7 @@ test.describe('Xiuxian Mini Web E2E Tests', () => {
   test('should have good performance', async ({ page }) => {
     const startTime = Date.now();
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.locator('#directSendComposer')).toBeVisible();
+    await expect(page.locator('.schedule-workbench')).toBeVisible();
     const loadTime = Date.now() - startTime;
 
     // Should load in less than 3 seconds
