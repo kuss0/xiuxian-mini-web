@@ -32,6 +32,7 @@ class LogCommandPolicy:
             "chat_configured": bool(self.chat_id),
             "mapping_chat_configured": bool(self.effective_mapping_chat_id),
             "group_members_allowed": bool(self.effective_mapping_chat_id),
+            "group_members_admin": bool(self.chat_id or self.effective_mapping_chat_id),
         }
 
 
@@ -74,11 +75,13 @@ def classify_telegram_ingress(
             text="日志群命令未启用。",
         )
 
-    is_admin = int(user_id or 0) in policy.admin_ids
     in_log_group = bool(policy.chat_id) and int(chat_id or 0) == policy.chat_id
-    admin_dm = is_admin and int(chat_id or 0) == int(user_id or 0)
     mapping_chat_id = policy.effective_mapping_chat_id
     in_mapping_group = bool(mapping_chat_id) and int(chat_id or 0) == mapping_chat_id
+    explicit_admin = int(user_id or 0) in policy.admin_ids
+    group_member_admin = in_log_group or in_mapping_group
+    is_admin = explicit_admin or group_member_admin
+    admin_dm = explicit_admin and int(chat_id or 0) == int(user_id or 0)
 
     if text.startswith("/"):
         if not is_admin:

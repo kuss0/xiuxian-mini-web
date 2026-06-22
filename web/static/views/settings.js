@@ -235,6 +235,7 @@
             <span>管理员 User ID</span>
             <textarea name="log_command_admin_ids" rows="2" placeholder="每行一个 user_id">${escapeHtml((settings.log_command_admin_ids || []).join("\n"))}</textarea>
           </label>
+          <p class="muted" style="font-size:12px;">临时策略：配置群内成员视为 admin；私聊仍只认上方 user_id。</p>
         </div>
 
         <div class="login-verify">

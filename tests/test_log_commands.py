@@ -42,8 +42,10 @@ def test_telegram_ingress_separates_admin_slash_and_group_mapping():
         "/帮助",
         LogCommandSource(user_id=200, chat_id=-100500, msg_id=1, kind="telegram"),
     )
-    assert group_member["status"] == "skip"
-    assert group_member["decision"]["reason"] == "not_admin"
+    assert group_member["ok"] is True
+    assert group_member["status"] == "ok"
+    assert group_member["decision"]["ingress"] == "telegram_group"
+    assert group_member["decision"]["is_admin"] is True
 
     admin_group = dispatcher.dispatch(
         "/帮助",
@@ -69,6 +71,13 @@ def test_telegram_ingress_separates_admin_slash_and_group_mapping():
     assert admin_dm["decision"]["ingress"] == "telegram_admin_dm"
     assert admin_dm["decision"]["is_admin"] is True
 
+    non_admin_dm = dispatcher.dispatch(
+        "/帮助",
+        LogCommandSource(user_id=200, chat_id=200, msg_id=40, kind="telegram"),
+    )
+    assert non_admin_dm["status"] == "skip"
+    assert non_admin_dm["decision"]["reason"] == "not_admin"
+
     blocked_command = dispatcher.dispatch(
         "/发送 wild_training @123",
         LogCommandSource(user_id=100, chat_id=-100500, msg_id=5, kind="telegram"),
@@ -77,7 +86,7 @@ def test_telegram_ingress_separates_admin_slash_and_group_mapping():
     assert blocked_command["decision"]["reason"] == "command_not_allowed"
 
 
-def test_telegram_mapping_uses_group_members_but_admin_only_for_sensitive_mapping():
+def test_telegram_mapping_treats_group_members_as_admin_temporarily():
     dispatcher = LogCommandDispatcher(
         settings={
             "log_command_enabled": True,
@@ -95,8 +104,9 @@ def test_telegram_mapping_uses_group_members_but_admin_only_for_sensitive_mappin
         ".还有多少 增元丹",
         LogCommandSource(user_id=300, chat_id=-100500, msg_id=5, kind="telegram"),
     )
-    assert non_admin["status"] == "reject"
-    assert non_admin["decision"]["reason"] == "admin_required"
+    assert non_admin["ok"] is True
+    assert non_admin["decision"]["is_admin"] is True
+    assert "合计 5" in non_admin["reply"]
 
     admin = dispatcher.dispatch(
         ".还有多少 增元丹",

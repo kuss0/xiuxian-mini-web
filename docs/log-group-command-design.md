@@ -2,8 +2,8 @@
 
 mini-web 的日志群 listener 对齐 Rust 线 `notify_bot` 的入口拆分:
 
-- `/command`: admin 控制台入口,只允许 `log_command_admin_ids` 中的用户在
-  `log_command_chat_id` 或 admin DM 里触发。
+- `/command`: admin 控制台入口。临时策略下,`log_command_chat_id` 群内任何成员
+  都视为 admin;admin DM 仍只允许 `log_command_admin_ids` 中的用户触发。
 - `.command`: 群业务映射入口,只在 `log_command_mapping_chat_id` 命中的群里
   认领。未配置映射群时回退到 `log_command_chat_id`。
 - 未命中的文本、未知点号命令、非 admin slash 命令都静默跳过。
@@ -37,7 +37,8 @@ Group mapping:
 
 ## Safety Rules
 
-- `log_command_admin_ids` 是 admin-only slash 和敏感 mapping 的权限来源。
+- 临时策略:配置群内成员视为 admin,可触发只读 slash 和 admin-only mapping。
+- `log_command_admin_ids` 仍是 admin DM 的权限来源。
 - `log_command_chat_id` 是 admin slash 群入口;admin DM 仍可用。
 - `log_command_mapping_chat_id` 是点号业务映射群入口;未配置时回退控制台群。
 - listener 使用 raw 前缀语义,不会把带前导空格的 `.cmd` 修正成命令。
