@@ -67,6 +67,8 @@ def classify_telegram_ingress(
     text: str,
     user_id: int,
     chat_id: int,
+    dot_log_command: bool = False,
+    plain_log_command: bool = False,
 ) -> IngressDecision:
     if not policy.enabled:
         return IngressDecision(
@@ -83,7 +85,7 @@ def classify_telegram_ingress(
     is_admin = explicit_admin or group_member_admin
     admin_dm = explicit_admin and int(chat_id or 0) == int(user_id or 0)
 
-    if text.startswith("/"):
+    def allow_log_command() -> IngressDecision:
         if not is_admin:
             return IngressDecision("skip", reason="not_admin", is_admin=False)
         if not policy.chat_id and not policy.admin_ids:
@@ -101,7 +103,12 @@ def classify_telegram_ingress(
             is_admin=True,
         )
 
+    if text.startswith("/"):
+        return allow_log_command()
+
     if text.startswith("."):
+        if dot_log_command:
+            return allow_log_command()
         if not in_mapping_group:
             return IngressDecision(
                 "skip",
@@ -114,6 +121,9 @@ def classify_telegram_ingress(
             mapping="group",
             is_admin=is_admin,
         )
+
+    if plain_log_command:
+        return allow_log_command()
 
     return IngressDecision("skip", reason="not_a_log_command", is_admin=is_admin)
 

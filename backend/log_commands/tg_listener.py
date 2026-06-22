@@ -9,6 +9,7 @@ import urllib.request
 from collections.abc import Callable
 
 from backend.log_commands.allowlist import LogCommandPolicy, classify_telegram_ingress
+from backend.log_commands.core import telegram_log_command_candidate
 
 
 _API_BASE = "https://api.telegram.org"
@@ -184,11 +185,14 @@ class LogCommandTelegramListener:
             return
         settings = self._settings_snapshot()
         policy = LogCommandPolicy.from_settings(settings)
+        parsed_candidate = telegram_log_command_candidate(text)
         ingress = classify_telegram_ingress(
             policy=policy,
             text=text,
             user_id=user_id,
             chat_id=chat_id,
+            dot_log_command=bool(parsed_candidate and parsed_candidate.prefix == "." and parsed_candidate.spec.default_allowed),
+            plain_log_command=bool(parsed_candidate and parsed_candidate.prefix == "plain" and parsed_candidate.spec.default_allowed),
         )
         if ingress.kind == "skip":
             return

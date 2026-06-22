@@ -1,4 +1,5 @@
 from backend.log_commands import LogCommandDispatcher, LogCommandSource, parse_log_command
+from backend.log_commands.core import telegram_log_command_candidate
 from backend.domain.models import RawMessageEvent
 from backend.log_commands.mapping import GROUP_MAPPING_SPECS, classify_group_mapping
 from backend.log_commands.tg_listener import LogCommandTelegramListener
@@ -19,6 +20,13 @@ def test_parse_dot_and_slash_log_commands():
     module_status = parse_log_command(".元婴状态 @123")
     assert module_status is not None
     assert module_status.spec.default_allowed is False
+
+    assert parse_log_command("帮助") is None
+    plain_help = parse_log_command("帮助", allow_plain=True)
+    assert plain_help is not None
+    assert plain_help.spec.name == "help"
+    assert plain_help.prefix == "plain"
+    assert telegram_log_command_candidate(" 帮助") is None
 
 
 def test_group_mapping_registry_is_read_only_inventory_only():
@@ -46,6 +54,23 @@ def test_telegram_ingress_separates_admin_slash_and_group_mapping():
     assert group_member["status"] == "ok"
     assert group_member["decision"]["ingress"] == "telegram_group"
     assert group_member["decision"]["is_admin"] is True
+
+    bare_group_member = dispatcher.dispatch(
+        "帮助",
+        LogCommandSource(user_id=200, chat_id=-100500, msg_id=10, kind="telegram"),
+    )
+    assert bare_group_member["ok"] is True
+    assert bare_group_member["status"] == "ok"
+    assert bare_group_member["parsed"]["prefix"] == "plain"
+    assert "同群精确别名也可用" in bare_group_member["reply"]
+
+    dot_group_member = dispatcher.dispatch(
+        ".帮助",
+        LogCommandSource(user_id=200, chat_id=-100500, msg_id=11, kind="telegram"),
+    )
+    assert dot_group_member["ok"] is True
+    assert dot_group_member["status"] == "ok"
+    assert dot_group_member["parsed"]["prefix"] == "."
 
     admin_group = dispatcher.dispatch(
         "/帮助",
@@ -124,8 +149,15 @@ def test_telegram_mapping_treats_group_members_as_admin_temporarily():
         ".帮助",
         LogCommandSource(user_id=300, chat_id=-100500, msg_id=7, kind="telegram"),
     )
-    assert unknown["status"] == "skip"
-    assert unknown["decision"]["reason"] == "unknown_group_mapping"
+    assert unknown["ok"] is True
+    assert unknown["parsed"]["name"] == "help"
+
+    still_unknown_mapping = dispatcher.dispatch(
+        ".未知",
+        LogCommandSource(user_id=300, chat_id=-100500, msg_id=8, kind="telegram"),
+    )
+    assert still_unknown_mapping["status"] == "skip"
+    assert still_unknown_mapping["decision"]["reason"] == "unknown_group_mapping"
 
 
 def test_telegram_ingress_obeys_log_command_enabled_switch():
@@ -290,6 +322,22 @@ def test_log_command_telegram_listener_dispatches_and_replies():
     assert api_calls[0][2]["chat_id"] == "-100500"
     assert api_calls[0][2]["reply_to_message_id"] == "20"
     assert api_calls[0][2]["text"] == "帮助内容"
+
+    listener._handle_update(
+        "token",
+        {
+            "update_id": 11,
+            "message": {
+                "message_id": 21,
+                "text": "帮助",
+                "chat": {"id": -100500},
+                "from": {"id": 301},
+            },
+        },
+    )
+
+    assert calls[-1]["text"] == "帮助"
+    assert api_calls[-1][1] == "sendMessage"
 
 
 def test_log_command_telegram_listener_prefilters_unclaimed_text():

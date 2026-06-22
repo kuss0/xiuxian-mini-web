@@ -179,7 +179,8 @@ class LogCommandDispatcher:
         raw = str(text or "")
         if not raw:
             return _skip(source, reason="not_a_log_command")
-        decision = self._telegram_ingress_kind(raw, source)
+        parsed_candidate = telegram_log_command_candidate(raw)
+        decision = self._telegram_ingress_kind(raw, source, parsed_candidate=parsed_candidate)
         if decision["kind"] == "skip":
             return {
                 "ok": False,
@@ -202,7 +203,7 @@ class LogCommandDispatcher:
         if decision["ingress"] == "telegram_mapping":
             return self._run_group_mapping(raw, source, decision)
 
-        parsed = parse_log_command(raw)
+        parsed = parsed_candidate or parse_log_command(raw)
         if parsed is None:
             return _skip(source, reason="not_a_log_command", decision=decision)
 
@@ -228,12 +229,14 @@ class LogCommandDispatcher:
         result.setdefault("decision", decision)
         return result
 
-    def _telegram_ingress_kind(self, text: str, source: LogCommandSource) -> dict:
+    def _telegram_ingress_kind(self, text: str, source: LogCommandSource, parsed_candidate: ParsedLogCommand | None = None) -> dict:
         return classify_telegram_ingress(
             policy=self._policy,
             text=text,
             user_id=source.user_id,
             chat_id=source.chat_id,
+            dot_log_command=bool(parsed_candidate and parsed_candidate.prefix == "." and parsed_candidate.spec.default_allowed),
+            plain_log_command=bool(parsed_candidate and parsed_candidate.prefix == "plain" and parsed_candidate.spec.default_allowed),
         ).to_api()
 
     def _run_group_mapping(self, text: str, source: LogCommandSource, decision: dict) -> dict:
@@ -275,6 +278,7 @@ class LogCommandDispatcher:
         for spec in LOG_COMMAND_SPECS:
             alias = spec.aliases[0] if spec.aliases else spec.name
             lines.append(f"- /{alias}: {COMMAND_LEVELS[spec.level]['label']} - {spec.summary}")
+        lines.append("同群精确别名也可用: 帮助 / 状态 / 日志推送状态 / .帮助 / .状态。")
         lines.append("群业务映射: .还有多少 <物品名> admin-only,只读脱敏库存合计。未知 .xxx 静默忽略。")
         lines.append("日志群入口只读;不创建 draft/send/schedule。")
         return _reply(True, "ok", "\n".join(lines), commands=[spec.to_api() for spec in LOG_COMMAND_SPECS])
@@ -351,7 +355,7 @@ class LogCommandDispatcher:
             },
         }
 
-def parse_log_command(text: str) -> ParsedLogCommand | None:
+def parse_log_command(text: str, *, allow_plain: bool = False) -> ParsedLogCommand | None:
     raw = str(text or "").strip()
     if not raw:
         return None
@@ -361,6 +365,9 @@ def parse_log_command(text: str) -> ParsedLogCommand | None:
     elif raw.startswith("."):
         prefix = "."
         body = raw[1:]
+    elif allow_plain and not any(ch.isspace() for ch in raw):
+        prefix = "plain"
+        body = raw
     else:
         return None
     try:
@@ -386,6 +393,13 @@ def parse_log_command(text: str) -> ParsedLogCommand | None:
         args=tokens[1:],
         prefix=prefix,
     )
+
+
+def telegram_log_command_candidate(text: str) -> ParsedLogCommand | None:
+    raw = str(text or "")
+    if raw != raw.strip():
+        return None
+    return parse_log_command(raw, allow_plain=True)
 
 
 def _reply(ok: bool, status: str, reply: str, **extra) -> dict:
