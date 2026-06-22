@@ -128,6 +128,18 @@
       command_gap_sec: 180,
     },
   ];
+  const SCHEDULE_QUERY_COMMANDS_BY_MODULE = {
+    deep_retreat: [{ label: "查看闭关", command: ".查看闭关" }],
+    yuanying: [{ label: "元婴状态", command: ".元婴状态" }],
+    tianti_climb: [{ label: "天阶状态", command: ".天阶状态" }],
+    tianti_wenxin: [{ label: "天阶状态", command: ".天阶状态" }],
+    tianti_gangfeng: [{ label: "天阶状态", command: ".天阶状态" }],
+    second_soul: [{ label: "第二元神", command: ".第二元神" }],
+    small_world: [{ label: "小世界", command: ".小世界" }],
+    concubine_dream: [{ label: "我的侍妾", command: ".我的侍妾" }],
+    concubine_tianji: [{ label: "我的侍妾", command: ".我的侍妾" }],
+    concubine_heart: [{ label: "我的侍妾", command: ".我的侍妾" }],
+  };
 
   function scheduleTimeZonePill() {
     return `<span class="status-pill schedule-timezone-pill">${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}</span>`;
@@ -1954,6 +1966,18 @@
                   <input name="anchor_at_text" type="datetime-local" />
                 </label>
               </div>
+              <div class="schedule-query-tools" id="scheduleQueryCommandPanel">
+                <div class="schedule-query-tools-head">
+                  <strong>查询指令</strong>
+                  <small id="scheduleQueryCommandMeta">跟随状态机锚点</small>
+                </div>
+                <div class="schedule-query-tools-row">
+                  <select id="scheduleQueryCommandSelect" aria-label="查询指令">
+                    <option value="">暂无可用查询</option>
+                  </select>
+                  <button type="button" id="scheduleCopyQueryCommandButton" data-schedule-query-copy>复制查询</button>
+                </div>
+              </div>
               <label class="toggle-row">
                 <input type="checkbox" name="auto_anchor" />
                 <span>自动锚点(取状态机 next_at 和手填锚点中较晚者)</span>
@@ -2887,6 +2911,44 @@
     return (scheduleModules?.modules || []).find((item) => item.key === key) || null;
   }
 
+  function scheduleQueryCommandsForModule(moduleKey, contract = null, catalog = null) {
+    const key = String(moduleKey || "").trim();
+    const items = [];
+    const seen = new Set();
+    const push = ({ label = "", command = "", source = "" } = {}) => {
+      const clean = String(command || "").trim();
+      if (!clean || seen.has(clean)) return;
+      seen.add(clean);
+      items.push({
+        label: String(label || clean).trim(),
+        command: clean,
+        source: String(source || "").trim(),
+      });
+    };
+    const pushTrigger = (source, label) => {
+      const suggestion = source?.suggestion || {};
+      push({ label, command: suggestion.trigger_command, source: "状态机" });
+      push({ label, command: suggestion.payload_defaults?.trigger_command, source: "状态机" });
+      push({ label, command: source?.payload_defaults?.trigger_command, source: "状态机" });
+    };
+    pushTrigger(contract, "触发查询");
+    pushTrigger(catalog, "默认查询");
+    for (const item of SCHEDULE_QUERY_COMMANDS_BY_MODULE[key] || []) {
+      push({ ...item, source: "查询" });
+    }
+    return items;
+  }
+
+  function renderScheduleQueryCommandOptions(commands = []) {
+    if (!commands.length) return '<option value="">暂无可用查询</option>';
+    return commands
+      .map((item) => {
+        const prefix = item.source ? `${item.source} · ` : "";
+        return `<option value="${escapeAttr(item.command)}">${escapeHtml(`${prefix}${item.label} — ${item.command}`)}</option>`;
+      })
+      .join("");
+  }
+
   function scheduleContractHtml(contract, catalog = null) {
     if (!contract && !catalog) return "";
     const source = contract || {
@@ -3005,6 +3067,10 @@
     const renewRunButton = dialog.querySelector("#scheduleRenewRunButton");
     const stateModuleSelect = dialog.querySelector("#scheduleStateModuleSelect");
     const stateHint = dialog.querySelector("#scheduleStateHint");
+    const queryCommandPanel = dialog.querySelector("#scheduleQueryCommandPanel");
+    const queryCommandSelect = dialog.querySelector("#scheduleQueryCommandSelect");
+    const queryCommandMeta = dialog.querySelector("#scheduleQueryCommandMeta");
+    const queryCommandCopyButton = dialog.querySelector("[data-schedule-query-copy]");
     const applyStateSuggestionButton = dialog.querySelector("#scheduleApplyStateSuggestion");
     const planWorkbench = dialog.querySelector("#schedulePlanWorkbench");
     const accountPickerList = dialog.querySelector("#scheduleAccountPickerList");
@@ -3139,6 +3205,48 @@
       const key = String(presetSelect?.value || "").trim();
       return String(presetMap.get(key)?.module_key || "").trim();
     };
+    const refreshQueryCommandTools = () => {
+      if (!queryCommandSelect) return;
+      const moduleKey = selectedStateModule() || matchedModuleForPreset();
+      const contract = findScheduleContract(scheduleModules, selectedPrimarySendAs(), moduleKey);
+      const catalog = findModuleCatalog(scheduleModules, moduleKey);
+      const commands = moduleKey ? scheduleQueryCommandsForModule(moduleKey, contract, catalog) : [];
+      const previous = queryCommandSelect.value;
+      queryCommandSelect.innerHTML = renderScheduleQueryCommandOptions(commands);
+      if (commands.some((item) => item.command === previous)) {
+        queryCommandSelect.value = previous;
+      } else if (commands[0]) {
+        queryCommandSelect.value = commands[0].command;
+      }
+      queryCommandSelect.disabled = !commands.length;
+      if (queryCommandCopyButton) queryCommandCopyButton.disabled = !commands.length;
+      if (queryCommandPanel) queryCommandPanel.hidden = false;
+      if (queryCommandMeta) {
+        const label = contract?.label || catalog?.label || moduleKey || "未选模块";
+        queryCommandMeta.textContent = moduleKey
+          ? `${label}｜${commands.length ? `${commands.length} 条` : "暂无"}`
+          : "先选状态机锚点";
+      }
+    };
+    const copySelectedQueryCommand = async () => {
+      const command = String(queryCommandSelect?.value || "").trim();
+      if (!command) {
+        setStatus("warn", "当前模块暂无可复制的查询指令。");
+        return;
+      }
+      try {
+        if (typeof deps.copyCommandToClipboard === "function") {
+          await deps.copyCommandToClipboard(command, queryCommandCopyButton);
+        } else if (window.navigator?.clipboard?.writeText) {
+          await window.navigator.clipboard.writeText(command);
+        } else {
+          throw new Error("当前浏览器不支持复制");
+        }
+        setStatus("ok", `已复制查询指令: ${command}`);
+      } catch (error) {
+        setStatus("error", error.message || "复制查询指令失败");
+      }
+    };
     const syncStateModuleToPreset = ({ onlyIfEmpty = false } = {}) => {
       const moduleKey = matchedModuleForPreset();
       if (!stateModuleSelect) return false;
@@ -3158,18 +3266,23 @@
       return true;
     };
     const renderStateHint = () => {
-      if (!stateHint) return;
       const moduleKey = selectedStateModule();
       if (!moduleKey) {
-        stateHint.hidden = true;
-        stateHint.innerHTML = "";
+        if (stateHint) {
+          stateHint.hidden = true;
+          stateHint.innerHTML = "";
+        }
+        refreshQueryCommandTools();
         return;
       }
       const contract = findScheduleContract(scheduleModules, selectedPrimarySendAs(), moduleKey);
       const catalog = findModuleCatalog(scheduleModules, moduleKey);
       const catalogWithStatus = catalog ? { ...catalog, tianjige: scheduleModules.tianjige || null } : null;
-      stateHint.hidden = false;
-      stateHint.innerHTML = scheduleContractHtml(contract, catalogWithStatus);
+      if (stateHint) {
+        stateHint.hidden = false;
+        stateHint.innerHTML = scheduleContractHtml(contract, catalogWithStatus);
+      }
+      refreshQueryCommandTools();
     };
     const setPlanWorkbenchActive = (presetKey = "") => {
       if (!planWorkbench) return;
@@ -3902,6 +4015,9 @@
         renderStateHint();
         refreshPlanWorkbench();
       });
+    }
+    if (queryCommandCopyButton) {
+      queryCommandCopyButton.addEventListener("click", copySelectedQueryCommand);
     }
     if (applyStateSuggestionButton) {
       applyStateSuggestionButton.addEventListener("click", () => {

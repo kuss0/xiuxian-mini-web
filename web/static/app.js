@@ -2887,6 +2887,7 @@ function bindAddIdentityModal(dialog) {
 function scheduleDeps() {
   return {
     state,
+    copyCommandToClipboard,
     scheduleRail,
     scheduleIdentityQuickSelect,
     scheduleIdentityFollowChatButton,

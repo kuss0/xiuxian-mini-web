@@ -30,9 +30,15 @@ describe('Official schedule renewal overview', () => {
           <option value="">跟随预设 / 不使用</option>
           <option value="checkin">点卯</option>
         </select>
+        <div id="scheduleQueryCommandPanel">
+          <small id="scheduleQueryCommandMeta"></small>
+          <select id="scheduleQueryCommandSelect"></select>
+          <button type="button" id="scheduleCopyQueryCommandButton" data-schedule-query-copy>复制查询</button>
+        </div>
         <input name="anchor_at_text" />
         <input name="auto_anchor" type="checkbox" />
         <input name="schedule_use_module_defaults" type="checkbox" />
+        <div id="scheduleStateHint" hidden></div>
       </form>
       <p id="scheduleStatus" hidden></p>
       <div id="schedulePreview" hidden></div>
@@ -235,6 +241,68 @@ describe('Official schedule renewal overview', () => {
     expect(dialog.querySelector('[name="schedule_use_module_defaults"]').checked).toBe(true);
     expect(dialog.querySelector('#scheduleStatus').textContent).toBe('已套用方案: 点卯');
     expect(shortcut.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  test('schedule query helper copies the selected module status command', async () => {
+    const schedule = window.MiniwebViews.schedule;
+    const copyCommandToClipboard = jest.fn().mockResolvedValue();
+    window.MiniwebApi.fetchJson.mockResolvedValue({
+      ok: true,
+      profiles: [],
+      allowed_presets: [],
+      worker: null,
+    });
+    const dialog = buildDialog();
+    dialog.querySelector('[name="preset_key"]').insertAdjacentHTML('beforeend', '<option value="yuanying">元婴</option>');
+    dialog.querySelector('#scheduleStateModuleSelect').insertAdjacentHTML('beforeend', '<option value="yuanying">元婴</option>');
+    dialog.querySelector('[name="preset_key"]').value = 'yuanying';
+
+    schedule.bindScheduleModal(
+      { state: window.MiniwebState.state, copyCommandToClipboard },
+      dialog,
+      [{
+        key: 'yuanying',
+        label: '元婴',
+        description: '元婴出窍',
+        fields: ['horizon_days'],
+        module_key: 'yuanying',
+      }],
+      [],
+      [],
+      {
+        modules: [{
+          key: 'yuanying',
+          label: '元婴',
+          suggestion: { trigger_command: '.元婴状态' },
+        }],
+        by_identity: [{
+          send_as_id: 101,
+          items: [{
+            module_key: 'yuanying',
+            label: '元婴',
+            semiauto_ready: false,
+            summary: { text: '归来倒计时 1小时' },
+            suggestion: {
+              trigger_command: '.元婴状态',
+              payload_defaults: { trigger_command: '.元婴状态' },
+            },
+            warnings: [],
+          }],
+        }],
+      }
+    );
+
+    const select = dialog.querySelector('#scheduleQueryCommandSelect');
+    const button = dialog.querySelector('[data-schedule-query-copy]');
+    expect(select.value).toBe('.元婴状态');
+    expect(dialog.querySelector('#scheduleQueryCommandMeta').textContent).toContain('元婴');
+
+    button.click();
+    await Promise.resolve();
+
+    expect(copyCommandToClipboard).toHaveBeenCalledWith('.元婴状态', button);
+    expect(dialog.querySelector('#scheduleStatus').textContent).toBe('已复制查询指令: .元婴状态');
+    expect(window.MiniwebApi.postJson).not.toHaveBeenCalledWith('/api/skills/send', expect.anything());
   });
 
   test('workbench exposes module cards as scheduling entry points', () => {

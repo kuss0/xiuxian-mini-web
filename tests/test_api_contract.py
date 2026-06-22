@@ -1678,6 +1678,13 @@ def test_schedule_manual_required_details_persist_in_status_line():
     assert "scheduleRail," in app_js
     assert "loadAccounts," in app_js
     assert "loadIdentities," in app_js
+    schedule_deps = app_js[app_js.index("function scheduleDeps()"):app_js.index("async function loadScheduleRail", app_js.index("function scheduleDeps()"))]
+    assert "copyCommandToClipboard," in schedule_deps
+    assert "function scheduleQueryCommandsForModule" in schedule_js
+    assert 'id="scheduleQueryCommandSelect"' in schedule_js
+    assert 'data-schedule-query-copy' in schedule_js
+    assert "deps.copyCommandToClipboard" in schedule_js
+    assert '"/api/skills/send"' not in schedule_js
 
     modal_status = css[css.index(".modal-status-line {"):css.index(".modal-status-line.info")]
     assert "white-space: pre-line;" in modal_status
