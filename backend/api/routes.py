@@ -26,6 +26,7 @@ def build_get_routes(handlers: Mapping[str, Callable]) -> dict[str, Callable]:
     return {
         "/api/health": handlers["_get_health"],
         "/api/message-audit": handlers["_get_message_audit"],
+        "/api/maintenance/retention": handlers["_get_maintenance_retention"],
         "/api/channels": handlers["_get_channels"],
         "/api/messages": handlers["_get_messages"],
         "/api/messages/export": handlers["_get_messages_export"],
@@ -72,6 +73,7 @@ def build_post_routes(handlers: Mapping[str, Callable]) -> dict[str, PostRoute]:
         "/api/settings": PostRoute(handlers["_post_settings"], needs_payload=True),
         "/api/focus-exclude/preview": PostRoute(handlers["_post_focus_exclude_preview"], needs_payload=True),
         "/api/message-audit/backfill": PostRoute(handlers["_post_message_audit_backfill"], needs_payload=True),
+        "/api/maintenance/retention": PostRoute(handlers["_post_maintenance_retention"], needs_payload=True),
         "/api/resource-coverage/reparse": PostRoute(handlers["_post_resource_reparse"], needs_payload=True),
         "/api/inventory/transfer-plan": PostRoute(handlers["_post_inventory_transfer_plan"], needs_payload=True),
         "/api/accounts": PostRoute(handlers["_post_account"], needs_payload=True),

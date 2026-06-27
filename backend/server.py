@@ -200,6 +200,8 @@ SCHEDULE_REFILL_PHASEFUL_COMMANDS = {
     ".引道",
     ".引道 水",
 }
+OFFICIAL_SCHEDULE_SEND_MAX_ATTEMPTS = 3
+OFFICIAL_SCHEDULE_RETRY_MAX_DELAY_SEC = 8.0
 SCHEDULE_REFILL_DEFAULT_TASKS: tuple[dict, ...] = (
     {"command": ".探寻裂缝", "cd_seconds": 43380, "sect": "通用", "usage": "探索空间裂缝", "enabled": True, "module_key": "explore_rift"},
     {"command": ".搜寻节点", "cd_seconds": 43380, "sect": "通用", "usage": "搜寻飞升节点", "enabled": False, "module_key": "search_node", "phaseful": True},
@@ -400,6 +402,33 @@ def _looks_like_schedule_quota_error(exc: object) -> bool:
     return bool(scheduleish and limitish and ("100" in spaced or "too many" in spaced or "too much" in spaced))
 
 
+def _looks_like_transient_schedule_error(exc: object) -> bool:
+    if _looks_like_schedule_quota_error(exc):
+        return False
+    raw = f"{type(exc).__name__} {exc}".strip().lower()
+    transient_tokens = (
+        "database is locked",
+        "database table is locked",
+        "database is busy",
+        "sqlite",
+        "timeout",
+        "timed out",
+        "temporarily unavailable",
+        "connection reset",
+        "connection aborted",
+        "server disconnected",
+        "cannot send requests while disconnected",
+    )
+    return any(token in raw for token in transient_tokens)
+
+
+class ScheduleTransientRetryExhausted(Exception):
+    def __init__(self, exc: Exception, attempts: int) -> None:
+        self.original = exc
+        self.attempts = int(attempts or 0)
+        super().__init__(f"重试 {self.attempts} 次后失败: {exc}")
+
+
 
 class MiniWebServer:
     def __init__(self, store: CardStore | None = None, tianjige_gateway: TianjigeGateway | None = None) -> None:
@@ -493,6 +522,18 @@ class MiniWebServer:
         self._skill_send_recent: dict[str, dict[str, float | str]] = {}
         self._payload_cache_lock = threading.Lock()
         self._payload_cache: dict[tuple, tuple[float, dict]] = {}
+        self._reclassify_worker_lock = threading.Lock()
+        self._reclassify_worker_thread: threading.Thread | None = None
+        self._reclassify_worker_pending_runs = 0
+        self._reclassify_worker_status: dict = {
+            "running": False,
+            "queued": False,
+            "last_error": "",
+            "rebuilt_messages": 0,
+            "started_at": 0.0,
+            "finished_at": 0.0,
+            "reason": "",
+        }
 
     def _current_tianjige_config(self, settings: dict | None = None) -> TianjigeConfig:
         if settings is None:
@@ -594,6 +635,27 @@ class MiniWebServer:
                 deep=deep,
             ),
         )
+
+    def message_retention_payload(
+        self,
+        payload: dict | None = None,
+        *,
+        dry_run: bool = True,
+    ) -> dict:
+        payload = payload or {}
+        try:
+            retention_days = int(payload.get("retention_days") or self._store.get_settings().get("message_retention_days") or 30)
+        except (TypeError, ValueError):
+            retention_days = 30
+        default_limit = 5000 if dry_run else 500
+        try:
+            limit = int(payload.get("limit") or default_limit)
+        except (TypeError, ValueError):
+            limit = default_limit
+        cleanup = getattr(self._store, "cleanup_message_retention", None)
+        if not callable(cleanup):
+            return {"ok": False, "error": "store does not support message retention cleanup"}
+        return cleanup(retention_days, dry_run=dry_run, limit=limit)
 
     def _message_audit_payload_uncached(
         self,
@@ -1628,9 +1690,10 @@ class MiniWebServer:
             "game_bot_ids",
         }
         if any(saved.get(key) != before.get(key) for key in filter_keys):
-            reclassify = getattr(self._store, "reclassify_message_filters", None)
-            if callable(reclassify):
-                rebuilt = int(reclassify() or 0)
+            reclassify_status = self._queue_reclassify_message_filters("settings")
+            rebuilt = int(reclassify_status.get("rebuilt_messages") or 0)
+        else:
+            reclassify_status = dict(getattr(self, "_reclassify_worker_status", {}) or {})
         tianjige_keys = {
             "tianjige_mode",
             "tianjige_base_url",
@@ -1643,7 +1706,12 @@ class MiniWebServer:
             self._refresh_tianjige_config(saved)
         if saved.get("game_bot_ids") != before.get("game_bot_ids"):
             self._clear_payload_cache("discovered_bots")
-        return {"ok": True, "settings": public_settings(saved), "rebuilt_messages": rebuilt}
+        return {
+            "ok": True,
+            "settings": public_settings(saved),
+            "rebuilt_messages": rebuilt,
+            "reclassify": reclassify_status,
+        }
 
     def schedule_templates_payload(self) -> dict:
         if not hasattr(self._store, "list_schedule_templates"):
@@ -2100,7 +2168,7 @@ class MiniWebServer:
         patch = preserve_existing_secrets({**payload, "local_id": local_id}, current or {})
         account = self._store.save_account(patch)
         if _username_changed(current, account):
-            self._reclassify_message_filters()
+            self._queue_reclassify_message_filters("account_username")
         return {"ok": True, "account": public_account(account)}
 
     def delete_account_payload(self, payload: dict) -> dict:
@@ -2181,7 +2249,7 @@ class MiniWebServer:
             except Exception as exc:
                 print(f"[mini-web] identity {send_as_id} 状态机补采集失败: {exc}")
         if _username_changed(current, identity):
-            self._reclassify_message_filters()
+            self._queue_reclassify_message_filters("identity_username")
         return {"ok": True, "identity": public_identity(identity)}
 
     def batch_save_identities_payload(self, payload: dict) -> dict:
@@ -2748,40 +2816,64 @@ class MiniWebServer:
         send_as_id: int,
         messages: list[dict],
     ) -> None:
-        client = None
         account_local_id = str(account_config.get("local_id") or "")
-        try:
-            client = create_telegram_client(account_config)
-            await client.connect()
-            if not await client.is_user_authorized():
-                raise RuntimeError("Telegram session 未登录,请先在账号配置里完成验证码登录")
-            await self._run_official_send_with_client_lock(
-                client,
-                account_local_id,
-                batch_id,
-                target_chat,
-                target_topic_id,
-                send_as_id,
-                messages,
-            )
-        except Exception as exc:
-            err = str(exc) or exc.__class__.__name__
-            print(f"[mini-web] transient schedule client failed for batch {batch_id}: {exc!r}")
-            self._mark_official_schedule_batch_failed(
-                batch_id,
-                messages,
-                f"临时 Telegram client 排定时失败:{err}",
-                account_local_id=account_local_id,
-                send_as_id=send_as_id,
-                target_chat=target_chat,
-                target_topic_id=target_topic_id,
-            )
-        finally:
-            if client is not None:
-                try:
-                    await client.disconnect()
-                except Exception:
-                    pass
+        attempts = max(1, int(OFFICIAL_SCHEDULE_SEND_MAX_ATTEMPTS or 1))
+        for attempt in range(1, attempts + 1):
+            client = None
+            try:
+                client = create_telegram_client(account_config)
+                await client.connect()
+                if not await client.is_user_authorized():
+                    raise RuntimeError("Telegram session 未登录,请先在账号配置里完成验证码登录")
+                await self._run_official_send_with_client_lock(
+                    client,
+                    account_local_id,
+                    batch_id,
+                    target_chat,
+                    target_topic_id,
+                    send_as_id,
+                    messages,
+                )
+                return
+            except Exception as exc:
+                transient = _looks_like_transient_schedule_error(exc)
+                if attempt < attempts and transient:
+                    delay = max(0.0, float(self._official_schedule_retry_delay(attempt, exc) or 0.0))
+                    print(
+                        f"[mini-web] transient schedule client failed for batch {batch_id}, "
+                        f"retry {attempt + 1}/{attempts} after {delay:.1f}s: {exc!r}"
+                    )
+                    if client is not None:
+                        try:
+                            await client.disconnect()
+                        except Exception:
+                            pass
+                        client = None
+                    if delay > 0:
+                        import asyncio as _asyncio
+                        await _asyncio.sleep(delay)
+                    continue
+                err = str(exc) or exc.__class__.__name__
+                if attempt > 1 and transient:
+                    err = f"重试 {attempt} 次后失败:{err}"
+                print(f"[mini-web] transient schedule client failed for batch {batch_id}: {exc!r}")
+                self._mark_official_schedule_batch_failed(
+                    batch_id,
+                    messages,
+                    f"临时 Telegram client 排定时失败:{err}",
+                    account_local_id=account_local_id,
+                    send_as_id=send_as_id,
+                    target_chat=target_chat,
+                    target_topic_id=target_topic_id,
+                )
+                return
+            finally:
+                if client is not None:
+                    try:
+                        await client.disconnect()
+                    except Exception:
+                        pass
+        return
 
     def _submit_official_schedule_background(
         self,
@@ -4711,6 +4803,53 @@ class MiniWebServer:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def _official_schedule_retry_delay(self, attempt: int, exc: object) -> float:
+        del exc
+        base = 1.5 * max(1, int(attempt or 1))
+        return min(OFFICIAL_SCHEDULE_RETRY_MAX_DELAY_SEC, base)
+
+    async def _create_official_schedule_with_retries(
+        self,
+        client,
+        *,
+        peer,
+        send_as_peer,
+        reply_to,
+        command: str,
+        schedule_at: float,
+    ) -> tuple[int, int]:
+        import asyncio as _asyncio
+
+        attempts = max(1, int(OFFICIAL_SCHEDULE_SEND_MAX_ATTEMPTS or 1))
+        for attempt in range(1, attempts + 1):
+            try:
+                scheduled_msg_id = await self._schedule.create_one_on_client(
+                    client,
+                    peer=peer,
+                    send_as_peer=send_as_peer,
+                    reply_to=reply_to,
+                    command=command,
+                    schedule_at=schedule_at,
+                )
+                return int(scheduled_msg_id or 0), attempt
+            except Exception as exc:
+                if (
+                    attempt >= attempts
+                    or _looks_like_schedule_quota_error(exc)
+                    or not _looks_like_transient_schedule_error(exc)
+                ):
+                    if attempt > 1 and _looks_like_transient_schedule_error(exc):
+                        raise ScheduleTransientRetryExhausted(exc, attempt) from exc
+                    raise
+                delay = max(0.0, float(self._official_schedule_retry_delay(attempt, exc) or 0.0))
+                print(
+                    f"[mini-web] schedule transient failure, retry {attempt + 1}/{attempts} "
+                    f"after {delay:.1f}s: {exc}"
+                )
+                if delay > 0:
+                    await _asyncio.sleep(delay)
+        raise RuntimeError("schedule retry loop exhausted unexpectedly")
+
     async def _run_official_send_background(
         self,
         client,
@@ -4859,7 +4998,7 @@ class MiniWebServer:
                     fail_count += 1
                     continue
                 try:
-                    scheduled_msg_id = await self._schedule.create_one_on_client(
+                    scheduled_msg_id, attempts = await self._create_official_schedule_with_retries(
                         client,
                         peer=peer,
                         send_as_peer=send_as_peer,
@@ -4883,12 +5022,13 @@ class MiniWebServer:
                             "scheduled_msg_id": scheduled_msg_id,
                             "batch_id": batch_id,
                             "schedule_message_id": db_id,
-                            "meta": {"schedule_at": schedule_at},
+                            "meta": {"schedule_at": schedule_at, "attempts": attempts},
                         }
                     )
                     ok_count += 1
                 except Exception as exc:
                     err = str(exc)
+                    attempts = exc.attempts if isinstance(exc, ScheduleTransientRetryExhausted) else 1
                     if _looks_like_schedule_quota_error(exc):
                         local_usage = self._official_schedule_identity_usage(send_as_id)
                         remaining = messages[index:]
@@ -4937,7 +5077,7 @@ class MiniWebServer:
                             "batch_id": batch_id,
                             "schedule_message_id": db_id,
                             "error": err,
-                            "meta": {"schedule_at": schedule_at},
+                            "meta": {"schedule_at": schedule_at, "attempts": attempts},
                         }
                     )
                     fail_count += 1
@@ -5688,6 +5828,69 @@ class MiniWebServer:
         if callable(reclassify):
             return int(reclassify() or 0)
         return 0
+
+    def _queue_reclassify_message_filters(self, reason: str = "") -> dict:
+        now = time.time()
+        with self._reclassify_worker_lock:
+            thread = self._reclassify_worker_thread
+            if thread and thread.is_alive():
+                self._reclassify_worker_pending_runs = max(1, self._reclassify_worker_pending_runs)
+                self._reclassify_worker_status["queued"] = True
+                self._reclassify_worker_status["reason"] = str(
+                    reason or self._reclassify_worker_status.get("reason") or "settings"
+                )
+                return dict(self._reclassify_worker_status)
+            self._reclassify_worker_pending_runs = 1
+            self._reclassify_worker_status = {
+                "running": True,
+                "queued": True,
+                "last_error": "",
+                "rebuilt_messages": 0,
+                "started_at": now,
+                "finished_at": 0.0,
+                "reason": str(reason or "settings"),
+            }
+
+            def _worker() -> None:
+                rebuilt = 0
+                try:
+                    while True:
+                        with self._reclassify_worker_lock:
+                            if self._reclassify_worker_pending_runs <= 0:
+                                self._reclassify_worker_status.update(
+                                    {
+                                        "running": False,
+                                        "queued": False,
+                                        "last_error": "",
+                                        "rebuilt_messages": rebuilt,
+                                        "finished_at": time.time(),
+                                    }
+                                )
+                                return
+                            self._reclassify_worker_pending_runs -= 1
+                            self._reclassify_worker_status["running"] = True
+                            self._reclassify_worker_status["queued"] = self._reclassify_worker_pending_runs > 0
+                        rebuilt = self._reclassify_message_filters()
+                except Exception as exc:
+                    with self._reclassify_worker_lock:
+                        self._reclassify_worker_pending_runs = 0
+                        self._reclassify_worker_status.update(
+                            {
+                                "running": False,
+                                "queued": False,
+                                "last_error": str(exc) or exc.__class__.__name__,
+                                "finished_at": time.time(),
+                            }
+                        )
+
+            thread = threading.Thread(
+                target=_worker,
+                name="miniweb-reclassify-message-filters",
+                daemon=True,
+            )
+            self._reclassify_worker_thread = thread
+            thread.start()
+            return dict(self._reclassify_worker_status)
 
     def _mark_account_login_error(self, local_id: object, message: str) -> None:
         account = self._store.get_account(str(local_id or ""))

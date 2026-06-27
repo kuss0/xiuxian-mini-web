@@ -4282,7 +4282,7 @@
             }
             if (manualMessages.length) window.alert(manualMessages.join("\n\n"));
             setStatus(result.errors?.length || result.failed || manualMessages.length ? "warn" : "ok", scheduleStatusWithManualMessages(stats, manualMessages));
-            const refreshed = await fetchJson("/api/schedule");
+            const refreshed = await fetchJson("/api/schedule?history=0");
             if (batchList) batchList.innerHTML = renderScheduleBatches(deps, syncScheduleBatches(deps, refreshed));
             bindScheduleBatchActions(deps, dialog, setStatus);
           } catch (error) {
@@ -4374,7 +4374,7 @@
               `${result.message || "本地漂移修复完成"}｜当前 lost ${lost.length}｜expired ${expired.length}｜orphans ${orphans.length}｜其它身份 ${otherIdentity.length}`
             );
             renderSyncResult(sync);
-            const refreshed = await fetchJson("/api/schedule");
+            const refreshed = await fetchJson("/api/schedule?history=0");
             if (batchList) batchList.innerHTML = renderScheduleBatches(deps, syncScheduleBatches(deps, refreshed));
             bindScheduleBatchActions(deps, dialog, setStatus);
           } catch (error) {
@@ -4408,7 +4408,7 @@
           const result = await postJson("/api/schedule/delete", { batch_id: Number(batchId) });
           if (!result.ok) throw new Error(result.error || "删除失败");
           setBatchStatus("ok", `已删除批次 #${batchId}`);
-          const refreshed = await fetchJson("/api/schedule");
+          const refreshed = await fetchJson("/api/schedule?history=0");
           const batchList = dialog.querySelector("#scheduleBatchList");
           if (batchList) batchList.innerHTML = renderScheduleBatches(deps, syncScheduleBatches(deps, refreshed));
           bindScheduleBatchActions(deps, dialog, setStatus);
@@ -4435,7 +4435,7 @@
           const result = await postJson("/api/schedule/cancel", { batch_id: Number(batchId) });
           if (!result.ok) throw new Error(result.error || "取消失败");
           setBatchStatus("ok", `批次 #${batchId} 已取消`);
-          const refreshed = await fetchJson("/api/schedule");
+          const refreshed = await fetchJson("/api/schedule?history=0");
           const batchList = dialog.querySelector("#scheduleBatchList");
           if (batchList) batchList.innerHTML = renderScheduleBatches(deps, syncScheduleBatches(deps, refreshed));
           bindScheduleBatchActions(deps, dialog, setStatus);
@@ -4463,7 +4463,7 @@
           if (!result.ok) throw new Error(result.error || "提交失败");
           const estimate = scheduleEstimateText(result.estimate_seconds || 0);
           setBatchStatus("ok", `批次 #${batchId} 已提交后台排定时｜${result.activated || 0} 条｜预估 ${estimate}`);
-          const refreshed = await fetchJson("/api/schedule");
+          const refreshed = await fetchJson("/api/schedule?history=0");
           const batchList = dialog.querySelector("#scheduleBatchList");
           if (batchList) batchList.innerHTML = renderScheduleBatches(deps, syncScheduleBatches(deps, refreshed));
           bindScheduleBatchActions(deps, dialog, setStatus);
@@ -4491,7 +4491,7 @@
           const result = await postJson("/api/schedule/retry-failed", { batch_id: Number(batchId) });
           if (!result.ok) throw new Error(result.error || "重排失败");
           setBatchStatus("ok", `批次 #${batchId} 已重新排入后台发送`);
-          const refreshed = await fetchJson("/api/schedule");
+          const refreshed = await fetchJson("/api/schedule?history=0");
           const batchList = dialog.querySelector("#scheduleBatchList");
           if (batchList) batchList.innerHTML = renderScheduleBatches(deps, syncScheduleBatches(deps, refreshed));
           bindScheduleBatchActions(deps, dialog, setStatus);
@@ -4515,7 +4515,7 @@
       if (!document.body.contains(dialog)) return;
       if (Date.now() - start > 60 * 60 * 1000) return;
       try {
-        const refreshed = await fetchJson("/api/schedule");
+        const refreshed = await fetchJson("/api/schedule?history=0");
         const refreshedBatches = syncScheduleBatches(deps, refreshed);
         batchList.innerHTML = renderScheduleBatches(deps, refreshedBatches);
         bindScheduleBatchActions(deps, dialog);

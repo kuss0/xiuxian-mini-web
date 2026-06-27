@@ -224,7 +224,12 @@
           archive_dot_commands: data.get("archive_dot_commands") === "on",
           archive_bot_replies: data.get("archive_bot_replies") === "on",
         });
-        setStatus("ok", `已保存。${saved.rebuilt_messages ? `已重分流 ${saved.rebuilt_messages} 条历史消息。` : "历史消息无需重分流。"}`);
+        const reclassify = saved.reclassify || {};
+        if (reclassify.running || reclassify.queued) {
+          setStatus("ok", "已保存。历史消息重分流已转入后台执行。");
+        } else {
+          setStatus("ok", `已保存。${saved.rebuilt_messages ? `已重分流 ${saved.rebuilt_messages} 条历史消息。` : "历史消息无需重分流。"}`);
+        }
       } catch (error) {
         setStatus("error", error.message || "保存失败");
       }

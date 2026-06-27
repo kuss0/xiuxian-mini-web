@@ -3470,6 +3470,69 @@ def test_blank_secret_save_preserves_existing_secret(tmp_path):
     assert saved["tianjige_cookie"] == "session=secret-cookie"
 
 
+def test_settings_save_queues_filter_reclassification_in_background(tmp_path):
+    import threading
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_reclassify():
+        started.set()
+        assert release.wait(1.0)
+        return 12
+
+    store.reclassify_message_filters = fake_reclassify
+
+    payload = server.save_settings_payload({"focus_keywords": ["后台重分流测试"]})
+
+    assert payload["ok"] is True
+    assert payload["reclassify"]["queued"] is True
+    assert payload["reclassify"]["running"] is True
+    assert started.wait(1.0)
+    release.set()
+    server._reclassify_worker_thread.join(1.0)
+    assert server._reclassify_worker_status["running"] is False
+    assert server._reclassify_worker_status["rebuilt_messages"] == 12
+
+
+def test_settings_save_reruns_filter_reclassification_when_queued_during_background(tmp_path):
+    import threading
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    first_started = threading.Event()
+    release_first = threading.Event()
+    calls = {"n": 0}
+
+    def fake_reclassify():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            first_started.set()
+            assert release_first.wait(1.0)
+        return calls["n"]
+
+    store.reclassify_message_filters = fake_reclassify
+
+    first = server.save_settings_payload({"focus_keywords": ["后台重分流-1"]})
+    assert first["reclassify"]["running"] is True
+    assert first_started.wait(1.0)
+
+    second = server.save_settings_payload({"focus_keywords": ["后台重分流-2"]})
+    assert second["reclassify"]["queued"] is True
+    release_first.set()
+
+    deadline = time.time() + 1.0
+    while calls["n"] < 2 and time.time() < deadline:
+        time.sleep(0.01)
+    server._reclassify_worker_thread.join(1.0)
+    assert calls["n"] == 2
+    assert server._reclassify_worker_status["running"] is False
+    assert server._reclassify_worker_status["queued"] is False
+
+
 def test_account_save_redacts_and_preserves_existing_secret(tmp_path):
     store = SQLiteStore(tmp_path / "miniweb.db")
     server = MiniWebServer(store=store)
@@ -10434,6 +10497,13 @@ def test_message_audit_route_is_wired():
     from backend.app import GET_ROUTES, POST_ROUTES
     assert "/api/message-audit" in GET_ROUTES
     assert "/api/message-audit/backfill" in POST_ROUTES
+    assert "/api/maintenance/retention" in GET_ROUTES
+    assert "/api/maintenance/retention" in POST_ROUTES
+
+
+def test_schedule_modal_does_not_refetch_full_schedule_list():
+    schedule_js = Path("web/static/views/schedule.js").read_text(encoding="utf-8")
+    assert 'fetchJson("/api/schedule")' not in schedule_js
 
 
 def test_message_audit_backfill_requires_running_listener(tmp_path):
@@ -10444,6 +10514,168 @@ def test_message_audit_backfill_requires_running_listener(tmp_path):
 
     assert result["ok"] is False
     assert "采集" in result["error"] or "listener" in result["error"]
+
+
+def test_message_retention_cleanup_deletes_old_unreferenced_rows(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    now = datetime.now(timezone.utc)
+    old_at = now - timedelta(days=45)
+    new_at = now - timedelta(days=1)
+    store.ingest_event(RawMessageEvent(
+        id="old-free",
+        chat_id=-100,
+        msg_id=1,
+        text="old free",
+        source="tester",
+        date=old_at.isoformat(),
+        sender_id=1,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="old-state",
+        chat_id=-100,
+        msg_id=2,
+        text="old state",
+        source="tester",
+        date=old_at.isoformat(),
+        sender_id=1,
+    ))
+    store.ingest_event(RawMessageEvent(
+        id="new-free",
+        chat_id=-100,
+        msg_id=3,
+        text="new free",
+        source="tester",
+        date=new_at.isoformat(),
+        sender_id=1,
+    ))
+    with store._connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO parsed_cards(id, raw_message_id, primary_channel, channels_json, payload_json)
+            VALUES('preserved-card', 'old-state', 'focus', '["focus"]', '{}')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO parsed_card_channels(card_id, channel, card_rowid, raw_message_id, sort_date, msg_id)
+            VALUES('preserved-card', 'focus-retention', 0, 'old-free', ?, 1)
+            """,
+            (old_at.isoformat(),),
+        )
+        snapshot_id = conn.execute(
+            """
+            INSERT INTO inventory_snapshots(owner, raw_message_id, source, event_time, chat_id, msg_id, item_count, total_amount, created_at)
+            VALUES('tester', 'old-state', 'test', ?, -100, 2, 1, 1, ?)
+            """,
+            (old_at.isoformat(), old_at.isoformat()),
+        ).lastrowid
+        conn.execute(
+            """
+            INSERT INTO inventory_items(snapshot_id, owner, section, item_name, amount, extra, event_time, raw_message_id)
+            VALUES(?, 'tester', '', '孤儿物品', 1, '', ?, 'old-free')
+            """,
+            (snapshot_id, old_at.isoformat()),
+        )
+        conn.execute(
+            """
+            INSERT INTO state_patches(scope, send_as_id, key, value_json, source_message_id, updated_at)
+            VALUES('identity_profile', 123, 'name', '"tester"', 'old-state', ?)
+            """,
+            (old_at.isoformat(),),
+        )
+
+    dry = store.cleanup_message_retention(30, dry_run=True, limit=10)
+    run = store.cleanup_message_retention(30, dry_run=False, limit=10)
+
+    with store._connect() as conn:
+        remaining = {
+            row[0]
+            for row in conn.execute("SELECT id FROM raw_messages ORDER BY id").fetchall()
+        }
+        old_free_cards = int(
+            conn.execute("SELECT COUNT(*) FROM parsed_cards WHERE raw_message_id='old-free'").fetchone()[0]
+        )
+        orphan_channels = int(
+            conn.execute("SELECT COUNT(*) FROM parsed_card_channels WHERE raw_message_id='old-free'").fetchone()[0]
+        )
+        orphan_items = int(
+            conn.execute("SELECT COUNT(*) FROM inventory_items WHERE raw_message_id='old-free'").fetchone()[0]
+        )
+
+    assert dry["candidate_raw_messages"] == 1
+    assert run["deleted"]["raw_messages"] == 1
+    assert old_free_cards == 0
+    assert orphan_channels == 0
+    assert orphan_items == 0
+    assert remaining == {"new-free", "old-state"}
+
+
+def test_message_retention_payload_requires_confirm_to_delete(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    old_at = datetime.now(timezone.utc) - timedelta(days=45)
+    store.ingest_event(RawMessageEvent(
+        id="old-free",
+        chat_id=-100,
+        msg_id=1,
+        text="old free",
+        source="tester",
+        date=old_at.isoformat(),
+        sender_id=1,
+    ))
+
+    dry = server.message_retention_payload({"retention_days": 30}, dry_run=True)
+    still_dry = server.message_retention_payload({"retention_days": 30}, dry_run=True)
+    run = server.message_retention_payload({"retention_days": 30, "limit": 10}, dry_run=False)
+
+    assert dry["candidate_raw_messages"] == 1
+    assert still_dry["deleted"] == {}
+    assert run["deleted"]["raw_messages"] == 1
+
+
+def test_message_retention_payload_uses_smaller_default_write_limit():
+    class FakeStore:
+        def __init__(self):
+            self.calls = []
+
+        def get_settings(self):
+            return {"message_retention_days": 30}
+
+        def cleanup_message_retention(self, retention_days, *, dry_run=True, limit=5000):
+            self.calls.append(
+                {"retention_days": retention_days, "dry_run": dry_run, "limit": limit}
+            )
+            return {"ok": True, "dry_run": dry_run, "limit": limit, "deleted": {}}
+
+    store = FakeStore()
+    server = MiniWebServer(store=store)
+
+    dry = server.message_retention_payload({}, dry_run=True)
+    run = server.message_retention_payload({}, dry_run=False)
+
+    assert dry["limit"] == 5000
+    assert run["limit"] == 500
+    assert store.calls[0]["limit"] == 5000
+    assert store.calls[1]["limit"] == 500
+
+
+def test_message_retention_cleanup_indexes_exist(tmp_path):
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    with store._connect() as conn:
+        indexes = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            ).fetchall()
+        }
+
+    assert "idx_parsed_card_channels_raw_message" in indexes
+    assert "idx_inventory_items_raw_message" in indexes
+    assert "idx_state_observations_source_message" in indexes
 
 
 def test_list_schedule_batches_returns_sending_and_completed(tmp_path):
@@ -10605,6 +10837,184 @@ def test_official_schedule_background_records_success_send_log(tmp_path):
     assert logs[0]["scheduled_msg_id"] == 99001
     assert logs[0]["schedule_message_id"] == refreshed["id"]
     assert logs[0]["meta"]["schedule_at"] == refreshed["schedule_at"]
+    assert logs[0]["meta"]["attempts"] == 1
+
+
+def test_official_schedule_background_retries_transient_send_error(tmp_path):
+    import asyncio
+    import sqlite3
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server._official_schedule_retry_delay = lambda _attempt, _exc: 0.0
+    batch_id = store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "account_local_id": "main",
+            "preset_key": "custom",
+            "label": "自定义",
+            "anchor_at": time.time(),
+            "horizon_days": 1,
+            "options": {},
+        },
+        [{"command": ".签到", "schedule_at": time.time() + 3600, "status": "planned"}],
+    )
+    messages = store.list_schedule_messages(batch_id=batch_id, include_inactive=False)
+
+    class FakeClient:
+        async def get_input_entity(self, value):
+            return f"peer:{value}"
+
+    class FakeSendAs:
+        async def list_send_as_peers_on_client(self, client, chat):
+            return {"peers": [{"send_as_id": 12345}]}
+
+    class FakeSchedule:
+        def __init__(self):
+            self.calls = 0
+
+        async def create_one_on_client(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls < 3:
+                raise sqlite3.OperationalError("database is locked")
+            return 99002
+
+    fake_schedule = FakeSchedule()
+    server._send_as = FakeSendAs()
+    server._schedule = fake_schedule
+
+    asyncio.run(server._run_official_send_background(
+        FakeClient(), batch_id, "-1001680975844", 7310786, 12345, messages
+    ))
+
+    refreshed = store.list_schedule_messages(batch_id=batch_id, include_inactive=True)[0]
+    logs = store.list_send_logs(kind="official_schedule", batch_id=batch_id)
+    batch = store.list_schedule_batches(include_inactive=True)[0]
+    assert fake_schedule.calls == 3
+    assert refreshed["status"] == "scheduled"
+    assert refreshed["scheduled_msg_id"] == 99002
+    assert batch["status"] == "completed"
+    assert len(logs) == 1
+    assert logs[0]["status"] == "scheduled"
+    assert logs[0]["meta"]["attempts"] == 3
+
+
+def test_official_schedule_background_marks_failed_after_transient_retries(tmp_path):
+    import asyncio
+    import sqlite3
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server._official_schedule_retry_delay = lambda _attempt, _exc: 0.0
+    batch_id = store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "account_local_id": "main",
+            "preset_key": "custom",
+            "label": "自定义",
+            "anchor_at": time.time(),
+            "horizon_days": 1,
+            "options": {},
+        },
+        [{"command": ".签到", "schedule_at": time.time() + 3600, "status": "planned"}],
+    )
+    messages = store.list_schedule_messages(batch_id=batch_id, include_inactive=False)
+
+    class FakeClient:
+        async def get_input_entity(self, value):
+            return f"peer:{value}"
+
+    class FakeSendAs:
+        async def list_send_as_peers_on_client(self, client, chat):
+            return {"peers": [{"send_as_id": 12345}]}
+
+    class FakeSchedule:
+        def __init__(self):
+            self.calls = 0
+
+        async def create_one_on_client(self, *_args, **_kwargs):
+            self.calls += 1
+            raise sqlite3.OperationalError("database is locked")
+
+    fake_schedule = FakeSchedule()
+    server._send_as = FakeSendAs()
+    server._schedule = fake_schedule
+
+    asyncio.run(server._run_official_send_background(
+        FakeClient(), batch_id, "-1001680975844", 7310786, 12345, messages
+    ))
+
+    refreshed = store.list_schedule_messages(batch_id=batch_id, include_inactive=True)[0]
+    logs = store.list_send_logs(kind="official_schedule", status="failed", batch_id=batch_id)
+    batch = store.list_schedule_batches(include_inactive=True)[0]
+    assert fake_schedule.calls == 3
+    assert refreshed["status"] == "failed"
+    assert "重试 3 次后失败" in refreshed["last_error"]
+    assert batch["status"] == "failed"
+    assert len(logs) == 1
+    assert logs[0]["meta"]["attempts"] == 3
+
+
+def test_official_schedule_transient_client_retries_sqlite_lock(tmp_path, monkeypatch):
+    import asyncio
+    import sqlite3
+    import time
+
+    store = SQLiteStore(tmp_path / "miniweb.db")
+    server = MiniWebServer(store=store)
+    server._official_schedule_retry_delay = lambda _attempt, _exc: 0.0
+    batch_id = store.create_schedule_batch(
+        {
+            "send_as_id": 12345,
+            "account_local_id": "main",
+            "preset_key": "custom",
+            "label": "自定义",
+            "anchor_at": time.time(),
+            "horizon_days": 1,
+            "options": {},
+        },
+        [{"command": ".签到", "schedule_at": time.time() + 3600, "status": "planned"}],
+    )
+    messages = store.list_schedule_messages(batch_id=batch_id, include_inactive=False)
+    connect_calls = {"n": 0}
+
+    class FakeClient:
+        async def connect(self):
+            connect_calls["n"] += 1
+            if connect_calls["n"] < 3:
+                raise sqlite3.OperationalError("database is locked")
+
+        async def is_user_authorized(self):
+            return True
+
+        async def disconnect(self):
+            return None
+
+    async def fake_run(client, account_local_id, batch_id, target_chat, target_topic_id, send_as_id, messages):
+        del client, account_local_id, target_chat, target_topic_id, send_as_id
+        store.mark_schedule_message(messages[0]["id"], scheduled_msg_id=99003, status="scheduled")
+        store.set_schedule_batch_status(batch_id, "completed")
+
+    monkeypatch.setattr(server_module, "create_telegram_client", lambda _config: FakeClient())
+    server._run_official_send_with_client_lock = fake_run
+
+    asyncio.run(server._run_official_send_transient_client(
+        {"local_id": "main"},
+        batch_id,
+        "-1001680975844",
+        7310786,
+        12345,
+        messages,
+    ))
+
+    refreshed = store.list_schedule_messages(batch_id=batch_id, include_inactive=True)[0]
+    batch = store.list_schedule_batches(include_inactive=True)[0]
+    assert connect_calls["n"] == 3
+    assert refreshed["status"] == "scheduled"
+    assert refreshed["scheduled_msg_id"] == 99003
+    assert batch["status"] == "completed"
 
 
 def test_official_schedule_background_records_failed_send_log_for_invalid_item(tmp_path):

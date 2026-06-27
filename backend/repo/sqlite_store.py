@@ -526,6 +526,143 @@ class SQLiteStore:
             )
         return deleted
 
+    def cleanup_message_retention(
+        self,
+        retention_days: int | None = None,
+        *,
+        dry_run: bool = True,
+        limit: int = 5000,
+    ) -> dict:
+        """Delete old message-box rows in small, explicit batches.
+
+        The settings page has long exposed `message_retention_days`; this is
+        the safe executor for it.  Current state rows are preserved by keeping
+        any raw message still referenced by state_patches or identity state.
+        """
+        if retention_days is None:
+            try:
+                retention_days = int(self.get_settings().get("message_retention_days") or 30)
+            except (TypeError, ValueError):
+                retention_days = 30
+        retention_days = max(0, int(retention_days or 0))
+        if retention_days <= 0:
+            return {
+                "ok": True,
+                "dry_run": bool(dry_run),
+                "disabled": True,
+                "retention_days": retention_days,
+                "candidate_raw_messages": 0,
+                "deleted": {},
+            }
+        limit = max(1, min(50000, int(limit or 5000)))
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        cutoff_text = cutoff.strftime("%Y-%m-%d %H:%M:%S")
+        candidate_sql = """
+            FROM raw_messages
+            WHERE datetime(date) < ?
+              AND id NOT IN (
+                SELECT source_message_id FROM state_patches
+                WHERE source_message_id IS NOT NULL AND source_message_id != ''
+              )
+              AND id NOT IN (
+                SELECT source_message_id FROM identity_module_state
+                WHERE source_message_id IS NOT NULL AND source_message_id != ''
+              )
+        """
+        with self._connect() as conn:
+            candidate_total = int(
+                conn.execute(f"SELECT COUNT(*) {candidate_sql}", (cutoff_text,)).fetchone()[0] or 0
+            )
+            if dry_run or candidate_total <= 0:
+                return {
+                    "ok": True,
+                    "dry_run": bool(dry_run),
+                    "disabled": False,
+                    "retention_days": retention_days,
+                    "cutoff": cutoff.isoformat(),
+                    "candidate_raw_messages": candidate_total,
+                    "limit": limit,
+                    "deleted": {},
+                }
+            rows = conn.execute(
+                f"SELECT id {candidate_sql} ORDER BY date ASC, rowid ASC LIMIT ?",
+                (cutoff_text, limit),
+            ).fetchall()
+            ids = [str(row[0]) for row in rows if str(row[0] or "")]
+            if not ids:
+                return {
+                    "ok": True,
+                    "dry_run": False,
+                    "disabled": False,
+                    "retention_days": retention_days,
+                    "cutoff": cutoff.isoformat(),
+                    "candidate_raw_messages": candidate_total,
+                    "limit": limit,
+                    "deleted": {},
+                }
+            placeholders = ",".join("?" for _ in ids)
+
+            def delete_count(sql: str, *, repeats: int = 1) -> int:
+                cur = conn.execute(sql, ids * max(1, int(repeats or 1)))
+                return int(cur.rowcount or 0)
+
+            deleted: dict[str, int] = {}
+            deleted["parsed_card_channels"] = delete_count(
+                f"""
+                DELETE FROM parsed_card_channels
+                WHERE card_id IN (
+                    SELECT id FROM parsed_cards WHERE raw_message_id IN ({placeholders})
+                )
+                   OR raw_message_id IN ({placeholders})
+                """,
+                repeats=2,
+            )
+            deleted["parsed_cards"] = delete_count(
+                f"DELETE FROM parsed_cards WHERE raw_message_id IN ({placeholders})"
+            )
+            deleted["resource_events"] = delete_count(
+                f"DELETE FROM resource_events WHERE raw_message_id IN ({placeholders})"
+            )
+            deleted["resource_deltas"] = delete_count(
+                f"DELETE FROM resource_deltas WHERE raw_message_id IN ({placeholders})"
+            )
+            deleted["inventory_items"] = delete_count(
+                f"""
+                DELETE FROM inventory_items
+                WHERE snapshot_id IN (
+                    SELECT id FROM inventory_snapshots WHERE raw_message_id IN ({placeholders})
+                )
+                   OR raw_message_id IN ({placeholders})
+                """,
+                repeats=2,
+            )
+            deleted["inventory_snapshots"] = delete_count(
+                f"DELETE FROM inventory_snapshots WHERE raw_message_id IN ({placeholders})"
+            )
+            deleted["inventory_ledger"] = delete_count(
+                f"DELETE FROM inventory_ledger WHERE raw_message_id IN ({placeholders})"
+            )
+            deleted["state_observations"] = delete_count(
+                f"DELETE FROM state_observations WHERE source_message_id IN ({placeholders})"
+            )
+            deleted["raw_messages"] = delete_count(
+                f"DELETE FROM raw_messages WHERE id IN ({placeholders})"
+            )
+        self._runtime_cache_clear(
+            "message_health_invalid_date_total",
+            "message_health_summary",
+        )
+        return {
+            "ok": True,
+            "dry_run": False,
+            "disabled": False,
+            "retention_days": retention_days,
+            "cutoff": cutoff.isoformat(),
+            "candidate_raw_messages": candidate_total,
+            "limit": limit,
+            "deleted": deleted,
+        }
+
     def message_health_summary(self) -> dict:
         def looks_like_message_time(value: object) -> bool:
             return bool(re.match(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}", str(value or "")))
@@ -4866,6 +5003,8 @@ class SQLiteStore:
                     ON parsed_cards(primary_channel);
                 CREATE INDEX IF NOT EXISTS idx_parsed_cards_raw_message
                     ON parsed_cards(raw_message_id);
+                CREATE INDEX IF NOT EXISTS idx_parsed_card_channels_raw_message
+                    ON parsed_card_channels(raw_message_id);
 
                 CREATE TABLE IF NOT EXISTS resource_deltas (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4964,6 +5103,8 @@ class SQLiteStore:
                     ON inventory_items(snapshot_id);
                 CREATE INDEX IF NOT EXISTS idx_inventory_items_name
                     ON inventory_items(item_name);
+                CREATE INDEX IF NOT EXISTS idx_inventory_items_raw_message
+                    ON inventory_items(raw_message_id);
 
                 CREATE TABLE IF NOT EXISTS inventory_current (
                     owner TEXT NOT NULL,
@@ -5185,6 +5326,8 @@ class SQLiteStore:
                     ON state_observations(send_as_id, module_key, decision, observed_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_state_observations_family
                     ON state_observations(family, observed_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_state_observations_source_message
+                    ON state_observations(source_message_id);
 
                 CREATE INDEX IF NOT EXISTS idx_raw_messages_date
                     ON raw_messages(date);

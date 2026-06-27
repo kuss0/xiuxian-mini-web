@@ -139,6 +139,27 @@ def _post_log_command_dispatch(request: MiniWebRequest, payload: dict) -> dict:
         return {"ok": False, "status": "error", "error": str(exc), "actions": []}
 
 
+def _get_maintenance_retention(request: MiniWebRequest, query: dict) -> dict:
+    try:
+        retention_days = int((query.get("retention_days") or ["0"])[0] or 0)
+    except (TypeError, ValueError):
+        retention_days = 0
+    try:
+        limit = int((query.get("limit") or ["5000"])[0] or 5000)
+    except (TypeError, ValueError):
+        limit = 5000
+    payload = {"limit": limit}
+    if retention_days:
+        payload["retention_days"] = retention_days
+    return _app(request).message_retention_payload(payload, dry_run=True)
+
+
+def _post_maintenance_retention(request: MiniWebRequest, payload: dict) -> dict:
+    payload = payload or {}
+    confirm = bool(payload.get("confirm"))
+    return _app(request).message_retention_payload(payload, dry_run=not confirm)
+
+
 def _get_settings(request: MiniWebRequest, query: dict) -> dict:
     return _app(request).settings_payload()
 
