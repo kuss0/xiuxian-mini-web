@@ -4225,11 +4225,10 @@
             const payload = collectPayload();
             const result = await postJson("/api/schedule/preview", payload);
             if (!result.ok) throw new Error(result.error || "预览失败");
-            let curBatches = Array.isArray(_initialBatches) ? _initialBatches : [];
-            try {
-              const sched = await fetchJson("/api/schedule");
-              if (Array.isArray(sched.batches)) curBatches = sched.batches;
-            } catch (e) { /* 用打开模态时的批次兜底 */ }
+            const liveBatches = scheduleState(deps).scheduleBatches;
+            const curBatches = Array.isArray(liveBatches) && liveBatches.length
+              ? liveBatches
+              : (Array.isArray(_initialBatches) ? _initialBatches : []);
             const previewItems = result.items || [];
             showPreview(`
               <p>预设 <strong>${escapeHtml(result.preset_label)}</strong>｜锚点 ${escapeHtml(result.anchor_text)}${result.auto_anchor_used ? '<small class="status-pill ok" style="margin-left:6px">自动锚点</small>' : ""}｜首次发送 ${escapeHtml(result.first_due_text || result.anchor_text)}｜${escapeHtml(SCHEDULE_TIME_ZONE_LABEL)}｜${result.horizon_days} 天</p>

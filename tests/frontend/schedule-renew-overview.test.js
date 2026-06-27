@@ -305,6 +305,63 @@ describe('Official schedule renewal overview', () => {
     expect(window.MiniwebApi.postJson).not.toHaveBeenCalledWith('/api/skills/send', expect.anything());
   });
 
+  test('schedule preview uses cached batches without refetching the heavy schedule list', async () => {
+    const schedule = window.MiniwebViews.schedule;
+    window.MiniwebState.state.scheduleBatches = [{
+      send_as_id: 101,
+      counts: { scheduled: 99 },
+      items: [{ status: 'scheduled', schedule_text: '06-28 01:40' }],
+    }];
+    window.MiniwebApi.fetchJson.mockImplementation((url) => {
+      if (url === '/api/schedule/renew') {
+        return Promise.resolve({ ok: true, profiles: [], allowed_presets: [], worker: null });
+      }
+      return Promise.reject(new Error(`unexpected fetch ${url}`));
+    });
+    window.MiniwebApi.postJson.mockImplementation((url) => {
+      if (url === '/api/schedule/preview') {
+        return Promise.resolve({
+          ok: true,
+          preset_key: 'checkin',
+          preset_label: '点卯',
+          anchor_text: '06-28 01:30',
+          first_due_text: '06-28 01:40',
+          horizon_days: 1,
+          items: [{ command: '.宗门点卯', schedule_text: '06-28 01:40' }],
+        });
+      }
+      return Promise.resolve({ ok: true });
+    });
+    const dialog = buildDialog();
+    dialog.querySelector('[name="preset_key"]').value = 'checkin';
+    dialog.querySelector('#scheduleForm').insertAdjacentHTML(
+      'beforeend',
+      '<button type="button" data-schedule-action="preview">预览计划</button>'
+    );
+
+    schedule.bindScheduleModal(
+      { state: window.MiniwebState.state },
+      dialog,
+      [{ key: 'checkin', label: '点卯', description: '每日点卯', fields: [], module_key: 'checkin' }],
+      [],
+      [],
+      { modules: [{ key: 'checkin', label: '点卯', suggestion: {} }], by_identity: [] }
+    );
+
+    dialog.querySelector('[data-schedule-action="preview"]').click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(window.MiniwebApi.postJson).toHaveBeenCalledWith(
+      '/api/schedule/preview',
+      expect.objectContaining({ preset_key: 'checkin', send_as_id: 101 })
+    );
+    expect(window.MiniwebApi.fetchJson).not.toHaveBeenCalledWith('/api/schedule');
+    expect(window.MiniwebApi.fetchJson).not.toHaveBeenCalledWith('/api/schedule?history=0');
+    expect(dialog.querySelector('#schedulePreview').textContent).toContain('100/100');
+    expect(dialog.querySelector('#scheduleStatus').textContent).toBe('共 1 条');
+  });
+
   test('workbench exposes module cards as scheduling entry points', () => {
     const schedule = window.MiniwebViews.schedule;
     window.MiniwebState.state.identities = [{ send_as_id: 101, label: 'Wise', enabled: true }];
